@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ghostnetorg/microfat/internal/format"
+	"github.com/ghostnetorg/microfat/internal/pack"
 	"github.com/ghostnetorg/pkg/microarch"
 	"github.com/klauspost/compress/zstd"
 )
@@ -115,6 +116,52 @@ func TestExtractVariantAndOptimizeTo(t *testing.T) {
 	}
 	if !bytes.Equal(readBack, payloadData) {
 		t.Errorf("materialized binary content mismatch: got %q", string(readBack))
+	}
+}
+
+func TestTrimToAndInPlace(t *testing.T) {
+	tempDir := t.TempDir()
+
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("stub-bytes-data"), 0o755)
+
+	v1Path := filepath.Join(tempDir, "v1")
+	_ = os.WriteFile(v1Path, []byte("variant-v1-bytes-long-content"), 0o755)
+
+	fatPath := filepath.Join(tempDir, "fat_app")
+	_, err := pack.Pack(pack.Options{
+		StubPath:   stubPath,
+		OutputPath: fatPath,
+		AppName:    "testapp",
+		Variants:   map[string]string{"v1": v1Path},
+	})
+	if err != nil {
+		t.Fatalf("pack failed: %v", err)
+	}
+
+	fatFile, err := os.Open(fatPath)
+	if err != nil {
+		t.Fatalf("open fat file: %v", err)
+	}
+	defer func() { _ = fatFile.Close() }()
+
+	stat, _ := fatFile.Stat()
+
+	// Test trimTo
+	trimmedTarget := filepath.Join(tempDir, "sub2", "trimmed_app")
+	if err := trimTo(trimmedTarget, fatFile, stat.Size(), "v1"); err != nil {
+		t.Fatalf("trimTo failed: %v", err)
+	}
+
+	// Test trimInPlace on a copy
+	copyPath := filepath.Join(tempDir, "fat_copy")
+	data, _ := os.ReadFile(fatPath)
+	_ = os.WriteFile(copyPath, data, 0o755)
+	copyFile, _ := os.Open(copyPath)
+	defer func() { _ = copyFile.Close() }()
+
+	if err := trimInPlace(copyPath, copyFile, stat.Size(), "v1"); err != nil {
+		t.Fatalf("trimInPlace failed: %v", err)
 	}
 }
 

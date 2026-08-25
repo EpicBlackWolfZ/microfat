@@ -34,6 +34,13 @@ func TestRootCmdAndSubcommands(t *testing.T) {
 		t.Errorf("expected verify on non-existent binary to fail")
 	}
 
+	// Test trim validation
+	trim := newTrimCmd()
+	trim.SetArgs([]string{"/non/existent/binary/path"})
+	if err := trim.Execute(); err == nil {
+		t.Errorf("expected trim on non-existent binary to fail")
+	}
+
 	// Test pack validation errors
 	pack := newPackCmd()
 	pack.SetArgs([]string{"--stub", "", "--output", "", "--variant", "invalid"})

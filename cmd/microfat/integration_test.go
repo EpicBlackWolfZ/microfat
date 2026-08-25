@@ -153,7 +153,43 @@ func main() {
 		t.Errorf("unexpected info output: %s", string(out))
 	}
 
-	// 11. Run `--microfat:optimize-to`
+	// 11. Run `--microfat:trim-to` (creates a trimmed single-variant fat binary)
+	trimmedPath := filepath.Join(tempDir, "trimmed-app")
+	trimToCmd := exec.Command(fatBinPath, "--microfat:trim-to="+trimmedPath)
+	if out, err := trimToCmd.CombinedOutput(); err != nil {
+		t.Fatalf("running --microfat:trim-to failed: %v (output: %s)", err, out)
+	}
+	trimmedStat, _ := os.Stat(trimmedPath)
+	fatStat, _ := os.Stat(fatBinPath)
+	if trimmedStat.Size() >= fatStat.Size() {
+		t.Errorf("expected trimmed size (%d) to be smaller than fat binary (%d)", trimmedStat.Size(), fatStat.Size())
+	}
+	// Verify executing trimmed binary still uses memfd and produces correct output
+	trimExecCmd := exec.Command(trimmedPath)
+	trimOut, err := trimExecCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("running trimmed binary failed: %v (output: %s)", err, trimOut)
+	}
+	if !strings.Contains(string(trimOut), expectedOutput) {
+		t.Errorf("trimmed binary produced unexpected output: %s", string(trimOut))
+	}
+
+	// 12. Run CLI `microfat trim`
+	cliTrimPath := filepath.Join(tempDir, "cli-trimmed-app")
+	cliTrimCmd := exec.Command(cliPath, "trim", fatBinPath, "-o", cliTrimPath)
+	if out, err := cliTrimCmd.CombinedOutput(); err != nil {
+		t.Fatalf("running microfat trim CLI failed: %v (output: %s)", err, out)
+	}
+	cliTrimExecCmd := exec.Command(cliTrimPath)
+	cliTrimOut, err := cliTrimExecCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("running cli trimmed binary failed: %v (output: %s)", err, cliTrimOut)
+	}
+	if !strings.Contains(string(cliTrimOut), expectedOutput) {
+		t.Errorf("cli trimmed binary produced unexpected output: %s", string(cliTrimOut))
+	}
+
+	// 13. Run `--microfat:optimize-to`
 	matPath := filepath.Join(tempDir, "materialized-app")
 	matCmd := exec.Command(fatBinPath, "--microfat:optimize-to="+matPath)
 	if out, err := matCmd.CombinedOutput(); err != nil {
@@ -168,7 +204,7 @@ func main() {
 		t.Errorf("materialized binary produced unexpected output: %s", string(matOut))
 	}
 
-	// 12. Run `--microfat:optimize` (in-place)
+	// 14. Run `--microfat:optimize` (in-place)
 	statBefore, err := os.Stat(fatBinPath)
 	if err != nil {
 		t.Fatalf("stat fat binary: %v", err)

@@ -188,6 +188,68 @@ func Pack(opts Options) (*format.Index, error) {
 	return idx, nil
 }
 
+// TrimBinary extracts only the specified targetLevel variant, keeping the launcher stub intact,
+// and produces a single-variant trimmed fat binary written to out.
+func TrimBinary(r io.ReaderAt, totalSize int64, targetLevel string, out io.Writer) (*format.Index, error) {
+	idx, err := format.ReadTrailerAndIndex(r, totalSize)
+	if err != nil {
+		return nil, fmt.Errorf("reading index: %w", err)
+	}
+
+	if len(idx.Variants) == 0 {
+		return nil, errors.New("binary index contains no variants")
+	}
+
+	selected, found := idx.FindVariant(targetLevel)
+	if !found {
+		return nil, fmt.Errorf("variant level %q not found in binary manifest", targetLevel)
+	}
+
+	stubSize := idx.Variants[0].Offset
+	if stubSize <= 0 || stubSize > totalSize {
+		return nil, errors.New("invalid stub offset in binary index")
+	}
+
+	// 1. Copy Stub Binary Bytes (offset 0 to stubSize)
+	stubReader := io.NewSectionReader(r, 0, stubSize)
+	if _, err := io.Copy(out, stubReader); err != nil {
+		return nil, fmt.Errorf("copying stub binary: %w", err)
+	}
+
+	// 2. Copy Compressed Variant Frame
+	varReader := io.NewSectionReader(r, selected.Offset, selected.CompressedSize)
+	if _, err := io.Copy(out, varReader); err != nil {
+		return nil, fmt.Errorf("copying variant frame: %w", err)
+	}
+
+	// 3. Assemble New Index with single entry right after the stub
+	newIdx := &format.Index{
+		Version:     idx.Version,
+		AppName:     idx.AppName,
+		TargetOS:    idx.TargetOS,
+		TargetArch:  idx.TargetArch,
+		CreatedUnix: time.Now().Unix(),
+		Variants: []format.VariantEntry{
+			{
+				Level:            selected.Level,
+				Offset:           stubSize,
+				CompressedSize:   selected.CompressedSize,
+				UncompressedSize: selected.UncompressedSize,
+				SHA256:           selected.SHA256,
+				Compression:      selected.Compression,
+			},
+		},
+	}
+
+	// 4. Write New Index and Trailer
+	indexOffset := stubSize + selected.CompressedSize
+	if _, err := format.WriteIndexAndTrailer(out, newIdx, indexOffset); err != nil {
+		return nil, fmt.Errorf("writing trimmed index and trailer: %w", err)
+	}
+
+	return newIdx, nil
+}
+
 // VerifyBinary reads the index and decompresses each variant to verify SHA-256 checksums and boundaries.
 func VerifyBinary(r io.ReaderAt, totalSize int64) (*format.Index, []VerificationResult, error) {
 	idx, err := format.ReadTrailerAndIndex(r, totalSize)

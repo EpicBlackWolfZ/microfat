@@ -102,6 +102,67 @@ func TestPackAndVerify(t *testing.T) {
 	}
 }
 
+func TestTrimBinary(t *testing.T) {
+	tempDir := t.TempDir()
+
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("stub-header-code"), 0o755)
+
+	v1Path := filepath.Join(tempDir, "v1")
+	v3Path := filepath.Join(tempDir, "v3")
+	_ = os.WriteFile(v1Path, []byte("v1-binary-payload"), 0o755)
+	_ = os.WriteFile(v3Path, []byte("v3-binary-payload-larger-data"), 0o755)
+
+	fatPath := filepath.Join(tempDir, "fat")
+	_, err := Pack(Options{
+		StubPath:   stubPath,
+		OutputPath: fatPath,
+		Variants: map[string]string{
+			"v1": v1Path,
+			"v3": v3Path,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Pack failed: %v", err)
+	}
+
+	fatFile, err := os.Open(fatPath)
+	if err != nil {
+		t.Fatalf("open fat: %v", err)
+	}
+	defer func() { _ = fatFile.Close() }()
+
+	stat, _ := fatFile.Stat()
+
+	// 1. Trim to v3
+	var trimmedBuf bytes.Buffer
+	newIdx, err := TrimBinary(fatFile, stat.Size(), "v3", &trimmedBuf)
+	if err != nil {
+		t.Fatalf("TrimBinary failed: %v", err)
+	}
+
+	if len(newIdx.Variants) != 1 || newIdx.Variants[0].Level != "v3" {
+		t.Fatalf("expected 1 variant 'v3', got %+v", newIdx.Variants)
+	}
+
+	// 2. Verify the trimmed buffer
+	trimmedReader := bytes.NewReader(trimmedBuf.Bytes())
+	verifiedIdx, results, err := VerifyBinary(trimmedReader, int64(trimmedBuf.Len()))
+	if err != nil {
+		t.Fatalf("VerifyBinary on trimmed binary failed: %v", err)
+	}
+	if len(verifiedIdx.Variants) != 1 || !results[0].Valid {
+		t.Errorf("trimmed binary verification failed: %+v", results)
+	}
+
+	// 3. Error case: trim to non-existent variant
+	var dummy bytes.Buffer
+	_, err = TrimBinary(fatFile, stat.Size(), "v99", &dummy)
+	if err == nil {
+		t.Errorf("expected error trimming non-existent variant")
+	}
+}
+
 func TestPackValidationErrors(t *testing.T) {
 	tempDir := t.TempDir()
 

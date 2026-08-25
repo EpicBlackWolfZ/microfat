@@ -16,6 +16,10 @@ const (
 	flagInfo          = "--microfat:info"
 	flagOptimize      = "--microfat:optimize"
 	flagOptimizeTo    = "--microfat:optimize-to"
+	flagTrim          = "--microfat:trim"
+	flagTrimTo        = "--microfat:trim-to"
+	flagSpecialize    = "--microfat:specialize"
+	flagSpecializeTo  = "--microfat:specialize-to"
 	flagHelp          = "--microfat:help"
 	minOptimizeToArgs = 2
 )
@@ -75,23 +79,48 @@ func run() error {
 		case arg1 == flagInfo:
 			printInfo(idx, hostInfo, selectedEntry, stat.Size())
 			return nil
+		case arg1 == flagTrim || arg1 == flagSpecialize:
+			fmt.Printf("[microfat] Trimming binary in-place to variant '%s' (keeping launcher stub & auto-tuning)...\n", selectedLevel)
+			if err := trimInPlace(selfPath, selfFile, stat.Size(), selectedLevel); err != nil {
+				return err
+			}
+			newStat, _ := os.Stat(selfPath)
+			var newSize int64
+			if newStat != nil {
+				newSize = newStat.Size()
+			}
+			fmt.Printf("[microfat] Successfully trimmed '%s' (%d bytes -> %d bytes)\n", selfPath, stat.Size(), newSize)
+			return nil
+		case isPrefixOrExact(arg1, flagTrimTo) || isPrefixOrExact(arg1, flagSpecializeTo):
+			targetPath, err := extractTargetPath(arg1, flagTrimTo, flagSpecializeTo)
+			if err != nil {
+				return err
+			}
+			cleanTarget := filepath.Clean(targetPath)
+			fmt.Printf("[microfat] Trimming variant '%s' to '%s' (single-variant fat binary)...\n", selectedLevel, cleanTarget)
+			if err := trimTo(cleanTarget, selfFile, stat.Size(), selectedLevel); err != nil {
+				return err
+			}
+			// #nosec G703 -- stat user-supplied path for size reporting
+			newStat, _ := os.Stat(cleanTarget)
+			var newSize int64
+			if newStat != nil {
+				newSize = newStat.Size()
+			}
+			fmt.Printf("[microfat] Successfully created trimmed fat binary '%s' (%d bytes)\n", cleanTarget, newSize)
+			return nil
 		case arg1 == flagOptimize:
-			fmt.Printf("[microfat] Optimizing binary in-place to variant '%s'...\n", selectedLevel)
+			fmt.Printf("[microfat] Optimizing binary in-place to variant '%s' (raw uncompressed ELF)...\n", selectedLevel)
 			if err := optimizeInPlace(selfPath, selfFile, selectedEntry); err != nil {
 				return err
 			}
 			fmt.Printf("[microfat] Successfully replaced '%s' with %s binary (%d bytes -> %d bytes)\n",
 				selfPath, selectedLevel, stat.Size(), selectedEntry.UncompressedSize)
 			return nil
-		case strings.HasPrefix(arg1, flagOptimizeTo+"=") || arg1 == flagOptimizeTo:
-			var targetPath string
-			switch {
-			case strings.HasPrefix(arg1, flagOptimizeTo+"="):
-				targetPath = strings.TrimPrefix(arg1, flagOptimizeTo+"=")
-			case len(os.Args) > minOptimizeToArgs:
-				targetPath = os.Args[minOptimizeToArgs]
-			default:
-				return fmt.Errorf("%s requires a destination path", flagOptimizeTo)
+		case isPrefixOrExact(arg1, flagOptimizeTo):
+			targetPath, err := extractTargetPath(arg1, flagOptimizeTo, "")
+			if err != nil {
+				return err
 			}
 			fmt.Printf("[microfat] Extracting variant '%s' to '%s'...\n", selectedLevel, targetPath)
 			if err := optimizeTo(targetPath, selfFile, selectedEntry); err != nil {
@@ -104,6 +133,26 @@ func run() error {
 
 	// Standard transparent execution
 	return executeVariant(selfFile, selectedEntry, os.Args, os.Environ())
+}
+
+func isPrefixOrExact(arg, flag string) bool {
+	if flag == "" {
+		return false
+	}
+	return arg == flag || strings.HasPrefix(arg, flag+"=")
+}
+
+func extractTargetPath(arg, primaryFlag, aliasFlag string) (string, error) {
+	if strings.HasPrefix(arg, primaryFlag+"=") {
+		return strings.TrimPrefix(arg, primaryFlag+"="), nil
+	}
+	if aliasFlag != "" && strings.HasPrefix(arg, aliasFlag+"=") {
+		return strings.TrimPrefix(arg, aliasFlag+"="), nil
+	}
+	if len(os.Args) > minOptimizeToArgs {
+		return os.Args[minOptimizeToArgs], nil
+	}
+	return "", fmt.Errorf("%s requires a destination path", primaryFlag)
 }
 
 func getSelfExecutablePath() (string, error) {
@@ -121,9 +170,11 @@ func printHelp(idx *format.Index, hostInfo microarch.Info, selected *format.Vari
 	fmt.Printf("Host CPU:      %s (%s level %s)\n", hostInfo.Arch, idx.TargetArch, hostInfo.Level)
 	fmt.Printf("Auto-Selected: %s\n\n", selected.Level)
 	fmt.Printf("Meta-Commands:\n")
-	fmt.Printf("  --microfat:info              Print host CPU capabilities and embedded variant manifest\n")
-	fmt.Printf("  --microfat:optimize          Permanently shrink and replace this executable with the optimal variant\n")
-	fmt.Printf("  --microfat:optimize-to PATH  Extract the optimal variant to a specific file path (for containers/installs)\n")
+	fmt.Printf("  --microfat:info              Print host CPU capabilities, cgroup auto-tuning limits, and variants\n")
+	fmt.Printf("  --microfat:trim              Trim unused variants on disk, keeping launcher stub & cgroup auto-tuning\n")
+	fmt.Printf("  --microfat:trim-to PATH      Extract trimmed single-variant fat binary to a specific path\n")
+	fmt.Printf("  --microfat:optimize          Permanently extract raw uncompressed variant ELF over this file\n")
+	fmt.Printf("  --microfat:optimize-to PATH  Extract raw uncompressed variant ELF to a specific path\n")
 	fmt.Printf("  --microfat:help              Show this launcher help message\n\n")
 	fmt.Printf("All other arguments and flags are forwarded directly to the application.\n")
 }

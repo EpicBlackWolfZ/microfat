@@ -50,6 +50,7 @@ self-dispatching fat executable with zero persistent process overhead and crypto
 	cmd.AddCommand(newDetectCmd())
 	cmd.AddCommand(newInspectCmd())
 	cmd.AddCommand(newVerifyCmd())
+	cmd.AddCommand(newTrimCmd())
 	cmd.AddCommand(newPackCmd())
 
 	return cmd
@@ -205,6 +206,102 @@ func newVerifyCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results in JSON format")
+	return cmd
+}
+
+func newTrimCmd() *cobra.Command {
+	var (
+		outputPath  string
+		targetLevel string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "trim <binary> [-o <output>] [--level <level>]",
+		Short: "Trim away unneeded variant payloads, keeping the launcher stub and selected variant",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			srcPath := filepath.Clean(args[0])
+			// #nosec G304 -- user-supplied binary path to trim
+			f, err := os.Open(srcPath)
+			if err != nil {
+				return fmt.Errorf("opening %s: %w", srcPath, err)
+			}
+			defer func() { _ = f.Close() }()
+
+			stat, err := f.Stat()
+			if err != nil {
+				return fmt.Errorf("stat %s: %w", srcPath, err)
+			}
+
+			if !format.IsFatBinary(f, stat.Size()) {
+				return fmt.Errorf("'%s' is not a valid microfat fat binary (missing magic trailer)", srcPath)
+			}
+
+			idx, err := format.ReadTrailerAndIndex(f, stat.Size())
+			if err != nil {
+				return fmt.Errorf("reading binary manifest: %w", err)
+			}
+
+			if targetLevel == "" {
+				hostInfo := microarch.Detect()
+				matched, selErr := microarch.BestMatchingVariantFor(idx.TargetArch, hostInfo.Level, idx.VariantLevels())
+				if selErr != nil {
+					return fmt.Errorf("auto-detecting optimal level: %w", selErr)
+				}
+				targetLevel = matched
+			}
+
+			destPath := srcPath
+			if outputPath != "" {
+				destPath = filepath.Clean(outputPath)
+			}
+
+			destDir := filepath.Dir(destPath)
+			tmpFile, err := os.CreateTemp(destDir, ".microfat-trim-*.tmp")
+			if err != nil {
+				return fmt.Errorf("creating temp file in %s: %w", destDir, err)
+			}
+			tmpPath := tmpFile.Name()
+			defer func() {
+				_ = tmpFile.Close()
+				_ = os.Remove(tmpPath)
+			}()
+
+			newIdx, err := pack.TrimBinary(f, stat.Size(), targetLevel, tmpFile)
+			if err != nil {
+				return fmt.Errorf("trimming binary: %w", err)
+			}
+
+			if err := tmpFile.Sync(); err != nil {
+				return fmt.Errorf("syncing file: %w", err)
+			}
+			if err := tmpFile.Chmod(stat.Mode()); err != nil {
+				return fmt.Errorf("chmodding file: %w", err)
+			}
+			if err := tmpFile.Close(); err != nil {
+				return fmt.Errorf("closing temp file: %w", err)
+			}
+
+			if err := os.Rename(tmpPath, destPath); err != nil {
+				return fmt.Errorf("writing trimmed binary to %s: %w", destPath, err)
+			}
+
+			newStat, _ := os.Stat(destPath)
+			var newSize int64
+			if newStat != nil {
+				newSize = newStat.Size()
+			}
+
+			fmt.Printf("Successfully trimmed '%s' to variant '%s':\n", destPath, targetLevel)
+			fmt.Printf("  • Size: %d bytes -> %d bytes\n", stat.Size(), newSize)
+			fmt.Printf("  • Variants: %d embedded (%s)\n", len(newIdx.Variants), targetLevel)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Destination output path (defaults to in-place replacement)")
+	cmd.Flags().StringVar(&targetLevel, "level", "", "Target microarchitecture level to retain (defaults to auto-detected host level)")
+
 	return cmd
 }
 
