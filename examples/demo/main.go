@@ -43,10 +43,13 @@ const (
 	defaultAppVer    = "1.0.0"
 	seedValue        = 42
 	scaleMultiplier  = 100.0
+	cryptoBlockSize  = 65536
 	byteModulo       = 256
 	msPerMicro       = 1000.0
-	jsonOpsFactor    = 2
-	heavyMultiplier  = 5
+	jsonTotalFactor  = 4
+	opsDivisor       = 1000
+	bitShiftAmount   = 7
+	bitInitialMask   = 0xAAAAAAAAAAAAAAAA
 )
 
 var (
@@ -215,9 +218,9 @@ func runSIMDMathWorkload(heavy bool) WorkloadMetrics {
 	}
 
 	// 2. Hardware Bit Manipulation (BMI1 / BMI2 via math/bits)
-	var bitAcc uint64 = 0xAAAAAAAAAAAAAAAA
+	var bitAcc uint64 = bitInitialMask
 	for i := 0; i < bitIters; i++ {
-		bitAcc = bits.RotateLeft64(bitAcc, 7) ^ uint64(i)
+		bitAcc = bits.RotateLeft64(bitAcc, bitShiftAmount) ^ uint64(i)
 		totalOps += int64(bits.OnesCount64(bitAcc))
 		totalOps += int64(bits.LeadingZeros64(bitAcc))
 		totalOps += int64(bits.TrailingZeros64(bitAcc))
@@ -226,7 +229,7 @@ func runSIMDMathWorkload(heavy bool) WorkloadMetrics {
 
 	// 3. Cryptographic Multi-Block Hashing (SHA-256)
 	hasher := sha256.New()
-	block := make([]byte, 65536)
+	block := make([]byte, cryptoBlockSize)
 	for i := range block {
 		block[i] = byte(i % byteModulo)
 	}
@@ -321,7 +324,7 @@ func runJSONMemoryWorkload(heavy bool) WorkloadMetrics {
 
 	elapsed := time.Since(start)
 	computeMs := float64(elapsed.Microseconds()) / msPerMicro
-	totalOps := int64(batchSize * jsonOpsFactor * 2)
+	totalOps := int64(batchSize * jsonTotalFactor)
 	opsPerSec := float64(totalOps) / elapsed.Seconds()
 
 	return WorkloadMetrics{
@@ -376,7 +379,7 @@ func runConcurrentWorkload(heavy bool) WorkloadMetrics {
 		ComputeMs:       computeMs,
 		Operations:      totalOps,
 		OpsPerSecond:    opsPerSec,
-		Detail:          fmt.Sprintf("%d concurrent workers x %dk ops", tasks, innerIters/1000),
+		Detail:          fmt.Sprintf("%d concurrent workers x %dk ops", tasks, innerIters/opsDivisor),
 	}
 }
 
