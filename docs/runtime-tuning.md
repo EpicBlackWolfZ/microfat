@@ -25,8 +25,8 @@ Microfat uses `github.com/ghostnetorg/pkg/cgroup` to inspect the container envir
 flowchart TD
     Launcher["Launcher Startup"] --> Probe{"Inspect /sys/fs/cgroup"}
     
-    Probe -->|cgroup v2 (Unified)| V2["Read memory.max & cpu.max"]
-    Probe -->|cgroup v1 (Legacy)| V1["Read memory.limit_in_bytes & cpu.cfs_quota_us"]
+    Probe -->|"cgroup v2 (Unified)"| V2["Read memory.max & cpu.max"]
+    Probe -->|"cgroup v1 (Legacy)"| V1["Read memory.limit_in_bytes & cpu.cfs_quota_us"]
     
     V2 --> CalcMem["Calculate GOMEMLIMIT (90% limit, 64MB min headroom)"]
     V1 --> CalcMem
@@ -34,9 +34,10 @@ flowchart TD
     V2 --> CalcCPU["Calculate GOMAXPROCS (floor quota, min 1)"]
     V1 --> CalcCPU
     
-    CalcMem & CalcCPU --> CheckEnv{"Are variables already set?"}
-    CheckEnv -->|Already Set| Preserve["Keep User Setting (No Override)"]
-    CheckEnv -->|Unset| Inject["Inject into os.Environ() before execve"]
+    CalcMem --> CheckEnv{"Are variables already set?"}
+    CalcCPU --> CheckEnv
+    CheckEnv -->|"Already Set"| Preserve["Keep User Setting (No Override)"]
+    CheckEnv -->|"Unset"| Inject["Inject into os.Environ() before execve"]
 ```
 
 ---
