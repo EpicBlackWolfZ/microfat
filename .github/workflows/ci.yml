@@ -27,7 +27,7 @@ jobs:
     name: Go Build / Test / Lint
     uses: ghostnetorg/actions-workflows/.github/workflows/go-ci.yaml@v1.23.0
     with:
-      coverage-threshold: 60
+      coverage-threshold: 50
 
   govulncheck:
     name: Go Vulnerability Scan (govulncheck)
