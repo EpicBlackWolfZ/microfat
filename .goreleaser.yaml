@@ -1,0 +1,46 @@
+# GoReleaser configuration for microfat
+# renovate: datasource=github-releases depName=goreleaser/goreleaser
+version: 2
+
+builds:
+  - id: microfat
+    main: ./cmd/microfat
+    binary: microfat
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/ghostnetorg/pkg/version.Version={{.Version}}
+      - -X github.com/ghostnetorg/pkg/version.Commit={{.Commit}}
+      - -X github.com/ghostnetorg/pkg/version.Date={{.Date}}
+      - -X github.com/ghostnetorg/pkg/version.BuiltBy=goreleaser
+      - -X github.com/ghostnetorg/pkg/version.Vendor=Ghostnet
+
+  - id: microfat-stub
+    main: ./cmd/microfat-stub
+    binary: microfat-stub
+    env:
+      - CGO_ENABLED=0
+      - GOAMD64=v1
+    goos:
+      - linux
+    goarch:
+      - amd64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/ghostnetorg/pkg/version.Version={{.Version}}
+      - -X github.com/ghostnetorg/pkg/version.Commit={{.Commit}}
+      - -X github.com/ghostnetorg/pkg/version.Date={{.Date}}
+      - -X github.com/ghostnetorg/pkg/version.BuiltBy=goreleaser
+      - -X github.com/ghostnetorg/pkg/version.Vendor=Ghostnet
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-SNAPSHOT-{{ .ShortCommit }}"

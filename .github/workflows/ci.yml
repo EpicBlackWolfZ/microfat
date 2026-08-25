@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'TODO'
+      - 'LICENSE*'
+      - '.gitignore'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'TODO'
+      - 'LICENSE*'
+      - '.gitignore'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go-ci:
+    name: Go Build / Test / Lint
+    uses: ghostnetorg/actions-workflows/.github/workflows/go-ci.yaml@v1.23.0
+
+  govulncheck:
+    name: Go Vulnerability Scan (govulncheck)
+    uses: ghostnetorg/actions-workflows/.github/workflows/govulncheck.yaml@v1.23.0
+
+  secret-scan:
+    name: gitleaks Secret Scan
+    uses: ghostnetorg/actions-workflows/.github/workflows/secret-scan.yaml@v1.23.0

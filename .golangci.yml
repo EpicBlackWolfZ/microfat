@@ -1,0 +1,67 @@
+---
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - errcheck
+    - goconst
+    - gocritic
+    - gocyclo
+    - revive
+    - mnd
+    - goprintffuncname
+    - gosec
+    - govet
+    - ineffassign
+    - lll
+    - misspell
+    - nakedret
+    - staticcheck
+    - unconvert
+    - unused
+  disable:
+    - dupl
+
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+    gocyclo:
+      min-complexity: 25
+    lll:
+      line-length: 140
+    mnd:
+      ignored-numbers:
+        - '0o755'
+        - '0o644'
+        - '56'
+        - '32'
+        - '16'
+        - '8'
+    goconst:
+      min-occurrences: 5
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - errcheck
+          - dupl
+          - gosec
+
+formatters:
+  settings:
+    gofmt:
+      simplify: true
+
+run:
+  tests: true
+
+output:
+  formats:
+    text:
+      colors: true
+  show-stats: true
