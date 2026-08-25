@@ -123,7 +123,8 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 			return fmt.Errorf("%w: variant %s payload extends past index offset %d", ErrOutOfBounds, v.Level, indexOffset)
 		}
 		if i > 0 && v.Offset < lastEnd {
-			return fmt.Errorf("%w: variant %s offset %d overlaps with previous variant ending at %d", ErrOverlappingVariant, v.Level, v.Offset, lastEnd)
+			return fmt.Errorf("%w: variant %s offset %d overlaps with previous variant ending at %d",
+				ErrOverlappingVariant, v.Level, v.Offset, lastEnd)
 		}
 		lastEnd = v.Offset + v.CompressedSize
 	}

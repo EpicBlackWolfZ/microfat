@@ -162,7 +162,14 @@ func executeViaMemfd(selfFile *os.File, entry *format.VariantEntry, args []strin
 	return fmt.Errorf("execve on %s failed: %w", procPath, execErr)
 }
 
-func executeViaCache(selfFile *os.File, entry *format.VariantEntry, args []string, baseEnv []string, hostInfo microarch.Info, primaryErr error) error {
+func executeViaCache(
+	selfFile *os.File,
+	entry *format.VariantEntry,
+	args []string,
+	baseEnv []string,
+	hostInfo microarch.Info,
+	primaryErr error,
+) error {
 	env := buildAutoTunedEnviron(baseEnv, entry.Level, format.ExecModeCache)
 	logDiagnostics(entry, format.ExecModeCache, hostInfo, env)
 
@@ -185,7 +192,10 @@ func executeViaCache(selfFile *os.File, entry *format.VariantEntry, args []strin
 		cacheDir = filepath.Join(os.TempDir(), fmt.Sprintf(".microfat-%d", os.Getuid()))
 		triedDirs = append(triedDirs, cacheDir)
 		if err2 := os.MkdirAll(cacheDir, privateCacheDirMode); err2 != nil {
-			return fmt.Errorf("launcher execution failed: memfd_create unavailable (%v) and unable to initialize cache directories (%s): %w. Remediation: ensure /proc and memfd_create are enabled or mount a writable tmpfs at /tmp or $XDG_CACHE_HOME", primaryErr, strings.Join(triedDirs, ", "), err2)
+			return fmt.Errorf("launcher execution failed: memfd_create unavailable (%v) and unable to initialize cache "+
+				"directories (%s): %w. Remediation: ensure /proc and memfd_create are enabled or mount a writable "+
+				"tmpfs at /tmp or $XDG_CACHE_HOME",
+				primaryErr, strings.Join(triedDirs, ", "), err2)
 		}
 	}
 
@@ -194,7 +204,9 @@ func executeViaCache(selfFile *os.File, entry *format.VariantEntry, args []strin
 	if _, err := os.Stat(cachedBinary); err != nil {
 		tmpFile, err := os.CreateTemp(cacheDir, ".exec-*.tmp")
 		if err != nil {
-			return fmt.Errorf("launcher execution failed: memfd_create unavailable (%v) and cannot create temp file in %s: %w. Remediation: verify write permissions in %s or enable memfd_create", primaryErr, cacheDir, err, cacheDir)
+			return fmt.Errorf("launcher execution failed: memfd_create unavailable (%v) and cannot create temp file "+
+				"in %s: %w. Remediation: verify write permissions in %s or enable memfd_create",
+				primaryErr, cacheDir, err, cacheDir)
 		}
 		tmpPath := tmpFile.Name()
 		defer func() {

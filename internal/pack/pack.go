@@ -59,34 +59,8 @@ type VerificationResult struct {
 
 // Pack stitches the stub and compressed variant binaries into a complete microfat fat executable.
 func Pack(opts Options) (*format.Index, error) {
-	if len(opts.Variants) == 0 {
-		return nil, ErrNoVariantsSpecified
-	}
-	if opts.StubPath == "" {
-		return nil, ErrStubMissing
-	}
-	if opts.OutputPath == "" {
-		return nil, errors.New("output path must not be empty")
-	}
-	if opts.TargetOS == "" {
-		opts.TargetOS = "linux"
-	}
-	if opts.TargetArch == "" {
-		opts.TargetArch = "amd64"
-	}
-	if opts.Permissions == 0 {
-		opts.Permissions = defaultFileMode
-	}
-
-	if !opts.SkipELFValidation {
-		if err := ValidateELFBinary(opts.StubPath, opts.TargetOS, opts.TargetArch); err != nil {
-			return nil, fmt.Errorf("validating stub: %w", err)
-		}
-		for lvl, varPath := range opts.Variants {
-			if err := ValidateELFBinary(varPath, opts.TargetOS, opts.TargetArch); err != nil {
-				return nil, fmt.Errorf("validating variant %s: %w", lvl, err)
-			}
-		}
+	if err := validateOptions(&opts); err != nil {
+		return nil, err
 	}
 
 	stubBytes, err := os.ReadFile(filepath.Clean(opts.StubPath))
@@ -94,14 +68,7 @@ func Pack(opts Options) (*format.Index, error) {
 		return nil, fmt.Errorf("%w: %w", ErrStubMissing, err)
 	}
 
-	// Sort variant levels ascending by rank
-	levels := make([]string, 0, len(opts.Variants))
-	for lvl := range opts.Variants {
-		levels = append(levels, lvl)
-	}
-	sort.Slice(levels, func(i, j int) bool {
-		return microarch.Compare(opts.TargetArch, levels[i], levels[j]) < 0
-	})
+	levels := sortVariantLevels(opts.Variants, opts.TargetArch)
 
 	// Create temporary file in the destination directory for atomic replacement
 	outDir := filepath.Dir(opts.OutputPath)
@@ -137,46 +104,12 @@ func Pack(opts Options) (*format.Index, error) {
 
 	// 2. Compress and write each variant payload
 	for _, lvl := range levels {
-		variantPath := filepath.Clean(opts.Variants[lvl])
-		variantBytes, err := os.ReadFile(variantPath)
+		entry, newOffset, err := writeVariantPayload(tmpFile, lvl, opts.Variants[lvl], encLevel, currentOffset)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s (%w)", ErrVariantNotFound, variantPath, err)
+			return nil, err
 		}
-
-		rawHash := sha256.Sum256(variantBytes)
-		rawHashHex := hex.EncodeToString(rawHash[:])
-		uncompressedSize := int64(len(variantBytes))
-
-		variantOffset := currentOffset
-
-		zstdWriter, err := zstd.NewWriter(tmpFile, zstd.WithEncoderLevel(encLevel))
-		if err != nil {
-			return nil, fmt.Errorf("initializing zstd writer: %w", err)
-		}
-
-		if _, err := zstdWriter.Write(variantBytes); err != nil {
-			_ = zstdWriter.Close()
-			return nil, fmt.Errorf("compressing variant %s: %w", lvl, err)
-		}
-		if err := zstdWriter.Close(); err != nil {
-			return nil, fmt.Errorf("closing zstd writer for %s: %w", lvl, err)
-		}
-
-		newOffset, err := tmpFile.Seek(0, io.SeekCurrent)
-		if err != nil {
-			return nil, fmt.Errorf("seeking current file offset: %w", err)
-		}
-		compressedSize := newOffset - variantOffset
 		currentOffset = newOffset
-
-		idx.Variants = append(idx.Variants, format.VariantEntry{
-			Level:            lvl,
-			Offset:           variantOffset,
-			CompressedSize:   compressedSize,
-			UncompressedSize: uncompressedSize,
-			SHA256:           rawHashHex,
-			Compression:      "zstd",
-		})
+		idx.Variants = append(idx.Variants, entry)
 	}
 
 	// 3. Write Index and Trailer
@@ -185,21 +118,118 @@ func Pack(opts Options) (*format.Index, error) {
 	}
 
 	// 4. Sync, chmod and atomically move
-	if err := tmpFile.Sync(); err != nil {
-		return nil, fmt.Errorf("syncing output file: %w", err)
-	}
-	if err := tmpFile.Chmod(opts.Permissions); err != nil {
-		return nil, fmt.Errorf("chmodding output file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return nil, fmt.Errorf("closing output file: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, opts.OutputPath); err != nil {
-		return nil, fmt.Errorf("moving temporary file to output %s: %w", opts.OutputPath, err)
+	if err := finalizeOutputFile(tmpFile, tmpPath, opts.OutputPath, opts.Permissions); err != nil {
+		return nil, err
 	}
 
 	return idx, nil
+}
+
+func validateOptions(opts *Options) error {
+	if len(opts.Variants) == 0 {
+		return ErrNoVariantsSpecified
+	}
+	if opts.StubPath == "" {
+		return ErrStubMissing
+	}
+	if opts.OutputPath == "" {
+		return errors.New("output path must not be empty")
+	}
+	if opts.TargetOS == "" {
+		opts.TargetOS = "linux"
+	}
+	if opts.TargetArch == "" {
+		opts.TargetArch = "amd64"
+	}
+	if opts.Permissions == 0 {
+		opts.Permissions = defaultFileMode
+	}
+
+	if !opts.SkipELFValidation {
+		if err := ValidateELFBinary(opts.StubPath, opts.TargetOS, opts.TargetArch); err != nil {
+			return fmt.Errorf("validating stub: %w", err)
+		}
+		for lvl, varPath := range opts.Variants {
+			if err := ValidateELFBinary(varPath, opts.TargetOS, opts.TargetArch); err != nil {
+				return fmt.Errorf("validating variant %s: %w", lvl, err)
+			}
+		}
+	}
+	return nil
+}
+
+func sortVariantLevels(variants map[string]string, targetArch string) []string {
+	levels := make([]string, 0, len(variants))
+	for lvl := range variants {
+		levels = append(levels, lvl)
+	}
+	sort.Slice(levels, func(i, j int) bool {
+		return microarch.Compare(targetArch, levels[i], levels[j]) < 0
+	})
+	return levels
+}
+
+func writeVariantPayload(
+	tmpFile *os.File,
+	lvl string,
+	path string,
+	encLevel zstd.EncoderLevel,
+	currentOffset int64,
+) (format.VariantEntry, int64, error) {
+	variantPath := filepath.Clean(path)
+	variantBytes, err := os.ReadFile(variantPath)
+	if err != nil {
+		return format.VariantEntry{}, 0, fmt.Errorf("%w: %s (%w)", ErrVariantNotFound, variantPath, err)
+	}
+
+	rawHash := sha256.Sum256(variantBytes)
+	rawHashHex := hex.EncodeToString(rawHash[:])
+	uncompressedSize := int64(len(variantBytes))
+	variantOffset := currentOffset
+
+	zstdWriter, err := zstd.NewWriter(tmpFile, zstd.WithEncoderLevel(encLevel))
+	if err != nil {
+		return format.VariantEntry{}, 0, fmt.Errorf("initializing zstd writer: %w", err)
+	}
+
+	if _, err := zstdWriter.Write(variantBytes); err != nil {
+		_ = zstdWriter.Close()
+		return format.VariantEntry{}, 0, fmt.Errorf("compressing variant %s: %w", lvl, err)
+	}
+	if err := zstdWriter.Close(); err != nil {
+		return format.VariantEntry{}, 0, fmt.Errorf("closing zstd writer for %s: %w", lvl, err)
+	}
+
+	newOffset, err := tmpFile.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return format.VariantEntry{}, 0, fmt.Errorf("seeking current file offset: %w", err)
+	}
+
+	entry := format.VariantEntry{
+		Level:            lvl,
+		Offset:           variantOffset,
+		CompressedSize:   newOffset - variantOffset,
+		UncompressedSize: uncompressedSize,
+		SHA256:           rawHashHex,
+		Compression:      "zstd",
+	}
+	return entry, newOffset, nil
+}
+
+func finalizeOutputFile(tmpFile *os.File, tmpPath, outputPath string, perms os.FileMode) error {
+	if err := tmpFile.Sync(); err != nil {
+		return fmt.Errorf("syncing output file: %w", err)
+	}
+	if err := tmpFile.Chmod(perms); err != nil {
+		return fmt.Errorf("chmodding output file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("closing output file: %w", err)
+	}
+	if err := os.Rename(tmpPath, outputPath); err != nil {
+		return fmt.Errorf("moving temporary file to output %s: %w", outputPath, err)
+	}
+	return nil
 }
 
 // TrimBinary extracts only the specified targetLevel variant, keeping the launcher stub intact,
@@ -334,11 +364,13 @@ func ValidateELFBinary(path string, targetOS, targetArch string) error {
 	switch targetArch {
 	case "amd64", "x86_64":
 		if f.Machine != elf.EM_X86_64 {
-			return fmt.Errorf("%w (%s): machine type %v does not match target architecture %s (expected EM_X86_64)", ErrInvalidELF, path, f.Machine, targetArch)
+			return fmt.Errorf("%w (%s): machine type %v does not match target architecture %s (expected EM_X86_64)",
+				ErrInvalidELF, path, f.Machine, targetArch)
 		}
 	case "arm64", "aarch64":
 		if f.Machine != elf.EM_AARCH64 {
-			return fmt.Errorf("%w (%s): machine type %v does not match target architecture %s (expected EM_AARCH64)", ErrInvalidELF, path, f.Machine, targetArch)
+			return fmt.Errorf("%w (%s): machine type %v does not match target architecture %s (expected EM_AARCH64)",
+				ErrInvalidELF, path, f.Machine, targetArch)
 		}
 	}
 	return nil

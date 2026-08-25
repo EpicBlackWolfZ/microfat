@@ -193,7 +193,9 @@ func printInfo(idx *format.Index, hostInfo microarch.Info, selected *format.Vari
 	if limits, err := cgroup.ReadLimits(); err == nil && limits.CgroupVersion != cgroup.VersionUnknown {
 		fmt.Printf("\nContainer Auto-Tuning (cgroup v%d):\n", limits.CgroupVersion)
 		if limits.MemoryLimitBytes > 0 {
-			if memLimit, ok := cgroup.CalculateGOMEMLIMIT(limits.MemoryLimitBytes, cgroup.DefaultMemoryRatio, cgroup.DefaultMinHeadroomBytes); ok {
+			memLimit, ok := cgroup.CalculateGOMEMLIMIT(
+				limits.MemoryLimitBytes, cgroup.DefaultMemoryRatio, cgroup.DefaultMinHeadroomBytes)
+			if ok {
 				fmt.Printf("  • Memory Ceiling:  %d bytes -> Auto GOMEMLIMIT: %dB (90%%)\n", limits.MemoryLimitBytes, memLimit)
 			}
 		} else {
