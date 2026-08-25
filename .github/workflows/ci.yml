@@ -68,7 +68,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9.3.0
         with:
-          version: v2.12
+          version: v2.13.1
           install-mode: goinstall
           args: --timeout=5m
 
@@ -107,7 +107,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Package / File | Coverage |" >> $GITHUB_STEP_SUMMARY
           echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-          
+
           go tool cover -func=coverage.out | while read -r line; do
             pkg=$(echo "$line" | awk '{print $1}')
             pct=$(echo "$line" | awk '{print $NF}')
@@ -117,11 +117,11 @@ jobs:
               echo "| \`$pkg\` | $pct |" >> $GITHUB_STEP_SUMMARY
             fi
           done
-          
+
           TOTAL_COV=$(go tool cover -func=coverage.out | grep "total:" | awk '{print substr($3, 1, length($3)-1)}')
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Evaluated Coverage:** \`${TOTAL_COV}%\` | **Required Gate:** \`95.0%\`" >> $GITHUB_STEP_SUMMARY
-          
+
           if (( $(echo "$TOTAL_COV >= 95.0" | bc -l 2>/dev/null || awk -v t="$TOTAL_COV" 'BEGIN {if (t >= 95.0) exit 0; else exit 1}') )); then
             echo "✅ **Coverage threshold gate passed!**" >> $GITHUB_STEP_SUMMARY
           else
