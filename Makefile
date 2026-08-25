@@ -23,7 +23,7 @@ GOLANGCI_LINT := $(shell command -v golangci-lint 2> /dev/null)
 GOVULNCHECK := $(shell command -v govulncheck 2> /dev/null)
 GORELEASER := $(shell command -v goreleaser 2> /dev/null)
 
-.PHONY: all build test coverage lint vuln tidy snapshot demo bench bench-heavy clean help
+.PHONY: all build test coverage lint vuln tidy snapshot demo bench bench-heavy bench-ultra clean help
 
 all: tidy lint vuln test build
 
@@ -34,8 +34,9 @@ help:
 	@echo "  all          Run tidy, lint, vuln, test, and build"
 	@echo "  build        Compile microfat and microfat-stub binaries into $(BIN_DIR)/"
 	@echo "  demo         Compile and package the demonstration application in examples/demo"
-	@echo "  bench        Run the standard benchmark suite in examples/demo"
-	@echo "  bench-heavy  Run the heavy sustained compute benchmark suite (5x scale) in examples/demo"
+	@echo "  bench        Run the standard benchmark suite in examples/demo (~110ms)"
+	@echo "  bench-heavy  Run the heavy sustained compute benchmark suite (~500ms) in examples/demo"
+	@echo "  bench-ultra  Run the ultra heavy sustained compute benchmark suite (5-15s) in examples/demo"
 	@echo "  test         Run unit tests with race detection"
 	@echo "  coverage     Run tests and calculate code coverage"
 	@echo "  lint         Run golangci-lint"
@@ -66,6 +67,10 @@ bench: build
 bench-heavy: build
 	@echo "==> Running heavy sustained compute demo benchmark suite..."
 	@$(MAKE) -C examples/demo bench-heavy
+
+bench-ultra: build
+	@echo "==> Running ultra heavy sustained compute demo benchmark suite (5-15s)..."
+	@$(MAKE) -C examples/demo bench-ultra
 
 test:
 	@echo "==> Running tests..."

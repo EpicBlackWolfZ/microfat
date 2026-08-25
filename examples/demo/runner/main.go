@@ -17,11 +17,14 @@ import (
 const (
 	bytesInMegabyte   = 1024.0 * 1024.0
 	msPerMicro        = 1000.0
+	secPerMilli       = 1000.0
 	percentMultiplier = 100.0
 	p95Multiplier     = 0.95
-	warmupIterations  = 5
+	stdWarmup         = 5
+	ultraWarmup       = 1
 	stdIterations     = 50
 	heavyIterations   = 20
+	ultraIterations   = 3
 )
 
 type Config struct {
@@ -45,15 +48,24 @@ type DemoReport struct {
 }
 
 func main() {
-	heavyPtr := flag.Bool("heavy", false, "Run heavy compute-intensive benchmark")
+	ultraPtr := flag.Bool("ultra", false, "Run ULTRA sustained heavy compute benchmark (10s of seconds)")
+	heavyPtr := flag.Bool("heavy", false, "Run heavy compute-intensive benchmark (~500ms workload)")
 	itersPtr := flag.Int("n", 0, "Number of benchmark iterations")
 	flag.Parse()
 
-	isHeavy := *heavyPtr
+	isUltra := *ultraPtr
+	isHeavy := *heavyPtr && !isUltra
+
 	iterations := stdIterations
-	if isHeavy {
+	warmups := stdWarmup
+
+	if isUltra {
+		iterations = ultraIterations
+		warmups = ultraWarmup
+	} else if isHeavy {
 		iterations = heavyIterations
 	}
+
 	if *itersPtr > 0 {
 		iterations = *itersPtr
 	}
@@ -65,25 +77,40 @@ func main() {
 	defer func() { _ = os.RemoveAll(benchDir) }()
 
 	srcDir := filepath.Clean("..")
-	microfatStub, _ := exec.LookPath("microfat-stub")
-	if microfatStub == "" {
-		microfatStub = filepath.Join(os.Getenv("HOME"), ".local/bin/microfat-stub")
-	}
-	microfatCli, _ := exec.LookPath("microfat")
-	if microfatCli == "" {
-		microfatCli = filepath.Join(os.Getenv("HOME"), ".local/bin/microfat")
-	}
+	microfatStub := resolveBinary("microfat-stub")
+	microfatCli := resolveBinary("microfat")
 
-	modeStr := "Standard Workload"
-	if isHeavy {
-		modeStr = "HEAVY Sustained Compute (5x scale)"
+	modeStr := "Standard Workload (~110ms)"
+	if isUltra {
+		modeStr = "ULTRA Sustained Heavy Workload (10s of seconds per run)"
+	} else if isHeavy {
+		modeStr = "HEAVY Sustained Compute (~500ms per run)"
 	}
 
-	fmt.Println("==================================================================")
-	fmt.Printf("   Microfat Performance Benchmark Suite [%s - %d runs]   \n", modeStr, iterations)
-	fmt.Println("==================================================================")
+	fmt.Println("==========================================================================================")
+	fmt.Printf("      Microfat Performance Benchmark Suite [%s - %d runs]   \n", modeStr, iterations)
+	fmt.Println("==========================================================================================")
 
-	// 1. Build and pack variants
+	configs := buildAndPackageConfigs(srcDir, benchDir, microfatStub, microfatCli)
+	benchArgs := prepareBenchArgs(isUltra, isHeavy)
+
+	runWarmups(configs, warmups, benchArgs)
+
+	startupStats := measureStartup(configs, iterations)
+	pureComputeStats, totalWallStats := measureCompute(configs, iterations, benchArgs, isUltra)
+
+	printSummaryTables(configs, startupStats, pureComputeStats, totalWallStats, isUltra)
+}
+
+func resolveBinary(name string) string {
+	p, _ := exec.LookPath(name)
+	if p == "" {
+		p = filepath.Join(os.Getenv("HOME"), ".local/bin", name)
+	}
+	return p
+}
+
+func buildAndPackageConfigs(srcDir, benchDir, microfatStub, microfatCli string) []Config {
 	fmt.Println("==> Step 1: Compiling and packaging 5 test configurations...")
 
 	v1Native := filepath.Join(benchDir, "01_v1_native")
@@ -125,23 +152,32 @@ func main() {
 		fmt.Printf("  • %-30s -> %6.2f MB (%d bytes)\n", c.Name, float64(c.Size)/bytesInMegabyte, c.Size)
 	}
 
-	// 2. Warm up
-	fmt.Println("\n==> Step 2: Running warm-up cycles...")
+	return configs
+}
+
+func prepareBenchArgs(isUltra, isHeavy bool) []string {
 	benchArgs := []string{"--json", "all"}
-	if isHeavy {
+	if isUltra {
+		benchArgs = append(benchArgs, "--ultra")
+	} else if isHeavy {
 		benchArgs = append(benchArgs, "--heavy")
 	}
+	return benchArgs
+}
 
+func runWarmups(configs []Config, warmups int, benchArgs []string) {
+	fmt.Println("\n==> Step 2: Running warm-up cycles...")
 	for _, c := range configs {
-		for i := 0; i < warmupIterations; i++ {
+		for i := 0; i < warmups; i++ {
 			// #nosec G204 -- warm-up run of benchmark test binary
 			_ = exec.Command(c.Path, "--help").Run()
 			// #nosec G204 -- warm-up run of benchmark test binary
 			_ = exec.Command(c.Path, benchArgs...).Run()
 		}
 	}
+}
 
-	// 3. Benchmark Startup Overhead (--help)
+func measureStartup(configs []Config, iterations int) []Stats {
 	fmt.Printf("\n==> Step 3: Measuring Startup Overhead (--help) [%d iterations]...\n", iterations)
 	startupStats := make([]Stats, len(configs))
 	for i, c := range configs {
@@ -159,8 +195,10 @@ func main() {
 		startupStats[i] = calculateStats(durations)
 		fmt.Printf(" done (mean: %.2f ms)\n", float64(startupStats[i].Mean.Microseconds())/msPerMicro)
 	}
+	return startupStats
+}
 
-	// 4. Benchmark Steady-State Pure Compute Time & Total Wall Time
+func measureCompute(configs []Config, iterations int, benchArgs []string, isUltra bool) ([]Stats, []Stats) {
 	fmt.Printf("\n==> Step 4: Measuring Pure In-Process Compute Time & Total Latency [%d iterations]...\n", iterations)
 	pureComputeStats := make([]Stats, len(configs))
 	totalWallStats := make([]Stats, len(configs))
@@ -190,16 +228,31 @@ func main() {
 
 		pureComputeStats[i] = calculateStats(pureDurs)
 		totalWallStats[i] = calculateStats(wallDurs)
-		fmt.Printf(" done (pure compute: %.2f ms | wall: %.2f ms)\n",
-			float64(pureComputeStats[i].Mean.Microseconds())/msPerMicro,
-			float64(totalWallStats[i].Mean.Microseconds())/msPerMicro)
-	}
 
-	// 5. Print Comparison Summary
+		pureMs := float64(pureComputeStats[i].Mean.Microseconds()) / msPerMicro
+		wallMs := float64(totalWallStats[i].Mean.Microseconds()) / msPerMicro
+
+		if isUltra {
+			fmt.Printf(" done (pure compute: %.3f s | wall: %.3f s)\n", pureMs/secPerMilli, wallMs/secPerMilli)
+		} else {
+			fmt.Printf(" done (pure compute: %.2f ms | wall: %.2f ms)\n", pureMs, wallMs)
+		}
+	}
+	return pureComputeStats, totalWallStats
+}
+
+func printSummaryTables(configs []Config, startupStats, pureComputeStats, totalWallStats []Stats, isUltra bool) {
 	fmt.Println("\n==========================================================================================")
 	fmt.Println("                        BENCHMARK RESULTS & COMPARISON                                    ")
 	fmt.Println("==========================================================================================")
 
+	printDiskTable(configs)
+	printStartupTable(configs, startupStats)
+	printComputeTable(configs, pureComputeStats, isUltra)
+	printWallTable(configs, totalWallStats, isUltra)
+}
+
+func printDiskTable(configs []Config) {
 	fmt.Println("\n### Table 1: Binary Footprint on Disk")
 	fmt.Println("| Binary Configuration | Disk Size (Bytes) | Disk Size (MB) | % of Universal FAT | Space Savings |")
 	fmt.Println("| :--- | :--- | :--- | :--- | :--- |")
@@ -214,7 +267,9 @@ func main() {
 		fmt.Printf("| **%s** | `%d B` | `%.2f MB` | `%.1f%%` | `%s` |\n",
 			c.Name, c.Size, float64(c.Size)/bytesInMegabyte, ratio, diffStr)
 	}
+}
 
+func printStartupTable(configs []Config, startupStats []Stats) {
 	fmt.Println("\n### Table 2: Process Startup Overhead (`--help`)")
 	fmt.Println("| Binary Configuration | Mean Startup (ms) | StdDev (ms) | Median p50 (ms) | p95 (ms) | Startup Overhead vs Native v3 |")
 	fmt.Println("| :--- | :--- | :--- | :--- | :--- | :--- |")
@@ -232,33 +287,75 @@ func main() {
 		fmt.Printf("| **%s** | `%.2f ms` | `±%.2f ms` | `%.2f ms` | `%.2f ms` | `%s` |\n",
 			c.Name, meanMs, stdMs, medMs, p95Ms, diffStr)
 	}
+}
 
+func printComputeTable(configs []Config, pureComputeStats []Stats, isUltra bool) {
 	fmt.Println("\n### Table 3: Pure In-Process Compute Time (Isolated Hardware Speed)")
-	fmt.Println("| Binary Configuration | Mean Compute (ms) | StdDev (ms) | Median p50 (ms) | p95 (ms) | Compute Speedup vs Native v1 |")
-	fmt.Println("| :--- | :--- | :--- | :--- | :--- | :--- |")
-	v1Compute := float64(pureComputeStats[0].Mean.Microseconds()) / msPerMicro
-	for i, c := range configs {
-		meanMs := float64(pureComputeStats[i].Mean.Microseconds()) / msPerMicro
-		stdMs := float64(pureComputeStats[i].StdDev.Microseconds()) / msPerMicro
-		medMs := float64(pureComputeStats[i].Median.Microseconds()) / msPerMicro
-		p95Ms := float64(pureComputeStats[i].P95.Microseconds()) / msPerMicro
-		speedup := (v1Compute / meanMs)
-		fmt.Printf("| **%s** | `%.2f ms` | `±%.2f ms` | `%.2f ms` | `%.2f ms` | `%.2fx speedup` |\n",
-			c.Name, meanMs, stdMs, medMs, p95Ms, speedup)
+	if isUltra {
+		fmt.Println("| Binary Configuration | Mean Compute (s) | StdDev (s) | Median p50 (s) | Delta vs Native v1 (s) | Compute Speedup |")
+		fmt.Println("| :--- | :--- | :--- | :--- | :--- | :--- |")
+		v1Sec := float64(pureComputeStats[0].Mean.Microseconds()) / (msPerMicro * secPerMilli)
+		for i, c := range configs {
+			meanSec := float64(pureComputeStats[i].Mean.Microseconds()) / (msPerMicro * secPerMilli)
+			stdSec := float64(pureComputeStats[i].StdDev.Microseconds()) / (msPerMicro * secPerMilli)
+			medSec := float64(pureComputeStats[i].Median.Microseconds()) / (msPerMicro * secPerMilli)
+			deltaSec := meanSec - v1Sec
+			speedup := v1Sec / meanSec
+			deltaStr := fmt.Sprintf("%+.3f s", deltaSec)
+			if i == 0 {
+				deltaStr = "baseline (0.000 s)"
+			}
+			fmt.Printf("| **%s** | `%.3f s` | `±%.3f s` | `%.3f s` | `%s` | `%.2fx speedup` |\n",
+				c.Name, meanSec, stdSec, medSec, deltaStr, speedup)
+		}
+	} else {
+		fmt.Println("| Binary Configuration | Mean Compute (ms) | StdDev (ms) | Median p50 (ms) | p95 (ms) | Compute Speedup vs Native v1 |")
+		fmt.Println("| :--- | :--- | :--- | :--- | :--- | :--- |")
+		v1Compute := float64(pureComputeStats[0].Mean.Microseconds()) / msPerMicro
+		for i, c := range configs {
+			meanMs := float64(pureComputeStats[i].Mean.Microseconds()) / msPerMicro
+			stdMs := float64(pureComputeStats[i].StdDev.Microseconds()) / msPerMicro
+			medMs := float64(pureComputeStats[i].Median.Microseconds()) / msPerMicro
+			p95Ms := float64(pureComputeStats[i].P95.Microseconds()) / msPerMicro
+			speedup := (v1Compute / meanMs)
+			fmt.Printf("| **%s** | `%.2f ms` | `±%.2f ms` | `%.2f ms` | `%.2f ms` | `%.2fx speedup` |\n",
+				c.Name, meanMs, stdMs, medMs, p95Ms, speedup)
+		}
 	}
+}
 
+func printWallTable(configs []Config, totalWallStats []Stats, isUltra bool) {
 	fmt.Println("\n### Table 4: Total End-to-End Latency (Startup + Workload Combined)")
-	fmt.Println("| Binary Configuration | Total Mean (ms) | StdDev (ms) | Median p50 (ms) | p95 (ms) | Total Speed vs Native v1 |")
-	fmt.Println("| :--- | :--- | :--- | :--- | :--- | :--- |")
-	v1Total := float64(totalWallStats[0].Mean.Microseconds()) / msPerMicro
-	for i, c := range configs {
-		meanMs := float64(totalWallStats[i].Mean.Microseconds()) / msPerMicro
-		stdMs := float64(totalWallStats[i].StdDev.Microseconds()) / msPerMicro
-		medMs := float64(totalWallStats[i].Median.Microseconds()) / msPerMicro
-		p95Ms := float64(totalWallStats[i].P95.Microseconds()) / msPerMicro
-		speedup := (v1Total / meanMs)
-		fmt.Printf("| **%s** | `%.2f ms` | `±%.2f ms` | `%.2f ms` | `%.2f ms` | `%.2fx` |\n",
-			c.Name, meanMs, stdMs, medMs, p95Ms, speedup)
+	if isUltra {
+		fmt.Println("| Binary Configuration | Total Mean (s) | StdDev (s) | Median p50 (s) | Delta vs Native v1 (s) | Total Speedup |")
+		fmt.Println("| :--- | :--- | :--- | :--- | :--- | :--- |")
+		v1TotalSec := float64(totalWallStats[0].Mean.Microseconds()) / (msPerMicro * secPerMilli)
+		for i, c := range configs {
+			meanSec := float64(totalWallStats[i].Mean.Microseconds()) / (msPerMicro * secPerMilli)
+			stdSec := float64(totalWallStats[i].StdDev.Microseconds()) / (msPerMicro * secPerMilli)
+			medSec := float64(totalWallStats[i].Median.Microseconds()) / (msPerMicro * secPerMilli)
+			deltaSec := meanSec - v1TotalSec
+			speedup := v1TotalSec / meanSec
+			deltaStr := fmt.Sprintf("%+.3f s", deltaSec)
+			if i == 0 {
+				deltaStr = "baseline (0.000 s)"
+			}
+			fmt.Printf("| **%s** | `%.3f s` | `±%.3f s` | `%.3f s` | `%s` | `%.2fx` |\n",
+				c.Name, meanSec, stdSec, medSec, deltaStr, speedup)
+		}
+	} else {
+		fmt.Println("| Binary Configuration | Total Mean (ms) | StdDev (ms) | Median p50 (ms) | p95 (ms) | Total Speed vs Native v1 |")
+		fmt.Println("| :--- | :--- | :--- | :--- | :--- | :--- |")
+		v1Total := float64(totalWallStats[0].Mean.Microseconds()) / msPerMicro
+		for i, c := range configs {
+			meanMs := float64(totalWallStats[i].Mean.Microseconds()) / msPerMicro
+			stdMs := float64(totalWallStats[i].StdDev.Microseconds()) / msPerMicro
+			medMs := float64(totalWallStats[i].Median.Microseconds()) / msPerMicro
+			p95Ms := float64(totalWallStats[i].P95.Microseconds()) / msPerMicro
+			speedup := (v1Total / meanMs)
+			fmt.Printf("| **%s** | `%.2f ms` | `±%.2f ms` | `%.2f ms` | `%.2f ms` | `%.2fx` |\n",
+				c.Name, meanMs, stdMs, medMs, p95Ms, speedup)
+		}
 	}
 }
 

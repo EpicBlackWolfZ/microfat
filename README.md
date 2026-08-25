@@ -27,7 +27,7 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 
 | Guide | Description |
 | :--- | :--- |
-| 📊 [**Demo & Benchmark Suite**](examples/demo/README.md) | Multi-workload benchmark application testing SIMD vector math, JSON processing, and concurrent workers. |
+| 📊 [**Demo & Benchmark Suite**](examples/demo/README.md) | Multi-workload benchmark application testing SIMD vector math, JSON/Zstd processing, and concurrent workers. |
 | 📖 [**Architecture & Binary Format**](docs/architecture.md) | Technical specification of the 56-byte trailer, JSON Index schema, and `memfd_create` lifecycle. |
 | ⚙️ [**Container Resource Auto-Tuning**](docs/runtime-tuning.md) | Linux cgroup v1/v2 formulas for `GOMEMLIMIT` (90% pacing) and `GOMAXPROCS` (CFS quota). |
 | 🔄 [**Binary Lifecycle Modes**](docs/lifecycle-modes.md) | Comprehensive comparison and workflows for Universal Fat, Trimmed Fat, and Native ELF modes. |
@@ -81,8 +81,14 @@ microfat pack \
 # Build and run the demo workloads:
 make demo
 
-# Run the full 100-iteration performance benchmark suite:
+# Run the standard benchmark suite (~110ms):
 make bench
+
+# Run the heavy sustained compute benchmark suite (~500ms):
+make bench-heavy
+
+# Run the ultra sustained compute benchmark suite (5-15s per run):
+make bench-ultra
 ```
 
 ---

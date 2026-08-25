@@ -39,23 +39,42 @@ type BenchmarkReport struct {
 	TotalCompute float64           `json:"total_compute_ms"`
 }
 
+type WorkloadLevel int
+
 const (
-	defaultAppVer    = "1.0.0"
-	seedValue        = 42
-	scaleMultiplier  = 100.0
-	cryptoBlockSize  = 65536
-	byteModulo       = 256
-	msPerMicro       = 1000.0
-	jsonTotalFactor  = 4
-	opsDivisor       = 1000
-	bitShiftAmount   = 7
-	bitInitialMask   = 0xAAAAAAAAAAAAAAAA
+	LevelStandard WorkloadLevel = iota
+	LevelHeavy
+	LevelUltra
+)
+
+const (
+	defaultAppVer   = "1.0.0"
+	seedValue       = 42
+	scaleMultiplier = 100.0
+	cryptoBlockSize = 65536
+	byteModulo      = 256
+	msPerMicro      = 1000.0
+	jsonTotalFactor = 4
+	opsDivisor      = 1000
+	bitShiftAmount  = 7
+	bitInitialMask  = 0xAAAAAAAAAAAAAAAA
 )
 
 var (
 	flagJSON  bool
 	flagHeavy bool
+	flagUltra bool
 )
+
+func getWorkloadLevel() WorkloadLevel {
+	if flagUltra {
+		return LevelUltra
+	}
+	if flagHeavy {
+		return LevelHeavy
+	}
+	return LevelStandard
+}
 
 func main() {
 	rootCmd := newRootCmd()
@@ -71,12 +90,13 @@ func newRootCmd() *cobra.Command {
 		Long: `A high-performance demonstration application testing SIMD vector math,
 bulk memory/JSON processing, and concurrent worker scaling across Go microarchitecture levels.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAllWorkloads(flagJSON, flagHeavy)
+			return runAllWorkloads(flagJSON, getWorkloadLevel())
 		},
 	}
 
 	cmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output metrics in JSON format")
-	cmd.PersistentFlags().BoolVar(&flagHeavy, "heavy", false, "Run intensive heavy workload (5x compute)")
+	cmd.PersistentFlags().BoolVar(&flagHeavy, "heavy", false, "Run heavy compute workload (~500ms)")
+	cmd.PersistentFlags().BoolVar(&flagUltra, "ultra", false, "Run ultra-heavy sustained compute workload (10s of seconds)")
 
 	cmd.AddCommand(newMathCmd())
 	cmd.AddCommand(newJsonCmd())
@@ -91,7 +111,7 @@ func newAllCmd() *cobra.Command {
 		Use:   "all",
 		Short: "Run all 3 benchmark workloads in sequence",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAllWorkloads(flagJSON, flagHeavy)
+			return runAllWorkloads(flagJSON, getWorkloadLevel())
 		},
 	}
 }
@@ -101,7 +121,7 @@ func newMathCmd() *cobra.Command {
 		Use:   "math",
 		Short: "Execute SIMD Vector Math & Cryptographic Pipeline (Phase A)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			m := runSIMDMathWorkload(flagHeavy)
+			m := runSIMDMathWorkload(getWorkloadLevel())
 			return outputMetrics([]WorkloadMetrics{m}, flagJSON)
 		},
 	}
@@ -112,7 +132,7 @@ func newJsonCmd() *cobra.Command {
 		Use:   "json-mem",
 		Short: "Execute Bulk Memory & JSON Transformation Workload (Phase B)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			m := runJSONMemoryWorkload(flagHeavy)
+			m := runJSONMemoryWorkload(getWorkloadLevel())
 			return outputMetrics([]WorkloadMetrics{m}, flagJSON)
 		},
 	}
@@ -123,16 +143,16 @@ func newConcurrentCmd() *cobra.Command {
 		Use:   "concurrent",
 		Short: "Execute High-Concurrency Worker Scaling Workload (Phase C)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			m := runConcurrentWorkload(flagHeavy)
+			m := runConcurrentWorkload(getWorkloadLevel())
 			return outputMetrics([]WorkloadMetrics{m}, flagJSON)
 		},
 	}
 }
 
-func runAllWorkloads(jsonOut, heavy bool) error {
-	m1 := runSIMDMathWorkload(heavy)
-	m2 := runJSONMemoryWorkload(heavy)
-	m3 := runConcurrentWorkload(heavy)
+func runAllWorkloads(jsonOut bool, level WorkloadLevel) error {
+	m1 := runSIMDMathWorkload(level)
+	m2 := runJSONMemoryWorkload(level)
+	m3 := runConcurrentWorkload(level)
 
 	return outputMetrics([]WorkloadMetrics{m1, m2, m3}, jsonOut)
 }
@@ -166,12 +186,12 @@ func outputMetrics(metrics []WorkloadMetrics, jsonOut bool) error {
 		report.GOMAXPROCS, report.NumCPU, fallbackStr(report.GOMEMLIMIT, "(unset)"))
 
 	for _, m := range metrics {
-		fmt.Printf("  • %-38s -> %7.2f ms (%10.0f ops/sec) [%s]\n",
+		fmt.Printf("  • %-38s -> %9.2f ms (%10.0f ops/sec) [%s]\n",
 			m.WorkloadName, m.ComputeMs, m.OpsPerSecond, m.Detail)
 	}
 
 	fmt.Println("------------------------------------------------------------------")
-	fmt.Printf("  Total Pure In-Process Compute Time:   %7.2f ms\n", totalMs)
+	fmt.Printf("  Total Pure In-Process Compute Time:   %9.2f ms (%.2f s)\n", totalMs, totalMs/msPerMicro)
 	fmt.Println("==================================================================")
 	return nil
 }
@@ -179,16 +199,24 @@ func outputMetrics(metrics []WorkloadMetrics, jsonOut bool) error {
 // -----------------------------------------------------------------------------
 // Workload 1: SIMD Vector Math & Cryptographic Pipeline
 // -----------------------------------------------------------------------------
-func runSIMDMathWorkload(heavy bool) WorkloadMetrics {
+func runSIMDMathWorkload(level WorkloadLevel) WorkloadMetrics {
 	start := time.Now()
 
 	dim := 180
 	cryptoIters := 200
 	bitIters := 200000
-	if heavy {
+
+	switch level {
+	case LevelUltra:
+		dim = 1100
+		cryptoIters = 20000
+		bitIters = 30000000
+	case LevelHeavy:
 		dim = 300
 		cryptoIters = 1000
 		bitIters = 2000000
+	case LevelStandard:
+		// default values
 	}
 
 	// 1. Contiguous 1D Flat Slices for Vector Matrix Multiplication (AVX2/FMA)
@@ -266,12 +294,17 @@ type Record struct {
 	Scores    []float64 `json:"scores"`
 }
 
-func runJSONMemoryWorkload(heavy bool) WorkloadMetrics {
+func runJSONMemoryWorkload(level WorkloadLevel) WorkloadMetrics {
 	start := time.Now()
 
 	batchSize := 15000
-	if heavy {
+	switch level {
+	case LevelUltra:
+		batchSize = 250000
+	case LevelHeavy:
 		batchSize = 50000
+	case LevelStandard:
+		// default
 	}
 
 	records := make([]Record, batchSize)
@@ -340,14 +373,21 @@ func runJSONMemoryWorkload(heavy bool) WorkloadMetrics {
 // -----------------------------------------------------------------------------
 // Workload 3: High-Concurrency Worker Scaling
 // -----------------------------------------------------------------------------
-func runConcurrentWorkload(heavy bool) WorkloadMetrics {
+func runConcurrentWorkload(level WorkloadLevel) WorkloadMetrics {
 	start := time.Now()
 
 	tasks := 200
 	innerIters := 50000
-	if heavy {
+
+	switch level {
+	case LevelUltra:
+		tasks = 1000
+		innerIters = 600000
+	case LevelHeavy:
 		tasks = 500
 		innerIters = 150000
+	case LevelStandard:
+		// default
 	}
 
 	var wg sync.WaitGroup
