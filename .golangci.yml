@@ -17,11 +17,11 @@ linters:
     - lll
     - misspell
     - nakedret
-    - staticcheck
     - unconvert
     - unused
   disable:
     - dupl
+    - staticcheck
 
   settings:
     revive:
