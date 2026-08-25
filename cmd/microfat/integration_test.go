@@ -16,7 +16,7 @@ func TestEndToEndFatBinaryWorkflow(t *testing.T) {
 
 	// 1. Build real microfat-stub
 	stubPath := filepath.Join(tempDir, "microfat-stub")
-	buildStubCmd := exec.Command("go", "build", "-o", stubPath, "../microfat-stub")
+	buildStubCmd := exec.Command("go", "build", "-buildvcs=false", "-o", stubPath, "../microfat-stub")
 	buildStubCmd.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOAMD64=v1")
 	out, err := buildStubCmd.CombinedOutput()
 	if err != nil {
@@ -47,7 +47,7 @@ func main() {
 			t.Fatalf("writing source for %s: %v", level, err)
 		}
 
-		cmd := exec.Command("go", "build", "-o", binPath, srcPath)
+		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", binPath, srcPath)
 		cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local")
 		if bout, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("building variant %s: %v (output: %s)", level, err, bout)
@@ -61,7 +61,7 @@ func main() {
 
 	// 3. Build microfat CLI binary
 	cliPath := filepath.Join(tempDir, "microfat-cli")
-	buildCliCmd := exec.Command("go", "build", "-o", cliPath, ".")
+	buildCliCmd := exec.Command("go", "build", "-buildvcs=false", "-o", cliPath, ".")
 	buildCliCmd.Env = append(os.Environ(), "GOTOOLCHAIN=local")
 	if out, err := buildCliCmd.CombinedOutput(); err != nil {
 		t.Fatalf("failed to build microfat CLI: %v (output: %s)", err, out)
