@@ -23,7 +23,7 @@ GOLANGCI_LINT := $(shell command -v golangci-lint 2> /dev/null)
 GOVULNCHECK := $(shell command -v govulncheck 2> /dev/null)
 GORELEASER := $(shell command -v goreleaser 2> /dev/null)
 
-.PHONY: all build test coverage lint vuln tidy snapshot clean help
+.PHONY: all build test coverage lint vuln tidy snapshot demo bench clean help
 
 all: tidy lint vuln test build
 
@@ -33,6 +33,8 @@ help:
 	@echo "Targets:"
 	@echo "  all        Run tidy, lint, vuln, test, and build"
 	@echo "  build      Compile microfat and microfat-stub binaries into $(BIN_DIR)/"
+	@echo "  demo       Compile and package the demonstration application in examples/demo"
+	@echo "  bench      Run the 100-iteration multi-workload benchmark suite in examples/demo"
 	@echo "  test       Run unit tests with race detection"
 	@echo "  coverage   Run tests and calculate code coverage"
 	@echo "  lint       Run golangci-lint"
@@ -51,6 +53,14 @@ build:
 	@mkdir -p $(BIN_DIR)
 	@$(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/microfat ./cmd/microfat
 	@GOAMD64=v1 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/microfat-stub ./cmd/microfat-stub
+
+demo: build
+	@echo "==> Building and packaging examples/demo..."
+	@$(MAKE) -C examples/demo fat
+
+bench: build
+	@echo "==> Running demo benchmark suite..."
+	@$(MAKE) -C examples/demo bench
 
 test:
 	@echo "==> Running tests..."
@@ -98,3 +108,4 @@ endif
 clean:
 	@echo "==> Cleaning build artifacts..."
 	@rm -rf $(BIN_DIR) dist $(COVERAGE_FILE) coverage.html
+	@$(MAKE) -C examples/demo clean 2>/dev/null || true

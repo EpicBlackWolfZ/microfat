@@ -15,7 +15,7 @@
 - 🛡️ **Container Auto-Tuning**: Automatically parses Linux cgroup v1 & v2 limits to set safe `GOMEMLIMIT` pacing (preventing OOMKills) and `GOMAXPROCS` (preventing CPU throttling).
 - ✂️ **Flexible Lifecycle Modes**:
   - **Universal Fat Binary**: Distribute a single file that runs everywhere (`v1`–`v4`).
-  - **Trimmed Fat Binary (`--microfat:trim`)**: Discard unneeded variants on disk (~50% size reduction) while retaining launcher auto-tuning and RAM execution.
+  - **Trimmed Fat Binary (`--microfat:trim`)**: Discard unneeded variants on disk (~45%–50% size reduction) while retaining launcher auto-tuning and RAM execution.
   - **Raw Native ELF (`--microfat:optimize`)**: Permanently specialize to raw uncompressed ELF machine code with 0.0ms launch overhead.
 - 🔒 **Cryptographic Verification**: 56-byte cryptographic trailer with SHA-256 index hashing and variant checksum validation.
 
@@ -23,10 +23,11 @@
 
 ## Documentation Guide
 
-Explore the specialized deep-dive documentation in the [`docs/`](docs/) directory:
+Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`examples/`](examples/) directories:
 
 | Guide | Description |
 | :--- | :--- |
+| 📊 [**Demo & Benchmark Suite**](examples/demo/README.md) | Multi-workload benchmark application testing SIMD vector math, JSON processing, and concurrent workers. |
 | 📖 [**Architecture & Binary Format**](docs/architecture.md) | Technical specification of the 56-byte trailer, JSON Index schema, and `memfd_create` lifecycle. |
 | ⚙️ [**Container Resource Auto-Tuning**](docs/runtime-tuning.md) | Linux cgroup v1/v2 formulas for `GOMEMLIMIT` (90% pacing) and `GOMAXPROCS` (CFS quota). |
 | 🔄 [**Binary Lifecycle Modes**](docs/lifecycle-modes.md) | Comprehensive comparison and workflows for Universal Fat, Trimmed Fat, and Native ELF modes. |
@@ -74,14 +75,14 @@ microfat pack \
   -o bin/myapp
 ```
 
-### 4. Inspect & Verify
+### 4. Try the Demonstration & Benchmark Suite
 
 ```bash
-# Inspect embedded variants and compression ratios:
-microfat inspect bin/myapp
+# Build and run the demo workloads:
+make demo
 
-# Verify SHA-256 integrity and boundary checksums:
-microfat verify bin/myapp
+# Run the full 100-iteration performance benchmark suite:
+make bench
 ```
 
 ---
