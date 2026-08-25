@@ -10,7 +10,7 @@ INSTALL_DIR ?= $(HOME)/.local/bin
 MICROFAT ?= $(shell command -v microfat 2> /dev/null || echo "$(INSTALL_DIR)/microfat")
 MICROFAT_STUB ?= $(shell command -v microfat-stub 2> /dev/null || echo "$(INSTALL_DIR)/microfat-stub")
 
-.PHONY: all build fat trim optimize run bench clean help
+.PHONY: all build fat trim optimize run run-heavy bench bench-heavy clean help
 
 all: build fat
 
@@ -18,13 +18,15 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  build     Compile standalone native Go binary (default host architecture)"
-	@echo "  fat       Compile v1/v3/v4 variants & package universal fat binary into $(BIN_DIR)/demo-fat"
-	@echo "  trim      Trim universal fat binary into single-variant $(BIN_DIR)/demo-trimmed (-45% size)"
-	@echo "  optimize  Materialize raw uncompressed native v3 ELF into $(BIN_DIR)/demo-optimized"
-	@echo "  run       Execute demo application with all benchmark workloads"
-	@echo "  bench     Run full 100-iteration statistical benchmark across all 5 binary modes"
-	@echo "  clean     Remove compiled binaries and benchmark temporary files"
+	@echo "  build        Compile standalone native Go binary (default host architecture)"
+	@echo "  fat          Compile v1/v3/v4 variants & package universal fat binary into $(BIN_DIR)/demo-fat"
+	@echo "  trim         Trim universal fat binary into single-variant $(BIN_DIR)/demo-trimmed (-45% size)"
+	@echo "  optimize     Materialize raw uncompressed native v3 ELF into $(BIN_DIR)/demo-optimized"
+	@echo "  run          Execute demo application with standard benchmark workloads"
+	@echo "  run-heavy    Execute demo application with heavy sustained compute workloads (5x scale)"
+	@echo "  bench        Run standard 50-iteration benchmark suite across all 5 binary modes"
+	@echo "  bench-heavy  Run heavy sustained compute benchmark suite (5x scale) across all 5 modes"
+	@echo "  clean        Remove compiled binaries and benchmark temporary files"
 
 build:
 	@echo "==> Building native binary..."
@@ -58,12 +60,20 @@ optimize: fat
 	@echo "==> Raw native ELF materialized at $(BIN_DIR)/$(BINARY_NAME)-optimized!"
 
 run: fat
-	@echo "==> Running demo workloads..."
+	@echo "==> Running standard demo workloads..."
 	@$(BIN_DIR)/$(BINARY_NAME)-fat all
 
+run-heavy: fat
+	@echo "==> Running heavy sustained compute workloads (5x scale)..."
+	@$(BIN_DIR)/$(BINARY_NAME)-fat all --heavy
+
 bench:
-	@echo "==> Running full 100-iteration benchmark suite..."
+	@echo "==> Running standard benchmark suite..."
 	@cd runner && $(GO) run main.go
+
+bench-heavy:
+	@echo "==> Running heavy sustained compute benchmark suite..."
+	@cd runner && $(GO) run main.go -heavy
 
 clean:
 	@echo "==> Cleaning build artifacts..."

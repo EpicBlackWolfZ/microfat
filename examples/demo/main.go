@@ -2,16 +2,19 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/bits"
 	"math/rand"
 	"os"
 	"runtime"
 	"sync"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/spf13/cobra"
 )
 
@@ -37,18 +40,18 @@ type BenchmarkReport struct {
 }
 
 const (
-	matrixDim        = 180
-	jsonBatchSize    = 15000
-	concurrentTasks  = 200
 	defaultAppVer    = "1.0.0"
 	seedValue        = 42
 	scaleMultiplier  = 100.0
-	cryptoBlockSize  = 65536
-	cryptoIterations = 200
 	byteModulo       = 256
 	msPerMicro       = 1000.0
 	jsonOpsFactor    = 2
-	workerInnerIters = 50000
+	heavyMultiplier  = 5
+)
+
+var (
+	flagJSON  bool
+	flagHeavy bool
 )
 
 func main() {
@@ -59,19 +62,18 @@ func main() {
 }
 
 func newRootCmd() *cobra.Command {
-	var jsonOutput bool
-
 	cmd := &cobra.Command{
 		Use:   "demo",
 		Short: "Microfat Demonstration Workload and Performance Benchmark",
 		Long: `A high-performance demonstration application testing SIMD vector math,
 bulk memory/JSON processing, and concurrent worker scaling across Go microarchitecture levels.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAllWorkloads(jsonOutput)
+			return runAllWorkloads(flagJSON, flagHeavy)
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output metrics in JSON format")
+	cmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output metrics in JSON format")
+	cmd.PersistentFlags().BoolVar(&flagHeavy, "heavy", false, "Run intensive heavy workload (5x compute)")
 
 	cmd.AddCommand(newMathCmd())
 	cmd.AddCommand(newJsonCmd())
@@ -82,64 +84,52 @@ bulk memory/JSON processing, and concurrent worker scaling across Go microarchit
 }
 
 func newAllCmd() *cobra.Command {
-	var jsonOutput bool
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "all",
 		Short: "Run all 3 benchmark workloads in sequence",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAllWorkloads(jsonOutput)
+			return runAllWorkloads(flagJSON, flagHeavy)
 		},
 	}
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output metrics in JSON format")
-	return cmd
 }
 
 func newMathCmd() *cobra.Command {
-	var jsonOutput bool
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "math",
 		Short: "Execute SIMD Vector Math & Cryptographic Pipeline (Phase A)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			m := runSIMDMathWorkload()
-			return outputMetrics([]WorkloadMetrics{m}, jsonOutput)
+			m := runSIMDMathWorkload(flagHeavy)
+			return outputMetrics([]WorkloadMetrics{m}, flagJSON)
 		},
 	}
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output metrics in JSON format")
-	return cmd
 }
 
 func newJsonCmd() *cobra.Command {
-	var jsonOutput bool
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "json-mem",
 		Short: "Execute Bulk Memory & JSON Transformation Workload (Phase B)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			m := runJSONMemoryWorkload()
-			return outputMetrics([]WorkloadMetrics{m}, jsonOutput)
+			m := runJSONMemoryWorkload(flagHeavy)
+			return outputMetrics([]WorkloadMetrics{m}, flagJSON)
 		},
 	}
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output metrics in JSON format")
-	return cmd
 }
 
 func newConcurrentCmd() *cobra.Command {
-	var jsonOutput bool
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "concurrent",
 		Short: "Execute High-Concurrency Worker Scaling Workload (Phase C)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			m := runConcurrentWorkload()
-			return outputMetrics([]WorkloadMetrics{m}, jsonOutput)
+			m := runConcurrentWorkload(flagHeavy)
+			return outputMetrics([]WorkloadMetrics{m}, flagJSON)
 		},
 	}
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output metrics in JSON format")
-	return cmd
 }
 
-func runAllWorkloads(jsonOut bool) error {
-	m1 := runSIMDMathWorkload()
-	m2 := runJSONMemoryWorkload()
-	m3 := runConcurrentWorkload()
+func runAllWorkloads(jsonOut, heavy bool) error {
+	m1 := runSIMDMathWorkload(heavy)
+	m2 := runJSONMemoryWorkload(heavy)
+	m3 := runConcurrentWorkload(heavy)
 
 	return outputMetrics([]WorkloadMetrics{m1, m2, m3}, jsonOut)
 }
@@ -186,46 +176,62 @@ func outputMetrics(metrics []WorkloadMetrics, jsonOut bool) error {
 // -----------------------------------------------------------------------------
 // Workload 1: SIMD Vector Math & Cryptographic Pipeline
 // -----------------------------------------------------------------------------
-func runSIMDMathWorkload() WorkloadMetrics {
+func runSIMDMathWorkload(heavy bool) WorkloadMetrics {
 	start := time.Now()
 
-	// 1. Floating-Point Matrix Multiply-Accumulate (FMA & AVX vectorization)
-	a := make([][]float64, matrixDim)
-	b := make([][]float64, matrixDim)
-	c := make([][]float64, matrixDim)
+	dim := 180
+	cryptoIters := 200
+	bitIters := 200000
+	if heavy {
+		dim = 300
+		cryptoIters = 1000
+		bitIters = 2000000
+	}
+
+	// 1. Contiguous 1D Flat Slices for Vector Matrix Multiplication (AVX2/FMA)
+	totalElements := dim * dim
+	a := make([]float64, totalElements)
+	b := make([]float64, totalElements)
+	c := make([]float64, totalElements)
 
 	// #nosec G404 -- deterministic pseudo-random seed for reproducible benchmark runs
 	r := rand.New(rand.NewSource(seedValue))
-	for i := 0; i < matrixDim; i++ {
-		a[i] = make([]float64, matrixDim)
-		b[i] = make([]float64, matrixDim)
-		c[i] = make([]float64, matrixDim)
-		for j := 0; j < matrixDim; j++ {
-			a[i][j] = r.Float64() * scaleMultiplier
-			b[i][j] = r.Float64() * scaleMultiplier
-		}
+	for i := 0; i < totalElements; i++ {
+		a[i] = r.Float64() * scaleMultiplier
+		b[i] = r.Float64() * scaleMultiplier
 	}
 
-	// Matrix multiplication with fused multiply-add operations
 	var totalOps int64
-	for i := 0; i < matrixDim; i++ {
-		for k := 0; k < matrixDim; k++ {
-			aik := a[i][k]
-			for j := 0; j < matrixDim; j++ {
-				c[i][j] += math.FMA(aik, b[k][j], math.Sin(float64(i+j)))
+	for i := 0; i < dim; i++ {
+		iOff := i * dim
+		for k := 0; k < dim; k++ {
+			aik := a[iOff+k]
+			kOff := k * dim
+			for j := 0; j < dim; j++ {
+				c[iOff+j] += math.FMA(aik, b[kOff+j], math.Sin(float64(i+j)))
 				totalOps++
 			}
 		}
 	}
 
-	// 2. Cryptographic Block Hashing
+	// 2. Hardware Bit Manipulation (BMI1 / BMI2 via math/bits)
+	var bitAcc uint64 = 0xAAAAAAAAAAAAAAAA
+	for i := 0; i < bitIters; i++ {
+		bitAcc = bits.RotateLeft64(bitAcc, 7) ^ uint64(i)
+		totalOps += int64(bits.OnesCount64(bitAcc))
+		totalOps += int64(bits.LeadingZeros64(bitAcc))
+		totalOps += int64(bits.TrailingZeros64(bitAcc))
+	}
+	_ = bitAcc
+
+	// 3. Cryptographic Multi-Block Hashing (SHA-256)
 	hasher := sha256.New()
-	block := make([]byte, cryptoBlockSize)
+	block := make([]byte, 65536)
 	for i := range block {
 		block[i] = byte(i % byteModulo)
 	}
 
-	for i := 0; i < cryptoIterations; i++ {
+	for i := 0; i < cryptoIters; i++ {
 		hasher.Write(block)
 		_ = hasher.Sum(nil)
 		hasher.Reset()
@@ -242,12 +248,12 @@ func runSIMDMathWorkload() WorkloadMetrics {
 		ComputeMs:       computeMs,
 		Operations:      totalOps,
 		OpsPerSecond:    opsPerSec,
-		Detail:          fmt.Sprintf("Matrix %dx%d FMA + SHA256", matrixDim, matrixDim),
+		Detail:          fmt.Sprintf("Flat %dx%d FMA + BMI2 + SHA256", dim, dim),
 	}
 }
 
 // -----------------------------------------------------------------------------
-// Workload 2: Bulk Memory & JSON Serialization
+// Workload 2: Bulk Memory & JSON / Zstd Processing
 // -----------------------------------------------------------------------------
 type Record struct {
 	ID        int       `json:"id"`
@@ -257,69 +263,105 @@ type Record struct {
 	Scores    []float64 `json:"scores"`
 }
 
-func runJSONMemoryWorkload() WorkloadMetrics {
+func runJSONMemoryWorkload(heavy bool) WorkloadMetrics {
 	start := time.Now()
 
-	records := make([]Record, jsonBatchSize)
+	batchSize := 15000
+	if heavy {
+		batchSize = 50000
+	}
+
+	records := make([]Record, batchSize)
 	now := time.Now()
-	for i := 0; i < jsonBatchSize; i++ {
+	for i := 0; i < batchSize; i++ {
 		records[i] = Record{
 			ID:        i,
 			UUID:      fmt.Sprintf("record-%08d-token", i),
 			Timestamp: now.Add(time.Duration(i) * time.Second),
-			Payload:   "High-throughput microfat in-memory serialization test payload block",
+			Payload:   "High-throughput microfat in-memory serialization and zstd compression test payload block",
 			Scores:    []float64{float64(i) * 1.1, float64(i) * 2.2, float64(i) * 3.3},
 		}
 	}
 
-	// Encode to JSON
-	data, err := json.Marshal(records)
+	// 1. Encode JSON
+	jsonData, err := json.Marshal(records)
 	if err != nil {
 		panic(err)
 	}
 
-	// Decode back
+	// 2. Compress with Zstandard (exercising hardware bit-decoding & memory stream)
+	var zstdBuf bytes.Buffer
+	enc, err := zstd.NewWriter(&zstdBuf)
+	if err != nil {
+		panic(err)
+	}
+	if _, err := enc.Write(jsonData); err != nil {
+		panic(err)
+	}
+	if err := enc.Close(); err != nil {
+		panic(err)
+	}
+
+	// 3. Decompress Zstandard
+	dec, err := zstd.NewReader(&zstdBuf)
+	if err != nil {
+		panic(err)
+	}
+	var decompressedBuf bytes.Buffer
+	if _, err := decompressedBuf.ReadFrom(dec); err != nil {
+		panic(err)
+	}
+	dec.Close()
+
+	// 4. Decode JSON back
 	var decoded []Record
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	if err := json.Unmarshal(decompressedBuf.Bytes(), &decoded); err != nil {
 		panic(err)
 	}
 
 	elapsed := time.Since(start)
 	computeMs := float64(elapsed.Microseconds()) / msPerMicro
-	totalOps := int64(jsonBatchSize * jsonOpsFactor)
+	totalOps := int64(batchSize * jsonOpsFactor * 2)
 	opsPerSec := float64(totalOps) / elapsed.Seconds()
 
 	return WorkloadMetrics{
-		WorkloadName:    "Phase B: Memory & JSON Processing",
+		WorkloadName:    "Phase B: Memory, JSON & Zstd",
 		ComputeDuration: elapsed.String(),
 		ComputeMs:       computeMs,
 		Operations:      totalOps,
 		OpsPerSecond:    opsPerSec,
-		Detail:          fmt.Sprintf("%d records JSON marshal/unmarshal", jsonBatchSize),
+		Detail:          fmt.Sprintf("%d records JSON + Zstd encode/decode", batchSize),
 	}
 }
 
 // -----------------------------------------------------------------------------
 // Workload 3: High-Concurrency Worker Scaling
 // -----------------------------------------------------------------------------
-func runConcurrentWorkload() WorkloadMetrics {
+func runConcurrentWorkload(heavy bool) WorkloadMetrics {
 	start := time.Now()
 
+	tasks := 200
+	innerIters := 50000
+	if heavy {
+		tasks = 500
+		innerIters = 150000
+	}
+
 	var wg sync.WaitGroup
-	wg.Add(concurrentTasks)
+	wg.Add(tasks)
 
 	var totalOps int64
 
-	for t := 0; t < concurrentTasks; t++ {
+	for t := 0; t < tasks; t++ {
 		go func(taskID int) {
 			defer wg.Done()
 			var acc float64
-			for i := 1; i <= workerInnerIters; i++ {
+			for i := 1; i <= innerIters; i++ {
 				acc += math.Sqrt(float64(i*taskID + 1))
 			}
 			_ = acc
 		}(t)
-		totalOps += workerInnerIters
+		totalOps += int64(innerIters)
 	}
 
 	wg.Wait()
@@ -334,7 +376,7 @@ func runConcurrentWorkload() WorkloadMetrics {
 		ComputeMs:       computeMs,
 		Operations:      totalOps,
 		OpsPerSecond:    opsPerSec,
-		Detail:          fmt.Sprintf("%d concurrent workers x 50k ops", concurrentTasks),
+		Detail:          fmt.Sprintf("%d concurrent workers x %dk ops", tasks, innerIters/1000),
 	}
 }
 

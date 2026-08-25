@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"math"
 	"os"
@@ -18,8 +19,9 @@ const (
 	msPerMicro        = 1000.0
 	percentMultiplier = 100.0
 	p95Multiplier     = 0.95
-	warmupIterations  = 10
-	benchIterations   = 100
+	warmupIterations  = 5
+	stdIterations     = 50
+	heavyIterations   = 20
 )
 
 type Config struct {
@@ -43,6 +45,19 @@ type DemoReport struct {
 }
 
 func main() {
+	heavyPtr := flag.Bool("heavy", false, "Run heavy compute-intensive benchmark")
+	itersPtr := flag.Int("n", 0, "Number of benchmark iterations")
+	flag.Parse()
+
+	isHeavy := *heavyPtr
+	iterations := stdIterations
+	if isHeavy {
+		iterations = heavyIterations
+	}
+	if *itersPtr > 0 {
+		iterations = *itersPtr
+	}
+
 	benchDir, err := os.MkdirTemp("", "microfat-bench-*")
 	if err != nil {
 		panic(err)
@@ -59,8 +74,13 @@ func main() {
 		microfatCli = filepath.Join(os.Getenv("HOME"), ".local/bin/microfat")
 	}
 
+	modeStr := "Standard Workload"
+	if isHeavy {
+		modeStr = "HEAVY Sustained Compute (5x scale)"
+	}
+
 	fmt.Println("==================================================================")
-	fmt.Println("       Microfat Performance Benchmark Suite (100 Iterations)      ")
+	fmt.Printf("   Microfat Performance Benchmark Suite [%s - %d runs]   \n", modeStr, iterations)
 	fmt.Println("==================================================================")
 
 	// 1. Build and pack variants
@@ -106,23 +126,28 @@ func main() {
 	}
 
 	// 2. Warm up
-	fmt.Println("\n==> Step 2: Running warm-up cycles (10 runs each)...")
+	fmt.Println("\n==> Step 2: Running warm-up cycles...")
+	benchArgs := []string{"--json", "all"}
+	if isHeavy {
+		benchArgs = append(benchArgs, "--heavy")
+	}
+
 	for _, c := range configs {
 		for i := 0; i < warmupIterations; i++ {
 			// #nosec G204 -- warm-up run of benchmark test binary
 			_ = exec.Command(c.Path, "--help").Run()
 			// #nosec G204 -- warm-up run of benchmark test binary
-			_ = exec.Command(c.Path, "--json", "all").Run()
+			_ = exec.Command(c.Path, benchArgs...).Run()
 		}
 	}
 
 	// 3. Benchmark Startup Overhead (--help)
-	fmt.Printf("\n==> Step 3: Measuring Startup Overhead (--help) [%d iterations]...\n", benchIterations)
+	fmt.Printf("\n==> Step 3: Measuring Startup Overhead (--help) [%d iterations]...\n", iterations)
 	startupStats := make([]Stats, len(configs))
 	for i, c := range configs {
 		fmt.Printf("    Benchmarking %s...", c.Name)
-		durations := make([]time.Duration, benchIterations)
-		for j := 0; j < benchIterations; j++ {
+		durations := make([]time.Duration, iterations)
+		for j := 0; j < iterations; j++ {
 			t0 := time.Now()
 			// #nosec G204 -- benchmark execution of test binary
 			cmd := exec.Command(c.Path, "--help")
@@ -136,19 +161,19 @@ func main() {
 	}
 
 	// 4. Benchmark Steady-State Pure Compute Time & Total Wall Time
-	fmt.Printf("\n==> Step 4: Measuring Pure In-Process Compute Time & Total Latency [%d iterations]...\n", benchIterations)
+	fmt.Printf("\n==> Step 4: Measuring Pure In-Process Compute Time & Total Latency [%d iterations]...\n", iterations)
 	pureComputeStats := make([]Stats, len(configs))
 	totalWallStats := make([]Stats, len(configs))
 
 	for i, c := range configs {
 		fmt.Printf("    Benchmarking %s...", c.Name)
-		pureDurs := make([]time.Duration, benchIterations)
-		wallDurs := make([]time.Duration, benchIterations)
+		pureDurs := make([]time.Duration, iterations)
+		wallDurs := make([]time.Duration, iterations)
 
-		for j := 0; j < benchIterations; j++ {
+		for j := 0; j < iterations; j++ {
 			t0 := time.Now()
 			// #nosec G204 -- benchmark execution of test binary
-			cmd := exec.Command(c.Path, "--json", "all")
+			cmd := exec.Command(c.Path, benchArgs...)
 			var outBuf bytes.Buffer
 			cmd.Stdout = &outBuf
 			if err := cmd.Run(); err != nil {
@@ -209,7 +234,7 @@ func main() {
 	}
 
 	fmt.Println("\n### Table 3: Pure In-Process Compute Time (Isolated Hardware Speed)")
-	fmt.Println("| Binary Configuration | Mean Compute (ms) | StdDev (ms) | Median p50 (ms) | p95 (ms) | Compute Speed vs Native v1 |")
+	fmt.Println("| Binary Configuration | Mean Compute (ms) | StdDev (ms) | Median p50 (ms) | p95 (ms) | Compute Speedup vs Native v1 |")
 	fmt.Println("| :--- | :--- | :--- | :--- | :--- | :--- |")
 	v1Compute := float64(pureComputeStats[0].Mean.Microseconds()) / msPerMicro
 	for i, c := range configs {

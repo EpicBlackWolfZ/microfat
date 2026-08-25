@@ -23,7 +23,7 @@ GOLANGCI_LINT := $(shell command -v golangci-lint 2> /dev/null)
 GOVULNCHECK := $(shell command -v govulncheck 2> /dev/null)
 GORELEASER := $(shell command -v goreleaser 2> /dev/null)
 
-.PHONY: all build test coverage lint vuln tidy snapshot demo bench clean help
+.PHONY: all build test coverage lint vuln tidy snapshot demo bench bench-heavy clean help
 
 all: tidy lint vuln test build
 
@@ -31,17 +31,18 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all        Run tidy, lint, vuln, test, and build"
-	@echo "  build      Compile microfat and microfat-stub binaries into $(BIN_DIR)/"
-	@echo "  demo       Compile and package the demonstration application in examples/demo"
-	@echo "  bench      Run the 100-iteration multi-workload benchmark suite in examples/demo"
-	@echo "  test       Run unit tests with race detection"
-	@echo "  coverage   Run tests and calculate code coverage"
-	@echo "  lint       Run golangci-lint"
-	@echo "  vuln       Run govulncheck vulnerability scan"
-	@echo "  tidy       Run go mod tidy and go mod verify"
-	@echo "  snapshot   Run GoReleaser local snapshot build"
-	@echo "  clean      Remove build artifacts and coverage files"
+	@echo "  all          Run tidy, lint, vuln, test, and build"
+	@echo "  build        Compile microfat and microfat-stub binaries into $(BIN_DIR)/"
+	@echo "  demo         Compile and package the demonstration application in examples/demo"
+	@echo "  bench        Run the standard benchmark suite in examples/demo"
+	@echo "  bench-heavy  Run the heavy sustained compute benchmark suite (5x scale) in examples/demo"
+	@echo "  test         Run unit tests with race detection"
+	@echo "  coverage     Run tests and calculate code coverage"
+	@echo "  lint         Run golangci-lint"
+	@echo "  vuln         Run govulncheck vulnerability scan"
+	@echo "  tidy         Run go mod tidy and go mod verify"
+	@echo "  snapshot     Run GoReleaser local snapshot build"
+	@echo "  clean        Remove build artifacts and coverage files"
 
 tidy:
 	@echo "==> Tidying Go modules..."
@@ -59,8 +60,12 @@ demo: build
 	@$(MAKE) -C examples/demo fat
 
 bench: build
-	@echo "==> Running demo benchmark suite..."
+	@echo "==> Running standard demo benchmark suite..."
 	@$(MAKE) -C examples/demo bench
+
+bench-heavy: build
+	@echo "==> Running heavy sustained compute demo benchmark suite..."
+	@$(MAKE) -C examples/demo bench-heavy
 
 test:
 	@echo "==> Running tests..."
