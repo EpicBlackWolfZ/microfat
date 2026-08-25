@@ -249,7 +249,7 @@ func TestBestMatchingVariantFor(t *testing.T) {
 		},
 		{
 			name:        "arm64 host v8.2 with v8.0 and v8.2 available",
-			arch:        "arm64",
+			arch:        ArchARM64,
 			hostLevel:   "v8.2",
 			available:   []string{"linux_arm64_v8.0", "linux_arm64_v8.2"},
 			expected:    "linux_arm64_v8.2",
@@ -257,7 +257,7 @@ func TestBestMatchingVariantFor(t *testing.T) {
 		},
 		{
 			name:        "arm64 host v8.1 with v8.0, v8.2, v9.0 available",
-			arch:        "arm64",
+			arch:        ArchARM64,
 			hostLevel:   "v8.1",
 			available:   []string{"v8.0", "v8.2", "v9.0"},
 			expected:    "v8.0",
@@ -310,7 +310,7 @@ func TestNormalizeAndRank(t *testing.T) {
 
 	armLevels := []string{ARM64v8_0, ARM64v8_1, ARM64v8_2, ARM64v8_3, ARM64v8_4, ARM64v8_5, ARM64v9_0, ARM64v9_2}
 	for _, lvl := range armLevels {
-		if Rank("arm64", lvl) <= 0 {
+		if Rank(ArchARM64, lvl) <= 0 {
 			t.Errorf("expected positive rank for arm64 level %s", lvl)
 		}
 	}
@@ -413,8 +413,8 @@ func TestDetectForArch(t *testing.T) {
 	}
 
 	// Detect ARM64
-	armInfo := detectForArch("linux", "arm64", X86Features{}, ARM64Features{HasFP: true, HasASIMD: true, HasATOMICS: true})
-	if armInfo.Arch != "arm64" || armInfo.Level != "v8.0" || len(armInfo.Features) == 0 {
+	armInfo := detectForArch("linux", ArchARM64, X86Features{}, ARM64Features{HasFP: true, HasASIMD: true, HasATOMICS: true})
+	if armInfo.Arch != ArchARM64 || armInfo.Level != "v8.0" || len(armInfo.Features) == 0 {
 		t.Errorf("unexpected arm64 detect info: %+v", armInfo)
 	}
 

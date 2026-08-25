@@ -19,6 +19,12 @@ var (
 	ErrEmptyVariants     = errors.New("available variants list is empty")
 )
 
+// Supported CPU architecture identifiers.
+const (
+	ArchAMD64 = "amd64"
+	ArchARM64 = "arm64"
+)
+
 // AMD64 microarchitecture levels.
 const (
 	AMD64v1 = "v1"
@@ -120,10 +126,10 @@ func detectForArch(goos, goarch string, x86Feat X86Features, armFeat ARM64Featur
 	}
 
 	switch goarch {
-	case "amd64":
+	case ArchAMD64:
 		info.Level = EvaluateAMD64(x86Feat)
 		info.Features = extractX86FeatureList(x86Feat)
-	case "arm64":
+	case ArchARM64:
 		info.Level = EvaluateARM64(armFeat)
 		info.Features = extractARM64FeatureList(armFeat)
 	default:
@@ -220,8 +226,8 @@ func Normalize(level string) string {
 // Returns -1 if the level is unknown.
 func Rank(arch, level string) int {
 	norm := Normalize(level)
-	switch arch {
-	case "amd64", "x86_64":
+	switch strings.ToLower(arch) {
+	case ArchAMD64, "x86_64", "x86-64":
 		switch norm {
 		case AMD64v1:
 			return rankAMD64v1
@@ -234,7 +240,7 @@ func Rank(arch, level string) int {
 		default:
 			return rankUnknown
 		}
-	case "arm64", "aarch64":
+	case ArchARM64, "aarch64":
 		switch norm {
 		case ARM64v8_0:
 			return rankARM64v8_0
