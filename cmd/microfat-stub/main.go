@@ -132,7 +132,7 @@ func run() error {
 	}
 
 	// Standard transparent execution
-	return executeVariant(selfFile, selectedEntry, os.Args, os.Environ())
+	return executeVariant(selfFile, selectedEntry, os.Args, os.Environ(), hostInfo)
 }
 
 func isPrefixOrExact(arg, flag string) bool {

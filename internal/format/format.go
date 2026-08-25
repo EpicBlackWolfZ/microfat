@@ -39,6 +39,18 @@ const (
 
 	// MaxPayloadSize is the maximum allowable single payload uncompressed size (1 GB).
 	MaxPayloadSize = 1024 * 1024 * 1024
+
+	// Environment variable names for telemetry and control.
+	EnvSelectedVariant = "MICROFAT_SELECTED_VARIANT"
+	EnvExecMode        = "MICROFAT_EXEC_MODE"
+	EnvDebug           = "MICROFAT_DEBUG"
+	EnvLog             = "MICROFAT_LOG"
+	EnvAutotune        = "MICROFAT_AUTOTUNE"
+	EnvMemRatio        = "MICROFAT_MEM_RATIO"
+
+	// Execution modes.
+	ExecModeMemfd = "memfd"
+	ExecModeCache = "cache"
 )
 
 // Standard error definitions for binary format parsing.
@@ -51,6 +63,7 @@ var (
 	ErrIndexCorrupted     = errors.New("index SHA-256 checksum mismatch")
 	ErrOutOfBounds        = errors.New("variant payload extends beyond binary boundary")
 	ErrPayloadTooLarge    = errors.New("variant payload size exceeds safety limit")
+	ErrOverlappingVariant = errors.New("variant payloads overlap or are unsorted")
 )
 
 // VariantEntry describes an individual compressed microarchitecture variant payload.
@@ -98,7 +111,8 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 		return fmt.Errorf("%w: got version %d, expected %d", ErrUnsupportedVersion, idx.Version, FormatVersionCurrent)
 	}
 
-	for _, v := range idx.Variants {
+	var lastEnd int64
+	for i, v := range idx.Variants {
 		if v.Offset < 0 || v.CompressedSize <= 0 || v.UncompressedSize <= 0 {
 			return fmt.Errorf("%w: invalid dimensions for variant %s", ErrOutOfBounds, v.Level)
 		}
@@ -108,6 +122,10 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 		if v.Offset+v.CompressedSize > indexOffset {
 			return fmt.Errorf("%w: variant %s payload extends past index offset %d", ErrOutOfBounds, v.Level, indexOffset)
 		}
+		if i > 0 && v.Offset < lastEnd {
+			return fmt.Errorf("%w: variant %s offset %d overlaps with previous variant ending at %d", ErrOverlappingVariant, v.Level, v.Offset, lastEnd)
+		}
+		lastEnd = v.Offset + v.CompressedSize
 	}
 	return nil
 }

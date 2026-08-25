@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -46,5 +47,17 @@ func TestRootCmdAndSubcommands(t *testing.T) {
 	pack.SetArgs([]string{"--stub", "", "--output", "", "--variant", "invalid"})
 	if err := pack.Execute(); err == nil {
 		t.Errorf("expected pack with invalid args to fail")
+	}
+
+	// Test duplicate variant level error
+	packDup := newPackCmd()
+	packDup.SetArgs([]string{
+		"--stub", "stub",
+		"--output", "out",
+		"-v", "v3=bin1",
+		"-v", "v3=bin2",
+	})
+	if err := packDup.Execute(); err == nil || !strings.Contains(err.Error(), "duplicate variant level") {
+		t.Errorf("expected duplicate variant level error, got: %v", err)
 	}
 }

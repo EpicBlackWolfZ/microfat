@@ -117,9 +117,36 @@ sequenceDiagram
 
 ---
 
-## 5. Resilient User Cache Fallback
+## 5. Resilient User Cache Fallback & Security Model
 
 If `memfd_create` is blocked by hardened seccomp profiles or older kernels:
-1. The stub falls back to `$XDG_CACHE_HOME/microfat/<sha256>` (or `~/.cache/microfat/<sha256>`).
-2. Extracts the decompressed variant once and verifies its SHA-256 hash.
-3. Subsequent invocations execute the cached payload directly with zero decompression latency.
+1. The stub falls back to `$XDG_CACHE_HOME/microfat/<sha256>` (or `~/.cache/microfat/<sha256>`). If the home directory is unavailable, it falls back to `/tmp/.microfat-<uid>/<sha256>`.
+2. **Private Permission Isolation**: All cache directories and materialized binary files are created with strict `0o700` (`rwx------`) permissions, isolating cached binaries per-user and preventing exposure on multi-tenant or shared hosts.
+3. Extracts the decompressed variant once to a temporary file in the cache directory, verifies its SHA-256 hash, and atomically moves it to its final hash destination.
+4. Subsequent invocations execute the cached payload directly with zero decompression latency.
+
+### Ultra-Constrained Container Environments
+If both `memfd_create` and disk cache directories fail (e.g. in a locked-down container with a read-only rootfs, no `/proc`, and no writable `/tmp`), the launcher provides an actionable error detailing all attempted paths and remediation steps:
+- Ensure `memfd_create` syscall is permitted by seccomp/AppArmor policies.
+- Mount an anonymous `tmpfs` volume at `/tmp` or set `$XDG_CACHE_HOME` to a writable volume.
+
+---
+
+## 6. Runtime Observability & Telemetry
+
+When launching the specialized payload, the launcher stub exposes execution metadata:
+
+### Injected Environment Variables
+- `MICROFAT_SELECTED_VARIANT`: The chosen CPU microarchitecture variant (e.g., `v1`, `v3`, `v4`).
+- `MICROFAT_EXEC_MODE`: The execution dispatch mechanism utilized (`memfd` or `cache`).
+
+### Diagnostic Logging
+- Setting `MICROFAT_DEBUG=1` emits human-readable dispatch details to `stderr`:
+  ```
+  [microfat:debug] host_arch=amd64 host_level=v3 selected_variant=v3 exec_mode=memfd gomemlimit=3865470566B gomaxprocs=4
+  ```
+- Setting `MICROFAT_LOG=json` emits structured JSON logs to `stderr` for ingestion by container log collectors:
+  ```json
+  [microfat] {"host_arch":"amd64","host_level":"v3","selected_variant":"v3","exec_mode":"memfd","gomemlimit":"3865470566B","gomaxprocs":"4"}
+  ```
+

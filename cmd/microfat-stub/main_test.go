@@ -44,37 +44,72 @@ func TestPrintHelpAndInfo(t *testing.T) {
 func TestBuildAutoTunedEnviron(t *testing.T) {
 	base := []string{"PATH=/usr/bin", "USER=test"}
 
-	// 1. Standard auto-tune
-	env := buildAutoTunedEnviron(base)
-	if len(env) < len(base) {
-		t.Errorf("expected env to contain at least base items")
+	// 1. Standard auto-tune with metadata injection
+	env := buildAutoTunedEnviron(base, "v3", format.ExecModeMemfd)
+	hasVariant := false
+	hasExecMode := false
+	for _, e := range env {
+		if e == "MICROFAT_SELECTED_VARIANT=v3" {
+			hasVariant = true
+		}
+		if e == "MICROFAT_EXEC_MODE=memfd" {
+			hasExecMode = true
+		}
+	}
+	if !hasVariant || !hasExecMode {
+		t.Errorf("expected telemetry env vars in env: %v", env)
 	}
 
 	// 2. Opt-out via MICROFAT_AUTOTUNE=0
 	t.Setenv("MICROFAT_AUTOTUNE", "0")
-	envOptOut := buildAutoTunedEnviron(base)
-	if len(envOptOut) != len(base) {
-		t.Errorf("expected opt-out env to match base length, got %d vs %d", len(envOptOut), len(base))
+	envOptOut := buildAutoTunedEnviron(base, "v1", format.ExecModeCache)
+	if len(envOptOut) != len(base)+2 { // base + 2 injected metadata vars
+		t.Errorf("expected opt-out env to have len %d, got %d", len(base)+2, len(envOptOut))
 	}
 
 	// 3. Opt-out via MICROFAT_AUTOTUNE=false
 	t.Setenv("MICROFAT_AUTOTUNE", "false")
-	envFalse := buildAutoTunedEnviron(base)
-	if len(envFalse) != len(base) {
-		t.Errorf("expected opt-out false to match base length")
+	envFalse := buildAutoTunedEnviron(base, "v1", format.ExecModeCache)
+	if len(envFalse) != len(base)+2 {
+		t.Errorf("expected opt-out false to match base + 2 length")
 	}
 
 	// 4. Preserve existing GOMEMLIMIT and GOMAXPROCS
 	t.Setenv("MICROFAT_AUTOTUNE", "1")
 	existing := []string{"GOMEMLIMIT=1GiB", "GOMAXPROCS=8"}
-	envPreserve := buildAutoTunedEnviron(existing)
-	if len(envPreserve) != 2 || envPreserve[0] != "GOMEMLIMIT=1GiB" || envPreserve[1] != "GOMAXPROCS=8" {
-		t.Errorf("failed to preserve existing env: %v", envPreserve)
+	envPreserve := buildAutoTunedEnviron(existing, "v3", format.ExecModeMemfd)
+	var foundMem, foundProcs bool
+	for _, e := range envPreserve {
+		if e == "GOMEMLIMIT=1GiB" {
+			foundMem = true
+		}
+		if e == "GOMAXPROCS=8" {
+			foundProcs = true
+		}
+	}
+	if !foundMem || !foundProcs {
+		t.Errorf("failed to preserve existing user env: %v", envPreserve)
 	}
 
 	// 5. Custom memory ratio
 	t.Setenv("MICROFAT_MEM_RATIO", "0.85")
-	_ = buildAutoTunedEnviron(base)
+	_ = buildAutoTunedEnviron(base, "v3", format.ExecModeMemfd)
+}
+
+func TestLogDiagnostics(t *testing.T) {
+	entry := &format.VariantEntry{Level: "v3"}
+	hostInfo := microarch.Info{Arch: "amd64", Level: "v3"}
+	env := []string{"GOMEMLIMIT=1000B", "GOMAXPROCS=4"}
+
+	// Text debug output
+	t.Setenv("MICROFAT_DEBUG", "1")
+	t.Setenv("MICROFAT_LOG", "")
+	logDiagnostics(entry, format.ExecModeMemfd, hostInfo, env)
+
+	// JSON log output
+	t.Setenv("MICROFAT_DEBUG", "0")
+	t.Setenv("MICROFAT_LOG", "json")
+	logDiagnostics(entry, format.ExecModeCache, hostInfo, env)
 }
 
 func TestGetSelfExecutablePath(t *testing.T) {
@@ -130,10 +165,11 @@ func TestTrimToAndInPlace(t *testing.T) {
 
 	fatPath := filepath.Join(tempDir, "fat_app")
 	_, err := pack.Pack(pack.Options{
-		StubPath:   stubPath,
-		OutputPath: fatPath,
-		AppName:    "testapp",
-		Variants:   map[string]string{"v1": v1Path},
+		StubPath:          stubPath,
+		OutputPath:        fatPath,
+		AppName:           "testapp",
+		SkipELFValidation: true,
+		Variants:          map[string]string{"v1": v1Path},
 	})
 	if err != nil {
 		t.Fatalf("pack failed: %v", err)
@@ -162,6 +198,35 @@ func TestTrimToAndInPlace(t *testing.T) {
 
 	if err := trimInPlace(copyPath, copyFile, stat.Size(), "v1"); err != nil {
 		t.Fatalf("trimInPlace failed: %v", err)
+	}
+
+	// Test trimInPlace via symlink
+	symPath := filepath.Join(tempDir, "fat_symlink")
+	if err := os.Symlink(copyPath, symPath); err != nil {
+		t.Fatalf("creating symlink: %v", err)
+	}
+	if err := trimInPlace(symPath, copyFile, stat.Size(), "v1"); err != nil {
+		t.Fatalf("trimInPlace on symlink failed: %v", err)
+	}
+}
+
+func TestCacheDirectoryPermissions(t *testing.T) {
+	tempDir := t.TempDir()
+	customCache := filepath.Join(tempDir, "custom_cache")
+	t.Setenv("XDG_CACHE_HOME", customCache)
+
+	// Simulate cache dir creation logic
+	cacheDir := filepath.Join(customCache, "microfat")
+	if err := os.MkdirAll(cacheDir, privateCacheDirMode); err != nil {
+		t.Fatalf("failed to create cache dir: %v", err)
+	}
+
+	info, err := os.Stat(cacheDir)
+	if err != nil {
+		t.Fatalf("stat cache dir: %v", err)
+	}
+	if info.Mode().Perm() != privateCacheDirMode {
+		t.Errorf("expected cache permissions %o, got %o", privateCacheDirMode, info.Mode().Perm())
 	}
 }
 

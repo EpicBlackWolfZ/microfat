@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,29 +13,42 @@ import (
 
 	"github.com/ghostnetorg/microfat/internal/format"
 	"github.com/ghostnetorg/pkg/cgroup"
+	"github.com/ghostnetorg/pkg/microarch"
 	"golang.org/x/sys/unix"
+)
+
+const (
+	privateCacheDirMode = 0o700
+	privateExecMode     = 0o700
 )
 
 // executeVariant runs the selected variant payload in-memory using Linux memfd_create,
 // falling back to user cache execution if memfd is restricted.
-func executeVariant(selfFile *os.File, entry *format.VariantEntry, args []string, baseEnv []string) error {
-	env := buildAutoTunedEnviron(baseEnv)
-
+func executeVariant(selfFile *os.File, entry *format.VariantEntry, args []string, baseEnv []string, hostInfo microarch.Info) error {
 	// 1. Try In-Memory memfd_create
-	err := executeViaMemfd(selfFile, entry, args, env)
+	err := executeViaMemfd(selfFile, entry, args, baseEnv, hostInfo)
 	if err == nil {
 		return nil
 	}
 
 	// 2. Fallback to cached file execution
-	return executeViaCache(selfFile, entry, args, env, err)
+	return executeViaCache(selfFile, entry, args, baseEnv, hostInfo, err)
 }
 
-func buildAutoTunedEnviron(baseEnv []string) []string {
-	// 1. Check if user opted out of auto-tuning
-	autoTuneOpt := os.Getenv("MICROFAT_AUTOTUNE")
+func buildAutoTunedEnviron(baseEnv []string, selectedLevel string, execMode string) []string {
+	const extraEnvCapacity = 4
+	env := make([]string, len(baseEnv), len(baseEnv)+extraEnvCapacity)
+	copy(env, baseEnv)
+
+	env = append(env,
+		fmt.Sprintf("%s=%s", format.EnvSelectedVariant, selectedLevel),
+		fmt.Sprintf("%s=%s", format.EnvExecMode, execMode),
+	)
+
+	// Check if user opted out of auto-tuning
+	autoTuneOpt := os.Getenv(format.EnvAutotune)
 	if autoTuneOpt == "0" || strings.EqualFold(autoTuneOpt, "false") {
-		return baseEnv
+		return env
 	}
 
 	hasMemLimit := false
@@ -50,21 +64,17 @@ func buildAutoTunedEnviron(baseEnv []string) []string {
 
 	// If both are already explicitly configured, preserve existing env
 	if hasMemLimit && hasMaxProcs {
-		return baseEnv
+		return env
 	}
 
 	limits, err := cgroup.ReadLimits()
 	if err != nil || limits.CgroupVersion == cgroup.VersionUnknown {
-		return baseEnv
+		return env
 	}
-
-	const extraEnvCapacity = 2
-	env := make([]string, len(baseEnv), len(baseEnv)+extraEnvCapacity)
-	copy(env, baseEnv)
 
 	if !hasMemLimit && limits.MemoryLimitBytes > 0 {
 		ratio := cgroup.DefaultMemoryRatio
-		if ratioStr := os.Getenv("MICROFAT_MEM_RATIO"); ratioStr != "" {
+		if ratioStr := os.Getenv(format.EnvMemRatio); ratioStr != "" {
 			if parsedRatio, rErr := strconv.ParseFloat(ratioStr, 64); rErr == nil && parsedRatio > 0 && parsedRatio <= 1.0 {
 				ratio = parsedRatio
 			}
@@ -81,7 +91,59 @@ func buildAutoTunedEnviron(baseEnv []string) []string {
 	return env
 }
 
-func executeViaMemfd(selfFile *os.File, entry *format.VariantEntry, args []string, env []string) error {
+func logDiagnostics(entry *format.VariantEntry, execMode string, hostInfo microarch.Info, env []string) {
+	debugOpt := os.Getenv(format.EnvDebug)
+	logOpt := os.Getenv(format.EnvLog)
+	if debugOpt == "" && logOpt == "" {
+		return
+	}
+	if debugOpt == "0" || strings.EqualFold(debugOpt, "false") {
+		if logOpt == "" {
+			return
+		}
+	}
+
+	var memLimit, maxProcs string
+	for _, e := range env {
+		if strings.HasPrefix(e, "GOMEMLIMIT=") {
+			memLimit = strings.TrimPrefix(e, "GOMEMLIMIT=")
+		}
+		if strings.HasPrefix(e, "GOMAXPROCS=") {
+			maxProcs = strings.TrimPrefix(e, "GOMAXPROCS=")
+		}
+	}
+
+	if strings.EqualFold(logOpt, "json") {
+		type diagLog struct {
+			HostArch        string `json:"host_arch"`
+			HostLevel       string `json:"host_level"`
+			SelectedVariant string `json:"selected_variant"`
+			ExecMode        string `json:"exec_mode"`
+			GOMEMLIMIT      string `json:"gomemlimit,omitempty"`
+			GOMAXPROCS      string `json:"gomaxprocs,omitempty"`
+		}
+		d := diagLog{
+			HostArch:        hostInfo.Arch,
+			HostLevel:       hostInfo.Level,
+			SelectedVariant: entry.Level,
+			ExecMode:        execMode,
+			GOMEMLIMIT:      memLimit,
+			GOMAXPROCS:      maxProcs,
+		}
+		if b, err := json.Marshal(d); err == nil {
+			fmt.Fprintf(os.Stderr, "[microfat] %s\n", string(b))
+		}
+		return
+	}
+
+	fmt.Fprintf(os.Stderr, "[microfat:debug] host_arch=%s host_level=%s selected_variant=%s exec_mode=%s gomemlimit=%s gomaxprocs=%s\n",
+		hostInfo.Arch, hostInfo.Level, entry.Level, execMode, memLimit, maxProcs)
+}
+
+func executeViaMemfd(selfFile *os.File, entry *format.VariantEntry, args []string, baseEnv []string, hostInfo microarch.Info) error {
+	env := buildAutoTunedEnviron(baseEnv, entry.Level, format.ExecModeMemfd)
+	logDiagnostics(entry, format.ExecModeMemfd, hostInfo, env)
+
 	fd, err := unix.MemfdCreate("microfat_payload", unix.MFD_CLOEXEC)
 	if err != nil {
 		return fmt.Errorf("memfd_create failed: %w", err)
@@ -100,7 +162,10 @@ func executeViaMemfd(selfFile *os.File, entry *format.VariantEntry, args []strin
 	return fmt.Errorf("execve on %s failed: %w", procPath, execErr)
 }
 
-func executeViaCache(selfFile *os.File, entry *format.VariantEntry, args []string, env []string, primaryErr error) error {
+func executeViaCache(selfFile *os.File, entry *format.VariantEntry, args []string, baseEnv []string, hostInfo microarch.Info, primaryErr error) error {
+	env := buildAutoTunedEnviron(baseEnv, entry.Level, format.ExecModeCache)
+	logDiagnostics(entry, format.ExecModeCache, hostInfo, env)
+
 	cacheDir := os.Getenv("XDG_CACHE_HOME")
 	if cacheDir == "" {
 		homeDir, err := os.UserHomeDir()
@@ -112,10 +177,16 @@ func executeViaCache(selfFile *os.File, entry *format.VariantEntry, args []strin
 	}
 	cacheDir = filepath.Join(cacheDir, "microfat")
 
-	// #nosec G703 -- cache fallback directory creation
-	if err := os.MkdirAll(cacheDir, defaultExecMode); err != nil {
+	var triedDirs []string
+	triedDirs = append(triedDirs, cacheDir)
+
+	// #nosec G703 -- cache fallback directory creation with strict private permissions
+	if err := os.MkdirAll(cacheDir, privateCacheDirMode); err != nil {
 		cacheDir = filepath.Join(os.TempDir(), fmt.Sprintf(".microfat-%d", os.Getuid()))
-		_ = os.MkdirAll(cacheDir, defaultExecMode)
+		triedDirs = append(triedDirs, cacheDir)
+		if err2 := os.MkdirAll(cacheDir, privateCacheDirMode); err2 != nil {
+			return fmt.Errorf("launcher execution failed: memfd_create unavailable (%v) and unable to initialize cache directories (%s): %w. Remediation: ensure /proc and memfd_create are enabled or mount a writable tmpfs at /tmp or $XDG_CACHE_HOME", primaryErr, strings.Join(triedDirs, ", "), err2)
+		}
 	}
 
 	cachedBinary := filepath.Join(cacheDir, filepath.Clean(entry.SHA256))
@@ -123,7 +194,7 @@ func executeViaCache(selfFile *os.File, entry *format.VariantEntry, args []strin
 	if _, err := os.Stat(cachedBinary); err != nil {
 		tmpFile, err := os.CreateTemp(cacheDir, ".exec-*.tmp")
 		if err != nil {
-			return fmt.Errorf("cache fallback failed (%v): cannot create temp file in %s: %w", primaryErr, cacheDir, err)
+			return fmt.Errorf("launcher execution failed: memfd_create unavailable (%v) and cannot create temp file in %s: %w. Remediation: verify write permissions in %s or enable memfd_create", primaryErr, cacheDir, err, cacheDir)
 		}
 		tmpPath := tmpFile.Name()
 		defer func() {
@@ -134,7 +205,7 @@ func executeViaCache(selfFile *os.File, entry *format.VariantEntry, args []strin
 		if err := extractVariantToWriter(selfFile, entry, tmpFile); err != nil {
 			return fmt.Errorf("extracting to cache fallback: %w", err)
 		}
-		_ = tmpFile.Chmod(defaultExecMode)
+		_ = tmpFile.Chmod(privateExecMode)
 		_ = tmpFile.Close()
 		// #nosec G703 -- atomic move to cache location
 		_ = os.Rename(tmpPath, cachedBinary)

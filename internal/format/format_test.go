@@ -170,6 +170,32 @@ func TestValidateBoundsErrors(t *testing.T) {
 	if !errors.Is(err, ErrPayloadTooLarge) {
 		t.Errorf("expected ErrPayloadTooLarge, got %v", err)
 	}
+
+	idxOverlapping := &Index{
+		Version:    FormatVersionCurrent,
+		TargetOS:   testOSLinux,
+		TargetArch: testArchAMD64,
+		Variants: []VariantEntry{
+			{
+				Level:            "v1",
+				Offset:           100,
+				CompressedSize:   300,
+				UncompressedSize: 500,
+				Compression:      testCompression,
+			},
+			{
+				Level:            "v3",
+				Offset:           250, // Overlaps with v1 (ends at 400)
+				CompressedSize:   200,
+				UncompressedSize: 500,
+				Compression:      testCompression,
+			},
+		},
+	}
+	err = idxOverlapping.ValidateBounds(1200)
+	if !errors.Is(err, ErrOverlappingVariant) {
+		t.Errorf("expected ErrOverlappingVariant, got %v", err)
+	}
 }
 
 func TestIsFatBinary(t *testing.T) {

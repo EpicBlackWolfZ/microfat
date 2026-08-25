@@ -307,12 +307,13 @@ func newTrimCmd() *cobra.Command {
 
 func newPackCmd() *cobra.Command {
 	var (
-		stubPath    string
-		outputPath  string
-		appName     string
-		targetOS    string
-		targetArch  string
-		rawVariants []string
+		stubPath          string
+		outputPath        string
+		appName           string
+		targetOS          string
+		targetArch        string
+		rawVariants       []string
+		skipELFValidation bool
 	)
 
 	cmd := &cobra.Command{
@@ -325,16 +326,21 @@ func newPackCmd() *cobra.Command {
 				if len(parts) != keyValueParts || parts[0] == "" || parts[1] == "" {
 					return fmt.Errorf("invalid variant specification %q, expected <level>=<path> (e.g. v3=dist/app_v3)", item)
 				}
-				variants[parts[0]] = parts[1]
+				level := parts[0]
+				if _, exists := variants[level]; exists {
+					return fmt.Errorf("duplicate variant level %q specified", level)
+				}
+				variants[level] = parts[1]
 			}
 
 			opts := pack.Options{
-				StubPath:   stubPath,
-				OutputPath: outputPath,
-				AppName:    appName,
-				TargetOS:   targetOS,
-				TargetArch: targetArch,
-				Variants:   variants,
+				StubPath:          stubPath,
+				OutputPath:        outputPath,
+				AppName:           appName,
+				TargetOS:          targetOS,
+				TargetArch:        targetArch,
+				Variants:          variants,
+				SkipELFValidation: skipELFValidation,
 			}
 
 			fmt.Printf("Packaging fat binary '%s'...\n", outputPath)
@@ -358,6 +364,7 @@ func newPackCmd() *cobra.Command {
 	cmd.Flags().StringVar(&targetArch, "arch", "amd64", "Target architecture")
 	cmd.Flags().StringArrayVarP(&rawVariants, "variant", "v", nil,
 		"Variant mapping in <level>=<path> format (e.g. -v v1=bin/app_v1 -v v3=bin/app_v3)")
+	cmd.Flags().BoolVar(&skipELFValidation, "skip-elf-validation", false, "Skip ELF header architecture validation")
 
 	_ = cmd.MarkFlagRequired("stub")
 	_ = cmd.MarkFlagRequired("output")

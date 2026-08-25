@@ -79,3 +79,20 @@ Microfat supports three distinct binary operational modes to accommodate differe
   # Or materialize to explicit target path:
   antigravity-up --microfat:optimize-to ~/.local/bin/antigravity-up
   ```
+
+---
+
+## 4. Symlinks & In-Place Operations
+
+When executing in-place mutations (`--microfat:trim` or `--microfat:optimize`):
+- If the binary is invoked via a symbolic link (e.g. `/usr/local/bin/app -> /opt/app/bin/app_fat`), Microfat evaluates the symlink (`filepath.EvalSymlinks`) to atomically replace the physical destination binary while preserving permissions.
+- Microfat explicitly prints a notification indicating the canonical target path being replaced:
+  ```
+  [microfat] Notice: resolved symlink '/usr/local/bin/app' -> target '/opt/app/bin/app_fat'
+  ```
+- To create a specialized binary without modifying the original or symlinked file, use the explicit destination commands:
+  ```bash
+  ./app --microfat:trim-to=/path/to/trimmed-binary
+  ./app --microfat:optimize-to=/path/to/extracted-elf
+  ```
+

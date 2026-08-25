@@ -3,6 +3,7 @@ package pack
 
 import (
 	"crypto/sha256"
+	"debug/elf"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -29,18 +30,20 @@ var (
 	ErrVariantNotFound     = errors.New("variant binary file not found")
 	ErrChecksumMismatch    = errors.New("variant payload checksum mismatch")
 	ErrSizeMismatch        = errors.New("decompressed variant size mismatch")
+	ErrInvalidELF          = errors.New("invalid ELF binary")
 )
 
 // Options configures the packaging process.
 type Options struct {
-	StubPath         string
-	OutputPath       string
-	AppName          string
-	TargetOS         string
-	TargetArch       string
-	Variants         map[string]string // level -> binary path
-	CompressionLevel zstd.EncoderLevel
-	Permissions      os.FileMode
+	StubPath          string
+	OutputPath        string
+	AppName           string
+	TargetOS          string
+	TargetArch        string
+	Variants          map[string]string // level -> binary path
+	CompressionLevel  zstd.EncoderLevel
+	Permissions       os.FileMode
+	SkipELFValidation bool // Optional flag to bypass ELF header validation (primarily for testing)
 }
 
 // VerificationResult contains the result of verifying an individual embedded variant.
@@ -73,6 +76,17 @@ func Pack(opts Options) (*format.Index, error) {
 	}
 	if opts.Permissions == 0 {
 		opts.Permissions = defaultFileMode
+	}
+
+	if !opts.SkipELFValidation {
+		if err := ValidateELFBinary(opts.StubPath, opts.TargetOS, opts.TargetArch); err != nil {
+			return nil, fmt.Errorf("validating stub: %w", err)
+		}
+		for lvl, varPath := range opts.Variants {
+			if err := ValidateELFBinary(varPath, opts.TargetOS, opts.TargetArch); err != nil {
+				return nil, fmt.Errorf("validating variant %s: %w", lvl, err)
+			}
+		}
 	}
 
 	stubBytes, err := os.ReadFile(filepath.Clean(opts.StubPath))
@@ -303,4 +317,29 @@ func VerifyBinary(r io.ReaderAt, totalSize int64) (*format.Index, []Verification
 	}
 
 	return idx, results, nil
+}
+
+// ValidateELFBinary checks if the file at path is a valid 64-bit ELF binary matching targetOS and targetArch.
+func ValidateELFBinary(path string, targetOS, targetArch string) error {
+	f, err := elf.Open(filepath.Clean(path))
+	if err != nil {
+		return fmt.Errorf("%w (%s): %v", ErrInvalidELF, path, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if f.Class != elf.ELFCLASS64 {
+		return fmt.Errorf("%w (%s): expected 64-bit ELF, got class %v", ErrInvalidELF, path, f.Class)
+	}
+
+	switch targetArch {
+	case "amd64", "x86_64":
+		if f.Machine != elf.EM_X86_64 {
+			return fmt.Errorf("%w (%s): machine type %v does not match target architecture %s (expected EM_X86_64)", ErrInvalidELF, path, f.Machine, targetArch)
+		}
+	case "arm64", "aarch64":
+		if f.Machine != elf.EM_AARCH64 {
+			return fmt.Errorf("%w (%s): machine type %v does not match target architecture %s (expected EM_AARCH64)", ErrInvalidELF, path, f.Machine, targetArch)
+		}
+	}
+	return nil
 }

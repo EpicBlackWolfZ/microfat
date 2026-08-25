@@ -15,6 +15,14 @@ func trimInPlace(selfPath string, selfFile *os.File, totalSize int64, targetLeve
 	if err != nil {
 		realPath = selfPath
 	}
+	if realPath != selfPath {
+		fmt.Printf("[microfat] Notice: resolved symlink '%s' -> target '%s'\n", selfPath, realPath)
+	}
+
+	targetMode := os.FileMode(defaultExecMode)
+	if stat, err := selfFile.Stat(); err == nil {
+		targetMode = stat.Mode()
+	}
 
 	destDir := filepath.Dir(realPath)
 	tmpFile, err := os.CreateTemp(destDir, ".microfat-trim-*.tmp")
@@ -35,7 +43,7 @@ func trimInPlace(selfPath string, selfFile *os.File, totalSize int64, targetLeve
 	if err := tmpFile.Sync(); err != nil {
 		return fmt.Errorf("syncing file: %w", err)
 	}
-	if err := tmpFile.Chmod(defaultExecMode); err != nil {
+	if err := tmpFile.Chmod(targetMode); err != nil {
 		return fmt.Errorf("chmodding file: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
