@@ -93,7 +93,7 @@ jobs:
           gotestsum --junitfile junit.xml --format pkgname -- -race -coverprofile=coverage.out -covermode=atomic ./cmd/... ./internal/...
 
       - name: Publish Test Results to GitHub View
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v3
         if: success() || failure()
         with:
           name: Unit Test Results
