@@ -11,15 +11,21 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/ghostnetorg/microfat/internal/format"
-	"github.com/ghostnetorg/pkg/cgroup"
-	"github.com/ghostnetorg/pkg/microarch"
+	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
+	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"golang.org/x/sys/unix"
 )
 
 const (
 	privateCacheDirMode = 0o700
 	privateExecMode     = 0o700
+)
+
+var (
+	execveFunc           = syscall.Exec
+	readCgroupLimitsFunc = cgroup.ReadLimits
+	userHomeDirFunc      = os.UserHomeDir
 )
 
 // executeVariant runs the selected variant payload in-memory using Linux memfd_create,
@@ -67,7 +73,7 @@ func buildAutoTunedEnviron(baseEnv []string, selectedLevel string, execMode stri
 		return env
 	}
 
-	limits, err := cgroup.ReadLimits()
+	limits, err := readCgroupLimitsFunc()
 	if err != nil || limits.CgroupVersion == cgroup.VersionUnknown {
 		return env
 	}
@@ -158,7 +164,10 @@ func executeViaMemfd(selfFile *os.File, entry *format.VariantEntry, args []strin
 
 	procPath := "/proc/self/fd/" + strconv.Itoa(fd)
 	// #nosec G204, G702 -- launcher stub explicitly forwards process execution to the payload
-	execErr := syscall.Exec(procPath, args, env)
+	execErr := execveFunc(procPath, args, env)
+	if execErr == nil {
+		return nil
+	}
 	return fmt.Errorf("execve on %s failed: %w", procPath, execErr)
 }
 
@@ -175,7 +184,7 @@ func executeViaCache(
 
 	cacheDir := os.Getenv("XDG_CACHE_HOME")
 	if cacheDir == "" {
-		homeDir, err := os.UserHomeDir()
+		homeDir, err := userHomeDirFunc()
 		if err == nil {
 			cacheDir = filepath.Join(homeDir, ".cache")
 		} else {
@@ -224,6 +233,9 @@ func executeViaCache(
 	}
 
 	// #nosec G204, G702 -- launcher fallback execution
-	execErr := syscall.Exec(cachedBinary, args, env)
+	execErr := execveFunc(cachedBinary, args, env)
+	if execErr == nil {
+		return nil
+	}
 	return fmt.Errorf("cache fallback execve failed (%s): %w (primary memfd error: %v)", cachedBinary, execErr, primaryErr)
 }

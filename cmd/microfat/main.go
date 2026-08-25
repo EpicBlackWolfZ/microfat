@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ghostnetorg/microfat/internal/format"
-	"github.com/ghostnetorg/microfat/internal/pack"
-	"github.com/ghostnetorg/pkg/microarch"
-	"github.com/ghostnetorg/pkg/version"
+	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
+	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+	"github.com/EpicBlackWolfZ/microfat/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -21,10 +21,12 @@ const (
 	keyValueParts     = 2
 )
 
+var exitFunc = os.Exit
+
 func main() {
 	rootCmd := newRootCmd()
 	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+		exitFunc(1)
 	}
 }
 

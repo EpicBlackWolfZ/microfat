@@ -1,0 +1,48 @@
+name: 🐛 Bug Report
+description: Report an issue, bug, or unexpected behavior in microfat
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue in `microfat`! Please ensure you have searched existing issues first.
+  - type: input
+    id: version
+    attributes:
+      label: microfat Version
+      description: What version of microfat are you running? (Run `microfat --version`)
+      placeholder: "v0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: System Environment
+      description: Operating system, Linux kernel version, and CPU model
+      placeholder: "Ubuntu 24.04 LTS / Linux 6.8 / AMD EPYC 9654 (x86-64-v4)"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the Bug
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions or CLI commands to reproduce the issue.
+      placeholder: |
+        1. Build fat binary with 'microfat pack ...'
+        2. Execute binary on host with '...'
+        3. See error '...'
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Diagnostic Logs & Output
+      description: Output with `MICROFAT_DEBUG=1` enabled.
+      render: shell

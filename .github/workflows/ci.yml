@@ -6,33 +6,187 @@ on:
     paths-ignore:
       - '**.md'
       - 'docs/**'
-      - 'TODO'
       - 'LICENSE*'
       - '.gitignore'
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, edited]
     paths-ignore:
       - '**.md'
       - 'docs/**'
-      - 'TODO'
       - 'LICENSE*'
       - '.gitignore'
   workflow_dispatch:
 
 permissions:
   contents: read
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  go-ci:
-    name: Go Build / Test / Lint
-    uses: ghostnetorg/actions-workflows/.github/workflows/go-ci.yaml@v1.23.0
-    with:
-      coverage-threshold: 40
+  pr-lint:
+    name: Validate Conventional PR Title
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Verify PR Title Conventional Commits Format
+        uses: amannn/action-semantic-pull-request@v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+          requireScope: false
 
-  govulncheck:
-    name: Go Vulnerability Scan (govulncheck)
-    uses: ghostnetorg/actions-workflows/.github/workflows/govulncheck.yaml@v1.23.0
+  lint:
+    name: Lint (golangci-lint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7.0.1
 
-  secret-scan:
-    name: gitleaks Secret Scan
-    uses: ghostnetorg/actions-workflows/.github/workflows/secret-scan.yaml@v1.23.0
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.27.x'
+          cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          version: v1.64.6
+          args: --timeout=5m
+
+  test:
+    name: Unit Tests & Coverage Gate (>= 95%)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.27.x'
+          cache: true
+
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@v1.13.0
+
+      - name: Run Unit Tests with Race Detection & Coverage
+        run: |
+          gotestsum --junitfile junit.xml --format pkgname -- -race -coverprofile=coverage.out -covermode=atomic ./cmd/... ./internal/...
+
+      - name: Publish Test Results to GitHub View
+        uses: dorny/test-reporter@v1
+        if: success() || failure()
+        with:
+          name: Unit Test Results
+          path: junit.xml
+          reporter: java-junit
+          fail-on-error: false
+
+      - name: Evaluate Coverage & Generate Summary Table
+        run: |
+          echo "### 📊 Code Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Package / File | Coverage |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          
+          go tool cover -func=coverage.out | while read -r line; do
+            pkg=$(echo "$line" | awk '{print $1}')
+            pct=$(echo "$line" | awk '{print $NF}')
+            if [ "$pkg" = "total:" ]; then
+              echo "| **Total (Core Packages)** | **$pct** |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| \`$pkg\` | $pct |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          
+          TOTAL_COV=$(go tool cover -func=coverage.out | grep "total:" | awk '{print substr($3, 1, length($3)-1)}')
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Evaluated Coverage:** \`${TOTAL_COV}%\` | **Required Gate:** \`95.0%\`" >> $GITHUB_STEP_SUMMARY
+          
+          if (( $(echo "$TOTAL_COV >= 95.0" | bc -l 2>/dev/null || awk -v t="$TOTAL_COV" 'BEGIN {if (t >= 95.0) exit 0; else exit 1}') )); then
+            echo "✅ **Coverage threshold gate passed!**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Coverage threshold gate failed: ${TOTAL_COV}% is below 95.0% requirement.**" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+  vulncheck:
+    name: Vulnerability Scan (govulncheck)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@v1.1.0
+        with:
+          go-version-input: '1.27.x'
+          go-package: ./...
+
+  gitleaks:
+    name: Secrets Detection (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks Action
+        uses: gitleaks/gitleaks-action@v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    name: Build, GoReleaser Snapshot & Self-Bundling Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.27.x'
+          cache: true
+
+      - name: Compile Standard Binaries
+        run: make build
+
+      - name: Smoke Test Standalone microfat CLI
+        run: |
+          ./bin/microfat --help
+          ./bin/microfat detect
+
+      - name: GoReleaser Snapshot Build & Self-Bundling Verification
+        uses: goreleaser/goreleaser-action@v7.2.3
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --snapshot --clean --skip=publish,sign,announce,validate,sbom

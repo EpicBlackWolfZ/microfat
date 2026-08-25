@@ -19,7 +19,7 @@ When running standard Go applications inside Docker or Kubernetes containers:
 
 ## 2. Automatic Cgroup Inspection
 
-Microfat uses `github.com/ghostnetorg/pkg/cgroup` to inspect the container environment at startup:
+Microfat uses `internal/cgroup` to inspect the container environment at startup:
 
 ```mermaid
 flowchart TD
@@ -78,7 +78,7 @@ Microfat strictly adheres to the following precedence order:
 
 ---
 
-## 5. Standalone Applications (`pkg/cgroup`)
+## 5. Standalone Applications (`internal/cgroup`)
 
 If you want to use the same auto-tuning logic in Go applications compiled without `microfat`, import the package directly:
 
@@ -87,7 +87,7 @@ package main
 
 import (
 	"runtime/debug"
-	"github.com/ghostnetorg/pkg/cgroup"
+	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"go.uber.org/automaxprocs/maxprocs"
 )
 

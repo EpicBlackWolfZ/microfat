@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"testing"
 )
@@ -132,6 +133,29 @@ func TestReadTrailerErrors(t *testing.T) {
 }
 
 func TestValidateBoundsErrors(t *testing.T) {
+	idxInvalidVersion := &Index{
+		Version:    99,
+		TargetOS:   testOSLinux,
+		TargetArch: testArchAMD64,
+	}
+	err := idxInvalidVersion.ValidateBounds(1000)
+	if !errors.Is(err, ErrUnsupportedVersion) {
+		t.Errorf("expected ErrUnsupportedVersion, got %v", err)
+	}
+
+	idxInvalidDimensions := &Index{
+		Version:    FormatVersionCurrent,
+		TargetOS:   testOSLinux,
+		TargetArch: testArchAMD64,
+		Variants: []VariantEntry{
+			{Level: "v1", Offset: -10, CompressedSize: 100, UncompressedSize: 100},
+		},
+	}
+	err = idxInvalidDimensions.ValidateBounds(1000)
+	if !errors.Is(err, ErrOutOfBounds) {
+		t.Errorf("expected ErrOutOfBounds for negative offset, got %v", err)
+	}
+
 	idxOutOfBounds := &Index{
 		Version:    FormatVersionCurrent,
 		TargetOS:   testOSLinux,
@@ -147,7 +171,7 @@ func TestValidateBoundsErrors(t *testing.T) {
 		},
 	}
 
-	err := idxOutOfBounds.ValidateBounds(1200)
+	err = idxOutOfBounds.ValidateBounds(1200)
 	if !errors.Is(err, ErrOutOfBounds) {
 		t.Errorf("expected ErrOutOfBounds, got %v", err)
 	}
@@ -198,6 +222,15 @@ func TestValidateBoundsErrors(t *testing.T) {
 	}
 }
 
+func TestWriteIndexAndTrailerErrors(t *testing.T) {
+	var buf bytes.Buffer
+	idx := &Index{Version: FormatVersionCurrent}
+	_, err := WriteIndexAndTrailer(&buf, idx, -1)
+	if err == nil {
+		t.Errorf("expected error for negative offset")
+	}
+}
+
 func TestIsFatBinary(t *testing.T) {
 	if IsFatBinary(bytes.NewReader([]byte("short")), 5) {
 		t.Errorf("expected short binary to return false")
@@ -224,5 +257,98 @@ func TestTrailerOffsetAlignment(t *testing.T) {
 	_, err := ReadTrailerAndIndex(bytes.NewReader(data), int64(len(data)))
 	if !errors.Is(err, ErrInvalidIndexSize) {
 		t.Errorf("expected ErrInvalidIndexSize, got %v", err)
+	}
+
+	// Invalid index offset (offset > trailerOffset)
+	binary.LittleEndian.PutUint64(trailer[0:OffsetLen], 500)
+	binary.LittleEndian.PutUint64(trailer[OffsetLen:OffsetLen*2], 50)
+	copy(data[200:], trailer)
+	_, err = ReadTrailerAndIndex(bytes.NewReader(data), int64(len(data)))
+	if !errors.Is(err, ErrInvalidIndexOffset) {
+		t.Errorf("expected ErrInvalidIndexOffset, got %v", err)
+	}
+
+	// Valid hash over invalid JSON bytes
+	invalidJSONBytes := []byte("INVALID_JSON_BYTES_123456789012")
+	invalidJSONHash := sha256.Sum256(invalidJSONBytes)
+	trailerJSON := make([]byte, TrailerSize)
+	binary.LittleEndian.PutUint64(trailerJSON[0:OffsetLen], 100)
+	binary.LittleEndian.PutUint64(trailerJSON[OffsetLen:OffsetLen*2], uint64(len(invalidJSONBytes)))
+	copy(trailerJSON[OffsetLen*2:OffsetLen*2+HashLen], invalidJSONHash[:])
+	copy(trailerJSON[OffsetLen*2+HashLen:], []byte(MagicString))
+
+	dataJSON := make([]byte, 100+len(invalidJSONBytes)+TrailerSize)
+	copy(dataJSON[100:], invalidJSONBytes)
+	copy(dataJSON[100+len(invalidJSONBytes):], trailerJSON)
+	_, err = ReadTrailerAndIndex(bytes.NewReader(dataJSON), int64(len(dataJSON)))
+	if err == nil {
+		t.Errorf("expected error unmarshaling invalid JSON index")
+	}
+
+	// Valid hash and JSON, but failing bounds validation
+	outOfBoundsIdx := &Index{
+		Version:  FormatVersionCurrent,
+		Variants: []VariantEntry{{Level: "v1", Offset: 500, CompressedSize: 200, UncompressedSize: 300}},
+	}
+	outOfBoundsJSON, _ := json.Marshal(outOfBoundsIdx)
+	outOfBoundsHash := sha256.Sum256(outOfBoundsJSON)
+	trailerBounds := make([]byte, TrailerSize)
+	binary.LittleEndian.PutUint64(trailerBounds[0:OffsetLen], 100)
+	binary.LittleEndian.PutUint64(trailerBounds[OffsetLen:OffsetLen*2], uint64(len(outOfBoundsJSON)))
+	copy(trailerBounds[OffsetLen*2:OffsetLen*2+HashLen], outOfBoundsHash[:])
+	copy(trailerBounds[OffsetLen*2+HashLen:], []byte(MagicString))
+
+	dataBounds := make([]byte, 100+len(outOfBoundsJSON)+TrailerSize)
+	copy(dataBounds[100:], outOfBoundsJSON)
+	copy(dataBounds[100+len(outOfBoundsJSON):], trailerBounds)
+	_, err = ReadTrailerAndIndex(bytes.NewReader(dataBounds), int64(len(dataBounds)))
+	if err == nil {
+		t.Errorf("expected error when index bounds validation fails")
+	}
+}
+
+type errReader struct{}
+
+func (r *errReader) ReadAt(p []byte, off int64) (n int, err error) {
+	return 0, errors.New("read error")
+}
+
+func TestErrReader(t *testing.T) {
+	if IsFatBinary(&errReader{}, 100) {
+		t.Errorf("expected IsFatBinary on failing reader to return false")
+	}
+
+	_, err := ReadTrailerAndIndex(&errReader{}, 100)
+	if err == nil {
+		t.Errorf("expected ReadTrailerAndIndex on failing reader to return error")
+	}
+}
+
+type errWriter struct {
+	failOnWrite int
+	writes      int
+}
+
+func (w *errWriter) Write(p []byte) (n int, err error) {
+	w.writes++
+	if w.writes >= w.failOnWrite {
+		return 0, errors.New("write failed")
+	}
+	return len(p), nil
+}
+
+func TestWriteIndexAndTrailerWriterErrors(t *testing.T) {
+	idx := &Index{Version: FormatVersionCurrent}
+
+	// Fail on 1st write (index json)
+	_, err := WriteIndexAndTrailer(&errWriter{failOnWrite: 1}, idx, 100)
+	if err == nil {
+		t.Errorf("expected error on failing index write")
+	}
+
+	// Fail on 2nd write (trailer)
+	_, err = WriteIndexAndTrailer(&errWriter{failOnWrite: 2}, idx, 100)
+	if err == nil {
+		t.Errorf("expected error on failing trailer write")
 	}
 }

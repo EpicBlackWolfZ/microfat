@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ghostnetorg/microfat/internal/pack"
+	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 )
 
 // trimInPlace trims the fat binary in-place to contain only the selected variant + stub.

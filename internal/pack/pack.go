@@ -13,8 +13,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ghostnetorg/microfat/internal/format"
-	"github.com/ghostnetorg/pkg/microarch"
+	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/klauspost/compress/zstd"
 )
 

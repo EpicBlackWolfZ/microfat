@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ghostnetorg/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/klauspost/compress/zstd"
 )
 

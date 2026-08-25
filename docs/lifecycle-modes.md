@@ -56,7 +56,7 @@ Microfat supports three distinct binary operational modes to accommodate differe
 - **Best For**: Production container images where container memory and CPU auto-tuning are desired, but image layer size must be minimized.
 - **Containerfile Recipe**:
   ```dockerfile
-  FROM registry.helsen.dev/ghostnet/distroless:latest
+  FROM gcr.io/distroless/static-debian12:nonroot
 
   # Copy the universal binary
   COPY --from=builder /build/dist/myapp /usr/local/bin/myapp

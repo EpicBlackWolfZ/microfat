@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ghostnetorg/pkg/microarch"
+	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 )
 
 func TestEndToEndFatBinaryWorkflow(t *testing.T) {

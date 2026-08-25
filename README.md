@@ -1,7 +1,7 @@
 # Microfat
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/ghostnetorg/microfat.svg)](https://pkg.go.dev/github.com/ghostnetorg/microfat)
-[![Go Report Card](https://goreportcard.com/badge/github.com/ghostnetorg/microfat)](https://goreportcard.com/report/github.com/ghostnetorg/microfat)
+[![Go Reference](https://pkg.go.dev/badge/github.com/EpicBlackWolfZ/microfat.svg)](https://pkg.go.dev/github.com/EpicBlackWolfZ/microfat)
+[![Go Report Card](https://goreportcard.com/badge/github.com/EpicBlackWolfZ/microfat)](https://goreportcard.com/report/github.com/EpicBlackWolfZ/microfat)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 **Microfat** combines multiple CPU microarchitecture-specific ELF binaries (`v1`, `v2`, `v3`, `v4`) into a single, self-dispatching Linux executable with zero persistent process overhead, automatic container resource tuning (`GOMEMLIMIT` & `GOMAXPROCS`), and cryptographic integrity validation.
@@ -40,8 +40,8 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 ### 1. Installation
 
 ```bash
-go install github.com/ghostnetorg/microfat/cmd/microfat@latest
-go install github.com/ghostnetorg/microfat/cmd/microfat-stub@latest
+go install github.com/EpicBlackWolfZ/microfat/cmd/microfat@latest
+go install github.com/EpicBlackWolfZ/microfat/cmd/microfat-stub@latest
 ```
 
 ### 2. Detect Host CPU Capabilities

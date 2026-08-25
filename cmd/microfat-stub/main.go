@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ghostnetorg/microfat/internal/format"
-	"github.com/ghostnetorg/pkg/cgroup"
-	"github.com/ghostnetorg/pkg/microarch"
+	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
+	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 )
 
 const (
@@ -24,19 +24,27 @@ const (
 	minOptimizeToArgs = 2
 )
 
+var (
+	exitFunc                  = os.Exit
+	getSelfExecutablePathFunc = os.Executable
+)
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "[microfat] error: %v\n", err)
-		os.Exit(1)
+		exitFunc(1)
 	}
 }
 
 func run() error {
-	selfPath, err := getSelfExecutablePath()
+	selfPath, err := getSelfExecutablePathFunc()
 	if err != nil {
 		return fmt.Errorf("resolving executable path: %w", err)
 	}
+	return runBinary(selfPath)
+}
 
+func runBinary(selfPath string) error {
 	// #nosec G304 -- launcher opens its own binary image to read payload index
 	selfFile, err := os.Open(filepath.Clean(selfPath))
 	if err != nil {
@@ -155,14 +163,6 @@ func extractTargetPath(arg, primaryFlag, aliasFlag string) (string, error) {
 	return "", fmt.Errorf("%s requires a destination path", primaryFlag)
 }
 
-func getSelfExecutablePath() (string, error) {
-	// On Linux, /proc/self/exe is the most reliable
-	if fi, err := os.Lstat("/proc/self/exe"); err == nil && (fi.Mode()&os.ModeSymlink != 0) {
-		return "/proc/self/exe", nil
-	}
-	return os.Executable()
-}
-
 func printHelp(idx *format.Index, hostInfo microarch.Info, selected *format.VariantEntry) {
 	fmt.Printf("Microfat Universal Launcher\n")
 	fmt.Printf("Application:   %s\n", idx.AppName)
@@ -190,7 +190,7 @@ func printInfo(idx *format.Index, hostInfo microarch.Info, selected *format.Vari
 	fmt.Printf("Execution Mode:    Linux memfd_create (anonymous RAM, 0 disk I/O)\n")
 
 	// Print cgroup auto-tuning info
-	if limits, err := cgroup.ReadLimits(); err == nil && limits.CgroupVersion != cgroup.VersionUnknown {
+	if limits, err := readCgroupLimitsFunc(); err == nil && limits.CgroupVersion != cgroup.VersionUnknown {
 		fmt.Printf("\nContainer Auto-Tuning (cgroup v%d):\n", limits.CgroupVersion)
 		if limits.MemoryLimitBytes > 0 {
 			memLimit, ok := cgroup.CalculateGOMEMLIMIT(

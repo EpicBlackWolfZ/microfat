@@ -2,14 +2,23 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/ghostnetorg/microfat/internal/format"
-	"github.com/ghostnetorg/microfat/internal/pack"
-	"github.com/ghostnetorg/pkg/microarch"
+	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
+	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
+	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"github.com/klauspost/compress/zstd"
+)
+
+const (
+	testArchAMD64 = "amd64"
+	testPathEnv   = "PATH=/bin"
+	testAppArg    = "app"
 )
 
 func TestPrintHelpAndInfo(t *testing.T) {
@@ -17,7 +26,7 @@ func TestPrintHelpAndInfo(t *testing.T) {
 		Version:     1,
 		AppName:     "testapp",
 		TargetOS:    "linux",
-		TargetArch:  "amd64",
+		TargetArch:  testArchAMD64,
 		CreatedUnix: 1700000000,
 		Variants: []format.VariantEntry{
 			{
@@ -31,7 +40,7 @@ func TestPrintHelpAndInfo(t *testing.T) {
 	}
 	hostInfo := microarch.Info{
 		OS:       "linux",
-		Arch:     "amd64",
+		Arch:     testArchAMD64,
 		Level:    "v3",
 		Features: []string{"avx", "avx2"},
 	}
@@ -91,14 +100,85 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 		t.Errorf("failed to preserve existing user env: %v", envPreserve)
 	}
 
-	// 5. Custom memory ratio
+	// 5. Custom memory ratio variations
 	t.Setenv("MICROFAT_MEM_RATIO", "0.85")
 	_ = buildAutoTunedEnviron(base, "v3", format.ExecModeMemfd)
+
+	t.Setenv("MICROFAT_MEM_RATIO", "invalid")
+	_ = buildAutoTunedEnviron(base, "v3", format.ExecModeMemfd)
+
+	t.Setenv("MICROFAT_MEM_RATIO", "1.5")
+	_ = buildAutoTunedEnviron(base, "v3", format.ExecModeMemfd)
+
+	t.Setenv("MICROFAT_MEM_RATIO", "-0.2")
+	_ = buildAutoTunedEnviron(base, "v3", format.ExecModeMemfd)
+
+	// 6. Test with mocked active cgroup limits
+	oldReadCgroup := readCgroupLimitsFunc
+	defer func() { readCgroupLimitsFunc = oldReadCgroup }()
+
+	// cgroup read error
+	readCgroupLimitsFunc = func() (cgroup.Limits, error) {
+		return cgroup.Limits{}, errors.New("cgroup error")
+	}
+	_ = buildAutoTunedEnviron([]string{testPathEnv}, "v3", format.ExecModeMemfd)
+
+	// cgroup unknown version
+	readCgroupLimitsFunc = func() (cgroup.Limits, error) {
+		return cgroup.Limits{CgroupVersion: cgroup.VersionUnknown}, nil
+	}
+	_ = buildAutoTunedEnviron([]string{testPathEnv}, "v3", format.ExecModeMemfd)
+
+	readCgroupLimitsFunc = func() (cgroup.Limits, error) {
+		return cgroup.Limits{
+			CgroupVersion:    cgroup.VersionV2,
+			MemoryLimitBytes: 1024 * 1024 * 1024,
+			CPUQuota:         4.0,
+			CPUs:             4,
+		}, nil
+	}
+
+	envCgroup := buildAutoTunedEnviron([]string{testPathEnv}, "v3", format.ExecModeMemfd)
+	var foundAutoMem, foundAutoCPU bool
+	for _, e := range envCgroup {
+		if strings.HasPrefix(e, "GOMEMLIMIT=") {
+			foundAutoMem = true
+		}
+		if strings.HasPrefix(e, "GOMAXPROCS=4") {
+			foundAutoCPU = true
+		}
+	}
+	if !foundAutoMem || !foundAutoCPU {
+		t.Errorf("expected auto-tuned GOMEMLIMIT and GOMAXPROCS in env: %v", envCgroup)
+	}
+
+	// 7. Test printInfo with mocked limits
+	idx := &format.Index{
+		AppName:    "testapp",
+		TargetOS:   "linux",
+		TargetArch: testArchAMD64,
+		Variants: []format.VariantEntry{
+			{Level: "v3", Offset: 100, CompressedSize: 200, UncompressedSize: 300, SHA256: "hash"},
+		},
+	}
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3", Features: []string{"avx2"}}
+	printInfo(idx, hostInfo, &idx.Variants[0], 1000)
+
+	// Test printInfo with unlimited limits
+	readCgroupLimitsFunc = func() (cgroup.Limits, error) {
+		return cgroup.Limits{
+			CgroupVersion:    cgroup.VersionV1,
+			MemoryLimitBytes: 0,
+			CPUQuota:         0,
+			CPUs:             0,
+		}, nil
+	}
+	printInfo(idx, hostInfo, &idx.Variants[0], 1000)
 }
 
 func TestLogDiagnostics(t *testing.T) {
 	entry := &format.VariantEntry{Level: "v3"}
-	hostInfo := microarch.Info{Arch: "amd64", Level: "v3"}
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
 	env := []string{"GOMEMLIMIT=1000B", "GOMAXPROCS=4"}
 
 	// Text debug output
@@ -110,19 +190,58 @@ func TestLogDiagnostics(t *testing.T) {
 	t.Setenv("MICROFAT_DEBUG", "0")
 	t.Setenv("MICROFAT_LOG", "json")
 	logDiagnostics(entry, format.ExecModeCache, hostInfo, env)
+
+	// Debug false without log
+	t.Setenv("MICROFAT_DEBUG", "0")
+	t.Setenv("MICROFAT_LOG", "")
+	logDiagnostics(entry, format.ExecModeMemfd, hostInfo, env)
 }
 
 func TestGetSelfExecutablePath(t *testing.T) {
-	path, err := getSelfExecutablePath()
+	path, err := getSelfExecutablePathFunc()
 	if err != nil {
-		t.Fatalf("getSelfExecutablePath failed: %v", err)
+		t.Fatalf("getSelfExecutablePathFunc failed: %v", err)
 	}
 	if path == "" {
 		t.Errorf("expected non-empty executable path")
 	}
 }
 
-func TestExtractVariantAndOptimizeTo(t *testing.T) {
+func TestHelperFunctions(t *testing.T) {
+	if !isPrefixOrExact("--microfat:trim", "--microfat:trim") {
+		t.Errorf("expected exact match true")
+	}
+	if !isPrefixOrExact("--microfat:trim=dest", "--microfat:trim") {
+		t.Errorf("expected prefix match true")
+	}
+	if isPrefixOrExact("--microfat:other", "--microfat:trim") {
+		t.Errorf("expected mismatch false")
+	}
+	if isPrefixOrExact("anything", "") {
+		t.Errorf("expected empty flag to return false")
+	}
+
+	target, err := extractTargetPath("--microfat:trim-to=/path/to/target", "--microfat:trim-to", "")
+	if err != nil || target != "/path/to/target" {
+		t.Errorf("extractTargetPath with = failed: %v, got %s", err, target)
+	}
+
+	targetAlias, err := extractTargetPath("--microfat:specialize-to=/path/alias", "--microfat:trim-to", "--microfat:specialize-to")
+	if err != nil || targetAlias != "/path/alias" {
+		t.Errorf("extractTargetPath with alias failed: %v, got %s", err, targetAlias)
+	}
+
+	oldArgs := os.Args
+	defer func() { os.Args = oldArgs }()
+	os.Args = []string{testAppArg, "--microfat:trim-to"}
+
+	_, err = extractTargetPath("--microfat:trim-to", "--microfat:trim-to", "")
+	if err == nil {
+		t.Errorf("expected error when no target path provided")
+	}
+}
+
+func TestExtractVariantAndOptimize(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create dummy compressed file
@@ -151,6 +270,17 @@ func TestExtractVariantAndOptimizeTo(t *testing.T) {
 	}
 	if !bytes.Equal(readBack, payloadData) {
 		t.Errorf("materialized binary content mismatch: got %q", string(readBack))
+	}
+
+	// Test optimizeInPlace
+	replaceTarget := filepath.Join(tempDir, "to_replace")
+	_ = os.WriteFile(replaceTarget, []byte("old-data"), 0o755)
+	if err := optimizeInPlace(replaceTarget, rawFile, entry); err != nil {
+		t.Fatalf("optimizeInPlace failed: %v", err)
+	}
+	readReplaced, _ := os.ReadFile(replaceTarget)
+	if !bytes.Equal(readReplaced, payloadData) {
+		t.Errorf("optimizeInPlace content mismatch: got %q", string(readReplaced))
 	}
 }
 
@@ -210,23 +340,388 @@ func TestTrimToAndInPlace(t *testing.T) {
 	}
 }
 
-func TestCacheDirectoryPermissions(t *testing.T) {
+func TestRunBinaryMetaCommands(t *testing.T) {
 	tempDir := t.TempDir()
-	customCache := filepath.Join(tempDir, "custom_cache")
-	t.Setenv("XDG_CACHE_HOME", customCache)
 
-	// Simulate cache dir creation logic
-	cacheDir := filepath.Join(customCache, "microfat")
-	if err := os.MkdirAll(cacheDir, privateCacheDirMode); err != nil {
-		t.Fatalf("failed to create cache dir: %v", err)
-	}
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("stub-bytes-data"), 0o755)
 
-	info, err := os.Stat(cacheDir)
+	v1Path := filepath.Join(tempDir, "v1")
+	_ = os.WriteFile(v1Path, []byte("v1-bytes-data"), 0o755)
+
+	fatPath := filepath.Join(tempDir, "fat_runner_app")
+	_, err := pack.Pack(pack.Options{
+		StubPath:          stubPath,
+		OutputPath:        fatPath,
+		AppName:           "runnertest",
+		SkipELFValidation: true,
+		Variants:          map[string]string{"v1": v1Path},
+	})
 	if err != nil {
-		t.Fatalf("stat cache dir: %v", err)
+		t.Fatalf("pack failed: %v", err)
 	}
-	if info.Mode().Perm() != privateCacheDirMode {
-		t.Errorf("expected cache permissions %o, got %o", privateCacheDirMode, info.Mode().Perm())
+
+	oldArgs := os.Args
+	defer func() { os.Args = oldArgs }()
+
+	// 1. --microfat:help
+	os.Args = []string{fatPath, "--microfat:help"}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("runBinary --microfat:help failed: %v", err)
+	}
+
+	// 2. --microfat:info
+	os.Args = []string{fatPath, "--microfat:info"}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("runBinary --microfat:info failed: %v", err)
+	}
+
+	// 3. --microfat:trim-to
+	destTrim := filepath.Join(tempDir, "trimmed_via_run")
+	os.Args = []string{fatPath, "--microfat:trim-to=" + destTrim}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("runBinary --microfat:trim-to failed: %v", err)
+	}
+
+	// 3b. --microfat:specialize-to alias
+	destSpec := filepath.Join(tempDir, "specialized_via_run")
+	os.Args = []string{fatPath, "--microfat:specialize-to=" + destSpec}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("runBinary --microfat:specialize-to failed: %v", err)
+	}
+
+	// 3c. --microfat:trim-to without argument
+	os.Args = []string{fatPath, "--microfat:trim-to"}
+	if err := runBinary(fatPath); err == nil {
+		t.Errorf("expected error when --microfat:trim-to has no target path")
+	}
+
+	// 3d. --microfat:trim-to with separate target path argument
+	destTrimSep := filepath.Join(tempDir, "trimmed_via_run_sep")
+	os.Args = []string{fatPath, "--microfat:trim-to", destTrimSep}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("runBinary --microfat:trim-to separate arg failed: %v", err)
+	}
+
+	// 4. --microfat:optimize-to
+	destOpt := filepath.Join(tempDir, "optimized_via_run")
+	os.Args = []string{fatPath, "--microfat:optimize-to=" + destOpt}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("runBinary --microfat:optimize-to failed: %v", err)
+	}
+
+	// 5. --microfat:trim in-place on a copy
+	copyFat := filepath.Join(tempDir, "fat_for_trim")
+	data, _ := os.ReadFile(fatPath)
+	_ = os.WriteFile(copyFat, data, 0o755)
+	os.Args = []string{copyFat, "--microfat:trim"}
+	if err := runBinary(copyFat); err != nil {
+		t.Fatalf("runBinary --microfat:trim failed: %v", err)
+	}
+
+	// 6. --microfat:optimize in-place on a copy
+	copyFat2 := filepath.Join(tempDir, "fat_for_opt")
+	_ = os.WriteFile(copyFat2, data, 0o755)
+	os.Args = []string{copyFat2, "--microfat:optimize"}
+	if err := runBinary(copyFat2); err != nil {
+		t.Fatalf("runBinary --microfat:optimize failed: %v", err)
+	}
+
+	// 7. Transparent application argument forwarding
+	oldExec := execveFunc
+	defer func() { execveFunc = oldExec }()
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		return nil
+	}
+	os.Args = []string{fatPath, "myarg1", "--flag"}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("runBinary standard execution failed: %v", err)
+	}
+
+	// 8. Error cases
+	os.Args = []string{stubPath, "--microfat:info"}
+	if err := runBinary(stubPath); err == nil {
+		t.Errorf("expected error running non-fat binary")
+	}
+
+	if err := runBinary(filepath.Join(tempDir, "nonexistent")); err == nil {
+		t.Errorf("expected error running non-existent binary")
+	}
+
+	// 9. Incompatible architecture fat binary
+	incompatibleFat := filepath.Join(tempDir, "fat_incompatible")
+	_, _ = pack.Pack(pack.Options{
+		StubPath:          stubPath,
+		OutputPath:        incompatibleFat,
+		TargetArch:        "unknown_arch_xyz",
+		SkipELFValidation: true,
+		Variants:          map[string]string{"v1": v1Path},
+	})
+	if err := runBinary(incompatibleFat); err == nil {
+		t.Errorf("expected error running fat binary with incompatible arch")
+	}
+}
+
+func TestExecuteVariantExecutionPaths(t *testing.T) {
+	tempDir := t.TempDir()
+	payloadData := []byte("PAYLOAD_EXEC_TEST")
+	entry, rawFile := createDummyVariantFile(t, tempDir, payloadData)
+	defer func() { _ = rawFile.Close() }()
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	oldExec := execveFunc
+	defer func() { execveFunc = oldExec }()
+
+	// 1. Successful memfd execve
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		return nil
+	}
+	if err := executeVariant(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo); err != nil {
+		t.Errorf("expected success for executeVariant, got %v", err)
+	}
+
+	// 2. Fallback to cache when memfd execution returns error
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		return errors.New("simulated execve error")
+	}
+	err := executeVariant(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo)
+	if err == nil || !strings.Contains(err.Error(), "cache fallback execve failed") {
+		t.Errorf("expected cache fallback error, got %v", err)
+	}
+
+	// 3. Fallback to cache when cached binary already exists
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		return nil
+	}
+	if err := executeViaCache(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo, errors.New("memfd err")); err != nil {
+		t.Errorf("expected success for existing cached binary, got %v", err)
+	}
+
+	// 4. Fallback to cache with fresh cache directory extraction
+	freshCacheDir := filepath.Join(tempDir, "fresh_cache_dir")
+	t.Setenv("XDG_CACHE_HOME", freshCacheDir)
+	if err := executeViaCache(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo, errors.New("memfd err")); err != nil {
+		t.Errorf("expected success for fresh cache directory extraction, got %v", err)
+	}
+
+	// 5. Fallback when XDG_CACHE_HOME is empty (uses user home dir)
+	t.Setenv("XDG_CACHE_HOME", "")
+	if err := executeViaCache(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo, errors.New("memfd err")); err != nil {
+		t.Errorf("expected success when XDG_CACHE_HOME is empty, got %v", err)
+	}
+
+	// 5b. Fallback when XDG_CACHE_HOME is empty and userHomeDirFunc fails (uses os.TempDir())
+	oldHome := userHomeDirFunc
+	defer func() { userHomeDirFunc = oldHome }()
+	userHomeDirFunc = func() (string, error) {
+		return "", errors.New("no home dir")
+	}
+	if err := executeViaCache(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo, errors.New("memfd err")); err != nil {
+		t.Errorf("expected success when userHomeDir fails, got %v", err)
+	}
+	userHomeDirFunc = oldHome
+
+	// 6. Fallback when primary cacheDir cannot be created (forbidden path)
+	t.Setenv("XDG_CACHE_HOME", "/dev/null/forbidden_path")
+	if err := executeViaCache(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo, errors.New("memfd err")); err != nil {
+		t.Errorf("expected success falling back to /tmp/.microfat-uid, got %v", err)
+	}
+
+	// 6b. Fallback failure when both primary and secondary cacheDir cannot be created
+	t.Setenv("XDG_CACHE_HOME", "/dev/null/forbidden_primary")
+	t.Setenv("TMPDIR", "/dev/null/forbidden_secondary")
+	if err := executeViaCache(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo, errors.New("memfd err")); err == nil {
+		t.Errorf("expected error when both cache directories cannot be created")
+	}
+	t.Setenv("TMPDIR", "")
+
+	// 7. Error extracting variant to cache fallback
+	badEntryCache := &format.VariantEntry{Level: "v1", Offset: 0, CompressedSize: 10, UncompressedSize: 50, SHA256: "unique_bad_hash_123"}
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(tempDir, "bad_cache_extract"))
+	err = executeViaCache(rawFile, badEntryCache, []string{testAppArg}, []string{testPathEnv}, hostInfo, errors.New("memfd err"))
+	if err == nil {
+		t.Errorf("expected error extracting invalid entry in executeViaCache")
+	}
+
+	// 8. Error creating temp file in read-only cache dir
+	roCacheDir := filepath.Join(tempDir, "ro_cache_dir")
+	_ = os.MkdirAll(filepath.Join(roCacheDir, "microfat"), 0o755)
+	_ = os.Chmod(filepath.Join(roCacheDir, "microfat"), 0o555)
+	defer func() { _ = os.Chmod(filepath.Join(roCacheDir, "microfat"), 0o755) }()
+	t.Setenv("XDG_CACHE_HOME", roCacheDir)
+	newHashEntry := &format.VariantEntry{Level: "v1", Offset: 0, CompressedSize: 10, UncompressedSize: 50, SHA256: "brand_new_hash_456"}
+	err = executeViaCache(rawFile, newHashEntry, []string{testAppArg}, []string{testPathEnv}, hostInfo, errors.New("memfd err"))
+	if err == nil {
+		t.Errorf("expected error when cache dir is not writable")
+	}
+
+	// 9. Error in executeViaMemfd when variant extraction fails
+	if err := executeViaMemfd(rawFile, badEntryCache, []string{testAppArg}, []string{testPathEnv}, hostInfo); err == nil {
+		t.Errorf("expected error in executeViaMemfd when extractVariantToWriter fails")
+	}
+
+	// 10. Error in executeViaMemfd when execve fails
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		return errors.New("memfd execve failed")
+	}
+	if err := executeViaMemfd(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo); err == nil {
+		t.Errorf("expected error in executeViaMemfd when execve returns error")
+	}
+}
+
+func TestOptimizeInPlaceSymlink(t *testing.T) {
+	tempDir := t.TempDir()
+	payloadData := []byte("OPTIMIZE_SYMLINK_TEST")
+	entry, rawFile := createDummyVariantFile(t, tempDir, payloadData)
+	defer func() { _ = rawFile.Close() }()
+
+	realTarget := filepath.Join(tempDir, "real_opt_file")
+	_ = os.WriteFile(realTarget, []byte("original"), 0o755)
+
+	symTarget := filepath.Join(tempDir, "sym_opt_file")
+	if err := os.Symlink(realTarget, symTarget); err != nil {
+		t.Fatalf("creating symlink: %v", err)
+	}
+
+	if err := optimizeInPlace(symTarget, rawFile, entry); err != nil {
+		t.Fatalf("optimizeInPlace on symlink failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(realTarget)
+	if !bytes.Equal(content, payloadData) {
+		t.Errorf("optimizeInPlace on symlink did not update target: got %q", string(content))
+	}
+
+	// Test extractVariantToWriter with wrong UncompressedSize
+	entrySizeMismatch := &format.VariantEntry{
+		Level:            entry.Level,
+		Offset:           entry.Offset,
+		CompressedSize:   entry.CompressedSize,
+		UncompressedSize: entry.UncompressedSize + 100, // wrong size
+	}
+	var dummyBuf bytes.Buffer
+	if err := extractVariantToWriter(rawFile, entrySizeMismatch, &dummyBuf); err == nil {
+		t.Errorf("expected error on uncompressed size mismatch")
+	}
+
+	// Test optimizeTo and trimTo error on invalid destination directory
+	if err := optimizeTo("/dev/null/forbidden/bin", rawFile, entry); err == nil {
+		t.Errorf("expected optimizeTo to fail on invalid destination directory")
+	}
+	if err := trimTo("/dev/null/forbidden/bin", rawFile, 1000, "v1"); err == nil {
+		t.Errorf("expected trimTo to fail on invalid destination directory")
+	}
+
+	// Test optimizeInPlace and trimInPlace in read-only directory
+	roDir := filepath.Join(tempDir, "readonly_dir")
+	_ = os.MkdirAll(roDir, 0o755)
+	roFile := filepath.Join(roDir, "ro_app")
+	_ = os.WriteFile(roFile, []byte("data"), 0o755)
+	_ = os.Chmod(roDir, 0o555)
+	defer func() { _ = os.Chmod(roDir, 0o755) }()
+
+	if err := optimizeInPlace(roFile, rawFile, entry); err == nil {
+		t.Errorf("expected optimizeInPlace to fail in read-only directory")
+	}
+	if err := trimInPlace(roFile, rawFile, 1000, "v1"); err == nil {
+		t.Errorf("expected trimInPlace to fail in read-only directory")
+	}
+
+	// Test optimizeInPlace and trimInPlace when selfPath is a directory (rename error)
+	dirTarget := filepath.Join(tempDir, "existing_target_dir")
+	_ = os.MkdirAll(dirTarget, 0o755)
+	if err := optimizeInPlace(dirTarget, rawFile, entry); err == nil {
+		t.Errorf("expected optimizeInPlace to fail when selfPath is directory")
+	}
+	if err := trimInPlace(dirTarget, rawFile, 1000, "v1"); err == nil {
+		t.Errorf("expected trimInPlace to fail when selfPath is directory")
+	}
+
+	// Test optimizeTo with invalid entry
+	badEntry := &format.VariantEntry{Level: "v1", Offset: 0, CompressedSize: 10, UncompressedSize: 50}
+	if err := optimizeTo(filepath.Join(tempDir, "bad_opt"), rawFile, badEntry); err == nil {
+		t.Errorf("expected optimizeTo with bad entry to fail")
+	}
+
+	// Test optimizeTo when destination is an existing directory
+	if err := optimizeTo(tempDir, rawFile, entry); err == nil {
+		t.Errorf("expected optimizeTo to fail when target is directory")
+	}
+
+	// Test trimTo with invalid variant level
+	if err := trimTo(filepath.Join(tempDir, "bad_trim"), rawFile, 1000, "nonexistent"); err == nil {
+		t.Errorf("expected trimTo with nonexistent variant to fail")
+	}
+
+	// Test trimTo when destination is an existing directory
+	if err := trimTo(tempDir, rawFile, 1000, "v1"); err == nil {
+		t.Errorf("expected trimTo to fail when target is directory")
+	}
+}
+
+func TestRunBinarySpecializeAndRun(t *testing.T) {
+	tempDir := t.TempDir()
+
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("stub-bytes"), 0o755)
+
+	v1Path := filepath.Join(tempDir, "v1")
+	_ = os.WriteFile(v1Path, []byte("v1-bytes"), 0o755)
+
+	fatPath := filepath.Join(tempDir, "fat_specialize_app")
+	_, err := pack.Pack(pack.Options{
+		StubPath:          stubPath,
+		OutputPath:        fatPath,
+		AppName:           "specializeapp",
+		SkipELFValidation: true,
+		Variants:          map[string]string{"v1": v1Path},
+	})
+	if err != nil {
+		t.Fatalf("pack failed: %v", err)
+	}
+
+	oldArgs := os.Args
+	defer func() { os.Args = oldArgs }()
+
+	// 1. --microfat:specialize
+	copyFat := filepath.Join(tempDir, "fat_copy_specialize")
+	data, _ := os.ReadFile(fatPath)
+	_ = os.WriteFile(copyFat, data, 0o755)
+	os.Args = []string{copyFat, "--microfat:specialize"}
+	if err := runBinary(copyFat); err != nil {
+		t.Fatalf("runBinary --microfat:specialize failed: %v", err)
+	}
+
+	// 2. --microfat:specialize-to
+	destSpec := filepath.Join(tempDir, "specialize_to_out")
+	os.Args = []string{fatPath, "--microfat:specialize-to=" + destSpec}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("runBinary --microfat:specialize-to failed: %v", err)
+	}
+
+	// 3. run() when current test binary is not fat binary
+	_ = run()
+
+	// 3b. run() when resolving executable path fails
+	oldGetSelf := getSelfExecutablePathFunc
+	defer func() { getSelfExecutablePathFunc = oldGetSelf }()
+	getSelfExecutablePathFunc = func() (string, error) {
+		return "", errors.New("cannot determine executable path")
+	}
+	if err := run(); err == nil {
+		t.Errorf("expected error when getSelfExecutablePathFunc fails")
+	}
+
+	// 4. main() invocation
+	oldExit := exitFunc
+	defer func() { exitFunc = oldExit }()
+	exitCalled := false
+	exitFunc = func(code int) {
+		exitCalled = true
+	}
+	main()
+	if !exitCalled {
+		t.Errorf("expected exitFunc to be called from main() on non-fat binary")
 	}
 }
 

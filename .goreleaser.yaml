@@ -1,6 +1,7 @@
 # GoReleaser configuration for microfat
-# renovate: datasource=github-releases depName=goreleaser/goreleaser
 version: 2
+
+project_name: microfat
 
 builds:
   - id: microfat
@@ -12,35 +13,110 @@ builds:
       - linux
     goarch:
       - amd64
+      - arm64
+    goamd64:
+      - v1
+      - v2
+      - v3
+      - v4
     flags:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/ghostnetorg/pkg/version.Version={{.Version}}
-      - -X github.com/ghostnetorg/pkg/version.Commit={{.Commit}}
-      - -X github.com/ghostnetorg/pkg/version.Date={{.Date}}
-      - -X github.com/ghostnetorg/pkg/version.BuiltBy=goreleaser
-      - -X github.com/ghostnetorg/pkg/version.Vendor=Ghostnet
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.Version={{.Version}}
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.Commit={{.Commit}}
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.Date={{.Date}}
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.BuiltBy=goreleaser
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.Vendor=EpicBlackWolfZ
+    hooks:
+      post:
+        - cmd: ./scripts/bundle-fat.sh
 
   - id: microfat-stub
     main: ./cmd/microfat-stub
     binary: microfat-stub
     env:
       - CGO_ENABLED=0
-      - GOAMD64=v1
     goos:
       - linux
     goarch:
       - amd64
+      - arm64
+    goamd64:
+      - v1
     flags:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/ghostnetorg/pkg/version.Version={{.Version}}
-      - -X github.com/ghostnetorg/pkg/version.Commit={{.Commit}}
-      - -X github.com/ghostnetorg/pkg/version.Date={{.Date}}
-      - -X github.com/ghostnetorg/pkg/version.BuiltBy=goreleaser
-      - -X github.com/ghostnetorg/pkg/version.Vendor=Ghostnet
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.Version={{.Version}}
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.Commit={{.Commit}}
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.Date={{.Date}}
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.BuiltBy=goreleaser
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.Vendor=EpicBlackWolfZ
+    hooks:
+      post:
+        - cmd: ./scripts/bundle-fat.sh
+
+archives:
+  - id: microfat
+    ids:
+      - microfat
+    name_template: "microfat_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Amd64 }}_{{ .Amd64 }}{{ end }}"
+    formats:
+      - tar.gz
+    files:
+      - README.md
+      - LICENSE
+      - docs/*
+
+  - id: microfat-stub
+    ids:
+      - microfat-stub
+    name_template: "microfat-stub_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Amd64 }}_{{ .Amd64 }}{{ end }}"
+    formats:
+      - tar.gz
+    files:
+      - README.md
+      - LICENSE
+      - docs/*
+
+sboms:
+  - id: spdx
+    artifacts: archive
+    documents:
+      - "${artifact}.spdx.json"
+  - id: cyclonedx
+    artifacts: archive
+    documents:
+      - "${artifact}.cyclonedx.json"
+
+signs:
+  - artifacts: checksum
+    cmd: cosign
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+
+release:
+  github:
+    owner: EpicBlackWolfZ
+    name: microfat
+  extra_files:
+    - glob: ./dist/microfat_linux_amd64_fat
+
+checksum:
+  name_template: "checksums.txt"
 
 snapshot:
   version_template: "{{ incpatch .Version }}-SNAPSHOT-{{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

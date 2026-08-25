@@ -1,6 +1,4 @@
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
-github.com/ghostnetorg/pkg v0.3.0 h1:XuFiHnWyr7dMoCAuCG6rxq5mwsCSQyyz/X3Qyf/Oaa0=
-github.com/ghostnetorg/pkg v0.3.0/go.mod h1:QjWFNVglg64j+lh5fqWsI3UsYwAT+eG04rzbF9QG7LU=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/klauspost/compress v1.18.5 h1:/h1gH5Ce+VWNLSWqPzOVn6XBO+vJbCNGvjoaGBFW2IE=
