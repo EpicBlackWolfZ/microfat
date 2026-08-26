@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  goreleaser:
+    name: Build, Smoke Test & Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.27.x'
+          cache: true
+
+      - name: Install Cosign (Keyless Signing)
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Install Syft (SBOM Generation)
+        uses: anchore/sbom-action/download-syft@v0.24.0
+
+      - name: Run GoReleaser (Compile Variants, Self-Bundle Fat Binary, Syft SBOMs, Cosign Signatures & Publish)
+        uses: goreleaser/goreleaser-action@v7.2.3
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
