@@ -53,9 +53,9 @@ func handleMetaCommand(
 	case isPrefixOrExact(arg1, flagTrimTo) || isPrefixOrExact(arg1, flagSpecializeTo):
 		return true, handleTrimTo(arg1, selfFile, statSize, selectedEntry.Level)
 	case arg1 == flagOptimize:
-		return true, handleOptimizeInPlace(selfPath, selfFile, statSize, selectedEntry)
+		return true, handleOptimizeInPlace(selfPath, selfFile, statSize, selectedEntry, idx)
 	case isPrefixOrExact(arg1, flagOptimizeTo):
-		return true, handleOptimizeTo(arg1, selfFile, selectedEntry)
+		return true, handleOptimizeTo(arg1, selfFile, selectedEntry, idx)
 	case isPrefixOrExact(arg1, flagPrewarm):
 		jsonOutput := strings.HasSuffix(arg1, "=json") || hasJSONFlag(os.Args[2:])
 		verifyMode := strings.Contains(arg1, "verify") || hasVerifyFlag(os.Args[2:])
@@ -99,9 +99,11 @@ func handleTrimTo(arg1 string, selfFile *os.File, statSize int64, selectedLevel 
 	return nil
 }
 
-func handleOptimizeInPlace(selfPath string, selfFile *os.File, statSize int64, selectedEntry *format.VariantEntry) error {
+func handleOptimizeInPlace(
+	selfPath string, selfFile *os.File, statSize int64, selectedEntry *format.VariantEntry, idx *format.Index,
+) error {
 	fmt.Printf("[microfat] Optimizing binary in-place to variant '%s' (raw uncompressed ELF)...\n", selectedEntry.Level)
-	if err := optimizeInPlace(selfPath, selfFile, selectedEntry); err != nil {
+	if err := optimizeInPlace(selfPath, selfFile, selectedEntry, idx); err != nil {
 		return err
 	}
 	fmt.Printf("[microfat] Successfully replaced '%s' with %s binary (%d bytes -> %d bytes)\n",
@@ -109,13 +111,13 @@ func handleOptimizeInPlace(selfPath string, selfFile *os.File, statSize int64, s
 	return nil
 }
 
-func handleOptimizeTo(arg1 string, selfFile *os.File, selectedEntry *format.VariantEntry) error {
+func handleOptimizeTo(arg1 string, selfFile *os.File, selectedEntry *format.VariantEntry, idx *format.Index) error {
 	targetPath, err := extractTargetPath(arg1, flagOptimizeTo, "")
 	if err != nil {
 		return err
 	}
 	fmt.Printf("[microfat] Extracting variant '%s' to '%s'...\n", selectedEntry.Level, targetPath)
-	if err := optimizeTo(targetPath, selfFile, selectedEntry); err != nil {
+	if err := optimizeTo(targetPath, selfFile, selectedEntry, idx); err != nil {
 		return err
 	}
 	fmt.Printf("[microfat] Successfully materialized '%s' (%d bytes)\n", targetPath, selectedEntry.UncompressedSize)
@@ -368,21 +370,25 @@ func printInfo(
 			}
 		}
 		info := format.BinaryInfo{
-			AppName:         idx.AppName,
-			TargetOS:        idx.TargetOS,
-			TargetArch:      idx.TargetArch,
-			FatBinarySize:   totalSize,
-			HostOS:          hostInfo.OS,
-			HostArch:        hostInfo.Arch,
-			HostLevel:       hostInfo.Level,
-			SelectedVariant: selected.Level,
-			SelectedSize:    selected.UncompressedSize,
-			ExecMode:        format.ExecModeMemfd,
-			PolicyApplied:   policyRes.PolicyApplied,
-			PolicyReason:    policyRes.OverrideReason,
-			Cgroup:          cgInfo,
-			Variants:        idx.Variants,
-			HostFeatures:    hostInfo.Features,
+			AppName:          idx.AppName,
+			TargetOS:         idx.TargetOS,
+			TargetArch:       idx.TargetArch,
+			FatBinarySize:    totalSize,
+			HostOS:           hostInfo.OS,
+			HostArch:         hostInfo.Arch,
+			HostLevel:        hostInfo.Level,
+			SelectedVariant:  selected.Level,
+			SelectedSize:     selected.UncompressedSize,
+			ExecMode:         format.ExecModeMemfd,
+			PolicyApplied:    policyRes.PolicyApplied,
+			PolicyReason:     policyRes.OverrideReason,
+			DictionaryOffset: idx.DictionaryOffset,
+			DictionarySize:   idx.DictionarySize,
+			DictionarySHA256: idx.DictionarySHA256,
+			DictionaryID:     idx.DictionaryID,
+			Cgroup:           cgInfo,
+			Variants:         idx.Variants,
+			HostFeatures:     hostInfo.Features,
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -396,6 +402,10 @@ func printInfo(
 	fmt.Printf("App Name:          %s\n", idx.AppName)
 	fmt.Printf("Target Platform:   %s/%s\n", idx.TargetOS, idx.TargetArch)
 	fmt.Printf("Fat Binary Size:   %d bytes\n", totalSize)
+	if idx.DictionarySize > 0 {
+		fmt.Printf("Shared Dictionary: %d bytes (offset %d, sha256: %.12s...)\n",
+			idx.DictionarySize, idx.DictionaryOffset, idx.DictionarySHA256)
+	}
 	fmt.Printf("Host Platform:     %s/%s\n", hostInfo.OS, hostInfo.Arch)
 	fmt.Printf("Host CPU Level:    %s\n", hostInfo.Level)
 	fmt.Printf("Selected Variant:  %s (%d bytes uncompressed)\n", selected.Level, selected.UncompressedSize)

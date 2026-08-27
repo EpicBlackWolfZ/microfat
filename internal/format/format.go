@@ -102,17 +102,19 @@ var userHomeDirFunc = os.UserHomeDir
 
 // Standard error definitions for binary format parsing.
 var (
-	ErrBinaryTooSmall     = errors.New("binary size is smaller than trailer size")
-	ErrInvalidMagic       = errors.New("invalid microfat magic bytes at EOF")
-	ErrUnsupportedVersion = errors.New("unsupported microfat format version")
-	ErrInvalidIndexOffset = errors.New("invalid index offset in trailer")
-	ErrInvalidIndexSize   = errors.New("invalid index size in trailer")
-	ErrIndexCorrupted     = errors.New("index SHA-256 checksum mismatch")
-	ErrOutOfBounds        = errors.New("variant payload extends beyond binary boundary")
-	ErrPayloadTooLarge    = errors.New("variant payload size exceeds safety limit")
-	ErrOverlappingVariant = errors.New("variant payloads overlap or are unsorted")
-	ErrTruncatedIndex     = errors.New("truncated index data")
-	ErrInvalidJSONSyntax  = errors.New("invalid json syntax in manifest index")
+	ErrBinaryTooSmall      = errors.New("binary size is smaller than trailer size")
+	ErrInvalidMagic        = errors.New("invalid microfat magic bytes at EOF")
+	ErrUnsupportedVersion  = errors.New("unsupported microfat format version")
+	ErrInvalidIndexOffset  = errors.New("invalid index offset in trailer")
+	ErrInvalidIndexSize    = errors.New("invalid index size in trailer")
+	ErrIndexCorrupted      = errors.New("index SHA-256 checksum mismatch")
+	ErrOutOfBounds         = errors.New("variant payload extends beyond binary boundary")
+	ErrPayloadTooLarge     = errors.New("variant payload size exceeds safety limit")
+	ErrOverlappingVariant  = errors.New("variant payloads overlap or are unsorted")
+	ErrTruncatedIndex      = errors.New("truncated index data")
+	ErrInvalidJSONSyntax   = errors.New("invalid json syntax in manifest index")
+	ErrDictionaryCorrupted = errors.New("shared dictionary SHA-256 checksum mismatch")
+	ErrInvalidDictionary   = errors.New("invalid shared dictionary offset or size")
 )
 
 // VariantEntry describes an individual compressed microarchitecture variant payload.
@@ -127,12 +129,16 @@ type VariantEntry struct {
 
 // Index holds the manifest of all embedded variants and target platform metadata.
 type Index struct {
-	Version     int            `json:"version"`
-	AppName     string         `json:"app_name,omitempty"`
-	TargetOS    string         `json:"os"`
-	TargetArch  string         `json:"arch"`
-	CreatedUnix int64          `json:"created_unix"`
-	Variants    []VariantEntry `json:"variants"`
+	Version          int            `json:"version"`
+	AppName          string         `json:"app_name,omitempty"`
+	TargetOS         string         `json:"os"`
+	TargetArch       string         `json:"arch"`
+	CreatedUnix      int64          `json:"created_unix"`
+	DictionaryOffset int64          `json:"dictionary_offset,omitempty"`
+	DictionarySize   int64          `json:"dictionary_size,omitempty"`
+	DictionarySHA256 string         `json:"dictionary_sha256,omitempty"`
+	DictionaryID     uint32         `json:"dictionary_id,omitempty"`
+	Variants         []VariantEntry `json:"variants"`
 }
 
 // DispatchTelemetry records structured runtime execution metadata and performance timings.
@@ -206,21 +212,25 @@ type PrewarmTelemetry struct {
 
 // BinaryInfo represents the structured JSON output for launcher inspection.
 type BinaryInfo struct {
-	AppName         string         `json:"app_name"`
-	TargetOS        string         `json:"target_os"`
-	TargetArch      string         `json:"target_arch"`
-	FatBinarySize   int64          `json:"fat_binary_size"`
-	HostOS          string         `json:"host_os"`
-	HostArch        string         `json:"host_arch"`
-	HostLevel       string         `json:"host_level"`
-	SelectedVariant string         `json:"selected_variant"`
-	SelectedSize    int64          `json:"selected_size"`
-	ExecMode        string         `json:"exec_mode"`
-	PolicyApplied   string         `json:"policy_applied,omitempty"`
-	PolicyReason    string         `json:"policy_reason,omitempty"`
-	Cgroup          *CgroupInfo    `json:"cgroup,omitempty"`
-	Variants        []VariantEntry `json:"variants"`
-	HostFeatures    []string       `json:"host_features"`
+	AppName          string         `json:"app_name"`
+	TargetOS         string         `json:"target_os"`
+	TargetArch       string         `json:"target_arch"`
+	FatBinarySize    int64          `json:"fat_binary_size"`
+	HostOS           string         `json:"host_os"`
+	HostArch         string         `json:"host_arch"`
+	HostLevel        string         `json:"host_level"`
+	SelectedVariant  string         `json:"selected_variant"`
+	SelectedSize     int64          `json:"selected_size"`
+	ExecMode         string         `json:"exec_mode"`
+	PolicyApplied    string         `json:"policy_applied,omitempty"`
+	PolicyReason     string         `json:"policy_reason,omitempty"`
+	DictionaryOffset int64          `json:"dictionary_offset,omitempty"`
+	DictionarySize   int64          `json:"dictionary_size,omitempty"`
+	DictionarySHA256 string         `json:"dictionary_sha256,omitempty"`
+	DictionaryID     uint32         `json:"dictionary_id,omitempty"`
+	Cgroup           *CgroupInfo    `json:"cgroup,omitempty"`
+	Variants         []VariantEntry `json:"variants"`
+	HostFeatures     []string       `json:"host_features"`
 }
 
 // CgroupInfo represents container cgroup telemetry and auto-tuning limits.
@@ -260,6 +270,16 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 	}
 
 	var lastEnd int64
+	if idx.DictionarySize > 0 {
+		if idx.DictionaryOffset < 0 {
+			return fmt.Errorf("%w: invalid dictionary offset %d", ErrInvalidDictionary, idx.DictionaryOffset)
+		}
+		if idx.DictionaryOffset+idx.DictionarySize > indexOffset {
+			return fmt.Errorf("%w: dictionary payload extends past index offset %d", ErrOutOfBounds, indexOffset)
+		}
+		lastEnd = idx.DictionaryOffset + idx.DictionarySize
+	}
+
 	for i, v := range idx.Variants {
 		if v.Offset < 0 || v.CompressedSize <= 0 || v.UncompressedSize <= 0 {
 			return fmt.Errorf("%w: invalid dimensions for variant %s", ErrOutOfBounds, v.Level)
@@ -270,31 +290,35 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 		if v.Offset+v.CompressedSize > indexOffset {
 			return fmt.Errorf("%w: variant %s payload extends past index offset %d", ErrOutOfBounds, v.Level, indexOffset)
 		}
-		if i > 0 && v.Offset < lastEnd {
-			return fmt.Errorf("%w: variant %s offset %d overlaps with previous variant ending at %d",
+		if (i > 0 || idx.DictionarySize > 0) && v.Offset < lastEnd {
+			return fmt.Errorf("%w: variant %s offset %d overlaps with previous data ending at %d",
 				ErrOverlappingVariant, v.Level, v.Offset, lastEnd)
 		}
-	lastEnd = v.Offset + v.CompressedSize
+		lastEnd = v.Offset + v.CompressedSize
 	}
 	return nil
 }
 
 const (
 	defaultCompressionAlgorithm = "zstd"
-	minBinaryHeaderSize         = 20
-	binaryHeaderFixedSize       = 20
+	minBinaryHeaderSize         = 34
+	binaryHeaderFixedSize       = 34
 	initialVariantCap           = 4
 	decimalBase                 = 10
 	asciiControlCutoff          = 0x20
+	uint16LenPrefixSize         = 2
+	uint64FieldSize             = 8
 )
 
 // MarshalBinaryIndex serializes an Index struct into a compact Format v2 binary representation.
 func MarshalBinaryIndex(idx *Index) ([]byte, error) {
-	if len(idx.TargetOS) > 255 || len(idx.TargetArch) > 255 || len(idx.AppName) > 65535 || len(idx.Variants) > 65535 {
+	if len(idx.TargetOS) > 255 || len(idx.TargetArch) > 255 || len(idx.AppName) > 65535 ||
+		len(idx.Variants) > 65535 || len(idx.DictionarySHA256) > 255 {
 		return nil, errors.New("index metadata field exceeds binary format limits")
 	}
 
-	totalSize := binaryHeaderFixedSize + len(idx.TargetOS) + len(idx.TargetArch) + len(idx.AppName)
+	totalSize := binaryHeaderFixedSize + 1 + len(idx.DictionarySHA256) +
+		1 + len(idx.TargetOS) + 1 + len(idx.TargetArch) + uint16LenPrefixSize + len(idx.AppName) + uint16LenPrefixSize
 	for _, v := range idx.Variants {
 		comp := v.Compression
 		if comp == "" {
@@ -303,7 +327,7 @@ func MarshalBinaryIndex(idx *Index) ([]byte, error) {
 		if len(v.Level) > 255 || len(v.SHA256) > 255 || len(comp) > 255 {
 			return nil, fmt.Errorf("variant %s field length exceeds binary format limits", v.Level)
 		}
-		totalSize += 1 + len(v.Level) + 8 + 8 + 8 + 1 + len(v.SHA256) + 1 + len(comp)
+		totalSize += 1 + len(v.Level) + uint64FieldSize + uint64FieldSize + uint64FieldSize + 1 + len(v.SHA256) + 1 + len(comp)
 	}
 
 	buf := make([]byte, totalSize)
@@ -311,8 +335,20 @@ func MarshalBinaryIndex(idx *Index) ([]byte, error) {
 	binary.LittleEndian.PutUint16(buf[4:6], uint16(FormatVersion2))
 	// #nosec G115 -- timestamps and counts fit in respective integer types
 	binary.LittleEndian.PutUint64(buf[6:14], uint64(idx.CreatedUnix))
+	// #nosec G115 -- offset fits uint64
+	binary.LittleEndian.PutUint64(buf[14:22], uint64(idx.DictionaryOffset))
+	// #nosec G115 -- size fits uint64
+	binary.LittleEndian.PutUint64(buf[22:30], uint64(idx.DictionarySize))
+	binary.LittleEndian.PutUint32(buf[30:34], idx.DictionaryID)
 
-	offset := 14
+	offset := 34
+
+	// #nosec G115 -- length checked <= 255 above
+	buf[offset] = byte(len(idx.DictionarySHA256))
+	offset++
+	copy(buf[offset:], idx.DictionarySHA256)
+	offset += len(idx.DictionarySHA256)
+
 	// #nosec G115 -- length checked <= 255 above
 	buf[offset] = byte(len(idx.TargetOS))
 	offset++
@@ -391,8 +427,28 @@ func UnmarshalBinaryIndex(data []byte) (*Index, error) {
 
 	// #nosec G115 -- binary format integer decode
 	createdUnix := int64(binary.LittleEndian.Uint64(data[6:14]))
-	offset := 14
+	// #nosec G115 -- binary format integer decode
+	dictOffset := int64(binary.LittleEndian.Uint64(data[14:22]))
+	// #nosec G115 -- binary format integer decode
+	dictSize := int64(binary.LittleEndian.Uint64(data[22:30]))
+	dictID := binary.LittleEndian.Uint32(data[30:34])
 
+	offset := 34
+
+	if offset >= len(data) {
+		return nil, fmt.Errorf("%w: truncated dictionary sha length", ErrTruncatedIndex)
+	}
+	dictSHALen := int(data[offset])
+	offset++
+	if offset+dictSHALen > len(data) {
+		return nil, fmt.Errorf("%w: truncated dictionary sha string", ErrTruncatedIndex)
+	}
+	dictSHA := string(data[offset : offset+dictSHALen])
+	offset += dictSHALen
+
+	if offset >= len(data) {
+		return nil, fmt.Errorf("%w: truncated os length", ErrTruncatedIndex)
+	}
 	osLen := int(data[offset])
 	offset++
 	if offset+osLen > len(data) {
@@ -492,12 +548,16 @@ func UnmarshalBinaryIndex(data []byte) (*Index, error) {
 	}
 
 	return &Index{
-		Version:     version,
-		AppName:     appName,
-		TargetOS:    targetOS,
-		TargetArch:  targetArch,
-		CreatedUnix: createdUnix,
-		Variants:    variants,
+		Version:          version,
+		AppName:          appName,
+		TargetOS:         targetOS,
+		TargetArch:       targetArch,
+		CreatedUnix:      createdUnix,
+		DictionaryOffset: dictOffset,
+		DictionarySize:   dictSize,
+		DictionarySHA256: dictSHA,
+		DictionaryID:     dictID,
+		Variants:         variants,
 	}, nil
 }
 
@@ -780,6 +840,35 @@ func parseJSONIndexField(key string, data []byte, pos int, idx *Index) (int, err
 		}
 		idx.CreatedUnix = v
 		return nPos, nil
+	case "dictionary_offset":
+		v, nPos, err := parseJSONInt64(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		idx.DictionaryOffset = v
+		return nPos, nil
+	case "dictionary_size":
+		v, nPos, err := parseJSONInt64(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		idx.DictionarySize = v
+		return nPos, nil
+	case "dictionary_sha256":
+		s, nPos, err := parseJSONString(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		idx.DictionarySHA256 = s
+		return nPos, nil
+	case "dictionary_id":
+		v, nPos, err := parseJSONInt64(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		// #nosec G115 -- integer conversion for dictionary_id
+		idx.DictionaryID = uint32(v)
+		return nPos, nil
 	case "variants":
 		variants, nPos, err := parseJSONVariantArray(data, pos)
 		if err != nil {
@@ -1002,6 +1091,21 @@ func marshalJSONIndex(idx *Index) ([]byte, error) {
 	sb.WriteString(escapeJSONString(idx.TargetArch))
 	sb.WriteString(`","created_unix":`)
 	sb.WriteString(strconv.FormatInt(idx.CreatedUnix, 10))
+	if idx.DictionarySize > 0 {
+		sb.WriteString(`,"dictionary_offset":`)
+		sb.WriteString(strconv.FormatInt(idx.DictionaryOffset, 10))
+		sb.WriteString(`,"dictionary_size":`)
+		sb.WriteString(strconv.FormatInt(idx.DictionarySize, 10))
+		if idx.DictionarySHA256 != "" {
+			sb.WriteString(`,"dictionary_sha256":"`)
+			sb.WriteString(escapeJSONString(idx.DictionarySHA256))
+			sb.WriteString(`"`)
+		}
+		if idx.DictionaryID > 0 {
+			sb.WriteString(`,"dictionary_id":`)
+			sb.WriteString(strconv.FormatInt(int64(idx.DictionaryID), 10))
+		}
+	}
 	sb.WriteString(`,"variants":[`)
 	for i, v := range idx.Variants {
 		if i > 0 {

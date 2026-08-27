@@ -3,6 +3,7 @@ package codec_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 
@@ -328,6 +329,159 @@ type errReader struct{}
 
 func (e *errReader) Read(p []byte) (n int, err error) {
 	return 0, errors.New("simulated read error")
+}
+
+func generateDictionarySamples() [][]byte {
+	samples := make([][]byte, 40)
+	for i := range samples {
+		var b bytes.Buffer
+		for j := 0; j < 50; j++ {
+			b.WriteString(fmt.Sprintf("GO_MICROFAT_RUNTIME_SYMBOL_TABLE_ENTRY_PKG_INDEX_%d_%d_OFFSET_%d_LENGTH_%d\n", i, j, i*100+j, (i+j)*8))
+			b.WriteString("common_static_data_string_for_testing_zstandard_compression_dictionary_builder\n")
+		}
+		samples[i] = b.Bytes()
+	}
+	return samples
+}
+
+func TestZstdDictionaryCompression(t *testing.T) {
+	t.Parallel()
+
+	samples := generateDictionarySamples()
+
+	dict, err := codec.TrainDictionary(samples, 32*1024, "better")
+	if err != nil {
+		t.Fatalf("TrainDictionary failed: %v", err)
+	}
+	if len(dict) == 0 {
+		t.Fatalf("expected non-empty dictionary")
+	}
+
+	zCodecRaw, err := codec.Get(codec.AlgorithmZstd)
+	if err != nil {
+		t.Fatalf("Get zstd: %v", err)
+	}
+	zCodec, ok := zCodecRaw.(codec.DictCodec)
+	if !ok {
+		t.Fatalf("expected zstd codec to implement DictCodec")
+	}
+
+	testData := samples[0]
+
+	t.Run("Compress and Decompress with Dict", func(t *testing.T) {
+		t.Parallel()
+		var compressed bytes.Buffer
+		if err := zCodec.CompressWithDict(&compressed, testData, "fastest", dict); err != nil {
+			t.Fatalf("CompressWithDict failed: %v", err)
+		}
+
+		var decompressed bytes.Buffer
+		if err := zCodec.DecompressWithDict(&decompressed, &compressed, int64(len(testData)), dict); err != nil {
+			t.Fatalf("DecompressWithDict failed: %v", err)
+		}
+
+		if !bytes.Equal(decompressed.Bytes(), testData) {
+			t.Fatalf("decompressed payload with dict mismatch")
+		}
+	})
+
+	t.Run("DecompressWithOptionalDict helper", func(t *testing.T) {
+		t.Parallel()
+		var compressed bytes.Buffer
+		if err := zCodec.CompressWithDict(&compressed, testData, "fastest", dict); err != nil {
+			t.Fatalf("CompressWithDict failed: %v", err)
+		}
+
+		var decompressed bytes.Buffer
+		if err := codec.DecompressWithOptionalDict(zCodec, &decompressed, &compressed, int64(len(testData)), dict); err != nil {
+			t.Fatalf("DecompressWithOptionalDict failed: %v", err)
+		}
+
+		if !bytes.Equal(decompressed.Bytes(), testData) {
+			t.Fatalf("DecompressWithOptionalDict payload mismatch")
+		}
+
+		// Also test DecompressWithOptionalDict on non-dict codec (None)
+		noneCodec, _ := codec.Get(codec.AlgorithmNone)
+		var noneOut bytes.Buffer
+		err := codec.DecompressWithOptionalDict(noneCodec, &noneOut, bytes.NewReader(testData), int64(len(testData)), dict)
+		if err != nil {
+			t.Fatalf("DecompressWithOptionalDict with noneCodec: %v", err)
+		}
+	})
+
+	t.Run("Decompress without matching dict fails or errs on corrupted data", func(t *testing.T) {
+		t.Parallel()
+		var compressed bytes.Buffer
+		if err := zCodec.CompressWithDict(&compressed, testData, "fastest", dict); err != nil {
+			t.Fatalf("CompressWithDict failed: %v", err)
+		}
+
+		wrongDict := []byte("invalid_or_wrong_dictionary_content_bytes_sequence_1234567890")
+		var decompressed bytes.Buffer
+		// Decompressing with empty dict or wrong dict should fail
+		err := zCodec.DecompressWithDict(&decompressed, &compressed, int64(len(testData)), nil)
+		if err == nil && !bytes.Equal(decompressed.Bytes(), testData) {
+			t.Fatalf("expected error or mismatch when decompressing without dict")
+		}
+
+		var decompressedWrong bytes.Buffer
+		_ = zCodec.DecompressWithDict(&decompressedWrong, bytes.NewReader(compressed.Bytes()), int64(len(testData)), wrongDict)
+	})
+
+	t.Run("Compress with invalid level", func(t *testing.T) {
+		t.Parallel()
+		var compressed bytes.Buffer
+		err := zCodec.CompressWithDict(&compressed, testData, "invalid_num_abc", dict)
+		if !errors.Is(err, codec.ErrInvalidCompressionLevel) {
+			t.Fatalf("expected ErrInvalidCompressionLevel, got %v", err)
+		}
+	})
+
+	t.Run("Writer error during CompressWithDict", func(t *testing.T) {
+		t.Parallel()
+		ew := &errWriter{}
+		err := zCodec.CompressWithDict(ew, testData, "fastest", dict)
+		if err == nil {
+			t.Fatalf("expected error writing with errWriter")
+		}
+	})
+}
+
+func TestTrainDictionaryValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Empty samples list", func(t *testing.T) {
+		t.Parallel()
+		_, err := codec.TrainDictionary(nil, 0, "")
+		if err == nil {
+			t.Fatalf("expected error on nil samples")
+		}
+	})
+
+	t.Run("Zero total sample bytes", func(t *testing.T) {
+		t.Parallel()
+		_, err := codec.TrainDictionary([][]byte{{}, {}}, 0, "")
+		if err == nil {
+			t.Fatalf("expected error on empty slices")
+		}
+	})
+
+	t.Run("Target dict size clamping", func(t *testing.T) {
+		t.Parallel()
+		samples := generateDictionarySamples()
+		// Negative size -> default
+		dict1, err := codec.TrainDictionary(samples, -100, "")
+		if err != nil || len(dict1) == 0 {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Extremely large size -> capped at MaxDictSize
+		dict2, err := codec.TrainDictionary(samples, 50*1024*1024, "best")
+		if err != nil || len(dict2) == 0 {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }
 
 func BenchmarkCodecs(b *testing.B) {

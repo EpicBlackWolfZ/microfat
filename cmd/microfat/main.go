@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/builder"
+	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
@@ -130,6 +131,10 @@ func newInspectCmd() *cobra.Command {
 			fmt.Printf("Format Version:    v%d (%s)\n", idx.Version, formatVersionName(idx.Version))
 			fmt.Printf("Target Platform:   %s/%s\n", idx.TargetOS, idx.TargetArch)
 			fmt.Printf("Total Size:        %d bytes\n", stat.Size())
+			if idx.DictionarySize > 0 {
+				fmt.Printf("Shared Dictionary: %d bytes (offset %d, sha256: %.12s...)\n",
+					idx.DictionarySize, idx.DictionaryOffset, idx.DictionarySHA256)
+			}
 			fmt.Printf("Created At:        %s\n\n", time.Unix(idx.CreatedUnix, 0).Format(time.RFC3339))
 
 			fmt.Printf("Embedded Variants (%d total):\n", len(idx.Variants))
@@ -352,6 +357,8 @@ func newPackCmd() *cobra.Command {
 		profile           string
 		compression       string
 		compressionLevel  string
+		enableDict        bool
+		dictSize          int
 		formatVersion     int
 		concurrency       int
 		keepIntermediates bool
@@ -378,6 +385,8 @@ func newPackCmd() *cobra.Command {
 					Profile:           profile,
 					Compression:       compression,
 					CompressionLevel:  compressionLevel,
+					EnableDict:        enableDict,
+					DictSize:          dictSize,
 					FormatVersion:     formatVersion,
 					Stdout:            os.Stdout,
 					Stderr:            os.Stderr,
@@ -428,6 +437,8 @@ func newPackCmd() *cobra.Command {
 				Profile:           profile,
 				Compression:       compression,
 				CompressionLevel:  compressionLevel,
+				EnableDict:        enableDict,
+				DictSize:          dictSize,
 				FormatVersion:     formatVersion,
 			}
 
@@ -456,6 +467,9 @@ func newPackCmd() *cobra.Command {
 	cmd.Flags().StringVar(&profile, "profile", "", "Compression profile preset: latency, balanced, size")
 	cmd.Flags().StringVar(&compression, "compression", "", "Compression algorithm: lz4, zstd, none (e.g. lz4 or zstd:11)")
 	cmd.Flags().StringVar(&compressionLevel, "compression-level", "", "Compression level override: fastest, default, better, best, or number")
+	cmd.Flags().BoolVar(&enableDict, "dict", false, "Enable shared Zstandard dictionary compression across variants")
+	cmd.Flags().BoolVar(&enableDict, "zstd-dict", false, "Alias for --dict")
+	cmd.Flags().IntVar(&dictSize, "dict-size", codec.DefaultDictSize, "Target shared Zstandard dictionary size in bytes (default: 112 KB)")
 	cmd.Flags().IntVar(&formatVersion, "format-version", format.FormatVersionCurrent,
 		"Binary format specification version (1 for JSON, 2 for binary table)")
 	cmd.Flags().BoolVar(&skipELFValidation, "skip-elf-validation", false, "Skip ELF header architecture validation")
@@ -474,6 +488,8 @@ func newPgoPackCmd() *cobra.Command {
 		profile           string
 		compression       string
 		compressionLevel  string
+		enableDict        bool
+		dictSize          int
 		formatVersion     int
 		concurrency       int
 		keepIntermediates bool
@@ -511,6 +527,8 @@ then packages them into a self-dispatching microfat binary.`,
 				Profile:           profile,
 				Compression:       compression,
 				CompressionLevel:  compressionLevel,
+				EnableDict:        enableDict,
+				DictSize:          dictSize,
 				FormatVersion:     formatVersion,
 				Stdout:            os.Stdout,
 				Stderr:            os.Stderr,
@@ -538,6 +556,9 @@ then packages them into a self-dispatching microfat binary.`,
 	cmd.Flags().StringVar(&profile, "profile", "", "Compression profile preset: latency, balanced, size")
 	cmd.Flags().StringVar(&compression, "compression", "", "Compression algorithm: lz4, zstd, none (e.g. lz4 or zstd:11)")
 	cmd.Flags().StringVar(&compressionLevel, "compression-level", "", "Compression level override: fastest, default, better, best, or number")
+	cmd.Flags().BoolVar(&enableDict, "dict", false, "Enable shared Zstandard dictionary compression across variants")
+	cmd.Flags().BoolVar(&enableDict, "zstd-dict", false, "Alias for --dict")
+	cmd.Flags().IntVar(&dictSize, "dict-size", codec.DefaultDictSize, "Target shared Zstandard dictionary size in bytes (default: 112 KB)")
 	cmd.Flags().IntVar(&formatVersion, "format-version", format.FormatVersionCurrent,
 		"Binary format specification version (1 for JSON, 2 for binary table)")
 	cmd.Flags().IntVarP(&concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (defaults to NumCPU)")
