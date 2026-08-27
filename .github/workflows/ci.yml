@@ -69,7 +69,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9.3.0
         with:
           version: v2.13.1
-          install-mode: goinstall
+          install-mode: binary
           args: --timeout=5m
 
   test:
