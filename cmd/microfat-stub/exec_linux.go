@@ -26,6 +26,7 @@ const (
 
 var (
 	execveFunc           = syscall.Exec
+	memfdCreateFunc      = unix.MemfdCreate
 	readCgroupLimitsFunc = cgroup.ReadLimits
 	resolveCacheDirFunc  = format.ResolveCacheDir
 	userHomeDirFunc      = os.UserHomeDir
@@ -263,7 +264,7 @@ func executeViaMemfd(
 ) error {
 	env, limits := buildAutoTunedEnviron(baseEnv, entry, format.ExecModeMemfd, hostInfo, policyRes)
 
-	fd, err := unix.MemfdCreate("microfat_payload", unix.MFD_CLOEXEC)
+	fd, err := memfdCreateFunc("microfat_payload", unix.MFD_CLOEXEC)
 	if err != nil {
 		logErrorDiagnostics("memfd_create", err, hostInfo, entry, policyRes, "falling back to disk cache")
 		return fmt.Errorf("memfd_create failed: %w", err)
@@ -312,8 +313,18 @@ func executeViaCache(
 
 	cachedBinary := filepath.Join(cacheDir, filepath.Clean(entry.SHA256))
 	var decompDuration time.Duration
-	// #nosec G703 -- cache entry existence check
-	if _, err := os.Stat(cachedBinary); err != nil {
+	stat, statErr := os.Stat(cachedBinary)
+	// #nosec G703 -- cache entry existence and size verification
+	if statErr != nil || stat.Size() != entry.UncompressedSize {
+		if statErr == nil && stat.Size() != entry.UncompressedSize {
+			if os.Getenv(format.EnvDebug) == "1" {
+				fmt.Fprintf(
+					os.Stderr,
+					"[microfat:debug] truncated cache file detected (%s, expected %d B, got %d B), re-extracting\n",
+					cachedBinary, entry.UncompressedSize, stat.Size(),
+				)
+			}
+		}
 		tmpFile, err := os.CreateTemp(cacheDir, ".exec-*.tmp")
 		if err != nil {
 			errOut := fmt.Errorf("launcher execution failed: cannot create temp file in %s: %w (primary memfd error: %v)",
