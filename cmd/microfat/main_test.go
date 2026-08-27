@@ -20,6 +20,10 @@ const (
 	flagSkipELF  = "--skip-elf-validation"
 	flagManifest = "--manifest"
 	flagVerify   = "--verify"
+
+	testOSLinux   = "linux"
+	testArchAMD64 = "amd64"
+	testArchARM64 = "arm64"
 )
 
 func TestRootCmdAndSubcommands(t *testing.T) {
@@ -382,7 +386,7 @@ func TestCLITrimPolicyFlags(t *testing.T) {
 		StubPath:          stubPath,
 		OutputPath:        fatPath,
 		AppName:           "policyapp",
-		TargetArch:        "amd64",
+		TargetArch:        testArchAMD64,
 		SkipELFValidation: true,
 		Variants: map[string]string{
 			"v1": v1Path,
@@ -443,7 +447,7 @@ func TestCLIPrewarmCmd(t *testing.T) {
 		StubPath:          stubPath,
 		OutputPath:        fatPath,
 		AppName:           "prewarm-cli-app",
-		TargetArch:        "amd64",
+		TargetArch:        testArchAMD64,
 		SkipELFValidation: true,
 		Variants: map[string]string{
 			"v1": v1Path,
@@ -636,7 +640,7 @@ func TestCLIPrewarmVerifyMode(t *testing.T) {
 		StubPath:          stubPath,
 		OutputPath:        fatPath,
 		AppName:           "prewarm-vfy-cli",
-		TargetArch:        "amd64",
+		TargetArch:        testArchAMD64,
 		SkipELFValidation: true,
 		Variants: map[string]string{
 			"v1": v1Path,
