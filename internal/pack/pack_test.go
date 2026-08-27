@@ -3,8 +3,10 @@ package pack
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
@@ -12,8 +14,9 @@ import (
 )
 
 const (
-	testOSLinux   = "linux"
-	testArchAMD64 = "amd64"
+	testOSLinux            = "linux"
+	testArchAMD64          = "amd64"
+	testCompressionFastest = "fastest"
 )
 
 func TestPackAndVerify(t *testing.T) {
@@ -54,7 +57,7 @@ func TestPackAndVerify(t *testing.T) {
 		TargetOS:          testOSLinux,
 		TargetArch:        testArchAMD64,
 		SkipELFValidation: true,
-		CompressionLevel:  "fastest",
+		CompressionLevel:  testCompressionFastest,
 		Variants: map[string]string{
 			"v1": v1Path,
 			"v3": v3Path,
@@ -1271,6 +1274,176 @@ func TestMultiCodecPackagingAndVerification(t *testing.T) {
 		t.Errorf("expected error in PrewarmVariant with hash mismatch")
 	}
 }
+
+func createBenchmarkFixture(b *testing.B, variantCount int) (stubPath string, variants map[string]string, tempDir string) {
+	b.Helper()
+	tempDir = b.TempDir()
+	stubPath = filepath.Join(tempDir, "stub")
+	if err := os.WriteFile(stubPath, []byte("#!/bin/sh\necho Stub\n"), 0o755); err != nil {
+		b.Fatalf("failed to create stub: %v", err)
+	}
+
+	variants = make(map[string]string, variantCount)
+	for i := 1; i <= variantCount; i++ {
+		lvl := "v" + strconv.Itoa(i)
+		p := filepath.Join(tempDir, "bin-"+lvl)
+		payload := bytes.Repeat([]byte("benchmark-payload-data-line-"+lvl+"\n"), 256)
+		if err := os.WriteFile(p, payload, 0o755); err != nil {
+			b.Fatalf("failed to create variant %s: %v", lvl, err)
+		}
+		variants[lvl] = p
+	}
+	return stubPath, variants, tempDir
+}
+
+func BenchmarkPack(b *testing.B) {
+	for _, count := range []int{1, 4} {
+		b.Run(strconv.Itoa(count)+"Variants", func(b *testing.B) {
+			stubPath, variants, tempDir := createBenchmarkFixture(b, count)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				outPath := filepath.Join(tempDir, "out-"+strconv.Itoa(i))
+				opts := Options{
+					StubPath:          stubPath,
+					OutputPath:        outPath,
+					AppName:           "bench-app",
+					TargetOS:          testOSLinux,
+					TargetArch:        testArchAMD64,
+					SkipELFValidation: true,
+					CompressionLevel:  testCompressionFastest,
+					Variants:          variants,
+				}
+				if _, err := Pack(opts); err != nil {
+					b.Fatalf("Pack failed: %v", err)
+				}
+				_ = os.Remove(outPath)
+			}
+		})
+	}
+}
+
+func BenchmarkVerifyBinary(b *testing.B) {
+	stubPath, variants, tempDir := createBenchmarkFixture(b, 4)
+	fatPath := filepath.Join(tempDir, "fat-verify")
+	opts := Options{
+		StubPath:          stubPath,
+		OutputPath:        fatPath,
+		AppName:           "bench-app",
+		TargetOS:          testOSLinux,
+		TargetArch:        testArchAMD64,
+		SkipELFValidation: true,
+		CompressionLevel:  testCompressionFastest,
+		Variants:          variants,
+	}
+	if _, err := Pack(opts); err != nil {
+		b.Fatalf("Pack fixture failed: %v", err)
+	}
+
+	data, err := os.ReadFile(fatPath)
+	if err != nil {
+		b.Fatalf("reading fat fixture: %v", err)
+	}
+	reader := bytes.NewReader(data)
+	totalSize := int64(len(data))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, results, err := VerifyBinary(reader, totalSize)
+		if err != nil || len(results) != 4 {
+			b.Fatalf("VerifyBinary failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkTrimBinary(b *testing.B) {
+	stubPath, variants, tempDir := createBenchmarkFixture(b, 4)
+	fatPath := filepath.Join(tempDir, "fat-trim")
+	opts := Options{
+		StubPath:          stubPath,
+		OutputPath:        fatPath,
+		AppName:           "bench-app",
+		TargetOS:          testOSLinux,
+		TargetArch:        testArchAMD64,
+		SkipELFValidation: true,
+		CompressionLevel:  testCompressionFastest,
+		Variants:          variants,
+	}
+	if _, err := Pack(opts); err != nil {
+		b.Fatalf("Pack fixture failed: %v", err)
+	}
+
+	data, err := os.ReadFile(fatPath)
+	if err != nil {
+		b.Fatalf("reading fat fixture: %v", err)
+	}
+	reader := bytes.NewReader(data)
+	totalSize := int64(len(data))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := TrimBinary(reader, totalSize, "v3", io.Discard)
+		if err != nil {
+			b.Fatalf("TrimBinary failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkPrewarmBinary(b *testing.B) {
+	stubPath, variants, tempDir := createBenchmarkFixture(b, 4)
+	fatPath := filepath.Join(tempDir, "fat-prewarm")
+	opts := Options{
+		StubPath:          stubPath,
+		OutputPath:        fatPath,
+		AppName:           "bench-app",
+		TargetOS:          testOSLinux,
+		TargetArch:        testArchAMD64,
+		SkipELFValidation: true,
+		CompressionLevel:  testCompressionFastest,
+		Variants:          variants,
+	}
+	if _, err := Pack(opts); err != nil {
+		b.Fatalf("Pack fixture failed: %v", err)
+	}
+
+	data, err := os.ReadFile(fatPath)
+	if err != nil {
+		b.Fatalf("reading fat fixture: %v", err)
+	}
+	reader := bytes.NewReader(data)
+	totalSize := int64(len(data))
+
+	cacheDir := filepath.Join(tempDir, "cache")
+	// Prewarm once to populate cache
+	if _, _, err := PrewarmBinary(reader, totalSize, nil, cacheDir); err != nil {
+		b.Fatalf("prewarming failed: %v", err)
+	}
+
+	b.Run("CachedHit", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, results, err := PrewarmBinary(reader, totalSize, nil, cacheDir)
+			if err != nil || len(results) != 4 {
+				b.Fatalf("PrewarmBinary failed: %v", err)
+			}
+		}
+	})
+
+	b.Run("VerifyCacheBinary", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, results, err := VerifyCacheBinary(reader, totalSize, nil, cacheDir)
+			if err != nil || len(results) != 4 {
+				b.Fatalf("VerifyCacheBinary failed: %v", err)
+			}
+		}
+	})
+}
+
 
 
 
