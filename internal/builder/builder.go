@@ -38,6 +38,7 @@ type BuildOptions struct {
 	Profile           string
 	Compression       string
 	CompressionLevel  string
+	FormatVersion     int
 	Stdout            io.Writer
 	Stderr            io.Writer
 }
@@ -415,6 +416,7 @@ func assemblePackOptions(
 		TargetArch:        m.TargetArch,
 		Variants:          compiledMap,
 		SkipELFValidation: opts.SkipELFValidation,
+		FormatVersion:     opts.FormatVersion,
 	}
 
 	if m.Compression != nil {

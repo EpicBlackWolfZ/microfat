@@ -1,3 +1,5 @@
+//go:build !minimal
+
 // Package main implements the minimal microfat launcher stub.
 package main
 

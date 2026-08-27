@@ -127,6 +127,7 @@ func newInspectCmd() *cobra.Command {
 
 			fmt.Printf("Binary Path:       %s\n", path)
 			fmt.Printf("App Name:          %s\n", idx.AppName)
+			fmt.Printf("Format Version:    v%d (%s)\n", idx.Version, formatVersionName(idx.Version))
 			fmt.Printf("Target Platform:   %s/%s\n", idx.TargetOS, idx.TargetArch)
 			fmt.Printf("Total Size:        %d bytes\n", stat.Size())
 			fmt.Printf("Created At:        %s\n\n", time.Unix(idx.CreatedUnix, 0).Format(time.RFC3339))
@@ -351,6 +352,7 @@ func newPackCmd() *cobra.Command {
 		profile           string
 		compression       string
 		compressionLevel  string
+		formatVersion     int
 		concurrency       int
 		keepIntermediates bool
 		goBinary          string
@@ -376,6 +378,7 @@ func newPackCmd() *cobra.Command {
 					Profile:           profile,
 					Compression:       compression,
 					CompressionLevel:  compressionLevel,
+					FormatVersion:     formatVersion,
 					Stdout:            os.Stdout,
 					Stderr:            os.Stderr,
 				}
@@ -425,6 +428,7 @@ func newPackCmd() *cobra.Command {
 				Profile:           profile,
 				Compression:       compression,
 				CompressionLevel:  compressionLevel,
+				FormatVersion:     formatVersion,
 			}
 
 			fmt.Printf("Packaging fat binary '%s'...\n", outputPath)
@@ -452,6 +456,8 @@ func newPackCmd() *cobra.Command {
 	cmd.Flags().StringVar(&profile, "profile", "", "Compression profile preset: latency, balanced, size")
 	cmd.Flags().StringVar(&compression, "compression", "", "Compression algorithm: lz4, zstd, none (e.g. lz4 or zstd:11)")
 	cmd.Flags().StringVar(&compressionLevel, "compression-level", "", "Compression level override: fastest, default, better, best, or number")
+	cmd.Flags().IntVar(&formatVersion, "format-version", format.FormatVersionCurrent,
+		"Binary format specification version (1 for JSON, 2 for binary table)")
 	cmd.Flags().BoolVar(&skipELFValidation, "skip-elf-validation", false, "Skip ELF header architecture validation")
 	cmd.Flags().IntVarP(&concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (when using --manifest)")
 	cmd.Flags().BoolVar(&keepIntermediates, "keep-intermediates", false, "Keep intermediate compiled variant ELF binaries")
@@ -468,6 +474,7 @@ func newPgoPackCmd() *cobra.Command {
 		profile           string
 		compression       string
 		compressionLevel  string
+		formatVersion     int
 		concurrency       int
 		keepIntermediates bool
 		goBinary          string
@@ -504,6 +511,7 @@ then packages them into a self-dispatching microfat binary.`,
 				Profile:           profile,
 				Compression:       compression,
 				CompressionLevel:  compressionLevel,
+				FormatVersion:     formatVersion,
 				Stdout:            os.Stdout,
 				Stderr:            os.Stderr,
 			}
@@ -530,12 +538,25 @@ then packages them into a self-dispatching microfat binary.`,
 	cmd.Flags().StringVar(&profile, "profile", "", "Compression profile preset: latency, balanced, size")
 	cmd.Flags().StringVar(&compression, "compression", "", "Compression algorithm: lz4, zstd, none (e.g. lz4 or zstd:11)")
 	cmd.Flags().StringVar(&compressionLevel, "compression-level", "", "Compression level override: fastest, default, better, best, or number")
+	cmd.Flags().IntVar(&formatVersion, "format-version", format.FormatVersionCurrent,
+		"Binary format specification version (1 for JSON, 2 for binary table)")
 	cmd.Flags().IntVarP(&concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (defaults to NumCPU)")
 	cmd.Flags().BoolVar(&keepIntermediates, "keep-intermediates", false, "Keep intermediate compiled variant ELF binaries")
 	cmd.Flags().StringVar(&goBinary, "go-binary", "", "Path to Go toolchain binary (defaults to $GO or 'go')")
 	cmd.Flags().BoolVar(&skipELFValidation, "skip-elf-validation", false, "Skip ELF header architecture validation")
 
 	return cmd
+}
+
+func formatVersionName(version int) string {
+	switch version {
+	case format.FormatVersion1:
+		return "legacy JSON manifest"
+	case format.FormatVersion2:
+		return "compact binary table"
+	default:
+		return "unknown"
+	}
 }
 
 func newPrewarmCmd() *cobra.Command {

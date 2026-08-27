@@ -3,8 +3,8 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
+	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"golang.org/x/sys/unix"
@@ -31,6 +32,21 @@ var (
 	resolveCacheDirFunc  = format.ResolveCacheDir
 	userHomeDirFunc      = os.UserHomeDir
 )
+
+// extractVariantToWriter seeks to the variant offset and streams decompressed bytes to w.
+func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, w io.Writer) error {
+	c, err := codec.Get(entry.Compression)
+	if err != nil {
+		return fmt.Errorf("lookup codec %q for variant %s: %w", entry.Compression, entry.Level, err)
+	}
+
+	secReader := io.NewSectionReader(selfFile, entry.Offset, entry.CompressedSize)
+	if err := c.Decompress(w, secReader, entry.UncompressedSize); err != nil {
+		return fmt.Errorf("decompressing variant payload: %w", err)
+	}
+
+	return nil
+}
 
 // executeVariant runs the selected variant payload in-memory using Linux memfd_create,
 // falling back to user cache execution if memfd is restricted or if cache mode is explicitly requested.
@@ -190,9 +206,7 @@ func logDiagnostics(
 			d.CgroupMemLimitBytes = limits.MemoryLimitBytes
 			d.CgroupCPUQuota = limits.CPUQuota
 		}
-		if b, err := json.Marshal(d); err == nil {
-			fmt.Fprintf(os.Stderr, "[microfat] %s\n", string(b))
-		}
+		fmt.Fprintf(os.Stderr, "[microfat] %s\n", formatDispatchTelemetryJSON(d))
 		return
 	}
 
@@ -237,9 +251,7 @@ func logErrorDiagnostics(
 		if entry != nil {
 			e.SelectedVariant = entry.Level
 		}
-		if b, mErr := json.Marshal(e); mErr == nil {
-			fmt.Fprintf(os.Stderr, "[microfat] %s\n", string(b))
-		}
+		fmt.Fprintf(os.Stderr, "[microfat] %s\n", formatErrorTelemetryJSON(e))
 		return
 	}
 

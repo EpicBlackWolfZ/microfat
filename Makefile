@@ -45,8 +45,10 @@ build: ## Compile microfat CLI and microfat-stub binaries for host architecture 
 	@$(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/microfat ./cmd/microfat
 ifeq ($(HOST_ARCH),arm64)
 	@GOARM64=v8.0 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/microfat-stub ./cmd/microfat-stub
+	@GOARM64=v8.0 $(GO) build -tags minimal -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/microfat-stub-minimal ./cmd/microfat-stub
 else
 	@GOAMD64=v1 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/microfat-stub ./cmd/microfat-stub
+	@GOAMD64=v1 $(GO) build -tags minimal -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/microfat-stub-minimal ./cmd/microfat-stub
 endif
 	@echo "\033[32m✔\033[0m Binaries built successfully in $(BIN_DIR)/"
 
@@ -55,6 +57,7 @@ build-amd64: ## Cross-compile microfat CLI and stub for Linux AMD64
 	@mkdir -p $(BIN_DIR)
 	@GOOS=linux GOARCH=amd64 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/microfat-amd64 ./cmd/microfat
 	@GOOS=linux GOARCH=amd64 GOAMD64=v1 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/microfat-stub-amd64 ./cmd/microfat-stub
+	@GOOS=linux GOARCH=amd64 GOAMD64=v1 $(GO) build -tags minimal -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/microfat-stub-minimal-amd64 ./cmd/microfat-stub
 	@echo "\033[32m✔\033[0m AMD64 binaries built in $(BIN_DIR)/"
 
 build-arm64: ## Cross-compile microfat CLI and stub for Linux ARM64
@@ -62,6 +65,7 @@ build-arm64: ## Cross-compile microfat CLI and stub for Linux ARM64
 	@mkdir -p $(BIN_DIR)
 	@GOOS=linux GOARCH=arm64 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/microfat-arm64 ./cmd/microfat
 	@GOOS=linux GOARCH=arm64 GOARM64=v8.0 $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/microfat-stub-arm64 ./cmd/microfat-stub
+	@GOOS=linux GOARCH=arm64 GOARM64=v8.0 $(GO) build -tags minimal -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/microfat-stub-minimal-arm64 ./cmd/microfat-stub
 	@echo "\033[32m✔\033[0m ARM64 binaries built in $(BIN_DIR)/"
 
 build-all: build build-amd64 build-arm64 ## Build host and all cross-architecture binaries
@@ -70,8 +74,10 @@ test: ## Run unit tests with race detection
 	@echo "\033[34m==>\033[0m Running unit tests with race detection..."
 ifdef GOTESTSUM
 	@gotestsum -- -race ./...
+	@gotestsum -- -race -tags minimal ./cmd/microfat-stub/...
 else
 	@$(GO) test -race ./...
+	@$(GO) test -race -tags minimal ./cmd/microfat-stub/...
 endif
 	@echo "\033[32m✔\033[0m Tests passed successfully"
 

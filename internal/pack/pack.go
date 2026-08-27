@@ -53,6 +53,7 @@ type Options struct {
 	CompressionLevel   string            // level string or numeric
 	VariantCompression map[string]VariantCompressionOptions
 	Permissions        os.FileMode
+	FormatVersion      int  // FormatVersion1 (JSON) or FormatVersion2 (Binary, default)
 	SkipELFValidation  bool // Optional flag to bypass ELF header validation (primarily for testing)
 }
 
@@ -99,7 +100,7 @@ func Pack(opts Options) (*format.Index, error) {
 
 	currentOffset := int64(len(stubBytes))
 	idx := &format.Index{
-		Version:     format.FormatVersionCurrent,
+		Version:     opts.FormatVersion,
 		AppName:     opts.AppName,
 		TargetOS:    opts.TargetOS,
 		TargetArch:  opts.TargetArch,
@@ -118,7 +119,7 @@ func Pack(opts Options) (*format.Index, error) {
 	}
 
 	// 3. Write Index and Trailer
-	if _, err := format.WriteIndexAndTrailer(tmpFile, idx, currentOffset); err != nil {
+	if _, err := format.WriteIndexAndTrailerWithVersion(tmpFile, idx, currentOffset, opts.FormatVersion); err != nil {
 		return nil, fmt.Errorf("writing index and trailer: %w", err)
 	}
 
@@ -148,6 +149,13 @@ func validateOptions(opts *Options) error {
 	}
 	if opts.Permissions == 0 {
 		opts.Permissions = defaultFileMode
+	}
+	if opts.FormatVersion != 0 && opts.FormatVersion != format.FormatVersion1 && opts.FormatVersion != format.FormatVersion2 {
+		return fmt.Errorf("%w: got version %d, expected %d or %d",
+			format.ErrUnsupportedVersion, opts.FormatVersion, format.FormatVersion1, format.FormatVersion2)
+	}
+	if opts.FormatVersion == 0 {
+		opts.FormatVersion = format.FormatVersionCurrent
 	}
 
 	if !opts.SkipELFValidation {

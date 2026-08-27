@@ -1,13 +1,13 @@
+//go:build !minimal
+
 // Package main implements the minimal microfat launcher stub.
 package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
-	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 )
 
@@ -101,21 +101,6 @@ func optimizeTo(destPath string, selfFile *os.File, entry *format.VariantEntry) 
 	// #nosec G703 -- move extracted binary
 	if err := os.Rename(tmpPath, cleanDest); err != nil {
 		return fmt.Errorf("moving extracted binary to %s: %w", cleanDest, err)
-	}
-
-	return nil
-}
-
-// extractVariantToWriter seeks to the variant offset and streams decompressed bytes to w.
-func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, w io.Writer) error {
-	c, err := codec.Get(entry.Compression)
-	if err != nil {
-		return fmt.Errorf("lookup codec %q for variant %s: %w", entry.Compression, entry.Level, err)
-	}
-
-	secReader := io.NewSectionReader(selfFile, entry.Offset, entry.CompressedSize)
-	if err := c.Decompress(w, secReader, entry.UncompressedSize); err != nil {
-		return fmt.Errorf("decompressing variant payload: %w", err)
 	}
 
 	return nil

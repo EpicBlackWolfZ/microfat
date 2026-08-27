@@ -6,13 +6,13 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 // Constants for binary layout and verification.
@@ -27,14 +27,26 @@ const (
 	// OffsetLen is length in bytes of uint64 fields in trailer.
 	OffsetLen = 8
 
+	// SizeLen is length in bytes of uint64 size fields in trailer.
+	SizeLen = 8
+
 	// HashLen is the byte length of SHA-256 checksums.
 	HashLen = 32
 
 	// MagicLen is the length of magic string in bytes.
 	MagicLen = 8
 
-	// FormatVersionCurrent is the current schema version.
-	FormatVersionCurrent = 1
+	// IndexMagicV2 is the 4-byte magic signature at the start of Format v2 binary indices.
+	IndexMagicV2 = "\x00\xFAM2"
+
+	// FormatVersion1 is the legacy JSON manifest format.
+	FormatVersion1 = 1
+
+	// FormatVersion2 is the reflection-free compact binary index table format.
+	FormatVersion2 = 2
+
+	// FormatVersionCurrent is the default format version used for new fat binaries.
+	FormatVersionCurrent = FormatVersion2
 
 	// MaxIndexSize is the maximum allowable index table size (1 MB).
 	MaxIndexSize = 1024 * 1024
@@ -95,6 +107,8 @@ var (
 	ErrOutOfBounds        = errors.New("variant payload extends beyond binary boundary")
 	ErrPayloadTooLarge    = errors.New("variant payload size exceeds safety limit")
 	ErrOverlappingVariant = errors.New("variant payloads overlap or are unsorted")
+	ErrTruncatedIndex     = errors.New("truncated index data")
+	ErrInvalidJSONSyntax  = errors.New("invalid json syntax in manifest index")
 )
 
 // VariantEntry describes an individual compressed microarchitecture variant payload.
@@ -233,8 +247,8 @@ func (idx *Index) FindVariant(level string) (*VariantEntry, bool) {
 
 // ValidateBounds verifies that all variants and offsets in the index are within safe boundaries.
 func (idx *Index) ValidateBounds(indexOffset int64) error {
-	if idx.Version != FormatVersionCurrent {
-		return fmt.Errorf("%w: got version %d, expected %d", ErrUnsupportedVersion, idx.Version, FormatVersionCurrent)
+	if idx.Version != FormatVersion1 && idx.Version != FormatVersion2 {
+		return fmt.Errorf("%w: got version %d, expected %d or %d", ErrUnsupportedVersion, idx.Version, FormatVersion1, FormatVersion2)
 	}
 
 	var lastEnd int64
@@ -252,96 +266,827 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 			return fmt.Errorf("%w: variant %s offset %d overlaps with previous variant ending at %d",
 				ErrOverlappingVariant, v.Level, v.Offset, lastEnd)
 		}
-		lastEnd = v.Offset + v.CompressedSize
+	lastEnd = v.Offset + v.CompressedSize
 	}
 	return nil
 }
 
+const (
+	defaultCompressionAlgorithm = "zstd"
+	minBinaryHeaderSize         = 20
+	binaryHeaderFixedSize       = 20
+	initialVariantCap           = 4
+	decimalBase                 = 10
+	asciiControlCutoff          = 0x20
+)
+
+// MarshalBinaryIndex serializes an Index struct into a compact Format v2 binary representation.
+func MarshalBinaryIndex(idx *Index) ([]byte, error) {
+	if len(idx.TargetOS) > 255 || len(idx.TargetArch) > 255 || len(idx.AppName) > 65535 || len(idx.Variants) > 65535 {
+		return nil, errors.New("index metadata field exceeds binary format limits")
+	}
+
+	totalSize := binaryHeaderFixedSize + len(idx.TargetOS) + len(idx.TargetArch) + len(idx.AppName)
+	for _, v := range idx.Variants {
+		comp := v.Compression
+		if comp == "" {
+			comp = defaultCompressionAlgorithm
+		}
+		if len(v.Level) > 255 || len(v.SHA256) > 255 || len(comp) > 255 {
+			return nil, fmt.Errorf("variant %s field length exceeds binary format limits", v.Level)
+		}
+		totalSize += 1 + len(v.Level) + 8 + 8 + 8 + 1 + len(v.SHA256) + 1 + len(comp)
+	}
+
+	buf := make([]byte, totalSize)
+	copy(buf[0:4], []byte(IndexMagicV2))
+	binary.LittleEndian.PutUint16(buf[4:6], uint16(FormatVersion2))
+	// #nosec G115 -- timestamps and counts fit in respective integer types
+	binary.LittleEndian.PutUint64(buf[6:14], uint64(idx.CreatedUnix))
+
+	offset := 14
+	// #nosec G115 -- length checked <= 255 above
+	buf[offset] = byte(len(idx.TargetOS))
+	offset++
+	copy(buf[offset:], idx.TargetOS)
+	offset += len(idx.TargetOS)
+
+	// #nosec G115 -- length checked <= 255 above
+	buf[offset] = byte(len(idx.TargetArch))
+	offset++
+	copy(buf[offset:], idx.TargetArch)
+	offset += len(idx.TargetArch)
+
+	// #nosec G115 -- length checked <= 65535 above
+	binary.LittleEndian.PutUint16(buf[offset:offset+2], uint16(len(idx.AppName)))
+	offset += 2
+	copy(buf[offset:], idx.AppName)
+	offset += len(idx.AppName)
+
+	// #nosec G115 -- length checked <= 65535 above
+	binary.LittleEndian.PutUint16(buf[offset:offset+2], uint16(len(idx.Variants)))
+	offset += 2
+
+	for _, v := range idx.Variants {
+		// #nosec G115 -- length checked <= 255 above
+		buf[offset] = byte(len(v.Level))
+		offset++
+		copy(buf[offset:], v.Level)
+		offset += len(v.Level)
+
+		// #nosec G115 -- offset fits uint64
+		binary.LittleEndian.PutUint64(buf[offset:offset+8], uint64(v.Offset))
+		offset += 8
+
+		// #nosec G115 -- size fits uint64
+		binary.LittleEndian.PutUint64(buf[offset:offset+8], uint64(v.CompressedSize))
+		offset += 8
+
+		// #nosec G115 -- size fits uint64
+		binary.LittleEndian.PutUint64(buf[offset:offset+8], uint64(v.UncompressedSize))
+		offset += 8
+
+		// #nosec G115 -- length checked <= 255 above
+		buf[offset] = byte(len(v.SHA256))
+		offset++
+		copy(buf[offset:], v.SHA256)
+		offset += len(v.SHA256)
+
+		comp := v.Compression
+		if comp == "" {
+			comp = defaultCompressionAlgorithm
+		}
+		// #nosec G115 -- length checked <= 255 above
+		buf[offset] = byte(len(comp))
+		offset++
+		copy(buf[offset:], comp)
+		offset += len(comp)
+	}
+
+	return buf, nil
+}
+
+// UnmarshalBinaryIndex deserializes a Format v2 compact binary index buffer.
+func UnmarshalBinaryIndex(data []byte) (*Index, error) {
+	if len(data) < minBinaryHeaderSize {
+		return nil, fmt.Errorf("%w: binary index too short (%d bytes)", ErrTruncatedIndex, len(data))
+	}
+
+	if string(data[0:4]) != IndexMagicV2 {
+		return nil, fmt.Errorf("%w: expected binary index magic %q, got %q", ErrInvalidMagic, IndexMagicV2, string(data[0:4]))
+	}
+
+	version := int(binary.LittleEndian.Uint16(data[4:6]))
+	if version != FormatVersion2 {
+		return nil, fmt.Errorf("%w: expected binary index version %d, got %d", ErrUnsupportedVersion, FormatVersion2, version)
+	}
+
+	// #nosec G115 -- binary format integer decode
+	createdUnix := int64(binary.LittleEndian.Uint64(data[6:14]))
+	offset := 14
+
+	osLen := int(data[offset])
+	offset++
+	if offset+osLen > len(data) {
+		return nil, fmt.Errorf("%w: truncated os string", ErrTruncatedIndex)
+	}
+	targetOS := string(data[offset : offset+osLen])
+	offset += osLen
+
+	if offset >= len(data) {
+		return nil, fmt.Errorf("%w: truncated arch length", ErrTruncatedIndex)
+	}
+	archLen := int(data[offset])
+	offset++
+	if offset+archLen > len(data) {
+		return nil, fmt.Errorf("%w: truncated arch string", ErrTruncatedIndex)
+	}
+	targetArch := string(data[offset : offset+archLen])
+	offset += archLen
+
+	if offset+2 > len(data) {
+		return nil, fmt.Errorf("%w: truncated app name length", ErrTruncatedIndex)
+	}
+	appLen := int(binary.LittleEndian.Uint16(data[offset : offset+2]))
+	offset += 2
+	if offset+appLen > len(data) {
+		return nil, fmt.Errorf("%w: truncated app name string", ErrTruncatedIndex)
+	}
+	appName := string(data[offset : offset+appLen])
+	offset += appLen
+
+	if offset+2 > len(data) {
+		return nil, fmt.Errorf("%w: truncated variant count", ErrTruncatedIndex)
+	}
+	variantCount := int(binary.LittleEndian.Uint16(data[offset : offset+2]))
+	offset += 2
+
+	variants := make([]VariantEntry, 0, variantCount)
+	for i := 0; i < variantCount; i++ {
+		if offset >= len(data) {
+			return nil, fmt.Errorf("%w: truncated variant %d header", ErrTruncatedIndex, i)
+		}
+		levelLen := int(data[offset])
+		offset++
+		if offset+levelLen > len(data) {
+			return nil, fmt.Errorf("%w: truncated variant %d level string", ErrTruncatedIndex, i)
+		}
+		level := string(data[offset : offset+levelLen])
+		offset += levelLen
+
+		if offset+24 > len(data) {
+			return nil, fmt.Errorf("%w: truncated variant %d numeric fields", ErrTruncatedIndex, i)
+		}
+		// #nosec G115 -- binary format integer decode
+		vOffset := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+		offset += 8
+		// #nosec G115 -- binary format integer decode
+		compSize := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+		offset += 8
+		// #nosec G115 -- binary format integer decode
+		uncompSize := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+		offset += 8
+
+		if offset >= len(data) {
+			return nil, fmt.Errorf("%w: truncated variant %d sha length", ErrTruncatedIndex, i)
+		}
+		shaLen := int(data[offset])
+		offset++
+		if offset+shaLen > len(data) {
+			return nil, fmt.Errorf("%w: truncated variant %d sha string", ErrTruncatedIndex, i)
+		}
+		shaStr := string(data[offset : offset+shaLen])
+		offset += shaLen
+
+		if offset >= len(data) {
+			return nil, fmt.Errorf("%w: truncated variant %d compression length", ErrTruncatedIndex, i)
+		}
+		compLen := int(data[offset])
+		offset++
+		if offset+compLen > len(data) {
+			return nil, fmt.Errorf("%w: truncated variant %d compression string", ErrTruncatedIndex, i)
+		}
+		compStr := string(data[offset : offset+compLen])
+		offset += compLen
+
+		if compStr == "" {
+			compStr = defaultCompressionAlgorithm
+		}
+
+		variants = append(variants, VariantEntry{
+			Level:            level,
+			Offset:           vOffset,
+			CompressedSize:   compSize,
+			UncompressedSize: uncompSize,
+			SHA256:           shaStr,
+			Compression:      compStr,
+		})
+	}
+
+	return &Index{
+		Version:     version,
+		AppName:     appName,
+		TargetOS:    targetOS,
+		TargetArch:  targetArch,
+		CreatedUnix: createdUnix,
+		Variants:    variants,
+	}, nil
+}
+
+func skipJSONWhitespace(data []byte, pos int) int {
+	for pos < len(data) {
+		c := data[pos]
+		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+			pos++
+			continue
+		}
+		break
+	}
+	return pos
+}
+
+func parseJSONString(data []byte, pos int) (string, int, error) {
+	pos = skipJSONWhitespace(data, pos)
+	if pos >= len(data) || data[pos] != '"' {
+		return "", pos, fmt.Errorf("%w: expected string opening quote at byte %d", ErrInvalidJSONSyntax, pos)
+	}
+	pos++
+	start := pos
+	var sb strings.Builder
+	hasEscapes := false
+
+	for pos < len(data) {
+		c := data[pos]
+		if c == '"' {
+			if !hasEscapes {
+				return string(data[start:pos]), pos + 1, nil
+			}
+			return sb.String(), pos + 1, nil
+		}
+		if c == '\\' {
+			if !hasEscapes {
+				sb.Write(data[start:pos])
+				hasEscapes = true
+			}
+			pos++
+			if pos >= len(data) {
+				return "", pos, fmt.Errorf("%w: unterminated escape sequence", ErrInvalidJSONSyntax)
+			}
+			switch data[pos] {
+			case '"', '\\', '/':
+				sb.WriteByte(data[pos])
+			case 'b':
+				sb.WriteByte('\b')
+			case 'f':
+				sb.WriteByte('\f')
+			case 'n':
+				sb.WriteByte('\n')
+			case 'r':
+				sb.WriteByte('\r')
+			case 't':
+				sb.WriteByte('\t')
+			case 'u':
+				if pos+4 >= len(data) {
+					return "", pos, fmt.Errorf("%w: invalid unicode escape", ErrInvalidJSONSyntax)
+				}
+				r, err := strconv.ParseUint(string(data[pos+1:pos+5]), 16, 16)
+				if err != nil {
+					return "", pos, fmt.Errorf("%w: invalid unicode escape: %v", ErrInvalidJSONSyntax, err)
+				}
+				sb.WriteRune(rune(r))
+				pos += 5
+				continue
+			default:
+				sb.WriteByte(data[pos])
+			}
+			pos++
+			continue
+		}
+		if hasEscapes {
+			sb.WriteByte(c)
+		}
+		pos++
+	}
+	return "", pos, fmt.Errorf("%w: unterminated string starting at byte %d", ErrInvalidJSONSyntax, start)
+}
+
+func parseJSONInt64(data []byte, pos int) (int64, int, error) {
+	pos = skipJSONWhitespace(data, pos)
+	if pos >= len(data) {
+		return 0, pos, fmt.Errorf("%w: expected number at end of input", ErrInvalidJSONSyntax)
+	}
+	start := pos
+	isNeg := false
+	if data[pos] == '-' {
+		isNeg = true
+		pos++
+	}
+	if pos >= len(data) || data[pos] < '0' || data[pos] > '9' {
+		return 0, pos, fmt.Errorf("%w: expected digit at byte %d", ErrInvalidJSONSyntax, pos)
+	}
+	var val int64
+	for pos < len(data) && data[pos] >= '0' && data[pos] <= '9' {
+		digit := int64(data[pos] - '0')
+		val = val*decimalBase + digit
+		pos++
+	}
+	if isNeg {
+		val = -val
+	}
+	if start == pos {
+		return 0, pos, fmt.Errorf("%w: no digits parsed at byte %d", ErrInvalidJSONSyntax, start)
+	}
+	return val, pos, nil
+}
+
+func skipJSONValue(data []byte, pos int) (int, error) {
+	pos = skipJSONWhitespace(data, pos)
+	if pos >= len(data) {
+		return pos, fmt.Errorf("%w: unexpected end of json", ErrInvalidJSONSyntax)
+	}
+	switch data[pos] {
+	case '"':
+		_, nextPos, err := parseJSONString(data, pos)
+		return nextPos, err
+	case '{':
+		return skipJSONObject(data, pos)
+	case '[':
+		return skipJSONArray(data, pos)
+	default:
+		return skipJSONPrimitive(data, pos)
+	}
+}
+
+func skipJSONObject(data []byte, pos int) (int, error) {
+	pos++
+	for {
+		pos = skipJSONWhitespace(data, pos)
+		if pos >= len(data) {
+			return pos, fmt.Errorf("%w: unclosed object", ErrInvalidJSONSyntax)
+		}
+		if data[pos] == '}' {
+			return pos + 1, nil
+		}
+		_, nextPos, err := parseJSONString(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		pos = skipJSONWhitespace(data, nextPos)
+		if pos >= len(data) || pos < len(data) && data[pos] != ':' {
+			return pos, fmt.Errorf("%w: expected ':' in object", ErrInvalidJSONSyntax)
+		}
+		pos++
+		valPos, err := skipJSONValue(data, pos)
+		if err != nil {
+			return valPos, err
+		}
+		pos = skipJSONWhitespace(data, valPos)
+		if pos < len(data) && data[pos] == ',' {
+			pos++
+			continue
+		}
+		if pos < len(data) && data[pos] == '}' {
+			return pos + 1, nil
+		}
+	}
+}
+
+func skipJSONArray(data []byte, pos int) (int, error) {
+	pos++
+	for {
+		pos = skipJSONWhitespace(data, pos)
+		if pos >= len(data) {
+			return pos, fmt.Errorf("%w: unclosed array", ErrInvalidJSONSyntax)
+		}
+		if data[pos] == ']' {
+			return pos + 1, nil
+		}
+		elemPos, err := skipJSONValue(data, pos)
+		if err != nil {
+			return elemPos, err
+		}
+		pos = skipJSONWhitespace(data, elemPos)
+		if pos < len(data) && data[pos] == ',' {
+			pos++
+			continue
+		}
+		if pos < len(data) && data[pos] == ']' {
+			return pos + 1, nil
+		}
+	}
+}
+
+func skipJSONPrimitive(data []byte, pos int) (int, error) {
+	for pos < len(data) {
+		c := data[pos]
+		if c == ',' || c == '}' || c == ']' || c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+			return pos, nil
+		}
+		pos++
+	}
+	return pos, nil
+}
+
+// unmarshalJSONIndex parses a Format v1 JSON index manifest without using Go reflection.
+func unmarshalJSONIndex(data []byte) (*Index, error) {
+	pos := skipJSONWhitespace(data, 0)
+	if pos >= len(data) || data[pos] != '{' {
+		return nil, fmt.Errorf("%w: root must be object", ErrInvalidJSONSyntax)
+	}
+	pos++
+
+	idx := &Index{
+		Version:  FormatVersion1,
+		Variants: make([]VariantEntry, 0, initialVariantCap),
+	}
+
+	for {
+		pos = skipJSONWhitespace(data, pos)
+		if pos >= len(data) {
+			return nil, fmt.Errorf("%w: unclosed root object", ErrInvalidJSONSyntax)
+		}
+		if data[pos] == '}' {
+			break
+		}
+
+		key, nextPos, err := parseJSONString(data, pos)
+		if err != nil {
+			return nil, err
+		}
+		pos = skipJSONWhitespace(data, nextPos)
+		if pos >= len(data) || data[pos] != ':' {
+			return nil, fmt.Errorf("%w: expected ':' after key %s", ErrInvalidJSONSyntax, key)
+		}
+		pos++
+		pos = skipJSONWhitespace(data, pos)
+
+		nPos, fErr := parseJSONIndexField(key, data, pos, idx)
+		if fErr != nil {
+			return nil, fErr
+		}
+		pos = nPos
+
+		pos = skipJSONWhitespace(data, pos)
+		if pos < len(data) && data[pos] == ',' {
+			pos++
+		}
+	}
+
+	return idx, nil
+}
+
+func parseJSONIndexField(key string, data []byte, pos int, idx *Index) (int, error) {
+	switch key {
+	case "version":
+		v, nPos, err := parseJSONInt64(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		idx.Version = int(v)
+		return nPos, nil
+	case "app_name":
+		s, nPos, err := parseJSONString(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		idx.AppName = s
+		return nPos, nil
+	case "os":
+		s, nPos, err := parseJSONString(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		idx.TargetOS = s
+		return nPos, nil
+	case "arch":
+		s, nPos, err := parseJSONString(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		idx.TargetArch = s
+		return nPos, nil
+	case "created_unix":
+		v, nPos, err := parseJSONInt64(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		idx.CreatedUnix = v
+		return nPos, nil
+	case "variants":
+		variants, nPos, err := parseJSONVariantArray(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		idx.Variants = variants
+		return nPos, nil
+	default:
+		return skipJSONValue(data, pos)
+	}
+}
+
+func parseJSONVariantArray(data []byte, pos int) ([]VariantEntry, int, error) {
+	if pos >= len(data) || data[pos] != '[' {
+		return nil, pos, fmt.Errorf("%w: expected '[' for variants array", ErrInvalidJSONSyntax)
+	}
+	pos++
+	variants := make([]VariantEntry, 0, initialVariantCap)
+	for {
+		pos = skipJSONWhitespace(data, pos)
+		if pos >= len(data) {
+			return nil, pos, fmt.Errorf("%w: unclosed variants array", ErrInvalidJSONSyntax)
+		}
+		if data[pos] == ']' {
+			return variants, pos + 1, nil
+		}
+		if data[pos] != '{' {
+			return nil, pos, fmt.Errorf("%w: expected variant object '{'", ErrInvalidJSONSyntax)
+		}
+		entry, nPos, err := parseJSONVariantObject(data, pos)
+		if err != nil {
+			return nil, pos, err
+		}
+		variants = append(variants, entry)
+		pos = skipJSONWhitespace(data, nPos)
+		if pos < len(data) && data[pos] == ',' {
+			pos++
+		}
+	}
+}
+
+func parseJSONVariantObject(data []byte, pos int) (VariantEntry, int, error) {
+	pos++
+	var entry VariantEntry
+	for {
+		pos = skipJSONWhitespace(data, pos)
+		if pos >= len(data) {
+			return entry, pos, fmt.Errorf("%w: unclosed variant object", ErrInvalidJSONSyntax)
+		}
+		if data[pos] == '}' {
+			if entry.Compression == "" {
+				entry.Compression = defaultCompressionAlgorithm
+			}
+			return entry, pos + 1, nil
+		}
+		vKey, vnPos, err := parseJSONString(data, pos)
+		if err != nil {
+			return entry, pos, err
+		}
+		pos = skipJSONWhitespace(data, vnPos)
+		if pos >= len(data) || data[pos] != ':' {
+			return entry, pos, fmt.Errorf("%w: expected ':' after variant key %s", ErrInvalidJSONSyntax, vKey)
+		}
+		pos++
+		pos = skipJSONWhitespace(data, pos)
+
+		nPos, fErr := parseJSONVariantField(vKey, data, pos, &entry)
+		if fErr != nil {
+			return entry, pos, fErr
+		}
+		pos = nPos
+
+		pos = skipJSONWhitespace(data, pos)
+		if pos < len(data) && data[pos] == ',' {
+			pos++
+		}
+	}
+}
+
+func parseJSONVariantField(vKey string, data []byte, pos int, entry *VariantEntry) (int, error) {
+	switch vKey {
+	case "level":
+		s, snPos, err := parseJSONString(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		entry.Level = s
+		return snPos, nil
+	case "offset":
+		v, vnPos, err := parseJSONInt64(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		entry.Offset = v
+		return vnPos, nil
+	case "compressed_size":
+		v, vnPos, err := parseJSONInt64(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		entry.CompressedSize = v
+		return vnPos, nil
+	case "uncompressed_size":
+		v, vnPos, err := parseJSONInt64(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		entry.UncompressedSize = v
+		return vnPos, nil
+	case "sha256":
+		s, snPos, err := parseJSONString(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		entry.SHA256 = s
+		return snPos, nil
+	case "compression":
+		s, snPos, err := parseJSONString(data, pos)
+		if err != nil {
+			return pos, err
+		}
+		entry.Compression = s
+		return snPos, nil
+	default:
+		return skipJSONValue(data, pos)
+	}
+}
+
 // ReadTrailerAndIndex reads the trailing 56 bytes of the binary, verifies magic and index SHA-256 hash,
-// deserializes the JSON index table, and enforces bounds checks.
+// deserializes the index table (binary Format v2 or JSON Format v1), and enforces bounds checks.
 func ReadTrailerAndIndex(r io.ReaderAt, totalSize int64) (*Index, error) {
 	if totalSize < TrailerSize {
-		return nil, ErrBinaryTooSmall
+		return nil, fmt.Errorf("%w: file size %d bytes is smaller than trailer size %d bytes",
+			ErrBinaryTooSmall, totalSize, TrailerSize)
 	}
 
 	trailerBuf := make([]byte, TrailerSize)
-	trailerOffset := totalSize - TrailerSize
-	if _, err := r.ReadAt(trailerBuf, trailerOffset); err != nil {
-		return nil, fmt.Errorf("reading trailer at offset %d: %w", trailerOffset, err)
+	if _, err := r.ReadAt(trailerBuf, totalSize-TrailerSize); err != nil {
+		return nil, fmt.Errorf("reading trailer from file: %w", err)
 	}
 
-	// 1. Verify Magic Bytes (last 8 bytes)
-	magic := trailerBuf[TrailerSize-MagicLen:]
-	if !bytes.Equal(magic, []byte(MagicString)) {
+	offset := OffsetLen + SizeLen
+	hashOffset := offset + HashLen
+	if string(trailerBuf[hashOffset:hashOffset+MagicLen]) != MagicString {
 		return nil, ErrInvalidMagic
 	}
 
-	// 2. Parse Trailer Fields
-	indexOffset := binary.LittleEndian.Uint64(trailerBuf[0:OffsetLen])
-	indexSize := binary.LittleEndian.Uint64(trailerBuf[OffsetLen : OffsetLen*2])
-	expectedHash := trailerBuf[OffsetLen*2 : OffsetLen*2+HashLen]
+	// #nosec G115 -- trailer format offset and size
+	indexOffset := int64(binary.LittleEndian.Uint64(trailerBuf[0:OffsetLen]))
+	// #nosec G115 -- trailer format offset and size
+	indexSize := int64(binary.LittleEndian.Uint64(trailerBuf[OffsetLen:offset]))
 
-	if indexOffset > math.MaxInt64 || int64(indexOffset) < 0 || int64(indexOffset) >= trailerOffset {
-		return nil, fmt.Errorf("%w: offset %d beyond trailer %d", ErrInvalidIndexOffset, indexOffset, trailerOffset)
+	trailerOffset := totalSize - TrailerSize
+	if indexOffset < 0 || indexOffset >= trailerOffset {
+		return nil, fmt.Errorf("%w: offset %d beyond trailer %d",
+			ErrInvalidIndexOffset, indexOffset, trailerOffset)
 	}
-	if indexSize == 0 || indexSize > MaxIndexSize || indexSize > math.MaxInt64 ||
-		int64(indexOffset)+int64(indexSize) != trailerOffset {
-		return nil, fmt.Errorf("%w: size %d with offset %d does not match %d",
+	if indexSize <= 0 || indexSize > MaxIndexSize || indexOffset+indexSize != trailerOffset {
+		return nil, fmt.Errorf("%w: index size %d with offset %d does not match trailer boundary %d",
 			ErrInvalidIndexSize, indexSize, indexOffset, trailerOffset)
 	}
 
-	// 3. Read Index Bytes
-	indexBuf := make([]byte, indexSize)
-	if _, err := r.ReadAt(indexBuf, int64(indexOffset)); err != nil {
-		return nil, fmt.Errorf("reading index at offset %d: %w", indexOffset, err)
+	expectedHash := trailerBuf[offset : offset+HashLen]
+	idxBytes := make([]byte, indexSize)
+	if _, err := r.ReadAt(idxBytes, indexOffset); err != nil {
+		return nil, fmt.Errorf("reading index payload at offset %d: %w", indexOffset, err)
 	}
 
-	// 4. Verify Index SHA-256 Hash
-	actualHash := sha256.Sum256(indexBuf)
+	actualHash := sha256.Sum256(idxBytes)
 	if !bytes.Equal(actualHash[:], expectedHash) {
 		return nil, fmt.Errorf("%w: expected %x, got %x", ErrIndexCorrupted, expectedHash, actualHash)
 	}
 
-	// 5. Unmarshal JSON
-	var idx Index
-	if err := json.Unmarshal(indexBuf, &idx); err != nil {
-		return nil, fmt.Errorf("unmarshaling index json: %w", err)
+	var idx *Index
+	var err error
+	if len(idxBytes) >= 4 && string(idxBytes[0:4]) == IndexMagicV2 {
+		idx, err = UnmarshalBinaryIndex(idxBytes)
+	} else {
+		idx, err = unmarshalJSONIndex(idxBytes)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("deserializing index: %w", err)
 	}
 
 	for i := range idx.Variants {
 		if idx.Variants[i].Compression == "" {
-			idx.Variants[i].Compression = "zstd"
+			idx.Variants[i].Compression = defaultCompressionAlgorithm
 		}
 	}
 
-	// 6. Validate Bounds
-	if err := idx.ValidateBounds(int64(indexOffset)); err != nil {
-		return nil, fmt.Errorf("validating index bounds: %w", err)
+	if err := idx.ValidateBounds(totalSize); err != nil {
+		return nil, fmt.Errorf("validating variant boundaries: %w", err)
 	}
 
-	return &idx, nil
+	return idx, nil
 }
 
-// WriteIndexAndTrailer writes the serialized index JSON followed by the 56-byte trailer to w.
+// WriteIndexAndTrailer serializes the index in Format v2 (binary) and writes it followed by the 56-byte trailer.
 func WriteIndexAndTrailer(w io.Writer, idx *Index, currentOffset int64) (int64, error) {
+	version := idx.Version
+	if version == 0 {
+		version = FormatVersionCurrent
+	}
+	return WriteIndexAndTrailerWithVersion(w, idx, currentOffset, version)
+}
+
+// marshalJSONIndex serializes an Index struct to JSON without using Go reflection.
+func marshalJSONIndex(idx *Index) ([]byte, error) {
+	var sb strings.Builder
+	sb.WriteString(`{"version":`)
+	sb.WriteString(strconv.Itoa(idx.Version))
+	if idx.AppName != "" {
+		sb.WriteString(`,"app_name":"`)
+		sb.WriteString(escapeJSONString(idx.AppName))
+		sb.WriteString(`"`)
+	}
+	sb.WriteString(`,"os":"`)
+	sb.WriteString(escapeJSONString(idx.TargetOS))
+	sb.WriteString(`","arch":"`)
+	sb.WriteString(escapeJSONString(idx.TargetArch))
+	sb.WriteString(`","created_unix":`)
+	sb.WriteString(strconv.FormatInt(idx.CreatedUnix, 10))
+	sb.WriteString(`,"variants":[`)
+	for i, v := range idx.Variants {
+		if i > 0 {
+			sb.WriteString(`,`)
+		}
+		sb.WriteString(`{"level":"`)
+		sb.WriteString(escapeJSONString(v.Level))
+		sb.WriteString(`","offset":`)
+		sb.WriteString(strconv.FormatInt(v.Offset, 10))
+		sb.WriteString(`,"compressed_size":`)
+		sb.WriteString(strconv.FormatInt(v.CompressedSize, 10))
+		sb.WriteString(`,"uncompressed_size":`)
+		sb.WriteString(strconv.FormatInt(v.UncompressedSize, 10))
+		if v.SHA256 != "" {
+			sb.WriteString(`,"sha256":"`)
+			sb.WriteString(escapeJSONString(v.SHA256))
+			sb.WriteString(`"`)
+		}
+		comp := v.Compression
+		if comp == "" {
+			comp = defaultCompressionAlgorithm
+		}
+		sb.WriteString(`,"compression":"`)
+		sb.WriteString(escapeJSONString(comp))
+		sb.WriteString(`"}`)
+	}
+	sb.WriteString(`]}`)
+	return []byte(sb.String()), nil
+}
+
+func escapeJSONString(s string) string {
+	var sb strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '"':
+			sb.WriteString(`\"`)
+		case '\\':
+			sb.WriteString(`\\`)
+		case '\b':
+			sb.WriteString(`\b`)
+		case '\f':
+			sb.WriteString(`\f`)
+		case '\n':
+			sb.WriteString(`\n`)
+		case '\r':
+			sb.WriteString(`\r`)
+		case '\t':
+			sb.WriteString(`\t`)
+		default:
+			if c < asciiControlCutoff {
+				fmt.Fprintf(&sb, `\u%04x`, c)
+			} else {
+				sb.WriteByte(c)
+			}
+		}
+	}
+	return sb.String()
+}
+
+// WriteIndexAndTrailerWithVersion writes the serialized index in the specified format version followed by the 56-byte trailer.
+func WriteIndexAndTrailerWithVersion(w io.Writer, idx *Index, currentOffset int64, version int) (int64, error) {
 	if currentOffset < 0 {
 		return 0, fmt.Errorf("invalid negative offset %d", currentOffset)
 	}
 
-	idx.Version = FormatVersionCurrent
-	idxBytes, err := json.Marshal(idx)
-	if err != nil {
-		return 0, fmt.Errorf("marshaling index json: %w", err)
+	var idxBytes []byte
+	var err error
+
+	idx.Version = version
+	switch version {
+	case FormatVersion1:
+		idxBytes, err = marshalJSONIndex(idx)
+		if err != nil {
+			return 0, fmt.Errorf("marshaling index json: %w", err)
+		}
+	case FormatVersion2:
+		idxBytes, err = MarshalBinaryIndex(idx)
+		if err != nil {
+			return 0, fmt.Errorf("marshaling binary index: %w", err)
+		}
+	default:
+		return 0, fmt.Errorf("%w: %d", ErrUnsupportedVersion, version)
 	}
 
 	indexSize := int64(len(idxBytes))
 	if indexSize > MaxIndexSize {
-		return 0, fmt.Errorf("index json size %d exceeds maximum %d", indexSize, MaxIndexSize)
+		return 0, fmt.Errorf("index size %d exceeds maximum %d", indexSize, MaxIndexSize)
 	}
 
 	n, err := w.Write(idxBytes)
 	if err != nil {
-		return 0, fmt.Errorf("writing index json: %w", err)
+		return 0, fmt.Errorf("writing index: %w", err)
 	}
 
 	indexHash := sha256.Sum256(idxBytes)
