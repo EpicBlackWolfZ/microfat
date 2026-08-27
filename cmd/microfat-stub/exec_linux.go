@@ -117,12 +117,28 @@ func buildAutoTunedEnviron(
 		fmt.Sprintf("%s=%.2f", format.EnvCgroupCPUs, limits.CPUQuota),
 	)
 
-	plan := cgroup.ResolveTuningPlan(limits, os.Getenv(format.EnvMemRatio), cgroup.DefaultMemoryRatio, cgroup.DefaultMinHeadroomBytes)
+	gcProfile, _ := cgroup.ParseGCProfile(os.Getenv(format.EnvGCProfile))
+	liveHeap, _ := cgroup.ParseByteSize(os.Getenv(format.EnvLiveHeapEstimate))
+
+	plan := cgroup.ResolveTuningPlanWithProfile(
+		limits,
+		os.Getenv(format.EnvMemRatio),
+		cgroup.DefaultMemoryRatio,
+		cgroup.DefaultMinHeadroomBytes,
+		gcProfile,
+		liveHeap,
+	)
 	if plan.GOMEMLIMITStr != "" {
 		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGOMEMLIMIT, plan.GOMEMLIMITStr))
 	}
 	if plan.GOMAXPROCSStr != "" {
 		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGOMAXPROCS, plan.GOMAXPROCSStr))
+	}
+	if plan.GOGCStr != "" {
+		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGOGC, plan.GOGCStr))
+	}
+	if plan.GCProfile != cgroup.GCProfileDefault {
+		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGCProfile, string(plan.GCProfile)))
 	}
 
 	// Check if user opted out of auto-tuning
@@ -133,12 +149,16 @@ func buildAutoTunedEnviron(
 
 	hasMemLimit := false
 	hasMaxProcs := false
+	hasGOGC := false
 	for _, e := range baseEnv {
 		if strings.HasPrefix(e, "GOMEMLIMIT=") {
 			hasMemLimit = true
 		}
 		if strings.HasPrefix(e, "GOMAXPROCS=") {
 			hasMaxProcs = true
+		}
+		if strings.HasPrefix(e, "GOGC=") {
+			hasGOGC = true
 		}
 	}
 
@@ -148,6 +168,10 @@ func buildAutoTunedEnviron(
 
 	if !hasMaxProcs && plan.GOMAXPROCSStr != "" {
 		env = append(env, fmt.Sprintf("GOMAXPROCS=%s", plan.GOMAXPROCSStr))
+	}
+
+	if !hasGOGC && plan.GOGCApplied && plan.GOGCStr != "" {
+		env = append(env, fmt.Sprintf("GOGC=%s", plan.GOGCStr))
 	}
 
 	return env, &limits
@@ -174,13 +198,19 @@ func logDiagnostics(
 		}
 	}
 
-	var memLimit, maxProcs string
+	var memLimit, maxProcs, gogcVal, gcProfileVal string
 	for _, e := range env {
 		if strings.HasPrefix(e, "GOMEMLIMIT=") {
 			memLimit = strings.TrimPrefix(e, "GOMEMLIMIT=")
 		}
 		if strings.HasPrefix(e, "GOMAXPROCS=") {
 			maxProcs = strings.TrimPrefix(e, "GOMAXPROCS=")
+		}
+		if strings.HasPrefix(e, "GOGC=") {
+			gogcVal = strings.TrimPrefix(e, "GOGC=")
+		}
+		if strings.HasPrefix(e, format.EnvCgroupGCProfile+"=") {
+			gcProfileVal = strings.TrimPrefix(e, format.EnvCgroupGCProfile+"=")
 		}
 	}
 
@@ -198,6 +228,8 @@ func logDiagnostics(
 			PolicyReason:            policyRes.OverrideReason,
 			GOMEMLIMIT:              memLimit,
 			GOMAXPROCS:              maxProcs,
+			GOGC:                    gogcVal,
+			GCProfile:               gcProfileVal,
 			DecompressionDurationUs: decompDuration.Microseconds(),
 			TotalLauncherUs:         totalDuration.Microseconds(),
 		}
@@ -215,11 +247,19 @@ func logDiagnostics(
 		policyStr = fmt.Sprintf(" policy=%s policy_reason=%q", policyRes.PolicyApplied, policyRes.OverrideReason)
 	}
 
+	gogcStr := ""
+	if gogcVal != "" {
+		gogcStr = fmt.Sprintf(" gogc=%s", gogcVal)
+	}
+	if gcProfileVal != "" {
+		gogcStr += fmt.Sprintf(" gc_profile=%s", gcProfileVal)
+	}
+
 	fmt.Fprintf(
 		os.Stderr,
-		"[microfat:debug] host_arch=%s host_level=%s selected_variant=%s exec_mode=%s gomemlimit=%s gomaxprocs=%s%s "+
+		"[microfat:debug] host_arch=%s host_level=%s selected_variant=%s exec_mode=%s gomemlimit=%s gomaxprocs=%s%s%s "+
 			"decompress_us=%d total_us=%d\n",
-		hostInfo.Arch, hostInfo.Level, entry.Level, execMode, memLimit, maxProcs, policyStr,
+		hostInfo.Arch, hostInfo.Level, entry.Level, execMode, memLimit, maxProcs, gogcStr, policyStr,
 		decompDuration.Microseconds(), totalDuration.Microseconds(),
 	)
 }

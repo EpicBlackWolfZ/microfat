@@ -130,6 +130,16 @@ func formatDispatchTelemetryJSON(d format.DispatchTelemetry) string {
 		sb.WriteString(escapeJSONString(d.GOMAXPROCS))
 		sb.WriteString(`"`)
 	}
+	if d.GOGC != "" {
+		sb.WriteString(`,"gogc":"`)
+		sb.WriteString(escapeJSONString(d.GOGC))
+		sb.WriteString(`"`)
+	}
+	if d.GCProfile != "" {
+		sb.WriteString(`,"gc_profile":"`)
+		sb.WriteString(escapeJSONString(d.GCProfile))
+		sb.WriteString(`"`)
+	}
 	if d.DecompressionDurationUs > 0 {
 		sb.WriteString(`,"decompression_duration_us":`)
 		sb.WriteString(strconv.FormatInt(d.DecompressionDurationUs, 10))

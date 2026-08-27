@@ -313,7 +313,7 @@ func main() {
 ```
 
 ### Programmatic Configuration & Diagnostic Inspection
-Alternatively, invoke `runtimeinit.AutoTune()` programmatically to customize parameters and inspect resolved container limits:
+Alternatively, invoke `runtimeinit.AutoTune()` programmatically to customize parameters, select workload profiles, and inspect resolved container limits:
 
 ```go
 package main
@@ -326,12 +326,32 @@ import (
 
 func main() {
 	res := runtimeinit.AutoTune(
-		runtimeinit.WithMemoryRatio(0.85), // 85% instead of default 90%
-		runtimeinit.WithMinHeadroom(128*1024*1024), // 128MB reserved headroom
+		runtimeinit.WithProfile(runtimeinit.ProfileLatencyCritical), // GOGC=75 for strict SLA microservices
+		runtimeinit.WithMemoryRatio(0.85),                          // 85% instead of default 90%
+		runtimeinit.WithMinHeadroom(128*1024*1024),                  // 128MB reserved headroom
 	)
 
-	log.Printf("cgroup v%d: GOMEMLIMIT=%d applied=%t, GOMAXPROCS=%d applied=%t",
-		res.CgroupVersion, res.GOMEMLIMIT, res.MemLimitApplied, res.GOMAXPROCS, res.MaxProcsApplied)
+	log.Printf("cgroup v%d: GOMEMLIMIT=%d applied=%t, GOMAXPROCS=%d applied=%t, GOGC=%d (profile=%s, applied=%t)",
+		res.CgroupVersion, res.GOMEMLIMIT, res.MemLimitApplied, res.GOMAXPROCS, res.MaxProcsApplied,
+		res.GOGC, res.ProfileApplied, res.GOGCApplied)
+}
+```
+
+### Adaptive Dynamic Tuning (`ProfileAdaptive`)
+For dynamic `GOGC` tuning based on steady-state live heap sizing:
+
+```go
+package main
+
+import (
+	"github.com/EpicBlackWolfZ/microfat/runtimeinit"
+)
+
+func main() {
+	runtimeinit.AutoTune(
+		runtimeinit.WithProfile(runtimeinit.ProfileAdaptive),
+		runtimeinit.WithLiveHeapEstimateString("150MB"), // Dynamic formula sizing
+	)
 }
 ```
 
@@ -361,11 +381,15 @@ Whenever the launcher stub executes a payload variant, it exports runtime metada
 | `MICROFAT_CGROUP_CPUS` | Raw container CPU CFS quota | `4.00` |
 | `MICROFAT_CGROUP_GOMEMLIMIT` | Computed `GOMEMLIMIT` ceiling | `966367641B` |
 | `MICROFAT_CGROUP_GOMAXPROCS` | Computed `GOMAXPROCS` core count | `4` |
+| `MICROFAT_CGROUP_GOGC` | Computed `GOGC` pacing target | `75` |
+| `MICROFAT_CGROUP_GC_PROFILE` | Active GC workload profile name | `latency_critical` |
 
-### Dispatch Policy Controls
+### Dispatch Policy Controls & Tuning Environment Variables
 
 | Environment Variable | Description |
 | :--- | :--- |
+| `MICROFAT_GC_PROFILE` | Workload GC profile preset (`latency_critical`, `memory_constrained`, `batch_etl`, `adaptive`, `default`). |
+| `MICROFAT_LIVE_HEAP_ESTIMATE` | Estimated steady-state live heap size for `adaptive` profile (e.g. `150MB`, `150MiB`, `157286400`). |
 | `MICROFAT_FORCE_LEVEL` | Pin execution strictly to a specified level (`v1`, `v2`, `v3`, `v4`, `v8.0`..`v9.5`). Fails fast on incompatibility. |
 | `MICROFAT_MAX_LEVEL` | Cap selection ceiling level (e.g. `v3` or `v8.2`). |
 | `MICROFAT_DISABLE_VARIANTS` | Comma-separated list of variant levels to exclude from selection (e.g. `v4`). |
