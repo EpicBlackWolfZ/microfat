@@ -781,4 +781,5 @@ func TestParseLinuxCPUInfoX86(t *testing.T) {
 	// Test default reader implementation
 	_ = readLinuxCPUInfoX86()
 	_ = isHostSkylakeXOrCascadeLake()
+	_ = IsAVX512DownclockingRisk()
 }

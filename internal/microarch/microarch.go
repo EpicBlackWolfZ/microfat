@@ -618,6 +618,12 @@ var (
 	isSkylakeXOrCascadeLakeFunc = isHostSkylakeXOrCascadeLake
 )
 
+// IsAVX512DownclockingRisk reports whether the host CPU is an AMD64 processor subject to
+// AVX-512 frequency downclocking (such as Intel Skylake-X or Cascade Lake Xeon).
+func IsAVX512DownclockingRisk() bool {
+	return isSkylakeXOrCascadeLakeFunc()
+}
+
 func isHostSkylakeXOrCascadeLake() bool {
 	if runtime.GOARCH != ArchAMD64 {
 		return false

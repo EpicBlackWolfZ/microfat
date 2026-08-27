@@ -44,17 +44,47 @@ go install github.com/EpicBlackWolfZ/microfat/cmd/microfat@latest
 go install github.com/EpicBlackWolfZ/microfat/cmd/microfat-stub@latest
 ```
 
-### 2. Detect Host CPU Capabilities
+### 2. Detect Host CPU Capabilities & Environment Readiness
 
 ```bash
+# Check CPU microarchitecture level
 microfat detect
+
+# Comprehensive host environment verification (CPU, memfd, cache, cgroups)
+microfat doctor
+
+# Machine-readable JSON output for CI/CD gating
+microfat doctor --json
 ```
 
 ```text
-OS:       linux
-Arch:     amd64
-Level:    v3
-Features: cx16, popcnt, sse3, ssse3, sse4.1, sse4.2, avx, avx2, bmi1, bmi2, fma, osxsave
+=== Microfat Host Environment Doctor ===
+
+[✔] Host CPU Microarchitecture
+    • OS/Arch:        linux/amd64
+    • Detected Level: v3
+    • Key Features:   cx16, popcnt, sse3, ssse3, sse4.1, sse4.2, avx, avx2, bmi1, bmi2, fma, osxsave
+    • AVX-512 Status: not present (no downclock risk)
+
+[✔] In-Memory Execution (memfd_create)
+    • Kernel Support: Available (Linux 6.8.0-generic)
+    • Seccomp Filter: Permitted
+
+[✔] Disk Cache Execution Fallback
+    • Resolved Path:  /home/deployer/.cache/microfat
+    • Permissions:    0700 (read/write OK)
+
+[✔] Container Resource Limits (cgroup v2)
+    • Memory Limit:   2147483648 B (2.00 GiB)
+    • CFS CPU Quota:  4.00 cores
+    • Auto GOMEMLIMIT: 1932735283 B (~1.80 GiB)
+    • Auto GOMAXPROCS: 4
+
+[✔] Toolchain & Version Metadata
+    • Version:        dev
+    • Commit:         none
+
+Summary: Environment is fully ready for high-performance Microfat dispatch!
 ```
 
 ### 3. Compile & Package a Fat Binary
