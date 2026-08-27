@@ -19,6 +19,7 @@ const (
 	flagOutput   = "--output"
 	flagSkipELF  = "--skip-elf-validation"
 	flagManifest = "--manifest"
+	flagVerify   = "--verify"
 )
 
 func TestRootCmdAndSubcommands(t *testing.T) {
@@ -619,4 +620,94 @@ variants:
 		t.Errorf("expected error for pack with no flags and no manifest")
 	}
 }
+
+func TestCLIPrewarmVerifyMode(t *testing.T) {
+	tempDir := t.TempDir()
+
+	stubPath := filepath.Join(tempDir, "stub_vfy_cli")
+	_ = os.WriteFile(stubPath, []byte("#!/bin/sh\n"), 0o755)
+	v1Path := filepath.Join(tempDir, "v1_vfy_cli")
+	v3Path := filepath.Join(tempDir, "v3_vfy_cli")
+	_ = os.WriteFile(v1Path, []byte("#!/bin/sh\necho v1_vfy_cli\n"), 0o755)
+	_ = os.WriteFile(v3Path, []byte("#!/bin/sh\necho v3_vfy_cli\n"), 0o755)
+
+	fatPath := filepath.Join(tempDir, "prewarm_vfy_app.fat")
+	idx, err := pack.Pack(pack.Options{
+		StubPath:          stubPath,
+		OutputPath:        fatPath,
+		AppName:           "prewarm-vfy-cli",
+		TargetArch:        "amd64",
+		SkipELFValidation: true,
+		Variants: map[string]string{
+			"v1": v1Path,
+			"v3": v3Path,
+		},
+	})
+	if err != nil {
+		t.Fatalf("packing test binary: %v", err)
+	}
+
+	cacheDir := filepath.Join(tempDir, "cli_verify_cache")
+
+	// 1. Verify clean cache (should fail because not cached)
+	vfyCleanCmd := newPrewarmCmd()
+	vfyCleanCmd.SetArgs([]string{flagVerify, flagCacheDir, cacheDir, fatPath})
+	if err := vfyCleanCmd.Execute(); err == nil {
+		t.Errorf("expected error verifying clean cache")
+	}
+
+	// 2. Prewarm all
+	prewarmCmd := newPrewarmCmd()
+	prewarmCmd.SetArgs([]string{"--all", flagCacheDir, cacheDir, fatPath})
+	if err := prewarmCmd.Execute(); err != nil {
+		t.Fatalf("prewarming all failed: %v", err)
+	}
+
+	// 3. Verify all on valid cache (should succeed)
+	vfyAllCmd := newPrewarmCmd()
+	vfyAllCmd.SetArgs([]string{flagVerify, "--all", flagCacheDir, cacheDir, fatPath})
+	if err := vfyAllCmd.Execute(); err != nil {
+		t.Fatalf("verifying all on valid cache failed: %v", err)
+	}
+
+	// 4. Verify specific variant v1 (should succeed)
+	vfyV1Cmd := newPrewarmCmd()
+	vfyV1Cmd.SetArgs([]string{flagVerify, flagLevel, "v1", flagCacheDir, cacheDir, fatPath})
+	if err := vfyV1Cmd.Execute(); err != nil {
+		t.Fatalf("verifying v1 on valid cache failed: %v", err)
+	}
+
+	// 5. Verify with --json output (should succeed)
+	vfyJSONCmd := newPrewarmCmd()
+	vfyJSONCmd.SetArgs([]string{flagVerify, flagJSON, flagCacheDir, cacheDir, fatPath})
+	if err := vfyJSONCmd.Execute(); err != nil {
+		t.Fatalf("verifying with --json failed: %v", err)
+	}
+
+	// 6. Verify with invalid variant level
+	vfyBadLevelCmd := newPrewarmCmd()
+	vfyBadLevelCmd.SetArgs([]string{flagVerify, flagLevel, "v99", flagCacheDir, cacheDir, fatPath})
+	if err := vfyBadLevelCmd.Execute(); err == nil {
+		t.Errorf("expected error verifying invalid variant level")
+	}
+
+	// 7. Corrupt cache file (truncate v1)
+	v1Entry, _ := idx.FindVariant("v1")
+	v1Cached := filepath.Join(cacheDir, v1Entry.SHA256)
+	_ = os.WriteFile(v1Cached, []byte("broken_cli"), 0o755)
+
+	vfyCorruptCmd := newPrewarmCmd()
+	vfyCorruptCmd.SetArgs([]string{flagVerify, flagLevel, "v1", flagCacheDir, cacheDir, fatPath})
+	if err := vfyCorruptCmd.Execute(); err == nil {
+		t.Errorf("expected error verifying corrupted cache entry")
+	}
+
+	// 8. Corrupt cache file with --json (should output json and return error)
+	vfyCorruptJSONCmd := newPrewarmCmd()
+	vfyCorruptJSONCmd.SetArgs([]string{flagVerify, flagLevel, "v1", flagJSON, flagCacheDir, cacheDir, fatPath})
+	if err := vfyCorruptJSONCmd.Execute(); err == nil {
+		t.Errorf("expected error verifying corrupted cache entry with --json")
+	}
+}
+
 

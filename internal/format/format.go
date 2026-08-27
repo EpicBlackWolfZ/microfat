@@ -152,7 +152,16 @@ type ErrorTelemetry struct {
 	Details           string `json:"details,omitempty"`
 }
 
-// PrewarmResult records the cache status for an individual prewarmed variant.
+// Prewarm and verify status constants.
+const (
+	PrewarmStatusExtracted     = "extracted"
+	PrewarmStatusAlreadyCached = "already_cached"
+	PrewarmStatusValid         = "valid"
+	PrewarmStatusMissing       = "missing"
+	PrewarmStatusCorrupted     = "corrupted"
+)
+
+// PrewarmResult records the cache status for an individual prewarmed or verified variant.
 type PrewarmResult struct {
 	Level            string `json:"level"`
 	SHA256           string `json:"sha256"`
@@ -160,6 +169,9 @@ type PrewarmResult struct {
 	CachedPath       string `json:"cached_path"`
 	AlreadyCached    bool   `json:"already_cached"`
 	DecompressionUs  int64  `json:"decompression_us,omitempty"`
+	Valid            bool   `json:"valid"`
+	Status           string `json:"status,omitempty"`
+	Error            string `json:"error,omitempty"`
 }
 
 // PrewarmTelemetry records structured telemetry for a prewarm operation.

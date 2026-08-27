@@ -2,10 +2,16 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1007,11 +1013,13 @@ func createDummyVariantFile(t *testing.T, dir string, content []byte) (*format.V
 		t.Fatalf("writing at offset: %v", err)
 	}
 
+	hash := sha256.Sum256(content)
 	entry := &format.VariantEntry{
 		Level:            "v1",
 		Offset:           offset,
 		CompressedSize:   int64(zstdBuf.Len()),
 		UncompressedSize: int64(len(content)),
+		SHA256:           hex.EncodeToString(hash[:]),
 	}
 
 	return entry, f
@@ -1239,5 +1247,354 @@ func TestStubPrewarmAndCacheDispatch(t *testing.T) {
 	}
 	t.Setenv(format.EnvExecMode, "")
 }
+
+func TestExecuteVariant_SyscallMocking(t *testing.T) {
+	tempDir := t.TempDir()
+	payloadData := []byte("PAYLOAD_SYSCALL_MOCK_TEST")
+	entry, rawFile := createDummyVariantFile(t, tempDir, payloadData)
+	defer func() { _ = rawFile.Close() }()
+
+	cacheDir := filepath.Join(tempDir, "mock_cache")
+	t.Setenv(format.EnvCacheDir, cacheDir)
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{}
+
+	oldMemfd := memfdCreateFunc
+	oldExec := execveFunc
+	defer func() {
+		memfdCreateFunc = oldMemfd
+		execveFunc = oldExec
+	}()
+
+	tests := []struct {
+		name     string
+		memfdErr error
+	}{
+		{"EPERM seccomp blocked", syscall.EPERM},
+		{"ENOSYS kernel unsupported", syscall.ENOSYS},
+		{"EMFILE descriptor exhaustion", syscall.EMFILE},
+		{"EACCES permission denied", syscall.EACCES},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			memfdCreateFunc = func(name string, flags int) (int, error) {
+				return -1, tc.memfdErr
+			}
+
+			var executedBinary string
+			execveFunc = func(argv0 string, argv []string, envv []string) error {
+				executedBinary = argv0
+				return nil
+			}
+
+			err := executeVariant(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+			if err != nil {
+				t.Fatalf("expected graceful fallback to cache, got error: %v", err)
+			}
+
+			if !strings.Contains(executedBinary, cacheDir) {
+				t.Errorf("expected execve on cached binary in %s, got %s", cacheDir, executedBinary)
+			}
+		})
+	}
+}
+
+func TestExecuteVariant_TruncatedCacheRecovery(t *testing.T) {
+	tempDir := t.TempDir()
+	payloadData := []byte("TRUNCATED_RECOVERY_PAYLOAD_CONTENT_12345")
+	entry, rawFile := createDummyVariantFile(t, tempDir, payloadData)
+	defer func() { _ = rawFile.Close() }()
+
+	cacheDir := filepath.Join(tempDir, "recovery_cache")
+	t.Setenv(format.EnvCacheDir, cacheDir)
+	_ = os.MkdirAll(cacheDir, 0o700)
+
+	cachedPath := filepath.Join(cacheDir, entry.SHA256)
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{}
+
+	oldExec := execveFunc
+	defer func() { execveFunc = oldExec }()
+
+	var executedPath string
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		executedPath = argv0
+		return nil
+	}
+
+	// 1. Zero-byte truncated cache file
+	_ = os.WriteFile(cachedPath, []byte{}, 0o755)
+
+	t.Setenv(format.EnvDebug, "1")
+	err := executeViaCache(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+	if err != nil {
+		t.Fatalf("executeViaCache failed on zero-byte cache file: %v", err)
+	}
+	if executedPath != cachedPath {
+		t.Errorf("expected execution of %s, got %s", cachedPath, executedPath)
+	}
+
+	// Verify cached file was replaced with full content
+	data, err := os.ReadFile(cachedPath)
+	if err != nil || !bytes.Equal(data, payloadData) {
+		t.Errorf("expected cached file to be restored to payload content, got %q (err: %v)", string(data), err)
+	}
+
+	// 2. Partial/corrupted size cache file (half length)
+	_ = os.WriteFile(cachedPath, payloadData[:len(payloadData)/2], 0o755)
+	executedPath = ""
+	err = executeViaCache(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+	if err != nil {
+		t.Fatalf("executeViaCache failed on partial cache file: %v", err)
+	}
+	data2, err := os.ReadFile(cachedPath)
+	if err != nil || !bytes.Equal(data2, payloadData) {
+		t.Errorf("expected cached file to be restored after partial file corruption, got %q", string(data2))
+	}
+	t.Setenv(format.EnvDebug, "")
+}
+
+func TestPrewarmStub_VerifyMode(t *testing.T) {
+	tempDir := t.TempDir()
+
+	stubPath := filepath.Join(tempDir, "stub_vfy")
+	_ = os.WriteFile(stubPath, []byte("#!/bin/sh\n"), 0o755)
+	v1Path := filepath.Join(tempDir, "v1_vfy")
+	v2Path := filepath.Join(tempDir, "v2_vfy")
+	v1Data := []byte("#!/bin/sh\necho v1_vfy\n")
+	v2Data := []byte("#!/bin/sh\necho v2_vfy\n")
+	_ = os.WriteFile(v1Path, v1Data, 0o755)
+	_ = os.WriteFile(v2Path, v2Data, 0o755)
+
+	fatPath := filepath.Join(tempDir, "prewarm_verify.fat")
+	idx, err := pack.Pack(pack.Options{
+		StubPath:          stubPath,
+		OutputPath:        fatPath,
+		AppName:           "verifyapp",
+		TargetArch:        testArchAMD64,
+		SkipELFValidation: true,
+		Variants: map[string]string{
+			"v1": v1Path,
+			"v2": v2Path,
+		},
+	})
+	if err != nil {
+		t.Fatalf("packing test binary: %v", err)
+	}
+
+	oldArgs := os.Args
+	defer func() { os.Args = oldArgs }()
+
+	cacheDir := filepath.Join(tempDir, "verify_cache")
+	t.Setenv(format.EnvCacheDir, cacheDir)
+
+	// 1. Verify clean cache (should fail with missing status)
+	os.Args = []string{fatPath, "--microfat:prewarm=verify"}
+	if err := runBinary(fatPath); err == nil {
+		t.Errorf("expected error running --microfat:prewarm=verify on clean cache")
+	}
+
+	// 2. Prewarm v1 and verify v1 (should succeed)
+	os.Args = []string{fatPath, "--microfat:prewarm=v1"}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("prewarming v1 failed: %v", err)
+	}
+
+	os.Args = []string{fatPath, "--microfat:prewarm=verify,v1"}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("--microfat:prewarm=verify,v1 failed on valid cache: %v", err)
+	}
+
+	// 3. Verify all when only v1 is cached (should fail because v2 is missing)
+	os.Args = []string{fatPath, "--microfat:prewarm=verify,all"}
+	if err := runBinary(fatPath); err == nil {
+		t.Errorf("expected error verifying all when v2 is missing")
+	}
+
+	// 4. Prewarm all and verify all (should succeed)
+	os.Args = []string{fatPath, "--microfat:prewarm=all"}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("prewarming all failed: %v", err)
+	}
+
+	os.Args = []string{fatPath, "--microfat:prewarm=verify,all"}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("--microfat:prewarm=verify,all failed on complete cache: %v", err)
+	}
+
+	// 5. Verify mode with --json flag
+	os.Args = []string{fatPath, "--microfat:prewarm=verify,all", "--json"}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("--microfat:prewarm=verify,all with --json failed: %v", err)
+	}
+
+	// 6. Verify mode with standalone --verify in args
+	os.Args = []string{fatPath, "--microfat:prewarm", "--verify"}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("--microfat:prewarm with --verify failed: %v", err)
+	}
+
+	// 7. Verify mode on corrupted cache entry (truncate v1)
+	v1Entry, _ := idx.FindVariant("v1")
+	v1Cached := filepath.Join(cacheDir, v1Entry.SHA256)
+	_ = os.WriteFile(v1Cached, []byte("broken"), 0o755)
+
+	os.Args = []string{fatPath, "--microfat:prewarm=verify,v1"}
+	if err := runBinary(fatPath); err == nil {
+		t.Errorf("expected error verifying corrupted cache entry")
+	}
+
+	// 8. Verify mode on corrupted cache entry with JSON output
+	os.Args = []string{fatPath, "--microfat:prewarm=verify,v1", "--json"}
+	if err := runBinary(fatPath); err == nil {
+		t.Errorf("expected error verifying corrupted cache entry with JSON output")
+	}
+}
+
+func TestExecuteVariant_StrictEnvironmentMatrix(t *testing.T) {
+	tempDir := t.TempDir()
+	payloadData := []byte("STRICT_ENV_MATRIX_PAYLOAD")
+	entry, rawFile := createDummyVariantFile(t, tempDir, payloadData)
+	defer func() { _ = rawFile.Close() }()
+
+	cacheDir := filepath.Join(tempDir, "matrix_cache")
+	t.Setenv(format.EnvCacheDir, cacheDir)
+
+	hostInfo := microarch.Info{
+		OS:       testOSLinux,
+		Arch:     testArchAMD64,
+		Level:    "v3",
+		Features: []string{"avx", "avx2", "bmi1", "bmi2", "fma"},
+	}
+
+	oldExec := execveFunc
+	defer func() { execveFunc = oldExec }()
+
+	var capturedEnv []string
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		capturedEnv = envv
+		return nil
+	}
+
+	t.Run("memfd execution strict env assertions", func(t *testing.T) {
+		policyRes := microarch.PolicyResult{
+			SelectedVariant: "v3",
+			PolicyApplied:   testPolicyForceLevel,
+			OverrideReason:  "MICROFAT_FORCE_LEVEL=v3",
+		}
+		base := []string{"USER=deployer", "LANG=en_US.UTF-8"}
+
+		err := executeVariant(rawFile, entry, []string{testAppArg}, base, hostInfo, policyRes, time.Now())
+		if err != nil {
+			t.Fatalf("executeVariant failed: %v", err)
+		}
+
+		envMap := make(map[string]string)
+		for _, e := range capturedEnv {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) == 2 {
+				envMap[parts[0]] = parts[1]
+			}
+		}
+
+		expected := map[string]string{
+			"USER":                    "deployer",
+			"LANG":                    "en_US.UTF-8",
+			format.EnvSelectedVariant: "v1",
+			format.EnvHostArch:        "amd64",
+			format.EnvHostLevel:       "v3",
+			format.EnvExecMode:        format.ExecModeMemfd,
+			format.EnvDispatchMode:    format.ExecModeMemfd,
+			format.EnvSelectedSHA256:  entry.SHA256,
+			format.EnvSelectedSize:    fmt.Sprintf("%d", entry.UncompressedSize),
+			format.EnvPolicyApplied:   testPolicyForceLevel,
+			format.EnvOverrideReason:  "MICROFAT_FORCE_LEVEL=v3",
+		}
+
+		for k, expVal := range expected {
+			if val, ok := envMap[k]; !ok || val != expVal {
+				t.Errorf("env key %s: expected %q, got %q (exists: %v)", k, expVal, val, ok)
+			}
+		}
+	})
+}
+
+func TestExecuteVariant_TelemetryJSONValidation(t *testing.T) {
+	tempDir := t.TempDir()
+	payloadData := []byte("TELEMETRY_JSON_VALIDATION_PAYLOAD")
+	entry, rawFile := createDummyVariantFile(t, tempDir, payloadData)
+	defer func() { _ = rawFile.Close() }()
+
+	cacheDir := filepath.Join(tempDir, "telem_cache")
+	t.Setenv(format.EnvCacheDir, cacheDir)
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{PolicyApplied: "test_policy", OverrideReason: "test"}
+
+	oldExec := execveFunc
+	defer func() { execveFunc = oldExec }()
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		return nil
+	}
+
+	// 1. DispatchTelemetry validation (JSON)
+	t.Setenv(format.EnvLog, "json")
+	var capturedOutput bytes.Buffer
+
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	logDiagnostics(
+		entry, format.ExecModeMemfd, hostInfo, policyRes, []string{"GOMEMLIMIT=1000B"}, nil,
+		150*time.Microsecond, 500*time.Microsecond,
+	)
+	_ = w.Close()
+	os.Stderr = oldStderr
+
+	_, _ = io.Copy(&capturedOutput, r)
+	outStr := strings.TrimSpace(capturedOutput.String())
+
+	jsonPart := strings.TrimPrefix(outStr, "[microfat] ")
+	var dt format.DispatchTelemetry
+	if err := json.Unmarshal([]byte(jsonPart), &dt); err != nil {
+		t.Fatalf("unmarshaling DispatchTelemetry JSON failed: %v (raw: %s)", err, outStr)
+	}
+
+	if dt.Event != format.EventDispatch || dt.HostArch != "amd64" || dt.SelectedVariant != entry.Level {
+		t.Errorf("DispatchTelemetry validation mismatch: %+v", dt)
+	}
+	if dt.TimestampUnixNano <= 0 || dt.DecompressionDurationUs <= 0 || dt.TotalLauncherUs <= 0 {
+		t.Errorf("DispatchTelemetry invalid timestamps/durations: %+v", dt)
+	}
+
+	// 2. ErrorTelemetry validation (JSON)
+	capturedOutput.Reset()
+	r2, w2, _ := os.Pipe()
+	os.Stderr = w2
+
+	logErrorDiagnostics("memfd_create", errors.New("simulated error"), hostInfo, entry, policyRes, "mock details")
+	_ = w2.Close()
+	os.Stderr = oldStderr
+
+	_, _ = io.Copy(&capturedOutput, r2)
+	errStr := strings.TrimSpace(capturedOutput.String())
+	errJSON := strings.TrimPrefix(errStr, "[microfat] ")
+
+	var et format.ErrorTelemetry
+	if err := json.Unmarshal([]byte(errJSON), &et); err != nil {
+		t.Fatalf("unmarshaling ErrorTelemetry JSON failed: %v (raw: %s)", err, errStr)
+	}
+
+	if et.Event != format.EventError || et.Stage != "memfd_create" || et.Error != "simulated error" || et.Details != "mock details" {
+		t.Errorf("ErrorTelemetry validation mismatch: %+v", et)
+	}
+
+	t.Setenv(format.EnvLog, "")
+}
+
 
 

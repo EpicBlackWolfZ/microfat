@@ -502,6 +502,11 @@ func PrewarmBinary(
 			return nil, nil, fmt.Errorf("prewarming variant %s: %w", v.Level, err)
 		}
 
+		status := format.PrewarmStatusExtracted
+		if alreadyCached {
+			status = format.PrewarmStatusAlreadyCached
+		}
+
 		results = append(results, format.PrewarmResult{
 			Level:            v.Level,
 			SHA256:           v.SHA256,
@@ -509,7 +514,131 @@ func PrewarmBinary(
 			CachedPath:       path,
 			AlreadyCached:    alreadyCached,
 			DecompressionUs:  duration.Microseconds(),
+			Valid:            true,
+			Status:           status,
 		})
+	}
+
+	return idx, results, nil
+}
+
+// VerifyCacheVariant inspects the cache directory for an existing variant binary, validating
+// its existence, uncompressed size, and cryptographic SHA-256 checksum without modifying disk state.
+func VerifyCacheVariant(
+	entry *format.VariantEntry,
+	cacheDir string,
+) format.PrewarmResult {
+	res := format.PrewarmResult{
+		Level:            entry.Level,
+		SHA256:           entry.SHA256,
+		UncompressedSize: entry.UncompressedSize,
+	}
+
+	if cacheDir == "" {
+		resolved, err := format.ResolveCacheDir("")
+		if err != nil {
+			res.Status = format.PrewarmStatusMissing
+			res.Error = fmt.Sprintf("resolving cache directory: %v", err)
+			return res
+		}
+		cacheDir = resolved
+	}
+
+	cleanDir := filepath.Clean(cacheDir)
+	cachedBinary := filepath.Join(cleanDir, filepath.Clean(entry.SHA256))
+	res.CachedPath = cachedBinary
+
+	stat, err := os.Stat(cachedBinary)
+	if err != nil {
+		res.Status = format.PrewarmStatusMissing
+		res.Error = fmt.Sprintf("cached binary not found: %v", err)
+		return res
+	}
+
+	res.AlreadyCached = true
+
+	if stat.Size() != entry.UncompressedSize {
+		res.Status = format.PrewarmStatusCorrupted
+		res.Error = fmt.Sprintf("size mismatch: expected %d bytes, got %d bytes", entry.UncompressedSize, stat.Size())
+		return res
+	}
+
+	// Compute full SHA-256 hash
+	// #nosec G304 -- opening resolved cached binary for hash verification
+	f, err := os.Open(cachedBinary)
+	if err != nil {
+		res.Status = format.PrewarmStatusCorrupted
+		res.Error = fmt.Sprintf("opening cached file for hashing: %v", err)
+		return res
+	}
+	defer func() { _ = f.Close() }()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, f); err != nil {
+		res.Status = format.PrewarmStatusCorrupted
+		res.Error = fmt.Sprintf("hashing cached binary: %v", err)
+		return res
+	}
+
+	actualHash := hex.EncodeToString(hasher.Sum(nil))
+	if entry.SHA256 != "" && actualHash != entry.SHA256 {
+		res.Status = format.PrewarmStatusCorrupted
+		res.Error = fmt.Sprintf("checksum mismatch: expected %s, got %s", entry.SHA256, actualHash)
+		return res
+	}
+
+	res.Valid = true
+	res.Status = format.PrewarmStatusValid
+	return res
+}
+
+// VerifyCacheBinary inspects the cache directory for the specified variant levels (or all variants if targetLevels is empty)
+// and validates their presence, size, and SHA-256 integrity without modifying disk state.
+func VerifyCacheBinary(
+	r io.ReaderAt,
+	totalSize int64,
+	targetLevels []string,
+	cacheDir string,
+) (*format.Index, []format.PrewarmResult, error) {
+	idx, err := format.ReadTrailerAndIndex(r, totalSize)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading index: %w", err)
+	}
+
+	if cacheDir == "" {
+		resolved, err := format.ResolveCacheDir("")
+		if err != nil {
+			return nil, nil, fmt.Errorf("resolving cache directory: %w", err)
+		}
+		cacheDir = resolved
+	}
+
+	// Validate target levels if specified
+	if len(targetLevels) > 0 {
+		for _, lvl := range targetLevels {
+			if _, found := idx.FindVariant(lvl); !found {
+				return nil, nil, fmt.Errorf("variant level %q not found in binary manifest", lvl)
+			}
+		}
+	}
+
+	results := make([]format.PrewarmResult, 0, len(idx.Variants))
+	for _, v := range idx.Variants {
+		if len(targetLevels) > 0 {
+			match := false
+			for _, lvl := range targetLevels {
+				if v.Level == lvl {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+
+		res := VerifyCacheVariant(&v, cacheDir)
+		results = append(results, res)
 	}
 
 	return idx, results, nil

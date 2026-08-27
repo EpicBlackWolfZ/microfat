@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -137,7 +138,8 @@ func handleMetaCommand(
 		return true, handleOptimizeTo(arg1, selfFile, selectedEntry)
 	case isPrefixOrExact(arg1, flagPrewarm):
 		jsonOutput := strings.HasSuffix(arg1, "=json") || hasJSONFlag(os.Args[2:])
-		return true, prewarmStub(selfFile, statSize, idx, selectedEntry.Level, arg1, jsonOutput)
+		verifyMode := strings.Contains(arg1, "verify") || hasVerifyFlag(os.Args[2:])
+		return true, prewarmStub(selfFile, statSize, idx, selectedEntry.Level, arg1, jsonOutput, verifyMode)
 	default:
 		return false, nil
 	}
@@ -200,25 +202,24 @@ func handleOptimizeTo(arg1 string, selfFile *os.File, selectedEntry *format.Vari
 	return nil
 }
 
-func prewarmStub(selfFile *os.File, statSize int64, idx *format.Index, defaultLevel string, arg string, jsonOutput bool) error {
-	var targetLevels []string
-	if strings.HasPrefix(arg, flagPrewarm+"=") {
-		val := strings.TrimPrefix(arg, flagPrewarm+"=")
-		switch {
-		case strings.EqualFold(val, "all"):
-			targetLevels = idx.VariantLevels()
-		case strings.EqualFold(val, "json"):
-			jsonOutput = true
-			targetLevels = []string{defaultLevel}
-		case val != "":
-			if _, found := idx.FindVariant(val); !found {
-				return fmt.Errorf("variant level %q not found in binary manifest", val)
-			}
-			targetLevels = []string{val}
-		}
+func prewarmStub(
+	selfFile *os.File,
+	statSize int64,
+	idx *format.Index,
+	defaultLevel string,
+	arg string,
+	jsonOutput bool,
+	verifyOnly bool,
+) error {
+	targetLevels, parsedJSON, parsedVerify, err := parsePrewarmArgs(arg, defaultLevel, idx)
+	if err != nil {
+		return err
 	}
-	if len(targetLevels) == 0 {
-		targetLevels = []string{defaultLevel}
+	if parsedJSON {
+		jsonOutput = true
+	}
+	if parsedVerify {
+		verifyOnly = true
 	}
 
 	cacheDir, err := resolveCacheDirFunc("")
@@ -226,6 +227,106 @@ func prewarmStub(selfFile *os.File, statSize int64, idx *format.Index, defaultLe
 		return fmt.Errorf("resolving cache directory: %w", err)
 	}
 
+	if verifyOnly {
+		return handlePrewarmVerify(selfFile, statSize, idx, targetLevels, cacheDir, jsonOutput)
+	}
+	return handlePrewarmExtract(selfFile, statSize, idx, targetLevels, cacheDir, jsonOutput)
+}
+
+func parsePrewarmArgs(arg, defaultLevel string, idx *format.Index) ([]string, bool, bool, error) {
+	var targetLevels []string
+	var jsonOutput, verifyOnly bool
+
+	if strings.HasPrefix(arg, flagPrewarm+"=") {
+		val := strings.TrimPrefix(arg, flagPrewarm+"=")
+		tokens := strings.Split(val, ",")
+		for _, token := range tokens {
+			token = strings.TrimSpace(token)
+			switch {
+			case strings.EqualFold(token, "verify"):
+				verifyOnly = true
+			case strings.EqualFold(token, "all"):
+				targetLevels = idx.VariantLevels()
+			case strings.EqualFold(token, "json"):
+				jsonOutput = true
+			case token != "":
+				if _, found := idx.FindVariant(token); !found {
+					return nil, false, false, fmt.Errorf("variant level %q not found in binary manifest", token)
+				}
+				targetLevels = []string{token}
+			}
+		}
+	}
+	if len(targetLevels) == 0 {
+		targetLevels = []string{defaultLevel}
+	}
+	return targetLevels, jsonOutput, verifyOnly, nil
+}
+
+func handlePrewarmVerify(
+	selfFile *os.File,
+	statSize int64,
+	idx *format.Index,
+	targetLevels []string,
+	cacheDir string,
+	jsonOutput bool,
+) error {
+	_, results, err := pack.VerifyCacheBinary(selfFile, statSize, targetLevels, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	allValid := true
+	for _, r := range results {
+		if !r.Valid {
+			allValid = false
+			break
+		}
+	}
+
+	if jsonOutput || strings.EqualFold(os.Getenv(format.EnvLog), "json") {
+		telem := format.PrewarmTelemetry{
+			Event:             format.EventPrewarm,
+			TimestampUnixNano: time.Now().UnixNano(),
+			AppName:           idx.AppName,
+			CacheDir:          cacheDir,
+			Results:           results,
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(telem); err != nil {
+			return fmt.Errorf("encoding json: %w", err)
+		}
+		if !allValid {
+			return errors.New("cache verification failed for one or more variants")
+		}
+		return nil
+	}
+
+	for _, r := range results {
+		if r.Valid {
+			fmt.Printf("[microfat] Cache valid for variant '%s' at '%s' (%d bytes, sha256: %.12s...)\n",
+				r.Level, r.CachedPath, r.UncompressedSize, r.SHA256)
+		} else {
+			fmt.Printf("[microfat] Cache invalid for variant '%s' at '%s': status=%s (%s)\n",
+				r.Level, r.CachedPath, r.Status, r.Error)
+		}
+	}
+
+	if !allValid {
+		return errors.New("cache verification failed for one or more variants")
+	}
+	return nil
+}
+
+func handlePrewarmExtract(
+	selfFile *os.File,
+	statSize int64,
+	idx *format.Index,
+	targetLevels []string,
+	cacheDir string,
+	jsonOutput bool,
+) error {
 	_, results, err := pack.PrewarmBinary(selfFile, statSize, targetLevels, cacheDir)
 	if err != nil {
 		return err
@@ -258,6 +359,15 @@ func prewarmStub(selfFile *os.File, statSize int64, idx *format.Index, defaultLe
 func hasJSONFlag(args []string) bool {
 	for _, a := range args {
 		if a == "--json" || a == "-json" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasVerifyFlag(args []string) bool {
+	for _, a := range args {
+		if a == "--verify" || a == "-verify" {
 			return true
 		}
 	}

@@ -522,11 +522,12 @@ func newPrewarmCmd() *cobra.Command {
 		allVariants bool
 		cacheDir    string
 		jsonOutput  bool
+		verifyOnly  bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "prewarm <binary>",
-		Short: "Pre-extract optimal or all variant payloads into the microfat cache",
+		Short: "Pre-extract optimal or all variant payloads into the microfat cache, or verify cache integrity",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := filepath.Clean(args[0])
@@ -575,6 +576,57 @@ func newPrewarmCmd() *cobra.Command {
 				targetLevels = []string{policyRes.SelectedVariant}
 			}
 
+			if verifyOnly {
+				idx, results, err := pack.VerifyCacheBinary(f, stat.Size(), targetLevels, resolvedDir)
+				if err != nil {
+					return fmt.Errorf("verifying cache: %w", err)
+				}
+
+				allValid := true
+				for _, r := range results {
+					if !r.Valid {
+						allValid = false
+						break
+					}
+				}
+
+				if jsonOutput {
+					telem := format.PrewarmTelemetry{
+						Event:             format.EventPrewarm,
+						TimestampUnixNano: time.Now().UnixNano(),
+						AppName:           idx.AppName,
+						CacheDir:          resolvedDir,
+						Results:           results,
+					}
+					enc := json.NewEncoder(os.Stdout)
+					enc.SetIndent("", "  ")
+					if err := enc.Encode(telem); err != nil {
+						return fmt.Errorf("encoding json: %w", err)
+					}
+					if !allValid {
+						return errors.New("cache verification failed for one or more variants")
+					}
+					return nil
+				}
+
+				fmt.Printf("Verifying cache for '%s' (%s - %s/%s)...\n", path, idx.AppName, idx.TargetOS, idx.TargetArch)
+				fmt.Printf("Cache Directory: %s\n\n", resolvedDir)
+				for _, r := range results {
+					if r.Valid {
+						fmt.Printf("  [PASS] %-6s (sha256: %.12s..., size: %d B) -> %s\n",
+							r.Level, r.SHA256, r.UncompressedSize, r.CachedPath)
+					} else {
+						fmt.Printf("  [FAIL] %-6s (sha256: %.12s..., size: %d B) -> status: %s (%s)\n",
+							r.Level, r.SHA256, r.UncompressedSize, r.Status, r.Error)
+					}
+				}
+				if !allValid {
+					return errors.New("cache verification failed for one or more variants")
+				}
+				fmt.Println("\nResult: All specified cache entries are valid and verified.")
+				return nil
+			}
+
 			idx, results, err := pack.PrewarmBinary(f, stat.Size(), targetLevels, resolvedDir)
 			if err != nil {
 				return fmt.Errorf("prewarming binary: %w", err)
@@ -612,6 +664,7 @@ func newPrewarmCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&allVariants, "all", false, "Prewarm all embedded variants into the cache")
 	cmd.Flags().StringVar(&cacheDir, "cache-dir", "", "Custom destination cache directory")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results in JSON format")
+	cmd.Flags().BoolVar(&verifyOnly, "verify", false, "Verify cache health and checksums for target variants without extracting")
 
 	return cmd
 }

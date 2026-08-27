@@ -899,3 +899,173 @@ func TestPrewarmVariantAndBinary(t *testing.T) {
 	}
 }
 
+func TestVerifyCacheVariantAndBinary(t *testing.T) {
+	tempDir := t.TempDir()
+
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("stub-payload"), 0o755)
+
+	v1Path := filepath.Join(tempDir, "v1")
+	v1Content := []byte("v1-binary-content-for-cache-verify")
+	_ = os.WriteFile(v1Path, v1Content, 0o755)
+
+	v3Path := filepath.Join(tempDir, "v3")
+	v3Content := []byte("v3-binary-content-for-cache-verify-avx2")
+	_ = os.WriteFile(v3Path, v3Content, 0o755)
+
+	fatPath := filepath.Join(tempDir, "fat_verify.bin")
+	opts := Options{
+		StubPath:          stubPath,
+		OutputPath:        fatPath,
+		AppName:           "verify-cache-app",
+		TargetOS:          testOSLinux,
+		TargetArch:        testArchAMD64,
+		SkipELFValidation: true,
+		Variants: map[string]string{
+			"v1": v1Path,
+			"v3": v3Path,
+		},
+	}
+
+	idx, err := Pack(opts)
+	if err != nil {
+		t.Fatalf("Pack failed: %v", err)
+	}
+
+	f, err := os.Open(fatPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	stat, err := f.Stat()
+	if err != nil {
+		t.Fatalf("Stat failed: %v", err)
+	}
+
+	cacheDir := filepath.Join(tempDir, "cache_verify_dir")
+
+	// 1. Clean cache: VerifyCacheBinary should report missing for all variants
+	_, missingResults, err := VerifyCacheBinary(f, stat.Size(), nil, cacheDir)
+	if err != nil {
+		t.Fatalf("VerifyCacheBinary failed on clean cache: %v", err)
+	}
+	if len(missingResults) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(missingResults))
+	}
+	for _, r := range missingResults {
+		if r.Valid || r.Status != format.PrewarmStatusMissing {
+			t.Errorf("expected status 'missing' and valid=false for clean cache, got %+v", r)
+		}
+	}
+
+	// 2. Prewarm v1 and verify: v1 should be valid, v3 should be missing
+	_, _, err = PrewarmBinary(f, stat.Size(), []string{"v1"}, cacheDir)
+	if err != nil {
+		t.Fatalf("prewarming v1 failed: %v", err)
+	}
+
+	_, mixedResults, err := VerifyCacheBinary(f, stat.Size(), nil, cacheDir)
+	if err != nil {
+		t.Fatalf("VerifyCacheBinary failed on mixed cache: %v", err)
+	}
+	for _, r := range mixedResults {
+		if r.Level == "v1" {
+			if !r.Valid || r.Status != format.PrewarmStatusValid {
+				t.Errorf("expected v1 to be valid, got %+v", r)
+			}
+		} else if r.Level == "v3" {
+			if r.Valid || r.Status != format.PrewarmStatusMissing {
+				t.Errorf("expected v3 to be missing, got %+v", r)
+			}
+		}
+	}
+
+	// 3. Prewarm all variants: both v1 and v3 should be valid
+	_, _, err = PrewarmBinary(f, stat.Size(), nil, cacheDir)
+	if err != nil {
+		t.Fatalf("prewarming all failed: %v", err)
+	}
+
+	_, allValidResults, err := VerifyCacheBinary(f, stat.Size(), nil, cacheDir)
+	if err != nil {
+		t.Fatalf("VerifyCacheBinary failed on fully populated cache: %v", err)
+	}
+	for _, r := range allValidResults {
+		if !r.Valid || r.Status != format.PrewarmStatusValid {
+			t.Errorf("expected variant %s to be valid, got %+v", r.Level, r)
+		}
+	}
+
+	// 4. Corrupt size of v1 (truncate to 5 bytes)
+	v1Entry, _ := idx.FindVariant("v1")
+	v1CachedFile := filepath.Join(cacheDir, v1Entry.SHA256)
+	_ = os.WriteFile(v1CachedFile, []byte("short"), 0o755)
+
+	resTrunc := VerifyCacheVariant(v1Entry, cacheDir)
+	if resTrunc.Valid || resTrunc.Status != format.PrewarmStatusCorrupted {
+		t.Errorf("expected status 'corrupted' for truncated cache entry, got %+v", resTrunc)
+	}
+
+	// 5. Corrupt content of v3 (same size, wrong SHA-256 hash)
+	v3Entry, _ := idx.FindVariant("v3")
+	v3CachedFile := filepath.Join(cacheDir, v3Entry.SHA256)
+	corruptBytes := make([]byte, v3Entry.UncompressedSize)
+	for i := range corruptBytes {
+		corruptBytes[i] = 'X'
+	}
+	_ = os.WriteFile(v3CachedFile, corruptBytes, 0o755)
+
+	resCorruptHash := VerifyCacheVariant(v3Entry, cacheDir)
+	if resCorruptHash.Valid || resCorruptHash.Status != format.PrewarmStatusCorrupted {
+		t.Errorf("expected status 'corrupted' for hash mismatch cache entry, got %+v", resCorruptHash)
+	}
+
+	// 6. VerifyCacheBinary with specific nonexistent variant level
+	_, _, err = VerifyCacheBinary(f, stat.Size(), []string{"v99"}, cacheDir)
+	if err == nil {
+		t.Errorf("expected error for nonexistent variant level v99")
+	}
+
+	// 7. VerifyCacheBinary with empty cacheDir (uses resolved default)
+	t.Setenv(format.EnvCacheDir, cacheDir)
+	_, _, err = VerifyCacheBinary(f, stat.Size(), []string{"v1"}, "")
+	if err != nil {
+		t.Errorf("expected success with auto-resolved cacheDir: %v", err)
+	}
+	t.Setenv(format.EnvCacheDir, "")
+
+	// 8. VerifyCacheVariant with invalid cacheDir
+	resBadDir := VerifyCacheVariant(v1Entry, filepath.Join(tempDir, "nonexistent_parent", "sub"))
+	if resBadDir.Valid || resBadDir.Status != format.PrewarmStatusMissing {
+		t.Errorf("expected missing status for nonexistent cache directory: %+v", resBadDir)
+	}
+
+	// 9. VerifyCacheVariant unreadable file (open error)
+	_ = os.Chmod(v1CachedFile, 0o000)
+	defer func() { _ = os.Chmod(v1CachedFile, 0o755) }()
+	resUnreadable := VerifyCacheVariant(v1Entry, cacheDir)
+	if os.Getuid() != 0 { // Skip permission check if running as root in container
+		if resUnreadable.Valid || resUnreadable.Status != format.PrewarmStatusCorrupted {
+			t.Errorf("expected corrupted status for unreadable file: %+v", resUnreadable)
+		}
+	}
+
+	// 10. VerifyCacheVariant and VerifyCacheBinary when cache resolution fails
+	t.Setenv("XDG_CACHE_HOME", "/dev/null/forbidden_primary")
+	t.Setenv("TMPDIR", "/dev/null/forbidden_secondary")
+	resResolveErr := VerifyCacheVariant(v1Entry, "")
+	if resResolveErr.Valid || resResolveErr.Status != format.PrewarmStatusMissing {
+		t.Errorf("expected missing status when cache resolution fails: %+v", resResolveErr)
+	}
+
+	_, _, err = VerifyCacheBinary(f, stat.Size(), []string{"v1"}, "")
+	if err == nil {
+		t.Errorf("expected error from VerifyCacheBinary when cache resolution fails")
+	}
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("TMPDIR", "")
+}
+
+
+
