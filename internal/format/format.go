@@ -62,23 +62,27 @@ const (
 	EnvDispatchMode     = "MICROFAT_DISPATCH_MODE"
 	EnvSelectedSHA256   = "MICROFAT_SELECTED_SHA256"
 	EnvSelectedSize     = "MICROFAT_SELECTED_SIZE"
-	EnvCgroupVersion    = "MICROFAT_CGROUP_VERSION"
-	EnvCgroupGOMEMLIMIT = "MICROFAT_CGROUP_GOMEMLIMIT"
-	EnvCgroupGOMAXPROCS = "MICROFAT_CGROUP_GOMAXPROCS"
-	EnvCgroupLimitBytes = "MICROFAT_CGROUP_LIMIT_BYTES"
-	EnvCgroupCPUs       = "MICROFAT_CGROUP_CPUS"
-	EnvDebug                       = "MICROFAT_DEBUG"
-	EnvLog                         = "MICROFAT_LOG"
-	EnvAutotune                    = "MICROFAT_AUTOTUNE"
-	EnvMemRatio                    = "MICROFAT_MEM_RATIO"
-	EnvForceLevel                  = "MICROFAT_FORCE_LEVEL"
-	EnvMaxLevel                    = "MICROFAT_MAX_LEVEL"
-	EnvDisableVariants             = "MICROFAT_DISABLE_VARIANTS"
-	EnvPolicy                      = "MICROFAT_POLICY"
-	EnvAVX512DownclockProtection   = "MICROFAT_AVX512_DOWNCLOCK_PROTECTION"
-	EnvCacheDir                    = "MICROFAT_CACHE_DIR"
-	EnvPolicyApplied               = "MICROFAT_POLICY_APPLIED"
-	EnvOverrideReason              = "MICROFAT_OVERRIDE_REASON"
+	EnvCgroupVersion              = "MICROFAT_CGROUP_VERSION"
+	EnvCgroupGOMEMLIMIT           = "MICROFAT_CGROUP_GOMEMLIMIT"
+	EnvCgroupGOMAXPROCS           = "MICROFAT_CGROUP_GOMAXPROCS"
+	EnvCgroupLimitBytes           = "MICROFAT_CGROUP_LIMIT_BYTES"
+	EnvCgroupCPUs                 = "MICROFAT_CGROUP_CPUS"
+	EnvCgroupGOGC                 = "MICROFAT_CGROUP_GOGC"
+	EnvCgroupGCProfile            = "MICROFAT_CGROUP_GC_PROFILE"
+	EnvDebug                      = "MICROFAT_DEBUG"
+	EnvLog                        = "MICROFAT_LOG"
+	EnvAutotune                   = "MICROFAT_AUTOTUNE"
+	EnvMemRatio                   = "MICROFAT_MEM_RATIO"
+	EnvGCProfile                  = "MICROFAT_GC_PROFILE"
+	EnvLiveHeapEstimate           = "MICROFAT_LIVE_HEAP_ESTIMATE"
+	EnvForceLevel                 = "MICROFAT_FORCE_LEVEL"
+	EnvMaxLevel                   = "MICROFAT_MAX_LEVEL"
+	EnvDisableVariants            = "MICROFAT_DISABLE_VARIANTS"
+	EnvPolicy                     = "MICROFAT_POLICY"
+	EnvAVX512DownclockProtection  = "MICROFAT_AVX512_DOWNCLOCK_PROTECTION"
+	EnvCacheDir                   = "MICROFAT_CACHE_DIR"
+	EnvPolicyApplied              = "MICROFAT_POLICY_APPLIED"
+	EnvOverrideReason             = "MICROFAT_OVERRIDE_REASON"
 
 	// Execution modes.
 	ExecModeMemfd = "memfd"
@@ -148,6 +152,8 @@ type DispatchTelemetry struct {
 	CgroupCPUQuota          float64 `json:"cgroup_cpu_quota,omitempty"`
 	GOMEMLIMIT              string  `json:"gomemlimit,omitempty"`
 	GOMAXPROCS              string  `json:"gomaxprocs,omitempty"`
+	GOGC                    string  `json:"gogc,omitempty"`
+	GCProfile               string  `json:"gc_profile,omitempty"`
 	DecompressionDurationUs int64   `json:"decompression_duration_us,omitempty"`
 	TotalLauncherUs         int64   `json:"total_launcher_us"`
 }
@@ -224,6 +230,8 @@ type CgroupInfo struct {
 	CPUQuota         float64 `json:"cpu_quota"`
 	GOMEMLIMIT       string  `json:"gomemlimit,omitempty"`
 	GOMAXPROCS       int     `json:"gomaxprocs,omitempty"`
+	GOGC             string  `json:"gogc,omitempty"`
+	GCProfile        string  `json:"gc_profile,omitempty"`
 }
 
 // VariantLevels returns a slice of all variant level strings present in the index.

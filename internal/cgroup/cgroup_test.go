@@ -491,3 +491,239 @@ func TestResolveTuningPlan(t *testing.T) {
 		})
 	}
 }
+
+func TestParseGCProfile(t *testing.T) {
+	tests := []struct {
+		input       string
+		expected    GCProfile
+		expectError bool
+	}{
+		{"", GCProfileDefault, false},
+		{"default", GCProfileDefault, false},
+		{"latency_critical", GCProfileLatencyCritical, false},
+		{"latency-critical", GCProfileLatencyCritical, false},
+		{"latency", GCProfileLatencyCritical, false},
+		{"LATENCY_CRITICAL", GCProfileLatencyCritical, false},
+		{"memory_constrained", GCProfileMemoryConstrained, false},
+		{"memory-constrained", GCProfileMemoryConstrained, false},
+		{"memory", GCProfileMemoryConstrained, false},
+		{"batch_etl", GCProfileBatchETL, false},
+		{"batch-etl", GCProfileBatchETL, false},
+		{"batch", GCProfileBatchETL, false},
+		{"etl", GCProfileBatchETL, false},
+		{"adaptive", GCProfileAdaptive, false},
+		{"dynamic", GCProfileAdaptive, false},
+		{"ADAPTIVE", GCProfileAdaptive, false},
+		{"unknown_profile", GCProfileDefault, true},
+		{"invalid", GCProfileDefault, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := ParseGCProfile(tt.input)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("ParseGCProfile(%q) error = %v, expectError = %v", tt.input, err, tt.expectError)
+			}
+			if got != tt.expected {
+				t.Errorf("ParseGCProfile(%q) = %q, expected %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseByteSize(t *testing.T) {
+	const (
+		bytes1KB = int64(1024)
+		bytes1MB = int64(1024 * 1024)
+		bytes1GB = int64(1024 * 1024 * 1024)
+		bytes1TB = int64(1024 * 1024 * 1024 * 1024)
+	)
+
+	tests := []struct {
+		input       string
+		expected    int64
+		expectError bool
+	}{
+		{"1024", 1024, false},
+		{"1024B", 1024, false},
+		{"1024 bytes", 1024, false},
+		{"1K", bytes1KB, false},
+		{"1KB", bytes1KB, false},
+		{"1KiB", bytes1KB, false},
+		{"150M", 150 * bytes1MB, false},
+		{"150MB", 150 * bytes1MB, false},
+		{"150MiB", 150 * bytes1MB, false},
+		{"1.5G", int64(1.5 * float64(bytes1GB)), false},
+		{"1GB", bytes1GB, false},
+		{"1GiB", bytes1GB, false},
+		{"2T", 2 * bytes1TB, false},
+		{"2TB", 2 * bytes1TB, false},
+		{"2TiB", 2 * bytes1TB, false},
+		{"0", 0, false},
+		{"0MB", 0, false},
+		{"", 0, true},
+		{"   ", 0, true},
+		{"-10MB", 0, true},
+		{"invalid", 0, true},
+		{"100XB", 0, true},
+		{"99999999999999999999TB", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := ParseByteSize(tt.input)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("ParseByteSize(%q) error = %v, expectError = %v", tt.input, err, tt.expectError)
+			}
+			if !tt.expectError && got != tt.expected {
+				t.Errorf("ParseByteSize(%q) = %d, expected %d", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCalculateAdaptiveGOGC(t *testing.T) {
+	const (
+		mb100  = int64(100 * 1024 * 1024)
+		mb450  = int64(450 * 1024 * 1024)
+		mb600  = int64(600 * 1024 * 1024)
+		mb900  = int64(900 * 1024 * 1024)
+		mb1000 = int64(1000 * 1024 * 1024)
+	)
+
+	tests := []struct {
+		name        string
+		headroom    int64
+		liveHeap    int64
+		expected    int
+		expectValid bool
+	}{
+		{
+			name:        "Ample Headroom (ratio=2.0 -> GOGC=100 clamped)",
+			headroom:    mb900,
+			liveHeap:    mb450,
+			expected:    100,
+			expectValid: true,
+		},
+		{
+			name:        "Moderate Headroom (ratio=1.5 -> GOGC=50)",
+			headroom:    mb900,
+			liveHeap:    mb600,
+			expected:    50,
+			expectValid: true,
+		},
+		{
+			name:        "Tight Headroom (ratio=1.25 -> GOGC=25)",
+			headroom:    int64(125 * 1024 * 1024),
+			liveHeap:    mb100,
+			expected:    25,
+			expectValid: true,
+		},
+		{
+			name:        "Starved Headroom (liveHeap > headroom -> GOGC=10 clamped)",
+			headroom:    mb900,
+			liveHeap:    mb1000,
+			expected:    10,
+			expectValid: true,
+		},
+		{
+			name:        "Zero or Negative Live Heap",
+			headroom:    mb900,
+			liveHeap:    0,
+			expected:    0,
+			expectValid: false,
+		},
+		{
+			name:        "Zero or Negative Headroom",
+			headroom:    0,
+			liveHeap:    mb100,
+			expected:    0,
+			expectValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := CalculateAdaptiveGOGC(tt.headroom, tt.liveHeap)
+			if ok != tt.expectValid {
+				t.Fatalf("CalculateAdaptiveGOGC() ok = %v, expected %v", ok, tt.expectValid)
+			}
+			if ok && got != tt.expected {
+				t.Errorf("CalculateAdaptiveGOGC() = %d, expected %d", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestResolveTuningPlan_Profiles(t *testing.T) {
+	const (
+		mem1GB   = int64(1024 * 1024 * 1024)
+		liveHeap = int64(600 * 1024 * 1024)
+	)
+
+	limits := Limits{
+		CgroupVersion:    VersionV2,
+		MemoryLimitBytes: mem1GB,
+		CPUQuota:         4.0,
+		CPUs:             4,
+	}
+
+	t.Run("LatencyCritical", func(t *testing.T) {
+		plan := ResolveTuningPlanWithProfile(limits, "", DefaultMemoryRatio, DefaultMinHeadroomBytes, GCProfileLatencyCritical, 0)
+		if !plan.GOGCApplied || plan.GOGC != DefaultLatencyCriticalGOGC || plan.GOGCStr != "75" {
+			t.Errorf("expected GOGC=75 applied, got %d (%s, applied=%t)", plan.GOGC, plan.GOGCStr, plan.GOGCApplied)
+		}
+		if plan.AppliedRatio != DefaultMemoryRatio {
+			t.Errorf("expected ratio %f, got %f", DefaultMemoryRatio, plan.AppliedRatio)
+		}
+	})
+
+	t.Run("MemoryConstrained", func(t *testing.T) {
+		plan := ResolveTuningPlanWithProfile(limits, "", DefaultMemoryRatio, DefaultMinHeadroomBytes, GCProfileMemoryConstrained, 0)
+		if !plan.GOGCApplied || plan.GOGC != DefaultMemoryConstrainedGOGC || plan.GOGCStr != "40" {
+			t.Errorf("expected GOGC=40 applied, got %d (%s, applied=%t)", plan.GOGC, plan.GOGCStr, plan.GOGCApplied)
+		}
+		if plan.AppliedRatio != DefaultMemoryConstrainedRatio {
+			t.Errorf("expected ratio %f, got %f", DefaultMemoryConstrainedRatio, plan.AppliedRatio)
+		}
+	})
+
+	t.Run("MemoryConstrainedWithExplicitRatioOverride", func(t *testing.T) {
+		plan := ResolveTuningPlanWithProfile(limits, "0.75", DefaultMemoryRatio, DefaultMinHeadroomBytes, GCProfileMemoryConstrained, 0)
+		if plan.AppliedRatio != 0.75 {
+			t.Errorf("expected explicit ratio 0.75, got %f", plan.AppliedRatio)
+		}
+		if !plan.GOGCApplied || plan.GOGC != DefaultMemoryConstrainedGOGC {
+			t.Errorf("expected GOGC=40 applied, got %d", plan.GOGC)
+		}
+	})
+
+	t.Run("BatchETL", func(t *testing.T) {
+		plan := ResolveTuningPlanWithProfile(limits, "", DefaultMemoryRatio, DefaultMinHeadroomBytes, GCProfileBatchETL, 0)
+		if !plan.GOGCApplied || plan.GOGC != DefaultBatchETLGOGC || plan.GOGCStr != "off" {
+			t.Errorf("expected GOGC=-1 (off) applied, got %d (%s, applied=%t)", plan.GOGC, plan.GOGCStr, plan.GOGCApplied)
+		}
+	})
+
+	t.Run("AdaptiveWithLiveHeap", func(t *testing.T) {
+		plan := ResolveTuningPlanWithProfile(limits, "", DefaultMemoryRatio, DefaultMinHeadroomBytes, GCProfileAdaptive, liveHeap)
+		if !plan.GOGCApplied || plan.GOGC <= 0 || plan.GOGCStr == "" {
+			t.Errorf("expected adaptive GOGC applied, got %d (%s, applied=%t)", plan.GOGC, plan.GOGCStr, plan.GOGCApplied)
+		}
+	})
+
+	t.Run("AdaptiveMissingLiveHeapSkipsGOGC", func(t *testing.T) {
+		plan := ResolveTuningPlanWithProfile(limits, "", DefaultMemoryRatio, DefaultMinHeadroomBytes, GCProfileAdaptive, 0)
+		if plan.GOGCApplied || plan.GOGCStr != "" {
+			t.Errorf("expected adaptive GOGC skipped when live heap is 0, got %d (%s, applied=%t)",
+				plan.GOGC, plan.GOGCStr, plan.GOGCApplied)
+		}
+	})
+
+	t.Run("DefaultProfilePreservesDefaultGOGC", func(t *testing.T) {
+		plan := ResolveTuningPlanWithProfile(limits, "", DefaultMemoryRatio, DefaultMinHeadroomBytes, GCProfileDefault, 0)
+		if plan.GOGCApplied || plan.GOGCStr != "" {
+			t.Errorf("expected default profile not to apply GOGC, got applied=%t", plan.GOGCApplied)
+		}
+	})
+}

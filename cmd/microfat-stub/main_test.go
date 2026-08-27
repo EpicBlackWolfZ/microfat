@@ -1906,3 +1906,78 @@ func TestStubMultiCodecExecutionAndErrors(t *testing.T) {
 	}
 }
 
+func TestBuildAutoTunedEnviron_GCProfiles(t *testing.T) {
+	entry := &format.VariantEntry{
+		Level:            "v3",
+		SHA256:           "abcdef123456",
+		UncompressedSize: 4096,
+	}
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{}
+
+	oldRead := readCgroupLimitsFunc
+	defer func() { readCgroupLimitsFunc = oldRead }()
+
+	readCgroupLimitsFunc = func() (cgroup.Limits, error) {
+		return cgroup.Limits{
+			CgroupVersion:    cgroup.VersionV2,
+			MemoryLimitBytes: 1024 * 1024 * 1024,
+			CPUQuota:         4.0,
+			CPUs:             4,
+		}, nil
+	}
+
+	t.Run("LatencyCriticalProfile", func(t *testing.T) {
+		t.Setenv(format.EnvGCProfile, "latency_critical")
+		env, limits := buildAutoTunedEnviron(nil, entry, format.ExecModeMemfd, hostInfo, policyRes)
+		if limits == nil {
+			t.Fatalf("expected limits")
+		}
+		envMap := make(map[string]string)
+		for _, e := range env {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) == 2 {
+				envMap[parts[0]] = parts[1]
+			}
+		}
+		if envMap["GOGC"] != "75" {
+			t.Errorf("expected GOGC=75, got %q", envMap["GOGC"])
+		}
+		if envMap[format.EnvCgroupGCProfile] != "latency_critical" {
+			t.Errorf("expected profile telemetry latency_critical, got %q", envMap[format.EnvCgroupGCProfile])
+		}
+	})
+
+	t.Run("BatchETLProfile", func(t *testing.T) {
+		t.Setenv(format.EnvGCProfile, "batch_etl")
+		env, _ := buildAutoTunedEnviron(nil, entry, format.ExecModeMemfd, hostInfo, policyRes)
+		envMap := make(map[string]string)
+		for _, e := range env {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) == 2 {
+				envMap[parts[0]] = parts[1]
+			}
+		}
+		if envMap["GOGC"] != "off" {
+			t.Errorf("expected GOGC=off, got %q", envMap["GOGC"])
+		}
+	})
+
+	t.Run("ExplicitGOGCPrecedence", func(t *testing.T) {
+		t.Setenv(format.EnvGCProfile, "latency_critical")
+		baseEnv := []string{"GOGC=120"}
+		env, _ := buildAutoTunedEnviron(baseEnv, entry, format.ExecModeMemfd, hostInfo, policyRes)
+		gogcCount := 0
+		var finalGOGC string
+		for _, e := range env {
+			if strings.HasPrefix(e, "GOGC=") {
+				gogcCount++
+				finalGOGC = strings.TrimPrefix(e, "GOGC=")
+			}
+		}
+		if gogcCount != 1 || finalGOGC != "120" {
+			t.Errorf("expected single explicit GOGC=120, got count=%d final=%q", gogcCount, finalGOGC)
+		}
+	})
+}
+
