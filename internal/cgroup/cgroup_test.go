@@ -284,3 +284,210 @@ func TestReadTrimmedFile(t *testing.T) {
 		t.Errorf("expected error reading nonexistent file")
 	}
 }
+
+func TestResolveTuningPlan(t *testing.T) {
+	const (
+		mem32MB            = int64(32 * 1024 * 1024)
+		mem16MB            = int64(16 * 1024 * 1024)
+		customHeadroomBytes = int64(128 * 1024 * 1024)
+		expectedCustomRatio = 0.80
+		expectedCustom85    = 0.85
+	)
+
+	expected1GB90Pct := (testBytes1GB * 90) / 100
+	expected1GB80Pct := (testBytes1GB * 80) / 100
+
+	tests := []struct {
+		name                 string
+		limits               Limits
+		envRatioStr          string
+		defaultRatio         float64
+		minHeadroomBytes     int64
+		expectedMemBytes     int64
+		expectedMemStr       string
+		expectedMaxProcs     int
+		expectedMaxProcsStr  string
+		expectedAppliedRatio float64
+	}{
+		{
+			name: "Standard 1GB 4-core with defaults",
+			limits: Limits{
+				CgroupVersion:    VersionV2,
+				MemoryLimitBytes: testBytes1GB,
+				CPUQuota:         4.0,
+				CPUs:             4,
+			},
+			envRatioStr:          "",
+			defaultRatio:         DefaultMemoryRatio,
+			minHeadroomBytes:     DefaultMinHeadroomBytes,
+			expectedMemBytes:     expected1GB90Pct,
+			expectedMemStr:       "966367641B",
+			expectedMaxProcs:     4,
+			expectedMaxProcsStr:  "4",
+			expectedAppliedRatio: DefaultMemoryRatio,
+		},
+		{
+			name: "Custom env ratio override",
+			limits: Limits{
+				CgroupVersion:    VersionV2,
+				MemoryLimitBytes: testBytes1GB,
+				CPUQuota:         2.5,
+				CPUs:             2,
+			},
+			envRatioStr:          "0.80",
+			defaultRatio:         DefaultMemoryRatio,
+			minHeadroomBytes:     DefaultMinHeadroomBytes,
+			expectedMemBytes:     expected1GB80Pct,
+			expectedMemStr:       "858993459B",
+			expectedMaxProcs:     2,
+			expectedMaxProcsStr:  "2",
+			expectedAppliedRatio: expectedCustomRatio,
+		},
+		{
+			name: "Invalid env ratio fallback to default ratio",
+			limits: Limits{
+				CgroupVersion:    VersionV2,
+				MemoryLimitBytes: testBytes1GB,
+			},
+			envRatioStr:          "invalid_ratio",
+			defaultRatio:         expectedCustom85,
+			minHeadroomBytes:     DefaultMinHeadroomBytes,
+			expectedMemBytes:     (testBytes1GB * 85) / 100,
+			expectedMemStr:       "912680550B",
+			expectedMaxProcs:     0,
+			expectedMaxProcsStr:  "",
+			expectedAppliedRatio: expectedCustom85,
+		},
+		{
+			name: "Negative and >1.0 env ratio fallback to default",
+			limits: Limits{
+				CgroupVersion:    VersionV2,
+				MemoryLimitBytes: testBytes1GB,
+			},
+			envRatioStr:          "1.5",
+			defaultRatio:         0, // invalid default should also fallback to DefaultMemoryRatio (0.90)
+			minHeadroomBytes:     0, // 0 headroom should fallback to DefaultMinHeadroomBytes
+			expectedMemBytes:     expected1GB90Pct,
+			expectedMemStr:       "966367641B",
+			expectedMaxProcs:     0,
+			expectedMaxProcsStr:  "",
+			expectedAppliedRatio: DefaultMemoryRatio,
+		},
+		{
+			name: "Unlimited memory and quota",
+			limits: Limits{
+				CgroupVersion:    VersionV2,
+				MemoryLimitBytes: 0,
+				CPUQuota:         0,
+				CPUs:             0,
+			},
+			envRatioStr:          "",
+			defaultRatio:         DefaultMemoryRatio,
+			minHeadroomBytes:     DefaultMinHeadroomBytes,
+			expectedMemBytes:     0,
+			expectedMemStr:       "",
+			expectedMaxProcs:     0,
+			expectedMaxProcsStr:  "",
+			expectedAppliedRatio: DefaultMemoryRatio,
+		},
+		{
+			name: "Unlimited cgroup v1 memory threshold",
+			limits: Limits{
+				CgroupVersion:    VersionV1,
+				MemoryLimitBytes: UnlimitedCgroupV1MemoryThreshold + 1024,
+			},
+			envRatioStr:          "",
+			defaultRatio:         DefaultMemoryRatio,
+			minHeadroomBytes:     DefaultMinHeadroomBytes,
+			expectedMemBytes:     0,
+			expectedMemStr:       "",
+			expectedMaxProcs:     0,
+			expectedMaxProcsStr:  "",
+			expectedAppliedRatio: DefaultMemoryRatio,
+		},
+		{
+			name: "Fractional CPU quota when CPUs field is unpopulated",
+			limits: Limits{
+				CgroupVersion: VersionV2,
+				CPUQuota:      2.5,
+				CPUs:          0,
+			},
+			envRatioStr:          "",
+			defaultRatio:         DefaultMemoryRatio,
+			minHeadroomBytes:     DefaultMinHeadroomBytes,
+			expectedMemBytes:     0,
+			expectedMemStr:       "",
+			expectedMaxProcs:     2,
+			expectedMaxProcsStr:  "2",
+			expectedAppliedRatio: DefaultMemoryRatio,
+		},
+		{
+			name: "Sub-core CPU quota (0.5 CPUs) minimum core constraint",
+			limits: Limits{
+				CgroupVersion: VersionV2,
+				CPUQuota:      0.5,
+				CPUs:          0,
+			},
+			envRatioStr:          "",
+			defaultRatio:         DefaultMemoryRatio,
+			minHeadroomBytes:     DefaultMinHeadroomBytes,
+			expectedMemBytes:     0,
+			expectedMemStr:       "",
+			expectedMaxProcs:     1,
+			expectedMaxProcsStr:  "1",
+			expectedAppliedRatio: DefaultMemoryRatio,
+		},
+		{
+			name: "Small 32MB container safety fallback",
+			limits: Limits{
+				CgroupVersion:    VersionV2,
+				MemoryLimitBytes: mem32MB,
+			},
+			envRatioStr:          "",
+			defaultRatio:         DefaultMemoryRatio,
+			minHeadroomBytes:     DefaultMinHeadroomBytes,
+			expectedMemBytes:     mem16MB,
+			expectedMemStr:       "16777216B",
+			expectedMaxProcs:     0,
+			expectedMaxProcsStr:  "",
+			expectedAppliedRatio: DefaultMemoryRatio,
+		},
+		{
+			name: "Custom headroom parameter takes precedence when smaller than ratio",
+			limits: Limits{
+				CgroupVersion:    VersionV2,
+				MemoryLimitBytes: testBytes2GB,
+			},
+			envRatioStr:          "",
+			defaultRatio:         DefaultMemoryRatio,
+			minHeadroomBytes:     int64(512 * 1024 * 1024),
+			expectedMemBytes:     testBytes2GB - int64(512*1024*1024),
+			expectedMemStr:       "1610612736B",
+			expectedMaxProcs:     0,
+			expectedMaxProcsStr:  "",
+			expectedAppliedRatio: DefaultMemoryRatio,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := ResolveTuningPlan(tt.limits, tt.envRatioStr, tt.defaultRatio, tt.minHeadroomBytes)
+
+			if plan.GOMEMLIMITBytes != tt.expectedMemBytes {
+				t.Errorf("GOMEMLIMITBytes = %d, expected %d", plan.GOMEMLIMITBytes, tt.expectedMemBytes)
+			}
+			if plan.GOMEMLIMITStr != tt.expectedMemStr {
+				t.Errorf("GOMEMLIMITStr = %q, expected %q", plan.GOMEMLIMITStr, tt.expectedMemStr)
+			}
+			if plan.GOMAXPROCS != tt.expectedMaxProcs {
+				t.Errorf("GOMAXPROCS = %d, expected %d", plan.GOMAXPROCS, tt.expectedMaxProcs)
+			}
+			if plan.GOMAXPROCSStr != tt.expectedMaxProcsStr {
+				t.Errorf("GOMAXPROCSStr = %q, expected %q", plan.GOMAXPROCSStr, tt.expectedMaxProcsStr)
+			}
+			if plan.AppliedRatio != tt.expectedAppliedRatio {
+				t.Errorf("AppliedRatio = %f, expected %f", plan.AppliedRatio, tt.expectedAppliedRatio)
+			}
+		})
+	}
+}

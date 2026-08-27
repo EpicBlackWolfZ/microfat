@@ -101,24 +101,12 @@ func buildAutoTunedEnviron(
 		fmt.Sprintf("%s=%.2f", format.EnvCgroupCPUs, limits.CPUQuota),
 	)
 
-	var calculatedMemLimit string
-	if limits.MemoryLimitBytes > 0 {
-		ratio := cgroup.DefaultMemoryRatio
-		if ratioStr := os.Getenv(format.EnvMemRatio); ratioStr != "" {
-			if parsedRatio, rErr := strconv.ParseFloat(ratioStr, 64); rErr == nil && parsedRatio > 0 && parsedRatio <= 1.0 {
-				ratio = parsedRatio
-			}
-		}
-		if memLimit, ok := cgroup.CalculateGOMEMLIMIT(limits.MemoryLimitBytes, ratio, cgroup.DefaultMinHeadroomBytes); ok {
-			calculatedMemLimit = fmt.Sprintf("%dB", memLimit)
-			env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGOMEMLIMIT, calculatedMemLimit))
-		}
+	plan := cgroup.ResolveTuningPlan(limits, os.Getenv(format.EnvMemRatio), cgroup.DefaultMemoryRatio, cgroup.DefaultMinHeadroomBytes)
+	if plan.GOMEMLIMITStr != "" {
+		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGOMEMLIMIT, plan.GOMEMLIMITStr))
 	}
-
-	var calculatedMaxProcs string
-	if limits.CPUs > 0 {
-		calculatedMaxProcs = strconv.Itoa(limits.CPUs)
-		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGOMAXPROCS, calculatedMaxProcs))
+	if plan.GOMAXPROCSStr != "" {
+		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGOMAXPROCS, plan.GOMAXPROCSStr))
 	}
 
 	// Check if user opted out of auto-tuning
@@ -138,12 +126,12 @@ func buildAutoTunedEnviron(
 		}
 	}
 
-	if !hasMemLimit && calculatedMemLimit != "" {
-		env = append(env, fmt.Sprintf("GOMEMLIMIT=%s", calculatedMemLimit))
+	if !hasMemLimit && plan.GOMEMLIMITStr != "" {
+		env = append(env, fmt.Sprintf("GOMEMLIMIT=%s", plan.GOMEMLIMITStr))
 	}
 
-	if !hasMaxProcs && calculatedMaxProcs != "" {
-		env = append(env, fmt.Sprintf("GOMAXPROCS=%s", calculatedMaxProcs))
+	if !hasMaxProcs && plan.GOMAXPROCSStr != "" {
+		env = append(env, fmt.Sprintf("GOMAXPROCS=%s", plan.GOMAXPROCSStr))
 	}
 
 	return env, &limits

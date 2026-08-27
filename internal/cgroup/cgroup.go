@@ -47,6 +47,15 @@ type Limits struct {
 	CPUs             int     `json:"cpus"`               // Computed GOMAXPROCS (0 if unlimited)
 }
 
+// TuningPlan contains computed Go runtime tuning parameters derived from container resource limits.
+type TuningPlan struct {
+	GOMEMLIMITBytes int64   `json:"gomemlimit_bytes"` // Calculated memory limit in bytes (0 if unset/unlimited)
+	GOMEMLIMITStr   string  `json:"gomemlimit_str"`   // Formatted memory limit string (e.g. "966367641B", empty if unset)
+	GOMAXPROCS      int     `json:"gomaxprocs"`       // Calculated CPU quota core count (0 if unset/unlimited)
+	GOMAXPROCSStr   string  `json:"gomaxprocs_str"`   // Formatted GOMAXPROCS string (e.g. "4", empty if unset)
+	AppliedRatio    float64 `json:"applied_ratio"`    // Actual memory ratio applied (e.g. 0.90 or custom)
+}
+
 // ReadLimits inspects /sys/fs/cgroup and returns the active container limits.
 func ReadLimits() (Limits, error) {
 	return ReadLimitsFrom(defaultCgroupMount)
@@ -179,6 +188,48 @@ func CalculateGOMAXPROCS(quota float64) (int, bool) {
 		cpus = MinimumCPUs
 	}
 	return cpus, true
+}
+
+// ResolveTuningPlan derives GOMEMLIMIT and GOMAXPROCS settings from container limits,
+// parsing custom memory ratio strings and applying headroom safety constraints.
+func ResolveTuningPlan(limits Limits, envRatioStr string, defaultRatio float64, minHeadroomBytes int64) TuningPlan {
+	ratio := defaultRatio
+	if ratio <= 0 || ratio > 1.0 {
+		ratio = DefaultMemoryRatio
+	}
+
+	if trimmed := strings.TrimSpace(envRatioStr); trimmed != "" {
+		if parsedRatio, rErr := strconv.ParseFloat(trimmed, 64); rErr == nil && parsedRatio > 0 && parsedRatio <= 1.0 {
+			ratio = parsedRatio
+		}
+	}
+
+	if minHeadroomBytes <= 0 {
+		minHeadroomBytes = DefaultMinHeadroomBytes
+	}
+
+	plan := TuningPlan{
+		AppliedRatio: ratio,
+	}
+
+	if limits.MemoryLimitBytes > 0 {
+		if memLimit, ok := CalculateGOMEMLIMIT(limits.MemoryLimitBytes, ratio, minHeadroomBytes); ok {
+			plan.GOMEMLIMITBytes = memLimit
+			plan.GOMEMLIMITStr = fmt.Sprintf("%dB", memLimit)
+		}
+	}
+
+	if limits.CPUs > 0 {
+		plan.GOMAXPROCS = limits.CPUs
+		plan.GOMAXPROCSStr = strconv.Itoa(limits.CPUs)
+	} else if limits.CPUQuota > 0 {
+		if cpus, ok := CalculateGOMAXPROCS(limits.CPUQuota); ok {
+			plan.GOMAXPROCS = cpus
+			plan.GOMAXPROCSStr = strconv.Itoa(cpus)
+		}
+	}
+
+	return plan
 }
 
 func readTrimmedFile(path string) (string, error) {

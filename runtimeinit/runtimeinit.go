@@ -116,30 +116,24 @@ func AutoTune(opts ...Option) Result {
 		CPUQuota:         limits.CPUQuota,
 	}
 
-	// 3. Configure GOMEMLIMIT
+	// 3. Resolve tuning plan
+	plan := cgroup.ResolveTuningPlan(limits, getenvFunc(format.EnvMemRatio), cfg.memoryRatio, cfg.minHeadroomBytes)
+
+	// 4. Configure GOMEMLIMIT
 	if getenvFunc("GOMEMLIMIT") != "" {
 		res.MemLimitApplied = false
-	} else if limits.MemoryLimitBytes > 0 {
-		ratio := cfg.memoryRatio
-		if envRatio := getenvFunc(format.EnvMemRatio); envRatio != "" {
-			if parsed, pErr := strconv.ParseFloat(envRatio, 64); pErr == nil && parsed > 0 && parsed <= 1.0 {
-				ratio = parsed
-			}
-		}
-
-		if memLimit, ok := cgroup.CalculateGOMEMLIMIT(limits.MemoryLimitBytes, ratio, cfg.minHeadroomBytes); ok {
-			setMemoryLimitFunc(memLimit)
-			res.GOMEMLIMIT = memLimit
-			res.MemLimitApplied = true
-		}
+	} else if plan.GOMEMLIMITBytes > 0 {
+		setMemoryLimitFunc(plan.GOMEMLIMITBytes)
+		res.GOMEMLIMIT = plan.GOMEMLIMITBytes
+		res.MemLimitApplied = true
 	}
 
-	// 4. Configure GOMAXPROCS
+	// 5. Configure GOMAXPROCS
 	if getenvFunc("GOMAXPROCS") != "" {
 		res.MaxProcsApplied = false
-	} else if limits.CPUs > 0 {
-		setMaxProcsFunc(limits.CPUs)
-		res.GOMAXPROCS = limits.CPUs
+	} else if plan.GOMAXPROCS > 0 {
+		setMaxProcsFunc(plan.GOMAXPROCS)
+		res.GOMAXPROCS = plan.GOMAXPROCS
 		res.MaxProcsApplied = true
 	}
 
