@@ -1576,7 +1576,7 @@ func TestExecuteVariant_TelemetryJSONValidation(t *testing.T) {
 	r2, w2, _ := os.Pipe()
 	os.Stderr = w2
 
-	logErrorDiagnostics("memfd_create", errors.New("simulated error"), hostInfo, entry, policyRes, "mock details")
+	logErrorDiagnostics(format.StageMemfdCreate, syscall.EPERM, hostInfo, entry, policyRes, "mock details")
 	_ = w2.Close()
 	os.Stderr = oldStderr
 
@@ -1589,12 +1589,236 @@ func TestExecuteVariant_TelemetryJSONValidation(t *testing.T) {
 		t.Fatalf("unmarshaling ErrorTelemetry JSON failed: %v (raw: %s)", err, errStr)
 	}
 
-	if et.Event != format.EventError || et.Stage != "memfd_create" || et.Error != "simulated error" || et.Details != "mock details" {
+	if et.Event != format.EventError || et.Stage != format.StageMemfdCreate ||
+		et.Error != syscall.EPERM.Error() || et.Details != "mock details" || et.Hint != format.HintMemfdSeccomp {
 		t.Errorf("ErrorTelemetry validation mismatch: %+v", et)
 	}
 
 	t.Setenv(format.EnvLog, "")
 }
 
+func TestExecuteVariant_DiagnosticHints(t *testing.T) {
+	tempDir := t.TempDir()
+	payloadData := []byte("DIAGNOSTIC_HINTS_PAYLOAD")
+	entry, rawFile := createDummyVariantFile(t, tempDir, payloadData)
+	defer func() { _ = rawFile.Close() }()
 
+	cacheDir := filepath.Join(tempDir, "hint_cache")
+	t.Setenv(format.EnvCacheDir, cacheDir)
 
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{}
+
+	oldMemfd := memfdCreateFunc
+	oldExec := execveFunc
+	defer func() {
+		memfdCreateFunc = oldMemfd
+		execveFunc = oldExec
+	}()
+
+	// 1. In default mode (no MICROFAT_DEBUG), non-fatal memfd fallback should NOT emit hints to stderr
+	t.Run("suppressed in default mode", func(t *testing.T) {
+		t.Setenv(format.EnvDebug, "")
+		t.Setenv(format.EnvLog, "")
+
+		memfdCreateFunc = func(name string, flags int) (int, error) {
+			return -1, syscall.EPERM
+		}
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			return nil
+		}
+
+		oldStderr := os.Stderr
+		r, w, _ := os.Pipe()
+		os.Stderr = w
+
+		err := executeVariant(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		_ = w.Close()
+		os.Stderr = oldStderr
+
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+
+		if err != nil {
+			t.Fatalf("expected fallback to succeed, got: %v", err)
+		}
+		if strings.Contains(buf.String(), "[microfat:hint]") {
+			t.Errorf("expected no hint in default mode, got: %s", buf.String())
+		}
+	})
+
+	// 2. In debug mode (MICROFAT_DEBUG=1), non-fatal memfd fallback should emit hints to stderr
+	t.Run("emitted in debug mode", func(t *testing.T) {
+		t.Setenv(format.EnvDebug, "1")
+		t.Setenv(format.EnvLog, "")
+
+		memfdCreateFunc = func(name string, flags int) (int, error) {
+			return -1, syscall.EPERM
+		}
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			return nil
+		}
+
+		oldStderr := os.Stderr
+		r, w, _ := os.Pipe()
+		os.Stderr = w
+
+		err := executeVariant(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		_ = w.Close()
+		os.Stderr = oldStderr
+
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+
+		if err != nil {
+			t.Fatalf("expected fallback to succeed, got: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "[microfat:hint]") || !strings.Contains(out, "seccomp") {
+			t.Errorf("expected seccomp hint in debug output, got: %s", out)
+		}
+	})
+
+	// 3. ENOSYS in debug mode
+	t.Run("enosys kernel hint in debug mode", func(t *testing.T) {
+		t.Setenv(format.EnvDebug, "true")
+		t.Setenv(format.EnvLog, "")
+
+		memfdCreateFunc = func(name string, flags int) (int, error) {
+			return -1, syscall.ENOSYS
+		}
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			return nil
+		}
+
+		oldStderr := os.Stderr
+		r, w, _ := os.Pipe()
+		os.Stderr = w
+
+		err := executeVariant(rawFile, entry, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		_ = w.Close()
+		os.Stderr = oldStderr
+
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+
+		if err != nil {
+			t.Fatalf("expected fallback to succeed, got: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "[microfat:hint]") || !strings.Contains(out, "unsupported on this Linux kernel") {
+			t.Errorf("expected kernel unsupported hint, got: %s", out)
+		}
+	})
+}
+
+func TestMain_DiagnosticHints(t *testing.T) {
+	oldExit := exitFunc
+	defer func() { exitFunc = oldExit }()
+
+	var exitCode int
+	exitFunc = func(code int) {
+		exitCode = code
+	}
+
+	oldGetSelf := getSelfExecutablePathFunc
+	defer func() { getSelfExecutablePathFunc = oldGetSelf }()
+
+	// 1. Fatal error without hint
+	t.Run("fatal error without specific hint", func(t *testing.T) {
+		t.Setenv(format.EnvLog, "")
+		getSelfExecutablePathFunc = func() (string, error) {
+			return "", errors.New("cannot determine self path")
+		}
+
+		oldStderr := os.Stderr
+		r, w, _ := os.Pipe()
+		os.Stderr = w
+
+		main()
+		_ = w.Close()
+		os.Stderr = oldStderr
+
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+
+		if exitCode != 1 {
+			t.Errorf("expected exit code 1, got %d", exitCode)
+		}
+		if !strings.Contains(buf.String(), "[microfat] error:") {
+			t.Errorf("expected error message in stderr, got: %s", buf.String())
+		}
+	})
+
+	// 2. Fatal error with diagnosed hint (e.g. read-only filesystem EROFS)
+	t.Run("fatal error with diagnosed hint in default mode", func(t *testing.T) {
+		t.Setenv(format.EnvLog, "")
+		getSelfExecutablePathFunc = func() (string, error) {
+			return "", syscall.EROFS
+		}
+
+		oldStderr := os.Stderr
+		r, w, _ := os.Pipe()
+		os.Stderr = w
+
+		main()
+		_ = w.Close()
+		os.Stderr = oldStderr
+
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+
+		if exitCode != 1 {
+			t.Errorf("expected exit code 1, got %d", exitCode)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "[microfat] error:") {
+			t.Errorf("expected error in stderr, got: %s", out)
+		}
+		if !strings.Contains(out, "[microfat:hint]") || !strings.Contains(out, "Read-only filesystem detected") {
+			t.Errorf("expected hint in stderr on fatal exit, got: %s", out)
+		}
+	})
+
+	// 3. Fatal error with JSON logging includes Hint field
+	t.Run("fatal error with JSON logging", func(t *testing.T) {
+		t.Setenv(format.EnvLog, "json")
+		getSelfExecutablePathFunc = func() (string, error) {
+			return "", syscall.EROFS
+		}
+
+		oldStderr := os.Stderr
+		r, w, _ := os.Pipe()
+		os.Stderr = w
+
+		main()
+		_ = w.Close()
+		os.Stderr = oldStderr
+
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+
+		out := buf.String()
+		var lines []string
+		for _, line := range strings.Split(out, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "[microfat] {") {
+				lines = append(lines, line)
+			}
+		}
+
+		if len(lines) == 0 {
+			t.Fatalf("expected JSON telemetry line, got: %s", out)
+		}
+
+		jsonStr := strings.TrimPrefix(lines[0], "[microfat] ")
+		var telem format.ErrorTelemetry
+		if err := json.Unmarshal([]byte(jsonStr), &telem); err != nil {
+			t.Fatalf("failed to unmarshal JSON: %v (raw: %s)", err, jsonStr)
+		}
+
+		if telem.Hint != format.HintReadOnlyFS {
+			t.Errorf("expected Hint=%q, got %q", format.HintReadOnlyFS, telem.Hint)
+		}
+	})
+}

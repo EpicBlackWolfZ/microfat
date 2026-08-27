@@ -150,6 +150,7 @@ type ErrorTelemetry struct {
 	Stage             string `json:"stage"`
 	Error             string `json:"error"`
 	Details           string `json:"details,omitempty"`
+	Hint              string `json:"hint,omitempty"`
 }
 
 // Prewarm and verify status constants.

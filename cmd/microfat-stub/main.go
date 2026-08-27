@@ -36,18 +36,23 @@ var (
 
 func main() {
 	if err := run(); err != nil {
+		hint := format.DiagnoseError(format.StageLauncherMain, err)
 		if strings.EqualFold(os.Getenv(format.EnvLog), "json") {
 			e := format.ErrorTelemetry{
 				Event:             format.EventError,
 				TimestampUnixNano: time.Now().UnixNano(),
-				Stage:             "launcher_main",
+				Stage:             format.StageLauncherMain,
 				Error:             err.Error(),
+				Hint:              hint,
 			}
 			if b, mErr := json.Marshal(e); mErr == nil {
 				fmt.Fprintf(os.Stderr, "[microfat] %s\n", string(b))
 			}
 		}
 		fmt.Fprintf(os.Stderr, "[microfat] error: %v\n", err)
+		if hint != "" {
+			fmt.Fprintf(os.Stderr, "[microfat:hint] %s\n", hint)
+		}
 		exitFunc(1)
 	}
 }
