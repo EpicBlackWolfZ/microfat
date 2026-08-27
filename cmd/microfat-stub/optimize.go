@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
-	"github.com/klauspost/compress/zstd"
 )
 
 const (
@@ -108,20 +108,14 @@ func optimizeTo(destPath string, selfFile *os.File, entry *format.VariantEntry) 
 
 // extractVariantToWriter seeks to the variant offset and streams decompressed bytes to w.
 func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, w io.Writer) error {
+	c, err := codec.Get(entry.Compression)
+	if err != nil {
+		return fmt.Errorf("lookup codec %q for variant %s: %w", entry.Compression, entry.Level, err)
+	}
+
 	secReader := io.NewSectionReader(selfFile, entry.Offset, entry.CompressedSize)
-	zstdReader, err := zstd.NewReader(secReader)
-	if err != nil {
-		return fmt.Errorf("creating zstd reader: %w", err)
-	}
-	defer zstdReader.Close()
-
-	written, err := io.Copy(w, zstdReader)
-	if err != nil {
-		return fmt.Errorf("decompressing payload: %w", err)
-	}
-
-	if written != entry.UncompressedSize {
-		return fmt.Errorf("uncompressed size mismatch: expected %d, got %d", entry.UncompressedSize, written)
+	if err := c.Decompress(w, secReader, entry.UncompressedSize); err != nil {
+		return fmt.Errorf("decompressing variant payload: %w", err)
 	}
 
 	return nil

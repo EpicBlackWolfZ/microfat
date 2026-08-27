@@ -17,6 +17,8 @@ const (
 	StageCacheCreateTemp = "cache_create_temp"
 	StageCacheExtract    = "cache_extract"
 	StageCacheExec       = "execve_cache"
+	StageCodecLookup     = "codec_lookup"
+	StageDecompress      = "decompress"
 	StageLauncherMain    = "launcher_main"
 )
 
@@ -39,6 +41,10 @@ const (
 	HintTextBusy = "Binary is currently open for writing by another process (ETXTBSY). " +
 		"Retrying or prewarming with --microfat:prewarm avoids concurrency contention."
 	HintExecFormat = "Binary format is invalid or incompatible with host kernel/architecture."
+	HintUnsupportedCodec = "Binary variant uses an unsupported compression algorithm. " +
+		"Update microfat launcher stub or re-package with a supported codec (e.g. zstd, lz4, none)."
+	HintDecompressFailed = "Payload decompression failed or corrupted. " +
+		"Re-package the binary with 'microfat pack' or verify integrity with 'microfat verify'."
 )
 
 // DiagnoseError inspects an execution failure and stage context, returning an actionable
@@ -129,6 +135,13 @@ func diagnoseGeneric(err error) string {
 		}
 		return HintCacheUnwritable
 	default:
+		errStr := err.Error()
+		if strings.Contains(errStr, "unsupported compression") {
+			return HintUnsupportedCodec
+		}
+		if strings.Contains(errStr, "decompression failed") || strings.Contains(errStr, "decompressing") {
+			return HintDecompressFailed
+		}
 		return ""
 	}
 }

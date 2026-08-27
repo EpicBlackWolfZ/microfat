@@ -308,6 +308,12 @@ func ReadTrailerAndIndex(r io.ReaderAt, totalSize int64) (*Index, error) {
 		return nil, fmt.Errorf("unmarshaling index json: %w", err)
 	}
 
+	for i := range idx.Variants {
+		if idx.Variants[i].Compression == "" {
+			idx.Variants[i].Compression = "zstd"
+		}
+	}
+
 	// 6. Validate Bounds
 	if err := idx.ValidateBounds(int64(indexOffset)); err != nil {
 		return nil, fmt.Errorf("validating index bounds: %w", err)

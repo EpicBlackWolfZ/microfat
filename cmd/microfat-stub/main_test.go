@@ -1822,3 +1822,85 @@ func TestMain_DiagnosticHints(t *testing.T) {
 		}
 	})
 }
+
+func TestStubMultiCodecExecutionAndErrors(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 1. Create fake launcher stub & dummy variants
+	stubPath := filepath.Join(tempDir, "microfat-stub")
+	_ = os.WriteFile(stubPath, []byte("#!/bin/sh\necho stub\n"), 0o755)
+
+	v1Path := filepath.Join(tempDir, "v1")
+	_ = os.WriteFile(v1Path, []byte("#!/bin/sh\necho v1\n"), 0o755)
+	v3Path := filepath.Join(tempDir, "v3")
+	_ = os.WriteFile(v3Path, []byte("#!/bin/sh\necho v3\n"), 0o755)
+
+	// Create fat binary with lz4 v1 and none v3
+	fatPath := filepath.Join(tempDir, "multicodec.fat")
+	opts := pack.Options{
+		StubPath:          stubPath,
+		OutputPath:        fatPath,
+		AppName:           "multicodec-stub-test",
+		TargetOS:          testOSLinux,
+		TargetArch:        testArchAMD64,
+		SkipELFValidation: true,
+		VariantCompression: map[string]pack.VariantCompressionOptions{
+			"v1": {Compression: "lz4"},
+			"v3": {Compression: "none"},
+		},
+		Variants: map[string]string{
+			"v1": v1Path,
+			"v3": v3Path,
+		},
+	}
+	idx, err := pack.Pack(opts)
+	if err != nil {
+		t.Fatalf("pack multicodec fat binary: %v", err)
+	}
+
+	selfFile, err := os.Open(fatPath)
+	if err != nil {
+		t.Fatalf("open fat binary: %v", err)
+	}
+	defer func() { _ = selfFile.Close() }()
+
+	v1Entry, _ := idx.FindVariant("v1")
+	v3Entry, _ := idx.FindVariant("v3")
+
+	// 2. Test extractVariantToWriter for lz4
+	var bufLZ4 bytes.Buffer
+	if err := extractVariantToWriter(selfFile, v1Entry, &bufLZ4); err != nil {
+		t.Fatalf("extract lz4 variant failed: %v", err)
+	}
+	if bufLZ4.String() != "#!/bin/sh\necho v1\n" {
+		t.Errorf("lz4 extracted payload mismatch: %q", bufLZ4.String())
+	}
+
+	// 3. Test extractVariantToWriter for none
+	var bufNone bytes.Buffer
+	if err := extractVariantToWriter(selfFile, v3Entry, &bufNone); err != nil {
+		t.Fatalf("extract none variant failed: %v", err)
+	}
+	if bufNone.String() != "#!/bin/sh\necho v3\n" {
+		t.Errorf("none extracted payload mismatch: %q", bufNone.String())
+	}
+
+	// 4. Test extractVariantToWriter with unsupported codec
+	badEntry := *v1Entry
+	badEntry.Compression = "unknown_codec_xyz"
+	var bufBad bytes.Buffer
+	if err := extractVariantToWriter(selfFile, &badEntry, &bufBad); err == nil {
+		t.Errorf("expected error extracting variant with unknown codec")
+	}
+
+	// 5. Test optimizeTo with lz4 variant
+	optDest := filepath.Join(tempDir, "opt_dest")
+	if err := optimizeTo(optDest, selfFile, v1Entry); err != nil {
+		t.Fatalf("optimizeTo with lz4 variant failed: %v", err)
+	}
+	optBytes, _ := os.ReadFile(optDest)
+	if string(optBytes) != "#!/bin/sh\necho v1\n" {
+		t.Errorf("optimizeTo content mismatch: %q", string(optBytes))
+	}
+}
+

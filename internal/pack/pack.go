@@ -13,9 +13,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
-	"github.com/klauspost/compress/zstd"
 )
 
 // Standard permissions and buffer sizes.
@@ -29,21 +29,31 @@ var (
 	ErrStubMissing         = errors.New("stub binary path is required and must exist")
 	ErrVariantNotFound     = errors.New("variant binary file not found")
 	ErrChecksumMismatch    = errors.New("variant payload checksum mismatch")
-	ErrSizeMismatch        = errors.New("decompressed variant size mismatch")
+	ErrSizeMismatch        = codec.ErrSizeMismatch
 	ErrInvalidELF          = errors.New("invalid ELF binary")
 )
 
+// VariantCompressionOptions configures compression parameters for a specific variant level.
+type VariantCompressionOptions struct {
+	Profile     string
+	Compression string
+	Level       string
+}
+
 // Options configures the packaging process.
 type Options struct {
-	StubPath          string
-	OutputPath        string
-	AppName           string
-	TargetOS          string
-	TargetArch        string
-	Variants          map[string]string // level -> binary path
-	CompressionLevel  zstd.EncoderLevel
-	Permissions       os.FileMode
-	SkipELFValidation bool // Optional flag to bypass ELF header validation (primarily for testing)
+	StubPath           string
+	OutputPath         string
+	AppName            string
+	TargetOS           string
+	TargetArch         string
+	Variants           map[string]string // level -> binary path
+	Profile            string            // "latency", "balanced", "size"
+	Compression        string            // "zstd", "lz4", "none" (or "zstd:best")
+	CompressionLevel   string            // level string or numeric
+	VariantCompression map[string]VariantCompressionOptions
+	Permissions        os.FileMode
+	SkipELFValidation  bool // Optional flag to bypass ELF header validation (primarily for testing)
 }
 
 // VerificationResult contains the result of verifying an individual embedded variant.
@@ -97,14 +107,9 @@ func Pack(opts Options) (*format.Index, error) {
 		Variants:    make([]format.VariantEntry, 0, len(levels)),
 	}
 
-	encLevel := zstd.SpeedBetterCompression
-	if opts.CompressionLevel != 0 {
-		encLevel = opts.CompressionLevel
-	}
-
 	// 2. Compress and write each variant payload
 	for _, lvl := range levels {
-		entry, newOffset, err := writeVariantPayload(tmpFile, lvl, opts.Variants[lvl], encLevel, currentOffset)
+		entry, newOffset, err := writeVariantPayload(tmpFile, lvl, opts.Variants[lvl], &opts, currentOffset)
 		if err != nil {
 			return nil, err
 		}
@@ -173,7 +178,7 @@ func writeVariantPayload(
 	tmpFile *os.File,
 	lvl string,
 	path string,
-	encLevel zstd.EncoderLevel,
+	opts *Options,
 	currentOffset int64,
 ) (format.VariantEntry, int64, error) {
 	variantPath := filepath.Clean(path)
@@ -187,17 +192,29 @@ func writeVariantPayload(
 	uncompressedSize := int64(len(variantBytes))
 	variantOffset := currentOffset
 
-	zstdWriter, err := zstd.NewWriter(tmpFile, zstd.WithEncoderLevel(encLevel))
-	if err != nil {
-		return format.VariantEntry{}, 0, fmt.Errorf("initializing zstd writer: %w", err)
+	profile := opts.Profile
+	compAlgo := opts.Compression
+	compLevel := opts.CompressionLevel
+
+	if varComp, ok := opts.VariantCompression[lvl]; ok {
+		if varComp.Profile != "" {
+			profile = varComp.Profile
+		}
+		if varComp.Compression != "" {
+			compAlgo = varComp.Compression
+		}
+		if varComp.Level != "" {
+			compLevel = varComp.Level
+		}
 	}
 
-	if _, err := zstdWriter.Write(variantBytes); err != nil {
-		_ = zstdWriter.Close()
-		return format.VariantEntry{}, 0, fmt.Errorf("compressing variant %s: %w", lvl, err)
+	c, resolvedLevel, err := codec.ResolveCompression(profile, compAlgo, compLevel, uncompressedSize)
+	if err != nil {
+		return format.VariantEntry{}, 0, fmt.Errorf("resolving compression for variant %s: %w", lvl, err)
 	}
-	if err := zstdWriter.Close(); err != nil {
-		return format.VariantEntry{}, 0, fmt.Errorf("closing zstd writer for %s: %w", lvl, err)
+
+	if err := c.Compress(tmpFile, variantBytes, resolvedLevel); err != nil {
+		return format.VariantEntry{}, 0, fmt.Errorf("compressing variant %s with codec %s: %w", lvl, c.Name(), err)
 	}
 
 	newOffset, err := tmpFile.Seek(0, io.SeekCurrent)
@@ -211,7 +228,7 @@ func writeVariantPayload(
 		CompressedSize:   newOffset - variantOffset,
 		UncompressedSize: uncompressedSize,
 		SHA256:           rawHashHex,
-		Compression:      "zstd",
+		Compression:      c.Name(),
 	}
 	return entry, newOffset, nil
 }
@@ -301,8 +318,8 @@ func VerifyBinary(r io.ReaderAt, totalSize int64) (*format.Index, []Verification
 		return nil, nil, fmt.Errorf("reading index: %w", err)
 	}
 
-	results := make([]VerificationResult, len(idx.Variants))
-	for i, v := range idx.Variants {
+	results := make([]VerificationResult, 0, len(idx.Variants))
+	for _, v := range idx.Variants {
 		res := VerificationResult{
 			Level:            v.Level,
 			CompressedSize:   v.CompressedSize,
@@ -310,40 +327,32 @@ func VerifyBinary(r io.ReaderAt, totalSize int64) (*format.Index, []Verification
 			ExpectedSHA256:   v.SHA256,
 		}
 
-		secReader := io.NewSectionReader(r, v.Offset, v.CompressedSize)
-		zstdReader, err := zstd.NewReader(secReader)
+		c, err := codec.Get(v.Compression)
 		if err != nil {
-			res.Error = fmt.Errorf("creating zstd reader: %w", err)
-			results[i] = res
+			res.Error = fmt.Errorf("lookup codec %q for variant %s: %w", v.Compression, v.Level, err)
+			results = append(results, res)
 			continue
 		}
 
+		secReader := io.NewSectionReader(r, v.Offset, v.CompressedSize)
 		hasher := sha256.New()
-		written, err := io.Copy(hasher, zstdReader)
-		zstdReader.Close()
-		if err != nil {
+		if err := c.Decompress(hasher, secReader, v.UncompressedSize); err != nil {
 			res.Error = fmt.Errorf("decompressing variant payload: %w", err)
-			results[i] = res
+			results = append(results, res)
 			continue
 		}
 
 		actualHashHex := hex.EncodeToString(hasher.Sum(nil))
 		res.ActualSHA256 = actualHashHex
 
-		if written != v.UncompressedSize {
-			res.Error = fmt.Errorf("%w: expected %d bytes, got %d", ErrSizeMismatch, v.UncompressedSize, written)
-			results[i] = res
-			continue
-		}
-
 		if v.SHA256 != "" && actualHashHex != v.SHA256 {
 			res.Error = fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, v.SHA256, actualHashHex)
-			results[i] = res
+			results = append(results, res)
 			continue
 		}
 
 		res.Valid = true
-		results[i] = res
+		results = append(results, res)
 	}
 
 	return idx, results, nil
@@ -409,26 +418,19 @@ func PrewarmVariant(
 		_ = os.Remove(tmpPath)
 	}()
 
+	c, err := codec.Get(entry.Compression)
+	if err != nil {
+		return "", false, 0, fmt.Errorf("lookup codec %q for %s: %w", entry.Compression, entry.Level, err)
+	}
+
 	decompStart := time.Now()
 	secReader := io.NewSectionReader(r, entry.Offset, entry.CompressedSize)
-	zstdReader, err := zstd.NewReader(secReader)
-	if err != nil {
-		return "", false, 0, fmt.Errorf("creating zstd reader for %s: %w", entry.Level, err)
-	}
-	defer zstdReader.Close()
-
 	hasher := sha256.New()
 	mw := io.MultiWriter(tmpFile, hasher)
-	written, err := io.Copy(mw, zstdReader)
-	if err != nil {
+	if err := c.Decompress(mw, secReader, entry.UncompressedSize); err != nil {
 		return "", false, 0, fmt.Errorf("decompressing variant %s: %w", entry.Level, err)
 	}
-
 	decompDuration := time.Since(decompStart)
-
-	if written != entry.UncompressedSize {
-		return "", false, 0, fmt.Errorf("%w: expected %d bytes, got %d", ErrSizeMismatch, entry.UncompressedSize, written)
-	}
 
 	actualHash := hex.EncodeToString(hasher.Sum(nil))
 	if actualHash != entry.SHA256 {

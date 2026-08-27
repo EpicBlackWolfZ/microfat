@@ -54,7 +54,7 @@ func TestPackAndVerify(t *testing.T) {
 		TargetOS:          testOSLinux,
 		TargetArch:        testArchAMD64,
 		SkipELFValidation: true,
-		CompressionLevel:  zstd.SpeedFastest,
+		CompressionLevel:  "fastest",
 		Variants: map[string]string{
 			"v1": v1Path,
 			"v3": v3Path,
@@ -574,7 +574,8 @@ func TestFinalizeOutputFile(t *testing.T) {
 	// Error case: writeVariantPayload with closed file
 	validPayload := filepath.Join(tempDir, "valid_payload")
 	_ = os.WriteFile(validPayload, []byte("payload"), 0o644)
-	if _, _, err := writeVariantPayload(tmp3, "v1", validPayload, zstd.SpeedDefault, 0); err == nil {
+	packOpts := &Options{}
+	if _, _, err := writeVariantPayload(tmp3, "v1", validPayload, packOpts, 0); err == nil {
 		t.Errorf("expected error writing payload to closed file")
 	}
 
@@ -584,7 +585,7 @@ func TestFinalizeOutputFile(t *testing.T) {
 		_ = tmp4.Close()
 		_ = os.Remove(tmp4.Name())
 	}()
-	if _, _, err := writeVariantPayload(tmp4, "v1", filepath.Join(tempDir, "nonexistent"), zstd.SpeedDefault, 0); err == nil {
+	if _, _, err := writeVariantPayload(tmp4, "v1", filepath.Join(tempDir, "nonexistent"), packOpts, 0); err == nil {
 		t.Errorf("expected error writing nonexistent payload")
 	}
 }
@@ -1066,6 +1067,211 @@ func TestVerifyCacheVariantAndBinary(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "")
 	t.Setenv("TMPDIR", "")
 }
+
+func TestMultiCodecPackagingAndVerification(t *testing.T) {
+	tempDir := t.TempDir()
+
+	stubPath := filepath.Join(tempDir, "microfat-stub")
+	stubContent := []byte("#!/bin/sh\necho Stub Launcher\n")
+	if err := os.WriteFile(stubPath, stubContent, 0o755); err != nil {
+		t.Fatalf("failed to write stub: %v", err)
+	}
+
+	// v1: tiny payload (100KB) -> under ProfileLatency should auto-promote to none
+	v1Path := filepath.Join(tempDir, "bin-v1")
+	v1Content := make([]byte, 100*1024)
+	for i := range v1Content {
+		v1Content[i] = byte(i % 256)
+	}
+	_ = os.WriteFile(v1Path, v1Content, 0o755)
+
+	// v3: large payload (600KB) -> under ProfileLatency defaults to lz4
+	v3Path := filepath.Join(tempDir, "bin-v3")
+	v3Content := make([]byte, 600*1024)
+	for i := range v3Content {
+		v3Content[i] = byte((i % 256) ^ (i / 1024))
+	}
+	_ = os.WriteFile(v3Path, v3Content, 0o755)
+
+	// v4: 200KB payload with explicit per-variant zstd:best
+	v4Path := filepath.Join(tempDir, "bin-v4")
+	v4Content := make([]byte, 200*1024)
+	for i := range v4Content {
+		v4Content[i] = byte((i * 7) % 256)
+	}
+	_ = os.WriteFile(v4Path, v4Content, 0o755)
+
+	fatBinaryPath := filepath.Join(tempDir, "multi-codec-fat")
+	opts := Options{
+		StubPath:          stubPath,
+		OutputPath:        fatBinaryPath,
+		AppName:           "multi-codec-app",
+		TargetOS:          testOSLinux,
+		TargetArch:        testArchAMD64,
+		SkipELFValidation: true,
+		Profile:           "latency",
+		VariantCompression: map[string]VariantCompressionOptions{
+			"v4": {
+				Compression: "zstd",
+				Level:       "best",
+			},
+		},
+		Variants: map[string]string{
+			"v1": v1Path,
+			"v3": v3Path,
+			"v4": v4Path,
+		},
+	}
+
+	idx, err := Pack(opts)
+	if err != nil {
+		t.Fatalf("Pack failed: %v", err)
+	}
+
+	v1Entry, _ := idx.FindVariant("v1")
+	if v1Entry.Compression != "none" {
+		t.Errorf("expected v1 to auto-promote to 'none', got %q", v1Entry.Compression)
+	}
+
+	v3Entry, _ := idx.FindVariant("v3")
+	if v3Entry.Compression != "lz4" {
+		t.Errorf("expected v3 to default to 'lz4', got %q", v3Entry.Compression)
+	}
+
+	v4Entry, _ := idx.FindVariant("v4")
+	if v4Entry.Compression != "zstd" {
+		t.Errorf("expected v4 to override to 'zstd', got %q", v4Entry.Compression)
+	}
+
+	// Verify the binary
+	f, err := os.Open(fatBinaryPath)
+	if err != nil {
+		t.Fatalf("failed to open fat binary: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	stat, _ := f.Stat()
+	_, results, err := VerifyBinary(f, stat.Size())
+	if err != nil {
+		t.Fatalf("VerifyBinary failed: %v", err)
+	}
+	for _, r := range results {
+		if !r.Valid {
+			t.Errorf("variant %s verification failed: %v", r.Level, r.Error)
+		}
+	}
+
+	// Prewarm all variants
+	cacheDir := filepath.Join(tempDir, "cache")
+	_, prewarmResults, err := PrewarmBinary(f, stat.Size(), nil, cacheDir)
+	if err != nil {
+		t.Fatalf("PrewarmBinary failed: %v", err)
+	}
+	if len(prewarmResults) != 3 {
+		t.Fatalf("expected 3 prewarm results, got %d", len(prewarmResults))
+	}
+	for _, pr := range prewarmResults {
+		if !pr.Valid {
+			t.Errorf("prewarm invalid for %s: %s", pr.Level, pr.Error)
+		}
+	}
+
+	// Trim binary to v3 (lz4)
+	trimmedPath := filepath.Join(tempDir, "trimmed-v3")
+	trimmedFile, _ := os.Create(trimmedPath)
+	trimmedIdx, err := TrimBinary(f, stat.Size(), "v3", trimmedFile)
+	_ = trimmedFile.Close()
+	if err != nil {
+		t.Fatalf("TrimBinary failed: %v", err)
+	}
+	if len(trimmedIdx.Variants) != 1 || trimmedIdx.Variants[0].Compression != "lz4" {
+		t.Errorf("trimmed variant compression mismatch: %+v", trimmedIdx.Variants)
+	}
+
+	// Test Pack with invalid profile
+	badProfileOpts := opts
+	badProfileOpts.Profile = "invalid_profile"
+	badProfileOpts.OutputPath = filepath.Join(tempDir, "bad-profile-out")
+	if _, err := Pack(badProfileOpts); err == nil {
+		t.Errorf("expected error packing with invalid profile")
+	}
+
+	// Test VerifyBinary with unknown compression algorithm
+	idxUnknownCodec := &format.Index{
+		Version:     format.FormatVersionCurrent,
+		CreatedUnix: 1000,
+		Variants: []format.VariantEntry{
+			{
+				Level:            "v1",
+				Offset:           0,
+				CompressedSize:   10,
+				UncompressedSize: 10,
+				SHA256:           "hash",
+				Compression:      "nonexistent_codec",
+			},
+		},
+	}
+	var bufUnknown bytes.Buffer
+	_, _ = bufUnknown.Write(make([]byte, 10))
+	_, _ = format.WriteIndexAndTrailer(&bufUnknown, idxUnknownCodec, 10)
+	_, resUnknown, _ := VerifyBinary(bytes.NewReader(bufUnknown.Bytes()), int64(bufUnknown.Len()))
+	if len(resUnknown) != 1 || resUnknown[0].Valid || resUnknown[0].Error == nil {
+		t.Errorf("expected error on unknown codec in VerifyBinary: %+v", resUnknown)
+	}
+
+	// Test PrewarmVariant with unknown compression algorithm
+	entryUnknown := &format.VariantEntry{
+		Level:            "v1",
+		Offset:           0,
+		CompressedSize:   10,
+		UncompressedSize: 10,
+		SHA256:           "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+		Compression:      "nonexistent_codec",
+	}
+	if _, _, _, err := PrewarmVariant(bytes.NewReader(make([]byte, 10)), entryUnknown, cacheDir); err == nil {
+		t.Errorf("expected error in PrewarmVariant with unknown codec")
+	}
+
+	// Test PrewarmVariant with decompression error
+	entryCorrupted := &format.VariantEntry{
+		Level:            "v1",
+		Offset:           0,
+		CompressedSize:   10,
+		UncompressedSize: 10,
+		SHA256:           "1111111111111111111111111111111111111111111111111111111111111111",
+		Compression:      "lz4",
+	}
+	if _, _, _, err := PrewarmVariant(bytes.NewReader([]byte("not-valid-lz4-bytes")), entryCorrupted, cacheDir); err == nil {
+		t.Errorf("expected error in PrewarmVariant with corrupted lz4 payload")
+	}
+
+	// Test PrewarmVariant with size mismatch (none codec with wrong size)
+	entrySizeMismatch := &format.VariantEntry{
+		Level:            "v1",
+		Offset:           0,
+		CompressedSize:   5,
+		UncompressedSize: 10,
+		SHA256:           "1111111111111111111111111111111111111111111111111111111111111111",
+		Compression:      "none",
+	}
+	if _, _, _, err := PrewarmVariant(bytes.NewReader([]byte("12345")), entrySizeMismatch, cacheDir); err == nil {
+		t.Errorf("expected error in PrewarmVariant with size mismatch")
+	}
+
+	// Test PrewarmVariant with hash mismatch (none codec with wrong hash)
+	entryHashMismatch := &format.VariantEntry{
+		Level:            "v1",
+		Offset:           0,
+		CompressedSize:   5,
+		UncompressedSize: 5,
+		SHA256:           "0000000000000000000000000000000000000000000000000000000000000000",
+		Compression:      "none",
+	}
+	if _, _, _, err := PrewarmVariant(bytes.NewReader([]byte("12345")), entryHashMismatch, cacheDir); err == nil {
+		t.Errorf("expected error in PrewarmVariant with hash mismatch")
+	}
+}
+
 
 
 

@@ -579,3 +579,44 @@ func TestResolveCacheDir(t *testing.T) {
 	}
 }
 
+func TestFormatEmptyCompressionDefaultsToZstd(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.NewBuffer(make([]byte, 1024))
+	originalIdx := &Index{
+		AppName:     "legacy-app",
+		TargetOS:    "linux",
+		TargetArch:  "amd64",
+		CreatedUnix: 1724540000,
+		Variants: []VariantEntry{
+			{
+				Level:            "v1",
+				Offset:           200,
+				CompressedSize:   300,
+				UncompressedSize: 800,
+				SHA256:           "abcdef123456",
+				Compression:      "", // legacy empty compression
+			},
+		},
+	}
+
+	written, err := WriteIndexAndTrailer(buf, originalIdx, 1024)
+	if err != nil {
+		t.Fatalf("WriteIndexAndTrailer failed: %v", err)
+	}
+
+	reader := bytes.NewReader(buf.Bytes())
+	idx, err := ReadTrailerAndIndex(reader, 1024+written)
+	if err != nil {
+		t.Fatalf("ReadTrailerAndIndex failed: %v", err)
+	}
+
+	if len(idx.Variants) != 1 {
+		t.Fatalf("expected 1 variant, got %d", len(idx.Variants))
+	}
+	if idx.Variants[0].Compression != "zstd" {
+		t.Errorf("expected empty compression to default to 'zstd', got %q", idx.Variants[0].Compression)
+	}
+}
+
+
