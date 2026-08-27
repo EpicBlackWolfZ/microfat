@@ -16,7 +16,7 @@ const (
 )
 
 // optimizeInPlace extracts the selected variant over the current executable on disk.
-func optimizeInPlace(selfPath string, selfFile *os.File, entry *format.VariantEntry) error {
+func optimizeInPlace(selfPath string, selfFile *os.File, entry *format.VariantEntry, idx *format.Index) error {
 	realPath, err := filepath.EvalSymlinks(selfPath)
 	if err != nil {
 		realPath = selfPath
@@ -42,7 +42,7 @@ func optimizeInPlace(selfPath string, selfFile *os.File, entry *format.VariantEn
 		_ = os.Remove(tmpPath)
 	}()
 
-	if err := extractVariantToWriter(selfFile, entry, tmpFile); err != nil {
+	if err := extractVariantToWriter(selfFile, entry, idx, tmpFile); err != nil {
 		return fmt.Errorf("extracting variant: %w", err)
 	}
 
@@ -65,7 +65,7 @@ func optimizeInPlace(selfPath string, selfFile *os.File, entry *format.VariantEn
 }
 
 // optimizeTo extracts the selected variant directly to an explicit target path.
-func optimizeTo(destPath string, selfFile *os.File, entry *format.VariantEntry) error {
+func optimizeTo(destPath string, selfFile *os.File, entry *format.VariantEntry, idx *format.Index) error {
 	cleanDest := filepath.Clean(destPath)
 	destDir := filepath.Dir(cleanDest)
 	// #nosec G703 -- create destination directory
@@ -84,7 +84,7 @@ func optimizeTo(destPath string, selfFile *os.File, entry *format.VariantEntry) 
 		_ = os.Remove(tmpPath)
 	}()
 
-	if err := extractVariantToWriter(selfFile, entry, tmpFile); err != nil {
+	if err := extractVariantToWriter(selfFile, entry, idx, tmpFile); err != nil {
 		return fmt.Errorf("extracting variant: %w", err)
 	}
 

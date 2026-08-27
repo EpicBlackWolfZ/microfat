@@ -38,6 +38,8 @@ type BuildOptions struct {
 	Profile           string
 	Compression       string
 	CompressionLevel  string
+	EnableDict        bool
+	DictSize          int
 	FormatVersion     int
 	Stdout            io.Writer
 	Stderr            io.Writer
@@ -423,6 +425,8 @@ func assemblePackOptions(
 		packOpts.Profile = m.Compression.Profile
 		packOpts.Compression = m.Compression.Algorithm
 		packOpts.CompressionLevel = m.Compression.Level
+		packOpts.EnableDict = m.Compression.EnableDict
+		packOpts.DictSize = m.Compression.DictSize
 	}
 
 	if opts.Profile != "" {
@@ -433,6 +437,12 @@ func assemblePackOptions(
 	}
 	if opts.CompressionLevel != "" {
 		packOpts.CompressionLevel = opts.CompressionLevel
+	}
+	if opts.EnableDict {
+		packOpts.EnableDict = true
+	}
+	if opts.DictSize > 0 {
+		packOpts.DictSize = opts.DictSize
 	}
 
 	if len(m.Variants) > 0 {

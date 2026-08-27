@@ -3,6 +3,7 @@ package pack
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -578,7 +579,7 @@ func TestFinalizeOutputFile(t *testing.T) {
 	validPayload := filepath.Join(tempDir, "valid_payload")
 	_ = os.WriteFile(validPayload, []byte("payload"), 0o644)
 	packOpts := &Options{}
-	if _, _, err := writeVariantPayload(tmp3, "v1", validPayload, packOpts, 0); err == nil {
+	if _, _, err := writeVariantPayload(tmp3, "v1", validPayload, packOpts, 0, nil); err == nil {
 		t.Errorf("expected error writing payload to closed file")
 	}
 
@@ -588,7 +589,7 @@ func TestFinalizeOutputFile(t *testing.T) {
 		_ = tmp4.Close()
 		_ = os.Remove(tmp4.Name())
 	}()
-	if _, _, err := writeVariantPayload(tmp4, "v1", filepath.Join(tempDir, "nonexistent"), packOpts, 0); err == nil {
+	if _, _, err := writeVariantPayload(tmp4, "v1", filepath.Join(tempDir, "nonexistent"), packOpts, 0, nil); err == nil {
 		t.Errorf("expected error writing nonexistent payload")
 	}
 }
@@ -1442,6 +1443,237 @@ func BenchmarkPrewarmBinary(b *testing.B) {
 			}
 		}
 	})
+}
+
+func TestDictionaryPackingAndVerification(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("DUMMY_STUB_HEADER_DATA_1234567890"), 0o755)
+
+	// Create 4 variants with substantial shared content (like real Go ELF binaries)
+	varPaths := make(map[string]string)
+	for _, lvl := range []string{"v1", "v2", "v3", "v4"} {
+		p := filepath.Join(tempDir, "app_"+lvl)
+		var buf bytes.Buffer
+		for i := 0; i < 1200; i++ {
+			buf.WriteString(fmt.Sprintf("runtime_metadata_symbol_entry_%04d_hash_%x\n", i, (i*43)^0xA5A5A5A5))
+		}
+		buf.WriteString(fmt.Sprintf("variant_specific_code_segment_%s_optimization_pass\n", lvl))
+		_ = os.WriteFile(p, buf.Bytes(), 0o755)
+		varPaths[lvl] = p
+	}
+
+	fatWithoutDict := filepath.Join(tempDir, "fat_no_dict")
+	optsNoDict := Options{
+		StubPath:          stubPath,
+		OutputPath:        fatWithoutDict,
+		AppName:           "dict-test-app",
+		TargetOS:          testOSLinux,
+		TargetArch:        testArchAMD64,
+		Variants:          varPaths,
+		EnableDict:        false,
+		SkipELFValidation: true,
+	}
+	idxNoDict, err := Pack(optsNoDict)
+	if err != nil {
+		t.Fatalf("Pack without dict failed: %v", err)
+	}
+	if idxNoDict.DictionarySize != 0 {
+		t.Errorf("expected 0 DictionarySize for no-dict pack, got %d", idxNoDict.DictionarySize)
+	}
+	statNoDict, err := os.Stat(fatWithoutDict)
+	if err != nil {
+		t.Fatalf("stat no dict failed: %v", err)
+	}
+
+	fatWithDict := filepath.Join(tempDir, "fat_with_dict")
+	optsWithDict := Options{
+		StubPath:          stubPath,
+		OutputPath:        fatWithDict,
+		AppName:           "dict-test-app",
+		TargetOS:          testOSLinux,
+		TargetArch:        testArchAMD64,
+		Variants:          varPaths,
+		EnableDict:        true,
+		DictSize:          32 * 1024,
+		SkipELFValidation: true,
+	}
+	idxWithDict, err := Pack(optsWithDict)
+	if err != nil {
+		t.Fatalf("Pack with dict failed: %v", err)
+	}
+	statWithDict, err := os.Stat(fatWithDict)
+	if err != nil {
+		t.Fatalf("stat with dict failed: %v", err)
+	}
+
+	if idxWithDict.DictionarySize <= 0 {
+		t.Errorf("expected DictionarySize > 0, got %d", idxWithDict.DictionarySize)
+	}
+	if idxWithDict.DictionaryOffset <= 0 {
+		t.Errorf("expected DictionaryOffset > 0, got %d", idxWithDict.DictionaryOffset)
+	}
+	if idxWithDict.DictionarySHA256 == "" {
+		t.Errorf("expected non-empty DictionarySHA256")
+	}
+
+	// Verify size reduction
+	t.Logf("Fat without dict: %d bytes | Fat with dict: %d bytes (savings: %.1f%%)",
+		statNoDict.Size(), statWithDict.Size(),
+		(1.0-float64(statWithDict.Size())/float64(statNoDict.Size()))*100)
+
+	// Verify binary integrity
+	fDict, err := os.Open(fatWithDict)
+	if err != nil {
+		t.Fatalf("open fatWithDict: %v", err)
+	}
+	defer func() { _ = fDict.Close() }()
+
+	vIdx, results, err := VerifyBinary(fDict, statWithDict.Size())
+	if err != nil {
+		t.Fatalf("VerifyBinary failed: %v", err)
+	}
+	if len(results) != 4 {
+		t.Fatalf("expected 4 results, got %d", len(results))
+	}
+	for _, r := range results {
+		if !r.Valid || r.Error != nil {
+			t.Errorf("expected valid verification for %s: %v", r.Level, r.Error)
+		}
+	}
+	if vIdx.DictionarySize != idxWithDict.DictionarySize {
+		t.Errorf("VerifyBinary returned wrong dictionary size")
+	}
+
+	// Verify TrimBinary on dictionary-backed fat binary
+	trimmedPath := filepath.Join(tempDir, "trimmed_v3")
+	trimmedFile, err := os.Create(trimmedPath)
+	if err != nil {
+		t.Fatalf("create trimmed file: %v", err)
+	}
+	trimIdx, err := TrimBinary(fDict, statWithDict.Size(), "v3", trimmedFile)
+	_ = trimmedFile.Close()
+	if err != nil {
+		t.Fatalf("TrimBinary on dict binary failed: %v", err)
+	}
+	if trimIdx.DictionarySize != idxWithDict.DictionarySize {
+		t.Errorf("Trimmed binary lost dictionary size: %d", trimIdx.DictionarySize)
+	}
+
+	trimmedOpen, err := os.Open(trimmedPath)
+	if err != nil {
+		t.Fatalf("open trimmed binary: %v", err)
+	}
+	defer func() { _ = trimmedOpen.Close() }()
+	trimStat, _ := trimmedOpen.Stat()
+	_, trimResults, err := VerifyBinary(trimmedOpen, trimStat.Size())
+	if err != nil || len(trimResults) != 1 || !trimResults[0].Valid {
+		t.Fatalf("verification of trimmed dict binary failed: %v (results: %v)", err, trimResults)
+	}
+
+	// Verify PrewarmBinary on dictionary-backed fat binary
+	cacheDir := filepath.Join(tempDir, "prewarm_cache")
+	_, prewarmRes, err := PrewarmBinary(fDict, statWithDict.Size(), []string{"v1", "v4"}, cacheDir)
+	if err != nil {
+		t.Fatalf("PrewarmBinary failed on dict binary: %v", err)
+	}
+	if len(prewarmRes) != 2 {
+		t.Fatalf("expected 2 prewarm results, got %d", len(prewarmRes))
+	}
+	for _, pr := range prewarmRes {
+		if !pr.Valid {
+			t.Errorf("prewarm invalid for %s: %s", pr.Level, pr.Error)
+		}
+	}
+}
+
+func TestDictionaryCorruptedVerification(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("DUMMY_STUB_HEADER_DATA_1234567890"), 0o755)
+
+	varPaths := make(map[string]string)
+	for _, lvl := range []string{"v1", "v2"} {
+		p := filepath.Join(tempDir, "app_"+lvl)
+		var buf bytes.Buffer
+		for i := 0; i < 1200; i++ {
+			buf.WriteString(fmt.Sprintf("sample_payload_for_corruption_test_entry_%04d_hash_%x\n", i, (i*37)^0x5A5A5A5A))
+		}
+		buf.WriteString(fmt.Sprintf("level_specific_data_%s\n", lvl))
+		_ = os.WriteFile(p, buf.Bytes(), 0o755)
+		varPaths[lvl] = p
+	}
+
+	fatPath := filepath.Join(tempDir, "fat_dict")
+	opts := Options{
+		StubPath:          stubPath,
+		OutputPath:        fatPath,
+		AppName:           "corrupt-test",
+		TargetOS:          testOSLinux,
+		TargetArch:        testArchAMD64,
+		Variants:          varPaths,
+		EnableDict:        true,
+		SkipELFValidation: true,
+	}
+	idx, err := Pack(opts)
+	if err != nil {
+		t.Fatalf("Pack failed: %v", err)
+	}
+
+	data, err := os.ReadFile(fatPath)
+	if err != nil {
+		t.Fatalf("reading fat binary: %v", err)
+	}
+
+	// Tamper with dictionary bytes
+	tamperedData := make([]byte, len(data))
+	copy(tamperedData, data)
+	if idx.DictionarySize > 0 {
+		tamperedData[idx.DictionaryOffset+10] ^= 0xFF
+	}
+
+	tamperedReader := bytes.NewReader(tamperedData)
+	_, _, err = VerifyBinary(tamperedReader, int64(len(tamperedData)))
+	if err == nil {
+		t.Fatalf("expected error when dictionary is corrupted")
+	}
+
+	// Also verify PrewarmBinary fails on corrupted dictionary
+	cacheDir := filepath.Join(tempDir, "cache_corrupt")
+	_, _, err = PrewarmBinary(tamperedReader, int64(len(tamperedData)), nil, cacheDir)
+	if err == nil {
+		t.Fatalf("expected PrewarmBinary to fail on corrupted dictionary")
+	}
+}
+
+func TestSampleVariantPayloadsEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	p1 := filepath.Join(tempDir, "p1")
+	p2 := filepath.Join(tempDir, "p2")
+
+	_ = os.WriteFile(p1, make([]byte, 1024), 0o644)
+	_ = os.WriteFile(p2, make([]byte, 500*1024), 0o644)
+
+	variants := map[string]string{"v1": p1, "v2": p2}
+	samples, err := sampleVariantPayloads(variants, []string{"v1", "v2"})
+	if err != nil {
+		t.Fatalf("sampleVariantPayloads failed: %v", err)
+	}
+	if len(samples) == 0 {
+		t.Fatalf("expected non-empty samples")
+	}
+
+	// Nonexistent file error
+	_, err = sampleVariantPayloads(map[string]string{"v1": filepath.Join(tempDir, "missing")}, []string{"v1"})
+	if err == nil {
+		t.Fatalf("expected error for missing variant file in sampleVariantPayloads")
+	}
 }
 
 

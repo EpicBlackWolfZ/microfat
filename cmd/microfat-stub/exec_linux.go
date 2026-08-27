@@ -3,6 +3,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -34,14 +36,29 @@ var (
 )
 
 // extractVariantToWriter seeks to the variant offset and streams decompressed bytes to w.
-func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, w io.Writer) error {
+func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, idx *format.Index, w io.Writer) error {
 	c, err := codec.Get(entry.Compression)
 	if err != nil {
 		return fmt.Errorf("lookup codec %q for variant %s: %w", entry.Compression, entry.Level, err)
 	}
 
+	var dictBytes []byte
+	if idx != nil && idx.DictionarySize > 0 {
+		dictBytes = make([]byte, idx.DictionarySize)
+		if _, err := selfFile.ReadAt(dictBytes, idx.DictionaryOffset); err != nil {
+			return fmt.Errorf("reading shared dictionary: %w", err)
+		}
+		if idx.DictionarySHA256 != "" {
+			h := sha256.Sum256(dictBytes)
+			actualHex := hex.EncodeToString(h[:])
+			if actualHex != idx.DictionarySHA256 {
+				return fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, actualHex)
+			}
+		}
+	}
+
 	secReader := io.NewSectionReader(selfFile, entry.Offset, entry.CompressedSize)
-	if err := c.Decompress(w, secReader, entry.UncompressedSize); err != nil {
+	if err := codec.DecompressWithOptionalDict(c, w, secReader, entry.UncompressedSize, dictBytes); err != nil {
 		return fmt.Errorf("decompressing variant payload: %w", err)
 	}
 
@@ -53,6 +70,7 @@ func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, w io.
 func executeVariant(
 	selfFile *os.File,
 	entry *format.VariantEntry,
+	idx *format.Index,
 	args []string,
 	baseEnv []string,
 	hostInfo microarch.Info,
@@ -66,17 +84,17 @@ func executeVariant(
 	}
 
 	if strings.EqualFold(requestedMode, format.ExecModeCache) {
-		return executeViaCache(selfFile, entry, args, baseEnv, hostInfo, policyRes, nil, startTime)
+		return executeViaCache(selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, nil, startTime)
 	}
 
 	// 1. Try In-Memory memfd_create
-	err := executeViaMemfd(selfFile, entry, args, baseEnv, hostInfo, policyRes, startTime)
+	err := executeViaMemfd(selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, startTime)
 	if err == nil {
 		return nil
 	}
 
 	// 2. Fallback to cached file execution
-	return executeViaCache(selfFile, entry, args, baseEnv, hostInfo, policyRes, err, startTime)
+	return executeViaCache(selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, err, startTime)
 }
 
 func buildAutoTunedEnviron(
@@ -304,6 +322,7 @@ func logErrorDiagnostics(
 func executeViaMemfd(
 	selfFile *os.File,
 	entry *format.VariantEntry,
+	idx *format.Index,
 	args []string,
 	baseEnv []string,
 	hostInfo microarch.Info,
@@ -322,7 +341,7 @@ func executeViaMemfd(
 	defer func() { _ = memFile.Close() }()
 
 	decompStart := time.Now()
-	if err := extractVariantToWriter(selfFile, entry, memFile); err != nil {
+	if err := extractVariantToWriter(selfFile, entry, idx, memFile); err != nil {
 		logErrorDiagnostics(format.StageMemfdExtract, err, hostInfo, entry, policyRes, "decompressing payload failed")
 		return fmt.Errorf("decompressing into memfd: %w", err)
 	}
@@ -343,6 +362,7 @@ func executeViaMemfd(
 func executeViaCache(
 	selfFile *os.File,
 	entry *format.VariantEntry,
+	idx *format.Index,
 	args []string,
 	baseEnv []string,
 	hostInfo microarch.Info,
@@ -387,7 +407,7 @@ func executeViaCache(
 		}()
 
 		decompStart := time.Now()
-		if err := extractVariantToWriter(selfFile, entry, tmpFile); err != nil {
+		if err := extractVariantToWriter(selfFile, entry, idx, tmpFile); err != nil {
 			logErrorDiagnostics(format.StageCacheExtract, err, hostInfo, entry, policyRes, "decompressing payload to cache failed")
 			return fmt.Errorf("extracting to cache fallback: %w", err)
 		}

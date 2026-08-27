@@ -54,6 +54,28 @@ type Codec interface {
 	Decompress(w io.Writer, r io.Reader, uncompressedSize int64) error
 }
 
+// DictCodec extends Codec with dictionary-aware compression and decompression capabilities.
+type DictCodec interface {
+	Codec
+
+	// CompressWithDict compresses src bytes using a shared dictionary and writes to w with the specified level.
+	CompressWithDict(w io.Writer, src []byte, level string, dict []byte) error
+
+	// DecompressWithDict decompresses stream from r using a shared dictionary into w and verifies uncompressedSize.
+	DecompressWithDict(w io.Writer, r io.Reader, uncompressedSize int64, dict []byte) error
+}
+
+// DecompressWithOptionalDict decompresses stream from r into w. If dict is non-empty and c implements DictCodec,
+// it uses DecompressWithDict; otherwise it calls Decompress.
+func DecompressWithOptionalDict(c Codec, w io.Writer, r io.Reader, uncompressedSize int64, dict []byte) error {
+	if len(dict) > 0 {
+		if dc, ok := c.(DictCodec); ok {
+			return dc.DecompressWithDict(w, r, uncompressedSize, dict)
+		}
+	}
+	return c.Decompress(w, r, uncompressedSize)
+}
+
 var (
 	registryMu sync.RWMutex
 	registry   = make(map[string]Codec)

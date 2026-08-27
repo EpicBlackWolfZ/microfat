@@ -51,6 +51,8 @@ type Options struct {
 	Profile            string            // "latency", "balanced", "size"
 	Compression        string            // "zstd", "lz4", "none" (or "zstd:best")
 	CompressionLevel   string            // level string or numeric
+	EnableDict         bool              // Train and embed a shared Zstandard dictionary across variants
+	DictSize           int               // Target dictionary size in bytes (default: 112 KB)
 	VariantCompression map[string]VariantCompressionOptions
 	Permissions        os.FileMode
 	FormatVersion      int  // FormatVersion1 (JSON) or FormatVersion2 (Binary, default)
@@ -68,6 +70,41 @@ type VerificationResult struct {
 	Error            error
 }
 
+const (
+	sampleChunkSize   = 4 * 1024 // 4 KB per sample chunk
+	maxSamplesPerFile = 32
+)
+
+func sampleVariantPayloads(variantPaths map[string]string, levels []string) ([][]byte, error) {
+	var samples [][]byte
+	for _, lvl := range levels {
+		path := filepath.Clean(variantPaths[lvl])
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("reading variant %s for sample training: %w", lvl, err)
+		}
+
+		if len(data) <= sampleChunkSize {
+			samples = append(samples, data)
+			continue
+		}
+
+		step := len(data) / maxSamplesPerFile
+		if step < sampleChunkSize {
+			step = sampleChunkSize
+		}
+
+		count := 0
+		for offset := 0; offset+sampleChunkSize <= len(data) && count < maxSamplesPerFile; offset += step {
+			chunk := make([]byte, sampleChunkSize)
+			copy(chunk, data[offset:offset+sampleChunkSize])
+			samples = append(samples, chunk)
+			count++
+		}
+	}
+	return samples, nil
+}
+
 // Pack stitches the stub and compressed variant binaries into a complete microfat fat executable.
 func Pack(opts Options) (*format.Index, error) {
 	if err := validateOptions(&opts); err != nil {
@@ -80,6 +117,41 @@ func Pack(opts Options) (*format.Index, error) {
 	}
 
 	levels := sortVariantLevels(opts.Variants, opts.TargetArch)
+
+	// Determine if shared dictionary compression should be trained
+	enableDict := opts.EnableDict
+	if !enableDict && opts.Profile == codec.ProfileSize && len(levels) >= 2 {
+		algo, _ := codec.ParseCompressionSpec(opts.Compression)
+		if algo == "" || algo == codec.AlgorithmZstd {
+			enableDict = true
+		}
+	}
+
+	var dictBytes []byte
+	var dictSHAHex string
+	if enableDict && len(levels) >= 2 {
+		samples, err := sampleVariantPayloads(opts.Variants, levels)
+		if err != nil {
+			if opts.EnableDict {
+				return nil, fmt.Errorf("sampling variants for dictionary training: %w", err)
+			}
+		} else if len(samples) > 0 {
+			dictSize := opts.DictSize
+			if dictSize <= 0 {
+				dictSize = codec.DefaultDictSize
+			}
+			dict, tErr := codec.TrainDictionary(samples, dictSize, opts.CompressionLevel)
+			if tErr != nil {
+				if opts.EnableDict {
+					return nil, fmt.Errorf("training shared dictionary: %w", tErr)
+				}
+			} else if len(dict) > 0 {
+				dictBytes = dict
+				h := sha256.Sum256(dictBytes)
+				dictSHAHex = hex.EncodeToString(h[:])
+			}
+		}
+	}
 
 	// Create temporary file in the destination directory for atomic replacement
 	outDir := filepath.Dir(opts.OutputPath)
@@ -108,9 +180,23 @@ func Pack(opts Options) (*format.Index, error) {
 		Variants:    make([]format.VariantEntry, 0, len(levels)),
 	}
 
-	// 2. Compress and write each variant payload
+	// 2. Write Shared Dictionary (if trained)
+	if len(dictBytes) > 0 {
+		dictOffset := currentOffset
+		dictSize := int64(len(dictBytes))
+		if _, err := tmpFile.Write(dictBytes); err != nil {
+			return nil, fmt.Errorf("writing dictionary payload: %w", err)
+		}
+		currentOffset += dictSize
+		idx.DictionaryOffset = dictOffset
+		idx.DictionarySize = dictSize
+		idx.DictionarySHA256 = dictSHAHex
+		idx.DictionaryID = codec.DefaultDictionaryID
+	}
+
+	// 3. Compress and write each variant payload
 	for _, lvl := range levels {
-		entry, newOffset, err := writeVariantPayload(tmpFile, lvl, opts.Variants[lvl], &opts, currentOffset)
+		entry, newOffset, err := writeVariantPayload(tmpFile, lvl, opts.Variants[lvl], &opts, currentOffset, dictBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -118,12 +204,12 @@ func Pack(opts Options) (*format.Index, error) {
 		idx.Variants = append(idx.Variants, entry)
 	}
 
-	// 3. Write Index and Trailer
+	// 4. Write Index and Trailer
 	if _, err := format.WriteIndexAndTrailerWithVersion(tmpFile, idx, currentOffset, opts.FormatVersion); err != nil {
 		return nil, fmt.Errorf("writing index and trailer: %w", err)
 	}
 
-	// 4. Sync, chmod and atomically move
+	// 5. Sync, chmod and atomically move
 	if err := finalizeOutputFile(tmpFile, tmpPath, opts.OutputPath, opts.Permissions); err != nil {
 		return nil, err
 	}
@@ -188,6 +274,7 @@ func writeVariantPayload(
 	path string,
 	opts *Options,
 	currentOffset int64,
+	dict []byte,
 ) (format.VariantEntry, int64, error) {
 	variantPath := filepath.Clean(path)
 	variantBytes, err := os.ReadFile(variantPath)
@@ -221,8 +308,20 @@ func writeVariantPayload(
 		return format.VariantEntry{}, 0, fmt.Errorf("resolving compression for variant %s: %w", lvl, err)
 	}
 
-	if err := c.Compress(tmpFile, variantBytes, resolvedLevel); err != nil {
-		return format.VariantEntry{}, 0, fmt.Errorf("compressing variant %s with codec %s: %w", lvl, c.Name(), err)
+	if len(dict) > 0 {
+		if dc, ok := c.(codec.DictCodec); ok {
+			if err := dc.CompressWithDict(tmpFile, variantBytes, resolvedLevel, dict); err != nil {
+				return format.VariantEntry{}, 0, fmt.Errorf("compressing variant %s with dict: %w", lvl, err)
+			}
+		} else {
+			if err := c.Compress(tmpFile, variantBytes, resolvedLevel); err != nil {
+				return format.VariantEntry{}, 0, fmt.Errorf("compressing variant %s with codec %s: %w", lvl, c.Name(), err)
+			}
+		}
+	} else {
+		if err := c.Compress(tmpFile, variantBytes, resolvedLevel); err != nil {
+			return format.VariantEntry{}, 0, fmt.Errorf("compressing variant %s with codec %s: %w", lvl, c.Name(), err)
+		}
 	}
 
 	newOffset, err := tmpFile.Seek(0, io.SeekCurrent)
@@ -275,6 +374,9 @@ func TrimBinary(r io.ReaderAt, totalSize int64, targetLevel string, out io.Write
 	}
 
 	stubSize := idx.Variants[0].Offset
+	if idx.DictionarySize > 0 {
+		stubSize = idx.DictionaryOffset
+	}
 	if stubSize <= 0 || stubSize > totalSize {
 		return nil, errors.New("invalid stub offset in binary index")
 	}
@@ -285,34 +387,77 @@ func TrimBinary(r io.ReaderAt, totalSize int64, targetLevel string, out io.Write
 		return nil, fmt.Errorf("copying stub binary: %w", err)
 	}
 
-	// 2. Copy Compressed Variant Frame
-	varReader := io.NewSectionReader(r, selected.Offset, selected.CompressedSize)
-	if _, err := io.Copy(out, varReader); err != nil {
-		return nil, fmt.Errorf("copying variant frame: %w", err)
-	}
+	currentOffset := stubSize
+	var newIdx *format.Index
 
-	// 3. Assemble New Index with single entry right after the stub
-	newIdx := &format.Index{
-		Version:     idx.Version,
-		AppName:     idx.AppName,
-		TargetOS:    idx.TargetOS,
-		TargetArch:  idx.TargetArch,
-		CreatedUnix: time.Now().Unix(),
-		Variants: []format.VariantEntry{
-			{
-				Level:            selected.Level,
-				Offset:           stubSize,
-				CompressedSize:   selected.CompressedSize,
-				UncompressedSize: selected.UncompressedSize,
-				SHA256:           selected.SHA256,
-				Compression:      selected.Compression,
+	if idx.DictionarySize > 0 {
+		// 2. Copy Shared Dictionary
+		dictReader := io.NewSectionReader(r, idx.DictionaryOffset, idx.DictionarySize)
+		if _, err := io.Copy(out, dictReader); err != nil {
+			return nil, fmt.Errorf("copying dictionary frame: %w", err)
+		}
+		dictOffset := currentOffset
+		currentOffset += idx.DictionarySize
+
+		// 3. Copy Compressed Variant Frame
+		varReader := io.NewSectionReader(r, selected.Offset, selected.CompressedSize)
+		if _, err := io.Copy(out, varReader); err != nil {
+			return nil, fmt.Errorf("copying variant frame: %w", err)
+		}
+		variantOffset := currentOffset
+		currentOffset += selected.CompressedSize
+
+		newIdx = &format.Index{
+			Version:          idx.Version,
+			AppName:          idx.AppName,
+			TargetOS:         idx.TargetOS,
+			TargetArch:       idx.TargetArch,
+			CreatedUnix:      time.Now().Unix(),
+			DictionaryOffset: dictOffset,
+			DictionarySize:   idx.DictionarySize,
+			DictionarySHA256: idx.DictionarySHA256,
+			DictionaryID:     idx.DictionaryID,
+			Variants: []format.VariantEntry{
+				{
+					Level:            selected.Level,
+					Offset:           variantOffset,
+					CompressedSize:   selected.CompressedSize,
+					UncompressedSize: selected.UncompressedSize,
+					SHA256:           selected.SHA256,
+					Compression:      selected.Compression,
+				},
 			},
-		},
+		}
+	} else {
+		// 2. Copy Compressed Variant Frame
+		varReader := io.NewSectionReader(r, selected.Offset, selected.CompressedSize)
+		if _, err := io.Copy(out, varReader); err != nil {
+			return nil, fmt.Errorf("copying variant frame: %w", err)
+		}
+		variantOffset := currentOffset
+		currentOffset += selected.CompressedSize
+
+		newIdx = &format.Index{
+			Version:     idx.Version,
+			AppName:     idx.AppName,
+			TargetOS:    idx.TargetOS,
+			TargetArch:  idx.TargetArch,
+			CreatedUnix: time.Now().Unix(),
+			Variants: []format.VariantEntry{
+				{
+					Level:            selected.Level,
+					Offset:           variantOffset,
+					CompressedSize:   selected.CompressedSize,
+					UncompressedSize: selected.UncompressedSize,
+					SHA256:           selected.SHA256,
+					Compression:      selected.Compression,
+				},
+			},
+		}
 	}
 
 	// 4. Write New Index and Trailer
-	indexOffset := stubSize + selected.CompressedSize
-	if _, err := format.WriteIndexAndTrailer(out, newIdx, indexOffset); err != nil {
+	if _, err := format.WriteIndexAndTrailer(out, newIdx, currentOffset); err != nil {
 		return nil, fmt.Errorf("writing trimmed index and trailer: %w", err)
 	}
 
@@ -324,6 +469,21 @@ func VerifyBinary(r io.ReaderAt, totalSize int64) (*format.Index, []Verification
 	idx, err := format.ReadTrailerAndIndex(r, totalSize)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading index: %w", err)
+	}
+
+	var dictBytes []byte
+	if idx.DictionarySize > 0 {
+		dictBytes = make([]byte, idx.DictionarySize)
+		if _, err := r.ReadAt(dictBytes, idx.DictionaryOffset); err != nil {
+			return nil, nil, fmt.Errorf("reading shared dictionary: %w", err)
+		}
+		if idx.DictionarySHA256 != "" {
+			h := sha256.Sum256(dictBytes)
+			actualHex := hex.EncodeToString(h[:])
+			if actualHex != idx.DictionarySHA256 {
+				return nil, nil, fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, actualHex)
+			}
+		}
 	}
 
 	results := make([]VerificationResult, 0, len(idx.Variants))
@@ -344,7 +504,7 @@ func VerifyBinary(r io.ReaderAt, totalSize int64) (*format.Index, []Verification
 
 		secReader := io.NewSectionReader(r, v.Offset, v.CompressedSize)
 		hasher := sha256.New()
-		if err := c.Decompress(hasher, secReader, v.UncompressedSize); err != nil {
+		if err := codec.DecompressWithOptionalDict(c, hasher, secReader, v.UncompressedSize, dictBytes); err != nil {
 			res.Error = fmt.Errorf("decompressing variant payload: %w", err)
 			results = append(results, res)
 			continue
@@ -400,6 +560,16 @@ func PrewarmVariant(
 	entry *format.VariantEntry,
 	cacheDir string,
 ) (cachedPath string, alreadyCached bool, duration time.Duration, err error) {
+	return PrewarmVariantWithDict(r, entry, cacheDir, nil)
+}
+
+// PrewarmVariantWithDict extracts and validates an embedded variant using an optional shared dictionary.
+func PrewarmVariantWithDict(
+	r io.ReaderAt,
+	entry *format.VariantEntry,
+	cacheDir string,
+	dict []byte,
+) (cachedPath string, alreadyCached bool, duration time.Duration, err error) {
 	if entry.SHA256 == "" {
 		return "", false, 0, errors.New("variant missing SHA-256 checksum")
 	}
@@ -435,7 +605,7 @@ func PrewarmVariant(
 	secReader := io.NewSectionReader(r, entry.Offset, entry.CompressedSize)
 	hasher := sha256.New()
 	mw := io.MultiWriter(tmpFile, hasher)
-	if err := c.Decompress(mw, secReader, entry.UncompressedSize); err != nil {
+	if err := codec.DecompressWithOptionalDict(c, mw, secReader, entry.UncompressedSize, dict); err != nil {
 		return "", false, 0, fmt.Errorf("decompressing variant %s: %w", entry.Level, err)
 	}
 	decompDuration := time.Since(decompStart)
@@ -452,7 +622,7 @@ func PrewarmVariant(
 		return "", false, 0, fmt.Errorf("syncing temp file: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		return "", false, 0, fmt.Errorf("closing temp file: %w", err)
+		return "", false, 0, fmt.Errorf("closing temp file %s: %w", tmpPath, err)
 	}
 
 	if err := os.Rename(tmpPath, cachedBinary); err != nil {
@@ -483,6 +653,21 @@ func PrewarmBinary(
 		cacheDir = resolved
 	}
 
+	var dictBytes []byte
+	if idx.DictionarySize > 0 {
+		dictBytes = make([]byte, idx.DictionarySize)
+		if _, err := r.ReadAt(dictBytes, idx.DictionaryOffset); err != nil {
+			return nil, nil, fmt.Errorf("reading shared dictionary: %w", err)
+		}
+		if idx.DictionarySHA256 != "" {
+			h := sha256.Sum256(dictBytes)
+			actualHex := hex.EncodeToString(h[:])
+			if actualHex != idx.DictionarySHA256 {
+				return nil, nil, fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, actualHex)
+			}
+		}
+	}
+
 	targetCap := len(idx.Variants)
 	var targetSet map[string]struct{}
 	if len(targetLevels) > 0 {
@@ -506,7 +691,7 @@ func PrewarmBinary(
 			}
 		}
 
-		path, alreadyCached, duration, err := PrewarmVariant(r, &v, cacheDir)
+		path, alreadyCached, duration, err := PrewarmVariantWithDict(r, &v, cacheDir, dictBytes)
 		if err != nil {
 			return nil, nil, fmt.Errorf("prewarming variant %s: %w", v.Level, err)
 		}

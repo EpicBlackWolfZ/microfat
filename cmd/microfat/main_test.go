@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -774,5 +775,63 @@ variants:
 	_ = packManifestCmd.Execute()
 }
 
+func TestPackAndInspect_DictionaryFlags(t *testing.T) {
+	tempDir := t.TempDir()
 
+	stubPath := filepath.Join(tempDir, "microfat-stub")
+	_ = os.WriteFile(stubPath, []byte("STUB_CODE_LAUNCHER"), 0o755)
 
+	v1Path := filepath.Join(tempDir, "app_v1")
+	v3Path := filepath.Join(tempDir, "app_v3")
+
+	var v1Buf, v3Buf bytes.Buffer
+	for i := 0; i < 800; i++ {
+		str := fmt.Sprintf("runtime_symbol_record_%04d_metadata_hash_%x\n", i, (i*31)^0x12345678)
+		v1Buf.WriteString(str)
+		v3Buf.WriteString(str)
+	}
+	v1Buf.WriteString("v1_specific_arch_code_optimizations\n")
+	v3Buf.WriteString("v3_specific_arch_code_optimizations\n")
+
+	_ = os.WriteFile(v1Path, v1Buf.Bytes(), 0o755)
+	_ = os.WriteFile(v3Path, v3Buf.Bytes(), 0o755)
+
+	fatPath := filepath.Join(tempDir, "app_dict.fat")
+
+	// 1. Pack with --dict and --dict-size
+	packCmd := newPackCmd()
+	packCmd.SetArgs([]string{
+		flagStub, stubPath,
+		"--output", fatPath,
+		"--name", "dict-cli-app",
+		"--dict",
+		"--dict-size", "65536",
+		"-v", "v1=" + v1Path,
+		"-v", "v3=" + v3Path,
+		flagSkipELF,
+	})
+	if err := packCmd.Execute(); err != nil {
+		t.Fatalf("pack with --dict failed: %v", err)
+	}
+
+	// 2. Inspect fat binary
+	inspectCmd := newInspectCmd()
+	inspectCmd.SetArgs([]string{fatPath})
+	if err := inspectCmd.Execute(); err != nil {
+		t.Fatalf("inspect dict binary failed: %v", err)
+	}
+
+	// 3. Inspect JSON
+	inspectJSONCmd := newInspectCmd()
+	inspectJSONCmd.SetArgs([]string{fatPath, flagJSON})
+	if err := inspectJSONCmd.Execute(); err != nil {
+		t.Fatalf("inspect --json dict binary failed: %v", err)
+	}
+
+	// 4. Verify binary with dict
+	verifyCmd := newVerifyCmd()
+	verifyCmd.SetArgs([]string{fatPath})
+	if err := verifyCmd.Execute(); err != nil {
+		t.Fatalf("verify dict binary failed: %v", err)
+	}
+}

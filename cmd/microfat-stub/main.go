@@ -94,5 +94,5 @@ func runBinary(selfPath string) error {
 	}
 
 	// Standard transparent execution
-	return executeVariant(selfFile, selectedEntry, os.Args, os.Environ(), hostInfo, policyRes, launcherStart)
+	return executeVariant(selfFile, selectedEntry, idx, os.Args, os.Environ(), hostInfo, policyRes, launcherStart)
 }

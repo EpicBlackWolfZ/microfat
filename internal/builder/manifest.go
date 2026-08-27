@@ -28,9 +28,11 @@ var (
 
 // CompressionConfig defines declarative compression parameters.
 type CompressionConfig struct {
-	Profile   string `json:"profile,omitempty" yaml:"profile,omitempty"`
-	Algorithm string `json:"algorithm,omitempty" yaml:"algorithm,omitempty"`
-	Level     string `json:"level,omitempty" yaml:"level,omitempty"`
+	Profile    string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Algorithm  string `json:"algorithm,omitempty" yaml:"algorithm,omitempty"`
+	Level      string `json:"level,omitempty" yaml:"level,omitempty"`
+	EnableDict bool   `json:"dict,omitempty" yaml:"dict,omitempty"`
+	DictSize   int    `json:"dict_size,omitempty" yaml:"dict_size,omitempty"`
 }
 
 // Manifest defines the declarative configuration for compiling and packaging

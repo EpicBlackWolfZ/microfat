@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -725,7 +726,7 @@ func TestFormatVersion2BinaryRoundTrip(t *testing.T) {
 	if len(readIdx.Variants) != 2 {
 		t.Fatalf("expected 2 variants, got %d", len(readIdx.Variants))
 	}
-	if readIdx.Variants[0].Compression != "none" || readIdx.Variants[1].Compression != "zstd" {
+	if readIdx.Variants[0].Compression != "none" || readIdx.Variants[1].Compression != defaultCompressionAlgorithm {
 		t.Errorf("variant compressions mismatch: %+v", readIdx.Variants)
 	}
 }
@@ -774,14 +775,14 @@ func TestUnmarshalBinaryIndexErrors(t *testing.T) {
 	}
 
 	// Bad magic
-	badMagic := make([]byte, 30)
+	badMagic := make([]byte, 40)
 	copy(badMagic, []byte("BADM"))
 	if _, err := UnmarshalBinaryIndex(badMagic); !errors.Is(err, ErrInvalidMagic) {
 		t.Errorf("expected ErrInvalidMagic for bad magic, got %v", err)
 	}
 
 	// Bad version
-	badVersion := make([]byte, 30)
+	badVersion := make([]byte, 40)
 	copy(badVersion, []byte(IndexMagicV2))
 	binary.LittleEndian.PutUint16(badVersion[4:6], 99)
 	if _, err := UnmarshalBinaryIndex(badVersion); !errors.Is(err, ErrUnsupportedVersion) {
@@ -992,6 +993,198 @@ func TestJSONParser_EdgeCases(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error for case %q, got nil", c)
 			}
+		}
+	})
+}
+
+func TestDictionaryBinaryIndexSerialization(t *testing.T) {
+	t.Parallel()
+
+	idx := &Index{
+		Version:          FormatVersion2,
+		AppName:          "dict-test-app",
+		TargetOS:         "linux",
+		TargetArch:       "amd64",
+		CreatedUnix:      1700000000,
+		DictionaryOffset: 4096,
+		DictionarySize:   110592,
+		DictionarySHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		DictionaryID:     0x4D464154,
+		Variants: []VariantEntry{
+			{
+				Level:            "v1",
+				Offset:           114688,
+				CompressedSize:   10000,
+				UncompressedSize: 25000,
+				SHA256:           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				Compression:      "zstd",
+			},
+			{
+				Level:            "v3",
+				Offset:           124688,
+				CompressedSize:   9000,
+				UncompressedSize: 26000,
+				SHA256:           "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				Compression:      "zstd",
+			},
+		},
+	}
+
+	data, err := MarshalBinaryIndex(idx)
+	if err != nil {
+		t.Fatalf("MarshalBinaryIndex failed: %v", err)
+	}
+
+	decoded, err := UnmarshalBinaryIndex(data)
+	if err != nil {
+		t.Fatalf("UnmarshalBinaryIndex failed: %v", err)
+	}
+
+	if decoded.Version != idx.Version {
+		t.Errorf("expected version %d, got %d", idx.Version, decoded.Version)
+	}
+	if decoded.DictionaryOffset != idx.DictionaryOffset {
+		t.Errorf("expected DictOffset %d, got %d", idx.DictionaryOffset, decoded.DictionaryOffset)
+	}
+	if decoded.DictionarySize != idx.DictionarySize {
+		t.Errorf("expected DictSize %d, got %d", idx.DictionarySize, decoded.DictionarySize)
+	}
+	if decoded.DictionarySHA256 != idx.DictionarySHA256 {
+		t.Errorf("expected DictSHA256 %s, got %s", idx.DictionarySHA256, decoded.DictionarySHA256)
+	}
+	if decoded.DictionaryID != idx.DictionaryID {
+		t.Errorf("expected DictID 0x%x, got 0x%x", idx.DictionaryID, decoded.DictionaryID)
+	}
+	if len(decoded.Variants) != 2 {
+		t.Fatalf("expected 2 variants, got %d", len(decoded.Variants))
+	}
+	if decoded.Variants[0].Level != "v1" || decoded.Variants[1].Level != "v3" {
+		t.Errorf("variant levels mismatch: %v", decoded.Variants)
+	}
+}
+
+func TestDictionaryJSONIndexSerialization(t *testing.T) {
+	t.Parallel()
+
+	idx := &Index{
+		Version:          FormatVersion1,
+		AppName:          "dict-json-app",
+		TargetOS:         "linux",
+		TargetArch:       "amd64",
+		CreatedUnix:      1700000000,
+		DictionaryOffset: 8192,
+		DictionarySize:   65536,
+		DictionarySHA256: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+		DictionaryID:     0x12345678,
+		Variants: []VariantEntry{
+			{
+				Level:            "v1",
+				Offset:           73728,
+				CompressedSize:   5000,
+				UncompressedSize: 15000,
+				SHA256:           "1111111111111111111111111111111111111111111111111111111111111111",
+				Compression:      "zstd",
+			},
+		},
+	}
+
+	data, err := marshalJSONIndex(idx)
+	if err != nil {
+		t.Fatalf("marshalJSONIndex failed: %v", err)
+	}
+
+	decoded, err := unmarshalJSONIndex(data)
+	if err != nil {
+		t.Fatalf("unmarshalJSONIndex failed: %v", err)
+	}
+
+	if decoded.DictionaryOffset != idx.DictionaryOffset {
+		t.Errorf("expected DictOffset %d, got %d", idx.DictionaryOffset, decoded.DictionaryOffset)
+	}
+	if decoded.DictionarySize != idx.DictionarySize {
+		t.Errorf("expected DictSize %d, got %d", idx.DictionarySize, decoded.DictionarySize)
+	}
+	if decoded.DictionarySHA256 != idx.DictionarySHA256 {
+		t.Errorf("expected DictSHA256 %s, got %s", idx.DictionarySHA256, decoded.DictionarySHA256)
+	}
+	if decoded.DictionaryID != idx.DictionaryID {
+		t.Errorf("expected DictID 0x%x, got 0x%x", idx.DictionaryID, decoded.DictionaryID)
+	}
+}
+
+func TestDictionaryBoundsValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Valid with dictionary", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion2,
+			DictionaryOffset: 1000,
+			DictionarySize:   500,
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 1500, CompressedSize: 500, UncompressedSize: 1000},
+				{Level: "v2", Offset: 2000, CompressedSize: 500, UncompressedSize: 1000},
+			},
+		}
+		if err := idx.ValidateBounds(3000); err != nil {
+			t.Fatalf("expected valid bounds, got %v", err)
+		}
+	})
+
+	t.Run("Negative dictionary offset", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion2,
+			DictionaryOffset: -10,
+			DictionarySize:   500,
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 1500, CompressedSize: 500, UncompressedSize: 1000},
+			},
+		}
+		if err := idx.ValidateBounds(3000); !errors.Is(err, ErrInvalidDictionary) {
+			t.Fatalf("expected ErrInvalidDictionary for negative offset, got %v", err)
+		}
+	})
+
+	t.Run("Dictionary extends past index offset", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion2,
+			DictionaryOffset: 2500,
+			DictionarySize:   1000,
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 1500, CompressedSize: 500, UncompressedSize: 1000},
+			},
+		}
+		if err := idx.ValidateBounds(3000); !errors.Is(err, ErrOutOfBounds) {
+			t.Fatalf("expected ErrOutOfBounds when dict extends past index, got %v", err)
+		}
+	})
+
+	t.Run("Variant overlaps with dictionary", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion2,
+			DictionaryOffset: 1000,
+			DictionarySize:   1000,
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 1500, CompressedSize: 500, UncompressedSize: 1000},
+			},
+		}
+		if err := idx.ValidateBounds(3000); !errors.Is(err, ErrOverlappingVariant) {
+			t.Fatalf("expected ErrOverlappingVariant when variant overlaps dict, got %v", err)
+		}
+	})
+
+	t.Run("Oversized DictionarySHA256 limit error", func(t *testing.T) {
+		t.Parallel()
+		longSHA := strings.Repeat("A", 300)
+		idx := &Index{
+			Version:          FormatVersion2,
+			DictionarySHA256: longSHA,
+		}
+		if _, err := MarshalBinaryIndex(idx); err == nil {
+			t.Fatalf("expected error for oversized DictionarySHA256")
 		}
 	})
 }
