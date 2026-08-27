@@ -64,6 +64,30 @@ func TestDemoWorkloads(t *testing.T) {
 		t.Fatalf("all command with json failed: %v", err)
 	}
 
+	// Test --startup-only
+	rStartup := newRootCmd()
+	var startupBuf bytes.Buffer
+	rStartup.SetOut(&startupBuf)
+	rStartup.SetArgs([]string{"--startup-only"})
+	if err := rStartup.Execute(); err != nil {
+		t.Fatalf("startup-only failed: %v", err)
+	}
+	if startupBuf.String() != "READY\n" {
+		t.Errorf("expected 'READY\\n', got %q", startupBuf.String())
+	}
+
+	// Test --startup-only with --json
+	rStartupJSON := newRootCmd()
+	var startupJSONBuf bytes.Buffer
+	rStartupJSON.SetOut(&startupJSONBuf)
+	rStartupJSON.SetArgs([]string{"--startup-only", "--json"})
+	if err := rStartupJSON.Execute(); err != nil {
+		t.Fatalf("startup-only json failed: %v", err)
+	}
+	if !bytes.Contains(startupJSONBuf.Bytes(), []byte(`"status": "ready"`)) {
+		t.Errorf("expected ready json, got %q", startupJSONBuf.String())
+	}
+
 	// Test getWorkloadLevel and fallbackStr
 	flagUltra = false
 	flagHeavy = false

@@ -61,10 +61,17 @@ const (
 )
 
 var (
-	flagJSON  bool
-	flagHeavy bool
-	flagUltra bool
+	flagJSON        bool
+	flagHeavy       bool
+	flagUltra       bool
+	flagStartupOnly bool
 )
+
+// StartupStatus records startup initialization state when --startup-only and --json are enabled.
+type StartupStatus struct {
+	Status  string `json:"status"`
+	Version string `json:"version"`
+}
 
 func getWorkloadLevel() WorkloadLevel {
 	if flagUltra {
@@ -89,6 +96,28 @@ func newRootCmd() *cobra.Command {
 		Short: "Microfat Demonstration Workload and Performance Benchmark",
 		Long: `A high-performance demonstration application testing SIMD vector math,
 bulk memory/JSON processing, and concurrent worker scaling across Go microarchitecture levels.`,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if flagStartupOnly {
+				if flagJSON {
+					enc := json.NewEncoder(cmd.OutOrStdout())
+					enc.SetIndent("", "  ")
+					if err := enc.Encode(StartupStatus{
+						Status:  "ready",
+						Version: defaultAppVer,
+					}); err != nil {
+						return err
+					}
+				} else {
+					if _, err := fmt.Fprintln(cmd.OutOrStdout(), "READY"); err != nil {
+						return err
+					}
+				}
+				cmd.RunE = func(c *cobra.Command, a []string) error {
+					return nil
+				}
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAllWorkloads(flagJSON, getWorkloadLevel())
 		},
@@ -97,6 +126,7 @@ bulk memory/JSON processing, and concurrent worker scaling across Go microarchit
 	cmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output metrics in JSON format")
 	cmd.PersistentFlags().BoolVar(&flagHeavy, "heavy", false, "Run heavy compute workload (~500ms)")
 	cmd.PersistentFlags().BoolVar(&flagUltra, "ultra", false, "Run ultra-heavy sustained compute workload (10s of seconds)")
+	cmd.PersistentFlags().BoolVar(&flagStartupOnly, "startup-only", false, "Run runtime initialization and exit immediately")
 
 	cmd.AddCommand(newMathCmd())
 	cmd.AddCommand(newJsonCmd())

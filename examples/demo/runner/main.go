@@ -1,8 +1,9 @@
-// Package main implements the statistical multi-workload benchmark runner.
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,20 +12,34 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"time"
+
+	"github.com/EpicBlackWolfZ/microfat/internal/format"
 )
 
 const (
-	bytesInMegabyte   = 1024.0 * 1024.0
-	msPerMicro        = 1000.0
-	secPerMilli       = 1000.0
-	percentMultiplier = 100.0
-	p95Multiplier     = 0.95
-	stdWarmup         = 5
-	ultraWarmup       = 1
-	stdIterations     = 50
-	heavyIterations   = 20
-	ultraIterations   = 3
+	bytesInMegabyte    = 1024.0 * 1024.0
+	msPerMicro         = 1000.0
+	secPerMilli        = 1000.0
+	percentMultiplier  = 100.0
+	p95Multiplier      = 0.95
+	p99Multiplier      = 0.99
+	medianMultiplier   = 0.50
+	stdWarmup          = 5
+	ultraWarmup        = 1
+	stdIterations      = 50
+	startupIterations  = 50
+	heavyIterations    = 20
+	ultraIterations    = 3
+	dirPermission      = 0o750
+	envPrefixLen       = 4
+	timestampLayout    = "2006-01-02T15:04:05.000Z07:00"
+	csvTimestampLayout = "20060102-150405"
+	execModeNative     = "native"
+	execModeMemfd      = "memfd"
+	execModeColdCache  = "cold-cache"
+	execModeWarmCache  = "warm-cache"
 )
 
 type Config struct {
@@ -38,6 +53,7 @@ type Stats struct {
 	StdDev time.Duration
 	Median time.Duration
 	P95    time.Duration
+	P99    time.Duration
 	Min    time.Duration
 	Max    time.Duration
 }
@@ -47,22 +63,57 @@ type DemoReport struct {
 	TotalCompute float64 `json:"total_compute_ms"`
 }
 
+type StartupScenario struct {
+	Name      string
+	Path      string
+	ExecMode  string
+	IsCold    bool
+	Env       []string
+	Size      int64
+	WarmCache string
+}
+
+type StartupObservation struct {
+	Timestamp          string        `json:"timestamp"`
+	Iteration          int           `json:"iteration"`
+	ConfigName         string        `json:"config_name"`
+	ExecMode           string        `json:"exec_mode"`
+	SelectedVariant    string        `json:"selected_variant"`
+	TotalWallDuration  time.Duration `json:"total_wall_duration"`
+	LauncherInternalUs int64         `json:"launcher_internal_us"`
+	DecompressionUs    int64         `json:"decompression_us"`
+	CgroupVersion      int           `json:"cgroup_version"`
+}
+
+type StartupSummary struct {
+	Scenario           StartupScenario
+	WallStats          Stats
+	LauncherStats      Stats
+	DecompressionStats Stats
+}
+
 func main() {
+	startupPtr := flag.Bool("startup", false, "Run microsecond startup latency and stub overhead benchmark suite")
+	csvPtr := flag.String("csv", "", "Path to export CSV benchmark results (defaults to timestamped file in -startup mode)")
 	ultraPtr := flag.Bool("ultra", false, "Run ULTRA sustained heavy compute benchmark (10s of seconds)")
 	heavyPtr := flag.Bool("heavy", false, "Run heavy compute-intensive benchmark (~500ms workload)")
 	itersPtr := flag.Int("n", 0, "Number of benchmark iterations")
 	flag.Parse()
 
+	isStartup := *startupPtr
 	isUltra := *ultraPtr
 	isHeavy := *heavyPtr && !isUltra
 
 	iterations := stdIterations
 	warmups := stdWarmup
 
-	if isUltra {
+	switch {
+	case isStartup:
+		iterations = startupIterations
+	case isUltra:
 		iterations = ultraIterations
 		warmups = ultraWarmup
-	} else if isHeavy {
+	case isHeavy:
 		iterations = heavyIterations
 	}
 
@@ -79,6 +130,11 @@ func main() {
 	srcDir := filepath.Clean("..")
 	microfatStub := resolveBinary("microfat-stub")
 	microfatCli := resolveBinary("microfat")
+
+	if isStartup {
+		runStartupBenchmarkSuite(srcDir, benchDir, microfatStub, microfatCli, *csvPtr, iterations, warmups)
+		return
+	}
 
 	modeStr := "Standard Workload (~110ms)"
 	if isUltra {
@@ -100,6 +156,389 @@ func main() {
 	pureComputeStats, totalWallStats := measureCompute(configs, iterations, benchArgs, isUltra)
 
 	printSummaryTables(configs, startupStats, pureComputeStats, totalWallStats, isUltra)
+}
+
+func runStartupBenchmarkSuite(srcDir, benchDir, microfatStub, microfatCli, csvPath string, iterations, warmups int) {
+	fmt.Println("==========================================================================================")
+	fmt.Printf("    Microfat Startup Overhead & Latency Benchmark Suite [%d iterations]   \n", iterations)
+	fmt.Println("==========================================================================================")
+
+	scenarios := buildStartupScenarios(srcDir, benchDir, microfatStub, microfatCli)
+
+	fmt.Println("\n==> Step 2: Running warm-up cycles across execution modes...")
+	runStartupWarmups(scenarios, warmups, benchDir)
+
+	fmt.Printf("\n==> Step 3: Measuring Startup Overhead & Microsecond Telemetry [%d iterations]...\n", iterations)
+	summaries, observations := measureStartupScenarios(scenarios, iterations, benchDir)
+
+	printStartupSummaryTables(summaries)
+
+	finalCSVPath := csvPath
+	if finalCSVPath == "" {
+		finalCSVPath = fmt.Sprintf("benchmarks-startup-%s.csv", time.Now().Format(csvTimestampLayout))
+	}
+
+	if err := exportStartupCSV(finalCSVPath, observations); err != nil {
+		fmt.Printf("Warning: failed to export CSV to %s: %v\n", finalCSVPath, err)
+	} else {
+		fmt.Printf("\n==> ✔ Exported %d raw telemetry observations to CSV: %s\n\n", len(observations), finalCSVPath)
+	}
+}
+
+func buildStartupScenarios(srcDir, benchDir, microfatStub, microfatCli string) []StartupScenario {
+	fmt.Println("==> Step 1: Compiling and packaging multi-architecture test binaries...")
+
+	v1Native := filepath.Join(benchDir, "01_v1_native")
+	v2Native := filepath.Join(benchDir, "02_v2_temp")
+	v3Native := filepath.Join(benchDir, "03_v3_native")
+	v4Native := filepath.Join(benchDir, "00_v4_temp")
+
+	fatZstd := filepath.Join(benchDir, "04_fat_zstd")
+	fatLZ4 := filepath.Join(benchDir, "05_fat_lz4")
+	fatNone := filepath.Join(benchDir, "06_fat_none")
+	fatTrimmed := filepath.Join(benchDir, "07_fat_trimmed")
+	optimizedV3 := filepath.Join(benchDir, "08_optimized_v3")
+
+	goBin := resolveGoBinary()
+	mustRun(srcDir, goBin, "build", "-ldflags=-s -w", "-o", v1Native, "main.go", "ENV:GOAMD64=v1")
+	mustRun(srcDir, goBin, "build", "-ldflags=-s -w", "-o", v2Native, "main.go", "ENV:GOAMD64=v2")
+	mustRun(srcDir, goBin, "build", "-ldflags=-s -w", "-o", v3Native, "main.go", "ENV:GOAMD64=v3")
+	mustRun(srcDir, goBin, "build", "-ldflags=-s -w", "-o", v4Native, "main.go", "ENV:GOAMD64=v4")
+
+	// 1. Zstd (Default)
+	mustRun(benchDir, microfatCli, "pack",
+		"--stub", microfatStub,
+		"--name", "demo-app",
+		"-v", "v1="+v1Native,
+		"-v", "v2="+v2Native,
+		"-v", "v3="+v3Native,
+		"-v", "v4="+v4Native,
+		"-o", fatZstd,
+	)
+
+	// 2. LZ4 Codec
+	mustRun(benchDir, microfatCli, "pack",
+		"--stub", microfatStub,
+		"--name", "demo-app",
+		"--compression", "lz4",
+		"-v", "v1="+v1Native,
+		"-v", "v2="+v2Native,
+		"-v", "v3="+v3Native,
+		"-v", "v4="+v4Native,
+		"-o", fatLZ4,
+	)
+
+	// 3. None / Uncompressed Codec
+	mustRun(benchDir, microfatCli, "pack",
+		"--stub", microfatStub,
+		"--name", "demo-app",
+		"--compression", "none",
+		"-v", "v1="+v1Native,
+		"-v", "v2="+v2Native,
+		"-v", "v3="+v3Native,
+		"-v", "v4="+v4Native,
+		"-o", fatNone,
+	)
+
+	// 4. Trimmed Fat
+	mustRun(benchDir, microfatCli, "trim", fatZstd, "-o", fatTrimmed)
+
+	// 5. Optimized raw ELF
+	// #nosec G204 -- benchmark runner invokes locally built fat binary for optimize-to test
+	cmdOpt := exec.Command(fatZstd, "--microfat:optimize-to="+optimizedV3)
+	if err := cmdOpt.Run(); err != nil {
+		panic(err)
+	}
+
+	// 6. Pre-warm dedicated cache directory for warm-cache scenario
+	warmCacheDir := filepath.Join(benchDir, "warm_cache")
+	if err := os.MkdirAll(warmCacheDir, dirPermission); err != nil {
+		panic(err)
+	}
+	// #nosec G204 -- prewarm run on local test fat binary
+	cmdPrewarm := exec.Command(fatZstd, "--microfat:prewarm")
+	cmdPrewarm.Env = append(os.Environ(), "XDG_CACHE_HOME="+warmCacheDir)
+	if err := cmdPrewarm.Run(); err != nil {
+		panic(err)
+	}
+
+	scenarios := []StartupScenario{
+		{Name: "1. Native v1 (Baseline SSE2)", Path: v1Native, ExecMode: execModeNative, Size: getFileSize(v1Native)},
+		{Name: "2. Native v3 (AVX2/FMA)", Path: v3Native, ExecMode: execModeNative, Size: getFileSize(v3Native)},
+		{
+			Name:     "3. Universal FAT (Cold memfd)",
+			Path:     fatZstd,
+			ExecMode: execModeMemfd,
+			Env:      []string{"MICROFAT_EXEC_MODE=memfd"},
+			Size:     getFileSize(fatZstd),
+		},
+		{
+			Name:     "4. Universal FAT (Cold cache)",
+			Path:     fatZstd,
+			ExecMode: execModeColdCache,
+			IsCold:   true,
+			Env:      []string{"MICROFAT_EXEC_MODE=cache"},
+			Size:     getFileSize(fatZstd),
+		},
+		{
+			Name:      "5. Universal FAT (Warm cache)",
+			Path:      fatZstd,
+			ExecMode:  execModeWarmCache,
+			WarmCache: warmCacheDir,
+			Env:       []string{"MICROFAT_EXEC_MODE=cache", "XDG_CACHE_HOME=" + warmCacheDir},
+			Size:      getFileSize(fatZstd),
+		},
+		{
+			Name:     "6. Universal FAT LZ4 (Cold memfd)",
+			Path:     fatLZ4,
+			ExecMode: execModeMemfd,
+			Env:      []string{"MICROFAT_EXEC_MODE=memfd"},
+			Size:     getFileSize(fatLZ4),
+		},
+		{
+			Name:     "7. Universal FAT None (Cold memfd)",
+			Path:     fatNone,
+			ExecMode: execModeMemfd,
+			Env:      []string{"MICROFAT_EXEC_MODE=memfd"},
+			Size:     getFileSize(fatNone),
+		},
+		{
+			Name:     "8. Trimmed FAT (Cold memfd)",
+			Path:     fatTrimmed,
+			ExecMode: execModeMemfd,
+			Env:      []string{"MICROFAT_EXEC_MODE=memfd"},
+			Size:     getFileSize(fatTrimmed),
+		},
+		{Name: "9. Optimized v3 (from FAT)", Path: optimizedV3, ExecMode: execModeNative, Size: getFileSize(optimizedV3)},
+	}
+
+	for _, s := range scenarios {
+		fmt.Printf("  • %-36s -> %6.2f MB (%d bytes)\n", s.Name, float64(s.Size)/bytesInMegabyte, s.Size)
+	}
+
+	return scenarios
+}
+
+func runStartupWarmups(scenarios []StartupScenario, warmups int, benchDir string) {
+	for _, s := range scenarios {
+		for i := 0; i < warmups; i++ {
+			_ = runStartupIteration(s, benchDir, 0)
+		}
+	}
+}
+
+func runStartupIteration(s StartupScenario, benchDir string, iter int) StartupObservation {
+	var cleanupDir string
+	extraEnv := make([]string, len(s.Env))
+	copy(extraEnv, s.Env)
+
+	if s.IsCold {
+		tDir, err := os.MkdirTemp(benchDir, "cold-cache-iter-*")
+		if err == nil {
+			cleanupDir = tDir
+			extraEnv = append(extraEnv, "XDG_CACHE_HOME="+tDir)
+		}
+	}
+	if cleanupDir != "" {
+		defer func() { _ = os.RemoveAll(cleanupDir) }()
+	}
+
+	cmdEnv := append(os.Environ(), "MICROFAT_LOG=json")
+	cmdEnv = append(cmdEnv, extraEnv...)
+
+	// #nosec G204 -- startup benchmark execution of test binaries
+	cmd := exec.Command(s.Path, "--startup-only")
+	cmd.Env = cmdEnv
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	t0 := time.Now()
+	err := cmd.Run()
+	wallDuration := time.Since(t0)
+
+	obs := StartupObservation{
+		Timestamp:         time.Now().UTC().Format(timestampLayout),
+		Iteration:         iter,
+		ConfigName:        s.Name,
+		ExecMode:          s.ExecMode,
+		TotalWallDuration: wallDuration,
+	}
+
+	if err != nil {
+		return obs
+	}
+
+	telemetry, parseErr := parseDispatchTelemetry(stderrBuf.Bytes())
+	if parseErr == nil {
+		obs.LauncherInternalUs = telemetry.TotalLauncherUs
+		obs.DecompressionUs = telemetry.DecompressionDurationUs
+		obs.SelectedVariant = telemetry.SelectedVariant
+		obs.CgroupVersion = telemetry.CgroupVersion
+		if telemetry.ExecMode != "" && s.ExecMode != execModeColdCache && s.ExecMode != execModeWarmCache {
+			obs.ExecMode = telemetry.ExecMode
+		}
+	}
+
+	return obs
+}
+
+func measureStartupScenarios(scenarios []StartupScenario, iterations int, benchDir string) ([]StartupSummary, []StartupObservation) {
+	summaries := make([]StartupSummary, len(scenarios))
+	allObservations := make([]StartupObservation, 0, len(scenarios)*iterations)
+
+	for i, s := range scenarios {
+		fmt.Printf("    Benchmarking %-36s...", s.Name)
+		wallDurs := make([]time.Duration, iterations)
+		launcherDurs := make([]time.Duration, iterations)
+		decompressDurs := make([]time.Duration, iterations)
+
+		for j := 0; j < iterations; j++ {
+			obs := runStartupIteration(s, benchDir, j+1)
+			allObservations = append(allObservations, obs)
+			wallDurs[j] = obs.TotalWallDuration
+			launcherDurs[j] = time.Duration(obs.LauncherInternalUs) * time.Microsecond
+			decompressDurs[j] = time.Duration(obs.DecompressionUs) * time.Microsecond
+		}
+
+		summaries[i] = StartupSummary{
+			Scenario:           s,
+			WallStats:          calculateStats(wallDurs),
+			LauncherStats:      calculateStats(launcherDurs),
+			DecompressionStats: calculateStats(decompressDurs),
+		}
+
+		meanWallMs := float64(summaries[i].WallStats.Mean.Microseconds()) / msPerMicro
+		meanStubUs := float64(summaries[i].LauncherStats.Mean.Microseconds())
+		if s.ExecMode == execModeNative {
+			fmt.Printf(" done (wall: %.2f ms)\n", meanWallMs)
+		} else {
+			fmt.Printf(" done (wall: %.2f ms | stub: %.0f µs)\n", meanWallMs, meanStubUs)
+		}
+	}
+
+	return summaries, allObservations
+}
+
+func parseDispatchTelemetry(stderr []byte) (format.DispatchTelemetry, error) {
+	scanner := bufio.NewScanner(bytes.NewReader(stderr))
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		idx := bytes.IndexByte(line, '{')
+		if idx == -1 {
+			continue
+		}
+		jsonBytes := line[idx:]
+		var dt format.DispatchTelemetry
+		if err := json.Unmarshal(jsonBytes, &dt); err == nil && dt.Event == format.EventDispatch {
+			return dt, nil
+		}
+	}
+	return format.DispatchTelemetry{}, fmt.Errorf("no dispatch telemetry JSON found in stderr")
+}
+
+func exportStartupCSV(csvPath string, observations []StartupObservation) error {
+	f, err := os.Create(filepath.Clean(csvPath))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	w := csv.NewWriter(f)
+	defer w.Flush()
+
+	header := []string{
+		"timestamp",
+		"iteration",
+		"config_name",
+		"exec_mode",
+		"selected_variant",
+		"total_wall_us",
+		"total_wall_ms",
+		"launcher_internal_us",
+		"decompression_us",
+		"cgroup_version",
+	}
+	if err := w.Write(header); err != nil {
+		return err
+	}
+
+	for _, obs := range observations {
+		wallUs := obs.TotalWallDuration.Microseconds()
+		wallMs := float64(wallUs) / msPerMicro
+		row := []string{
+			obs.Timestamp,
+			strconv.Itoa(obs.Iteration),
+			obs.ConfigName,
+			obs.ExecMode,
+			obs.SelectedVariant,
+			strconv.FormatInt(wallUs, 10),
+			strconv.FormatFloat(wallMs, 'f', 3, 64),
+			strconv.FormatInt(obs.LauncherInternalUs, 10),
+			strconv.FormatInt(obs.DecompressionUs, 10),
+			strconv.Itoa(obs.CgroupVersion),
+		}
+		if err := w.Write(row); err != nil {
+			return err
+		}
+	}
+
+	return w.Error()
+}
+
+func printStartupSummaryTables(summaries []StartupSummary) {
+	fmt.Println("\n==========================================================================================")
+	fmt.Println("                  STARTUP LATENCY & STUB TELEMETRY RESULTS                                ")
+	fmt.Println("==========================================================================================")
+
+	fmt.Println("\n### Table 1: Binary Footprint on Disk")
+	fmt.Println("| Binary Configuration | Disk Size (Bytes) | Disk Size (MB) | % of Universal FAT | Space Savings |")
+	fmt.Println("| :--- | :--- | :--- | :--- | :--- |")
+	fatSize := float64(summaries[2].Scenario.Size)
+	for _, s := range summaries {
+		ratio := (float64(s.Scenario.Size) / fatSize) * percentMultiplier
+		diff := percentMultiplier - ratio
+		diffStr := fmt.Sprintf("-%.1f%%", diff)
+		if s.Scenario.Name == summaries[2].Scenario.Name {
+			diffStr = "baseline"
+		}
+		fmt.Printf("| **%s** | `%d B` | `%.2f MB` | `%.1f%%` | `%s` |\n",
+			s.Scenario.Name, s.Scenario.Size, float64(s.Scenario.Size)/bytesInMegabyte, ratio, diffStr)
+	}
+
+	fmt.Println("\n### Table 2: Process Cold-Start Latency & Stub Overhead Breakdown (`--startup-only`)")
+	fmt.Println("| Configuration / Execution Mode | Mean Wall (ms) | StdDev (ms) | Median p50 (ms) | p95 (ms) | " +
+		"p99 (ms) | Stub Overhead (µs) | Decompress (µs) | Overhead vs Native v3 |")
+	fmt.Println("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+
+	nativeMean := float64(summaries[1].WallStats.Mean.Microseconds()) / msPerMicro
+	for i, s := range summaries {
+		meanMs := float64(s.WallStats.Mean.Microseconds()) / msPerMicro
+		stdMs := float64(s.WallStats.StdDev.Microseconds()) / msPerMicro
+		medMs := float64(s.WallStats.Median.Microseconds()) / msPerMicro
+		p95Ms := float64(s.WallStats.P95.Microseconds()) / msPerMicro
+		p99Ms := float64(s.WallStats.P99.Microseconds()) / msPerMicro
+		stubUs := float64(s.LauncherStats.Mean.Microseconds())
+		decUs := float64(s.DecompressionStats.Mean.Microseconds())
+
+		diff := meanMs - nativeMean
+		diffStr := fmt.Sprintf("%+.2f ms", diff)
+		if i == 1 {
+			diffStr = "baseline (0.00 ms)"
+		}
+
+		stubStr := fmt.Sprintf("%.0f µs", stubUs)
+		decStr := fmt.Sprintf("%.0f µs", decUs)
+		if s.Scenario.ExecMode == execModeNative {
+			stubStr = "n/a (direct)"
+			decStr = "n/a (direct)"
+		}
+
+		fmt.Printf("| **%s** | `%.2f ms` | `±%.2f ms` | `%.2f ms` | `%.2f ms` | `%.2f ms` | `%s` | `%s` | `%s` |\n",
+			s.Scenario.Name, meanMs, stdMs, medMs, p95Ms, p99Ms, stubStr, decStr, diffStr)
+	}
+	fmt.Println("==========================================================================================")
 }
 
 func findRepoRoot() string {
@@ -404,8 +843,8 @@ func mustRun(dir string, name string, args ...string) {
 	var env []string
 	cleanArgs := make([]string, 0, len(args))
 	for _, arg := range args {
-		if len(arg) > 4 && arg[:4] == "ENV:" {
-			env = append(env, arg[4:])
+		if len(arg) > envPrefixLen && arg[:envPrefixLen] == "ENV:" {
+			env = append(env, arg[envPrefixLen:])
 		} else {
 			cleanArgs = append(cleanArgs, arg)
 		}
@@ -453,10 +892,14 @@ func calculateStats(durations []time.Duration) Stats {
 	}
 	stdDevNs := math.Sqrt(varianceSum / float64(len(durations)))
 
-	median := durations[len(durations)/2]
+	median := durations[int(float64(len(durations))*medianMultiplier)]
 	p95Index := int(float64(len(durations)) * p95Multiplier)
 	if p95Index >= len(durations) {
 		p95Index = len(durations) - 1
+	}
+	p99Index := int(float64(len(durations)) * p99Multiplier)
+	if p99Index >= len(durations) {
+		p99Index = len(durations) - 1
 	}
 
 	return Stats{
@@ -464,6 +907,7 @@ func calculateStats(durations []time.Duration) Stats {
 		StdDev: time.Duration(stdDevNs),
 		Median: median,
 		P95:    durations[p95Index],
+		P99:    durations[p99Index],
 		Min:    durations[0],
 		Max:    durations[len(durations)-1],
 	}

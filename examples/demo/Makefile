@@ -12,7 +12,7 @@ MICROFAT ?= $(shell [ -x "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat" ] && ech
 MICROFAT_STUB ?= $(shell [ -x "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat-stub" ] && echo "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat-stub" || command -v microfat-stub 2> /dev/null || echo "$(INSTALL_DIR)/microfat-stub")
 MICROFAT_STUB_ARM64 ?= $(shell [ -x "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat-stub-arm64" ] && echo "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat-stub-arm64" || echo "$(BIN_DIR)/microfat-stub-arm64")
 
-.PHONY: all build fat fat-arm64 trim optimize run run-heavy run-ultra bench bench-heavy bench-ultra clean help
+.PHONY: all build fat fat-arm64 trim optimize run run-heavy run-ultra bench bench-heavy bench-ultra bench-startup clean help
 
 all: build fat
 
@@ -31,6 +31,7 @@ help:
 	@echo "  bench        Run standard 50-iteration benchmark suite across all 5 binary modes"
 	@echo "  bench-heavy  Run heavy sustained compute benchmark suite (20 iterations) across all 5 modes"
 	@echo "  bench-ultra  Run ultra heavy sustained compute benchmark suite (5-15s per run) across all 5 modes"
+	@echo "  bench-startup Run microsecond startup overhead benchmark suite across execution modes & codecs"
 	@echo "  clean        Remove compiled binaries and benchmark temporary files"
 
 build:
@@ -107,6 +108,10 @@ bench-heavy:
 bench-ultra:
 	@echo "==> Running ultra heavy sustained compute benchmark suite..."
 	@cd runner && $(GO) run main.go -ultra
+
+bench-startup:
+	@echo "==> Running microsecond startup overhead & telemetry benchmark suite..."
+	@cd runner && $(GO) run main.go -startup
 
 clean:
 	@echo "==> Cleaning build artifacts..."
