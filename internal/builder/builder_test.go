@@ -20,6 +20,7 @@ const (
 	testArchAMD64      = "amd64"
 	testArchARM64      = "arm64"
 	dummyELFExtraBytes = 100
+	pgoOff             = "off"
 )
 
 func createDummyELF(t *testing.T, dir, name string, arch string) string {
@@ -120,7 +121,7 @@ variants:
 	if len(m.Variants) != 2 {
 		t.Fatalf("expected 2 variants, got %d", len(m.Variants))
 	}
-	if m.Variants[0].Level != "v1" || m.Variants[0].PGO != "off" {
+	if m.Variants[0].Level != "v1" || m.Variants[0].PGO != pgoOff {
 		t.Errorf("unexpected variant 0: %+v", m.Variants[0])
 	}
 	if m.Variants[1].Level != "v3" || m.Variants[1].PGO != "profiles/v3.pgo" || len(m.Variants[1].Flags) != 1 {
@@ -414,7 +415,7 @@ func main() {
 		TargetOS:   testOSLinux,
 		TargetArch: testArchAMD64,
 		Variants: []builder.VariantConfig{
-			{Level: "v1", PGO: "off"},
+			{Level: "v1", PGO: pgoOff},
 			{Level: "v3", PGO: dummyPGO},
 		},
 		Dir: tmpDir,
@@ -598,8 +599,8 @@ func TestBuildAndPack_RelativePathsAndDistinctDirs(t *testing.T) {
 		TargetOS:   testOSLinux,
 		TargetArch: testArchAMD64,
 		Variants: []builder.VariantConfig{
-			{Level: "v1", PGO: "off"},
-			{Level: "v3", PGO: "off"},
+			{Level: "v1", PGO: pgoOff},
+			{Level: "v3", PGO: pgoOff},
 		},
 		Dir: tmpDir,
 	}
@@ -618,4 +619,130 @@ func TestBuildAndPack_RelativePathsAndDistinctDirs(t *testing.T) {
 		t.Errorf("expected 2 variants, got %d", len(res.Index.Variants))
 	}
 }
+
+func TestLoadManifest_CompressionValidation(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	validContent := `
+name: compapp
+package: .
+output: bin/compapp
+stub: bin/stub
+target_os: linux
+target_arch: amd64
+compression:
+  profile: latency
+  algorithm: lz4
+  level: fastest
+variants:
+  - level: v1
+    compression:
+      algorithm: none
+  - level: v3
+    compression:
+      algorithm: zstd
+      level: best
+`
+	validFile := filepath.Join(tmpDir, "valid.yaml")
+	_ = os.WriteFile(validFile, []byte(validContent), 0o644)
+
+	m, err := builder.LoadManifest(validFile)
+	if err != nil {
+		t.Fatalf("LoadManifest valid compression failed: %v", err)
+	}
+	if m.Compression == nil || m.Compression.Profile != "latency" || m.Compression.Algorithm != "lz4" {
+		t.Fatalf("unexpected root compression: %+v", m.Compression)
+	}
+	if len(m.Variants) != 2 || m.Variants[0].Compression.Algorithm != "none" || m.Variants[1].Compression.Algorithm != "zstd" {
+		t.Fatalf("unexpected variant compression: %+v", m.Variants)
+	}
+
+	// Invalid root profile
+	badProfileContent := `
+package: .
+variants: [{level: v1}]
+compression:
+  profile: invalid_profile
+`
+	badProfileFile := filepath.Join(tmpDir, "bad_prof.yaml")
+	_ = os.WriteFile(badProfileFile, []byte(badProfileContent), 0o644)
+	if _, err := builder.LoadManifest(badProfileFile); err == nil {
+		t.Errorf("expected error on invalid compression profile")
+	}
+
+	// Invalid variant algorithm
+	badAlgoContent := `
+package: .
+variants:
+  - level: v1
+    compression:
+      algorithm: invalid_algo
+`
+	badAlgoFile := filepath.Join(tmpDir, "bad_algo.yaml")
+	_ = os.WriteFile(badAlgoFile, []byte(badAlgoContent), 0o644)
+	if _, err := builder.LoadManifest(badAlgoFile); err == nil {
+		t.Errorf("expected error on invalid variant compression algorithm")
+	}
+}
+
+func TestBuildAndPack_CompressionProfiles(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	stubFile := createDummyELF(t, tmpDir, "microfat-stub", testArchAMD64)
+
+	pkgDir := filepath.Join(tmpDir, "src", "compapp")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatalf("failed to create pkg dir: %v", err)
+	}
+	mainCode := "package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"comp test\") }\n"
+	_ = os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(mainCode), 0o644)
+	_ = os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module compapp\ngo 1.27.0\n"), 0o644)
+
+	m := &builder.Manifest{
+		AppName:    "compfat",
+		Package:    "./src/compapp",
+		Output:     "dist/bin/compfat",
+		Stub:       stubFile,
+		TargetOS:   testOSLinux,
+		TargetArch: testArchAMD64,
+		Compression: &builder.CompressionConfig{
+			Profile:   "latency",
+			Algorithm: "lz4",
+		},
+		Variants: []builder.VariantConfig{
+			{
+				Level: "v1",
+				PGO:   pgoOff,
+				Compression: &builder.CompressionConfig{
+					Algorithm: "none",
+				},
+			},
+			{
+				Level: "v3",
+				PGO:   pgoOff,
+			},
+		},
+		Dir: tmpDir,
+	}
+
+	res, err := builder.BuildAndPack(context.Background(), m, builder.BuildOptions{
+		Concurrency: 2,
+	})
+	if err != nil {
+		t.Fatalf("BuildAndPack with compression failed: %v", err)
+	}
+
+	v1, _ := res.Index.FindVariant("v1")
+	if v1.Compression != "none" {
+		t.Errorf("expected v1 to be 'none', got %q", v1.Compression)
+	}
+	v3, _ := res.Index.FindVariant("v3")
+	if v3.Compression != "lz4" {
+		t.Errorf("expected v3 to inherit 'lz4', got %q", v3.Compression)
+	}
+}
+
 

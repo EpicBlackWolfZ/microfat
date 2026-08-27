@@ -35,6 +35,9 @@ type BuildOptions struct {
 	KeepIntermediates bool
 	GoBinary          string
 	SkipELFValidation bool
+	Profile           string
+	Compression       string
+	CompressionLevel  string
 	Stdout            io.Writer
 	Stderr            io.Writer
 }
@@ -120,15 +123,7 @@ func BuildAndPack(ctx context.Context, m *Manifest, opts BuildOptions) (*BuildRe
 		return nil, err
 	}
 
-	packOpts := pack.Options{
-		StubPath:          stubPath,
-		OutputPath:        finalOutput,
-		AppName:           appName,
-		TargetOS:          m.TargetOS,
-		TargetArch:        m.TargetArch,
-		Variants:          compiledMap,
-		SkipELFValidation: opts.SkipELFValidation,
-	}
+	packOpts := assemblePackOptions(m, stubPath, finalOutput, appName, compiledMap, opts)
 
 	idx, err := pack.Pack(packOpts)
 	if err != nil {
@@ -404,4 +399,55 @@ func ResolveStubPath(cliStub, manifestStub, manifestDir string) (string, error) 
 	}
 
 	return "", fmt.Errorf("%w: provide --stub flag, 'stub:' manifest entry, or compile stub into bin/microfat-stub", ErrStubNotFound)
+}
+
+func assemblePackOptions(
+	m *Manifest,
+	stubPath, finalOutput, appName string,
+	compiledMap map[string]string,
+	opts BuildOptions,
+) pack.Options {
+	packOpts := pack.Options{
+		StubPath:          stubPath,
+		OutputPath:        finalOutput,
+		AppName:           appName,
+		TargetOS:          m.TargetOS,
+		TargetArch:        m.TargetArch,
+		Variants:          compiledMap,
+		SkipELFValidation: opts.SkipELFValidation,
+	}
+
+	if m.Compression != nil {
+		packOpts.Profile = m.Compression.Profile
+		packOpts.Compression = m.Compression.Algorithm
+		packOpts.CompressionLevel = m.Compression.Level
+	}
+
+	if opts.Profile != "" {
+		packOpts.Profile = opts.Profile
+	}
+	if opts.Compression != "" {
+		packOpts.Compression = opts.Compression
+	}
+	if opts.CompressionLevel != "" {
+		packOpts.CompressionLevel = opts.CompressionLevel
+	}
+
+	if len(m.Variants) > 0 {
+		varCompMap := make(map[string]pack.VariantCompressionOptions, len(m.Variants))
+		for _, v := range m.Variants {
+			if v.Compression != nil {
+				varCompMap[v.Level] = pack.VariantCompressionOptions{
+					Profile:     v.Compression.Profile,
+					Compression: v.Compression.Algorithm,
+					Level:       v.Compression.Level,
+				}
+			}
+		}
+		if len(varCompMap) > 0 {
+			packOpts.VariantCompression = varCompMap
+		}
+	}
+
+	return packOpts
 }

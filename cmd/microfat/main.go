@@ -134,8 +134,8 @@ func newInspectCmd() *cobra.Command {
 			fmt.Printf("Embedded Variants (%d total):\n", len(idx.Variants))
 			for _, v := range idx.Variants {
 				ratio := float64(v.CompressedSize) / float64(v.UncompressedSize) * percentMultiplier
-				fmt.Printf("  • %-6s offset: %10d | comp: %10d B | raw: %10d B (%.1f%%) | sha256: %.12s...\n",
-					v.Level, v.Offset, v.CompressedSize, v.UncompressedSize, ratio, v.SHA256)
+				fmt.Printf("  • %-6s [%s] offset: %10d | comp: %10d B | raw: %10d B (%.1f%%) | sha256: %.12s...\n",
+					v.Level, v.Compression, v.Offset, v.CompressedSize, v.UncompressedSize, ratio, v.SHA256)
 			}
 			return nil
 		},
@@ -348,6 +348,9 @@ func newPackCmd() *cobra.Command {
 		targetArch        string
 		rawVariants       []string
 		skipELFValidation bool
+		profile           string
+		compression       string
+		compressionLevel  string
 		concurrency       int
 		keepIntermediates bool
 		goBinary          string
@@ -370,6 +373,9 @@ func newPackCmd() *cobra.Command {
 					KeepIntermediates: keepIntermediates,
 					GoBinary:          goBinary,
 					SkipELFValidation: skipELFValidation,
+					Profile:           profile,
+					Compression:       compression,
+					CompressionLevel:  compressionLevel,
 					Stdout:            os.Stdout,
 					Stderr:            os.Stderr,
 				}
@@ -380,7 +386,7 @@ func newPackCmd() *cobra.Command {
 				}
 				fmt.Printf("Successfully packaged %d variants into '%s':\n", len(res.Index.Variants), res.OutputPath)
 				for _, v := range res.Index.Variants {
-					fmt.Printf("  • %-6s -> uncompressed: %d B | compressed: %d B\n", v.Level, v.UncompressedSize, v.CompressedSize)
+					fmt.Printf("  • %-6s [%s] -> uncompressed: %d B | compressed: %d B\n", v.Level, v.Compression, v.UncompressedSize, v.CompressedSize)
 				}
 				return nil
 			}
@@ -416,6 +422,9 @@ func newPackCmd() *cobra.Command {
 				TargetArch:        targetArch,
 				Variants:          variants,
 				SkipELFValidation: skipELFValidation,
+				Profile:           profile,
+				Compression:       compression,
+				CompressionLevel:  compressionLevel,
 			}
 
 			fmt.Printf("Packaging fat binary '%s'...\n", outputPath)
@@ -426,7 +435,7 @@ func newPackCmd() *cobra.Command {
 
 			fmt.Printf("Successfully packaged %d variants into '%s':\n", len(idx.Variants), outputPath)
 			for _, v := range idx.Variants {
-				fmt.Printf("  • %-6s -> uncompressed: %d B | compressed: %d B\n", v.Level, v.UncompressedSize, v.CompressedSize)
+				fmt.Printf("  • %-6s [%s] -> uncompressed: %d B | compressed: %d B\n", v.Level, v.Compression, v.UncompressedSize, v.CompressedSize)
 			}
 			return nil
 		},
@@ -440,6 +449,9 @@ func newPackCmd() *cobra.Command {
 	cmd.Flags().StringVar(&targetArch, "arch", "amd64", "Target architecture (amd64 or arm64)")
 	cmd.Flags().StringArrayVarP(&rawVariants, "variant", "v", nil,
 		"Variant mapping in <level>=<path> format (e.g. -v v1=bin/v1 -v v3=bin/v3 for amd64, or -v v8.0=bin/v80 -v v8.2=bin/v82 for arm64)")
+	cmd.Flags().StringVar(&profile, "profile", "", "Compression profile preset: latency, balanced, size")
+	cmd.Flags().StringVar(&compression, "compression", "", "Compression algorithm: lz4, zstd, none (e.g. lz4 or zstd:11)")
+	cmd.Flags().StringVar(&compressionLevel, "compression-level", "", "Compression level override: fastest, default, better, best, or number")
 	cmd.Flags().BoolVar(&skipELFValidation, "skip-elf-validation", false, "Skip ELF header architecture validation")
 	cmd.Flags().IntVarP(&concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (when using --manifest)")
 	cmd.Flags().BoolVar(&keepIntermediates, "keep-intermediates", false, "Keep intermediate compiled variant ELF binaries")
@@ -453,6 +465,9 @@ func newPgoPackCmd() *cobra.Command {
 		manifestPath      string
 		outputPath        string
 		stubPath          string
+		profile           string
+		compression       string
+		compressionLevel  string
 		concurrency       int
 		keepIntermediates bool
 		goBinary          string
@@ -486,6 +501,9 @@ then packages them into a self-dispatching microfat binary.`,
 				KeepIntermediates: keepIntermediates,
 				GoBinary:          goBinary,
 				SkipELFValidation: skipELFValidation,
+				Profile:           profile,
+				Compression:       compression,
+				CompressionLevel:  compressionLevel,
 				Stdout:            os.Stdout,
 				Stderr:            os.Stderr,
 			}
@@ -499,8 +517,8 @@ then packages them into a self-dispatching microfat binary.`,
 			fmt.Printf("\nSuccessfully built and packaged %d variants into '%s':\n", len(res.Index.Variants), res.OutputPath)
 			for _, v := range res.Index.Variants {
 				pgoFlag := res.VariantPGOApplied[v.Level]
-				fmt.Printf("  • %-6s (pgo: %-20s) -> uncompressed: %d B | compressed: %d B\n",
-					v.Level, pgoFlag, v.UncompressedSize, v.CompressedSize)
+				fmt.Printf("  • %-6s [%s] (pgo: %-20s) -> uncompressed: %d B | compressed: %d B\n",
+					v.Level, v.Compression, pgoFlag, v.UncompressedSize, v.CompressedSize)
 			}
 			return nil
 		},
@@ -509,6 +527,9 @@ then packages them into a self-dispatching microfat binary.`,
 	cmd.Flags().StringVarP(&manifestPath, "manifest", "m", "", "Path to YAML or JSON build manifest file")
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Destination output path for the fat binary (overrides manifest)")
 	cmd.Flags().StringVar(&stubPath, "stub", "", "Path to microfat launcher stub binary (overrides manifest)")
+	cmd.Flags().StringVar(&profile, "profile", "", "Compression profile preset: latency, balanced, size")
+	cmd.Flags().StringVar(&compression, "compression", "", "Compression algorithm: lz4, zstd, none (e.g. lz4 or zstd:11)")
+	cmd.Flags().StringVar(&compressionLevel, "compression-level", "", "Compression level override: fastest, default, better, best, or number")
 	cmd.Flags().IntVarP(&concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (defaults to NumCPU)")
 	cmd.Flags().BoolVar(&keepIntermediates, "keep-intermediates", false, "Keep intermediate compiled variant ELF binaries")
 	cmd.Flags().StringVar(&goBinary, "go-binary", "", "Path to Go toolchain binary (defaults to $GO or 'go')")

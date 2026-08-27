@@ -191,6 +191,18 @@ func TestDiagnoseError(t *testing.T) {
 			expectedHint: "",
 		},
 		{
+			name:         "generic launcher_main unsupported compression",
+			stage:        StageCodecLookup,
+			err:          errors.New("unsupported compression algorithm: foo"),
+			expectedHint: HintUnsupportedCodec,
+		},
+		{
+			name:         "generic launcher_main decompression failed",
+			stage:        StageDecompress,
+			err:          errors.New("decompression failed: corrupted frame"),
+			expectedHint: HintDecompressFailed,
+		},
+		{
 			name:         "unknown stage uses generic",
 			stage:        "custom_stage",
 			err:          syscall.EROFS,

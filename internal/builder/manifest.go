@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"gopkg.in/yaml.v3"
 )
@@ -25,20 +26,28 @@ var (
 	ErrStubNotFound        = errors.New("microfat launcher stub binary not found")
 )
 
+// CompressionConfig defines declarative compression parameters.
+type CompressionConfig struct {
+	Profile   string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Algorithm string `json:"algorithm,omitempty" yaml:"algorithm,omitempty"`
+	Level     string `json:"level,omitempty" yaml:"level,omitempty"`
+}
+
 // Manifest defines the declarative configuration for compiling and packaging
 // a multi-microarchitecture Go binary with Profile-Guided Optimization (PGO).
 type Manifest struct {
-	AppName    string            `json:"name,omitempty" yaml:"name,omitempty"`
-	Package    string            `json:"package,omitempty" yaml:"package,omitempty"`
-	Output     string            `json:"output,omitempty" yaml:"output,omitempty"`
-	Stub       string            `json:"stub,omitempty" yaml:"stub,omitempty"`
-	TargetOS   string            `json:"target_os,omitempty" yaml:"target_os,omitempty"`
-	TargetArch string            `json:"target_arch,omitempty" yaml:"target_arch,omitempty"`
-	DefaultPGO string            `json:"default_pgo,omitempty" yaml:"default_pgo,omitempty"`
-	BuildFlags []string          `json:"build_flags,omitempty" yaml:"build_flags,omitempty"`
-	Tags       []string          `json:"tags,omitempty" yaml:"tags,omitempty"`
-	Env        map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
-	Variants   []VariantConfig   `json:"variants" yaml:"variants"`
+	AppName     string             `json:"name,omitempty" yaml:"name,omitempty"`
+	Package     string             `json:"package,omitempty" yaml:"package,omitempty"`
+	Output      string             `json:"output,omitempty" yaml:"output,omitempty"`
+	Stub        string             `json:"stub,omitempty" yaml:"stub,omitempty"`
+	TargetOS    string             `json:"target_os,omitempty" yaml:"target_os,omitempty"`
+	TargetArch  string             `json:"target_arch,omitempty" yaml:"target_arch,omitempty"`
+	DefaultPGO  string             `json:"default_pgo,omitempty" yaml:"default_pgo,omitempty"`
+	BuildFlags  []string           `json:"build_flags,omitempty" yaml:"build_flags,omitempty"`
+	Tags        []string           `json:"tags,omitempty" yaml:"tags,omitempty"`
+	Env         map[string]string  `json:"env,omitempty" yaml:"env,omitempty"`
+	Compression *CompressionConfig `json:"compression,omitempty" yaml:"compression,omitempty"`
+	Variants    []VariantConfig    `json:"variants" yaml:"variants"`
 
 	// Dir stores the directory containing the manifest file for relative path resolution.
 	Dir string `json:"-" yaml:"-"`
@@ -46,10 +55,11 @@ type Manifest struct {
 
 // VariantConfig defines compiler parameters and profile mappings for a single microarchitecture tier.
 type VariantConfig struct {
-	Level string            `json:"level" yaml:"level"`
-	PGO   string            `json:"pgo,omitempty" yaml:"pgo,omitempty"`
-	Flags []string          `json:"flags,omitempty" yaml:"flags,omitempty"`
-	Env   map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	Level       string             `json:"level" yaml:"level"`
+	PGO         string             `json:"pgo,omitempty" yaml:"pgo,omitempty"`
+	Flags       []string           `json:"flags,omitempty" yaml:"flags,omitempty"`
+	Env         map[string]string  `json:"env,omitempty" yaml:"env,omitempty"`
+	Compression *CompressionConfig `json:"compression,omitempty" yaml:"compression,omitempty"`
 }
 
 // LoadManifest reads, unmarshals, and validates a YAML or JSON build manifest from the specified file path.
@@ -116,6 +126,10 @@ func ValidateManifest(m *Manifest) error {
 		return ErrEmptyManifest
 	}
 
+	if err := validateCompressionConfig(m.Compression, "manifest root"); err != nil {
+		return err
+	}
+
 	seenLevels := make(map[string]struct{}, len(m.Variants))
 	for i, v := range m.Variants {
 		levelTrimmed := strings.TrimSpace(v.Level)
@@ -128,6 +142,10 @@ func ValidateManifest(m *Manifest) error {
 			return fmt.Errorf("%w: %q is not a valid level for %s", ErrInvalidVariantLevel, v.Level, m.TargetArch)
 		}
 
+		if err := validateCompressionConfig(v.Compression, fmt.Sprintf("variant %s", normLevel)); err != nil {
+			return err
+		}
+
 		if _, exists := seenLevels[normLevel]; exists {
 			return fmt.Errorf("%w: %q (normalized %q)", ErrDuplicateVariant, v.Level, normLevel)
 		}
@@ -135,5 +153,26 @@ func ValidateManifest(m *Manifest) error {
 		m.Variants[i].Level = normLevel
 	}
 
+	return nil
+}
+
+func validateCompressionConfig(c *CompressionConfig, contextStr string) error {
+	if c == nil {
+		return nil
+	}
+	if c.Profile != "" {
+		p := strings.ToLower(strings.TrimSpace(c.Profile))
+		switch p {
+		case codec.ProfileLatency, codec.ProfileBalanced, codec.ProfileSize:
+		default:
+			return fmt.Errorf("%w: invalid compression profile %q in %s", ErrInvalidManifest, c.Profile, contextStr)
+		}
+	}
+	if c.Algorithm != "" {
+		algo, _ := codec.ParseCompressionSpec(c.Algorithm)
+		if _, err := codec.Get(algo); err != nil {
+			return fmt.Errorf("%w: invalid compression algorithm %q in %s: %v", ErrInvalidManifest, c.Algorithm, contextStr, err)
+		}
+	}
 	return nil
 }

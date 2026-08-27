@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	github.com/klauspost/compress v1.19.2
+	github.com/pierrec/lz4/v4 v4.1.29
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.47.0
 	gopkg.in/yaml.v3 v3.0.1

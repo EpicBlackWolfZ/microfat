@@ -514,8 +514,8 @@ func printInfo(
 		if v.Level == selected.Level {
 			isSel = "*"
 		}
-		fmt.Printf(" %s %-6s (offset: %10d | comp: %10d B | uncomp: %10d B | sha256: %.12s...)\n",
-			isSel, v.Level, v.Offset, v.CompressedSize, v.UncompressedSize, v.SHA256)
+		fmt.Printf(" %s %-6s [%s] (offset: %10d | comp: %10d B | uncomp: %10d B | sha256: %.12s...)\n",
+			isSel, v.Level, v.Compression, v.Offset, v.CompressedSize, v.UncompressedSize, v.SHA256)
 	}
 	fmt.Printf("\nFeatures Detected on Host:\n  %s\n", strings.Join(hostInfo.Features, ", "))
 	return nil
