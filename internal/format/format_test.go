@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	testCompression = "zstd"
-	testArchAMD64   = "amd64"
-	testOSLinux     = "linux"
-	testAppName     = "testapp"
+	testCompression  = "zstd"
+	testArchAMD64    = "amd64"
+	testOSLinux      = "linux"
+	testAppName      = "testapp"
+	testSHA256Sample = "abcdef123456"
 )
 
 func TestFormatRoundTrip(t *testing.T) {
@@ -33,7 +34,7 @@ func TestFormatRoundTrip(t *testing.T) {
 				Offset:           200,
 				CompressedSize:   300,
 				UncompressedSize: 800,
-				SHA256:           "abcdef123456",
+				SHA256:           testSHA256Sample,
 				Compression:      testCompression,
 			},
 			{
@@ -382,7 +383,7 @@ func TestTelemetryStructs(t *testing.T) {
 		HostArch:                testArchAMD64,
 		HostLevel:               "v3",
 		SelectedVariant:         "v3",
-		SelectedSHA256:          "abcdef123456",
+		SelectedSHA256:          testSHA256Sample,
 		SelectedSizeBytes:       1024,
 		ExecMode:                ExecModeMemfd,
 		CgroupVersion:           2,
@@ -483,7 +484,7 @@ func TestPrewarmTelemetryStructs(t *testing.T) {
 		Results: []PrewarmResult{
 			{
 				Level:            "v3",
-				SHA256:           "abcdef123456",
+				SHA256:           testSHA256Sample,
 				UncompressedSize: 1024,
 				CachedPath:       "/tmp/cache/abcdef123456",
 				AlreadyCached:    false,
@@ -585,8 +586,8 @@ func TestFormatEmptyCompressionDefaultsToZstd(t *testing.T) {
 	buf := bytes.NewBuffer(make([]byte, 1024))
 	originalIdx := &Index{
 		AppName:     "legacy-app",
-		TargetOS:    "linux",
-		TargetArch:  "amd64",
+		TargetOS:    testOSLinux,
+		TargetArch:  testArchAMD64,
 		CreatedUnix: 1724540000,
 		Variants: []VariantEntry{
 			{
@@ -594,7 +595,7 @@ func TestFormatEmptyCompressionDefaultsToZstd(t *testing.T) {
 				Offset:           200,
 				CompressedSize:   300,
 				UncompressedSize: 800,
-				SHA256:           "abcdef123456",
+				SHA256:           testSHA256Sample,
 				Compression:      "", // legacy empty compression
 			},
 		},
@@ -614,9 +615,385 @@ func TestFormatEmptyCompressionDefaultsToZstd(t *testing.T) {
 	if len(idx.Variants) != 1 {
 		t.Fatalf("expected 1 variant, got %d", len(idx.Variants))
 	}
-	if idx.Variants[0].Compression != "zstd" {
+	if idx.Variants[0].Compression != testCompression {
 		t.Errorf("expected empty compression to default to 'zstd', got %q", idx.Variants[0].Compression)
 	}
+}
+
+func TestFormatVersion1JSONRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.NewBuffer(make([]byte, 1024))
+	originalIdx := &Index{
+		Version:     FormatVersion1,
+		AppName:     "json-legacy-app",
+		TargetOS:    testOSLinux,
+		TargetArch:  testArchAMD64,
+		CreatedUnix: 1724541234,
+		Variants: []VariantEntry{
+			{
+				Level:            "v1",
+				Offset:           200,
+				CompressedSize:   300,
+				UncompressedSize: 800,
+				SHA256:           testSHA256Sample,
+				Compression:      "lz4",
+			},
+			{
+				Level:            "v3",
+				Offset:           500,
+				CompressedSize:   400,
+				UncompressedSize: 900,
+				SHA256:           "123456abcdef",
+				Compression:      testCompression,
+			},
+		},
+	}
+
+	writtenBytes, err := WriteIndexAndTrailerWithVersion(buf, originalIdx, 1024, FormatVersion1)
+	if err != nil {
+		t.Fatalf("WriteIndexAndTrailerWithVersion(v1) failed: %v", err)
+	}
+
+	reader := bytes.NewReader(buf.Bytes())
+	readIdx, err := ReadTrailerAndIndex(reader, 1024+writtenBytes)
+	if err != nil {
+		t.Fatalf("ReadTrailerAndIndex for v1 failed: %v", err)
+	}
+
+	if readIdx.Version != FormatVersion1 {
+		t.Errorf("expected Version %d, got %d", FormatVersion1, readIdx.Version)
+	}
+	if readIdx.AppName != originalIdx.AppName {
+		t.Errorf("expected AppName %s, got %s", originalIdx.AppName, readIdx.AppName)
+	}
+	if len(readIdx.Variants) != 2 {
+		t.Fatalf("expected 2 variants, got %d", len(readIdx.Variants))
+	}
+	if readIdx.Variants[0].Compression != "lz4" || readIdx.Variants[1].Compression != testCompression {
+		t.Errorf("variant compressions mismatch: %+v", readIdx.Variants)
+	}
+}
+
+func TestFormatVersion2BinaryRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	buf := bytes.NewBuffer(make([]byte, 1024))
+	originalIdx := &Index{
+		Version:     FormatVersion2,
+		AppName:     "binary-v2-app",
+		TargetOS:    testOSLinux,
+		TargetArch:  testArchAMD64,
+		CreatedUnix: 1724545678,
+		Variants: []VariantEntry{
+			{
+				Level:            "v1",
+				Offset:           200,
+				CompressedSize:   300,
+				UncompressedSize: 800,
+				SHA256:           testSHA256Sample,
+				Compression:      "none",
+			},
+			{
+				Level:            "v4",
+				Offset:           500,
+				CompressedSize:   400,
+				UncompressedSize: 950,
+				SHA256:           "123456abcdef",
+				Compression:      testCompression,
+			},
+		},
+	}
+
+	writtenBytes, err := WriteIndexAndTrailerWithVersion(buf, originalIdx, 1024, FormatVersion2)
+	if err != nil {
+		t.Fatalf("WriteIndexAndTrailerWithVersion(v2) failed: %v", err)
+	}
+
+	reader := bytes.NewReader(buf.Bytes())
+	readIdx, err := ReadTrailerAndIndex(reader, 1024+writtenBytes)
+	if err != nil {
+		t.Fatalf("ReadTrailerAndIndex for v2 failed: %v", err)
+	}
+
+	if readIdx.Version != FormatVersion2 {
+		t.Errorf("expected Version %d, got %d", FormatVersion2, readIdx.Version)
+	}
+	if readIdx.AppName != originalIdx.AppName {
+		t.Errorf("expected AppName %s, got %s", originalIdx.AppName, readIdx.AppName)
+	}
+	if len(readIdx.Variants) != 2 {
+		t.Fatalf("expected 2 variants, got %d", len(readIdx.Variants))
+	}
+	if readIdx.Variants[0].Compression != "none" || readIdx.Variants[1].Compression != "zstd" {
+		t.Errorf("variant compressions mismatch: %+v", readIdx.Variants)
+	}
+}
+
+func TestWriteIndexAndTrailerUnsupportedVersion(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	idx := &Index{
+		Version:  99,
+		TargetOS: testOSLinux,
+	}
+	_, err := WriteIndexAndTrailerWithVersion(&buf, idx, 100, 99)
+	if !errors.Is(err, ErrUnsupportedVersion) {
+		t.Errorf("expected ErrUnsupportedVersion for version 99, got %v", err)
+	}
+}
+
+func TestMarshalBinaryIndexFieldLimits(t *testing.T) {
+	t.Parallel()
+
+	longString := string(make([]byte, 300))
+	idxBadOS := &Index{TargetOS: longString}
+	if _, err := MarshalBinaryIndex(idxBadOS); err == nil {
+		t.Errorf("expected error for oversized TargetOS")
+	}
+
+	idxBadLevel := &Index{
+		TargetOS:   "linux",
+		TargetArch: "amd64",
+		Variants: []VariantEntry{
+			{Level: longString},
+		},
+	}
+	if _, err := MarshalBinaryIndex(idxBadLevel); err == nil {
+		t.Errorf("expected error for oversized Variant.Level")
+	}
+}
+
+func TestUnmarshalBinaryIndexErrors(t *testing.T) {
+	t.Parallel()
+
+	// Short data
+	if _, err := UnmarshalBinaryIndex([]byte("short")); !errors.Is(err, ErrTruncatedIndex) {
+		t.Errorf("expected ErrTruncatedIndex for short data, got %v", err)
+	}
+
+	// Bad magic
+	badMagic := make([]byte, 30)
+	copy(badMagic, []byte("BADM"))
+	if _, err := UnmarshalBinaryIndex(badMagic); !errors.Is(err, ErrInvalidMagic) {
+		t.Errorf("expected ErrInvalidMagic for bad magic, got %v", err)
+	}
+
+	// Bad version
+	badVersion := make([]byte, 30)
+	copy(badVersion, []byte(IndexMagicV2))
+	binary.LittleEndian.PutUint16(badVersion[4:6], 99)
+	if _, err := UnmarshalBinaryIndex(badVersion); !errors.Is(err, ErrUnsupportedVersion) {
+		t.Errorf("expected ErrUnsupportedVersion for version 99, got %v", err)
+	}
+
+	// Truncated at various offsets
+	goodIdx := &Index{
+		Version:     FormatVersion2,
+		AppName:     "test",
+		TargetOS:    "linux",
+		TargetArch:  "amd64",
+		CreatedUnix: 123456,
+		Variants: []VariantEntry{
+			{Level: "v1", Offset: 100, CompressedSize: 200, UncompressedSize: 300, SHA256: "abc", Compression: "zstd"},
+		},
+	}
+	goodData, err := MarshalBinaryIndex(goodIdx)
+	if err != nil {
+		t.Fatalf("MarshalBinaryIndex failed: %v", err)
+	}
+
+	for cut := 14; cut < len(goodData)-1; cut++ {
+		truncated := goodData[:cut]
+		if _, err := UnmarshalBinaryIndex(truncated); !errors.Is(err, ErrTruncatedIndex) {
+			t.Errorf("expected ErrTruncatedIndex when cutting at %d, got %v", cut, err)
+		}
+	}
+}
+
+func TestUnmarshalJSONIndexErrorsAndEdges(t *testing.T) {
+	t.Parallel()
+
+	// Not an object
+	if _, err := unmarshalJSONIndex([]byte("[]")); !errors.Is(err, ErrInvalidJSONSyntax) {
+		t.Errorf("expected ErrInvalidJSONSyntax for array root, got %v", err)
+	}
+
+	// Unclosed root
+	if _, err := unmarshalJSONIndex([]byte("{ \"version\": 1")); !errors.Is(err, ErrInvalidJSONSyntax) {
+		t.Errorf("expected ErrInvalidJSONSyntax for unclosed root, got %v", err)
+	}
+
+	// Escapes and strings
+	jsonWithEscapes := []byte(`{
+		"version": 1,
+		"app_name": "app\"with\nquotes\\and\/slashes\b\f\r\t",
+		"os": "linux",
+		"arch": "amd64",
+		"created_unix": -12345,
+		"unknown_field": {"nested": [1, 2, "three", true, false, null]},
+		"variants": [
+			{
+				"level": "v1",
+				"offset": 100,
+				"compressed_size": 200,
+				"uncompressed_size": 300,
+				"sha256": "abc",
+				"compression": "lz4",
+				"extra": "ignore"
+			}
+		]
+	}`)
+
+	idx, err := unmarshalJSONIndex(jsonWithEscapes)
+	if err != nil {
+		t.Fatalf("unmarshalJSONIndex with escapes failed: %v", err)
+	}
+	if idx.AppName != "app\"with\nquotes\\and/slashes\b\f\r\t" {
+		t.Errorf("escaped AppName mismatch: %q", idx.AppName)
+	}
+	if idx.CreatedUnix != -12345 {
+		t.Errorf("negative CreatedUnix mismatch: %d", idx.CreatedUnix)
+	}
+	if len(idx.Variants) != 1 || idx.Variants[0].Compression != "lz4" {
+		t.Errorf("variant mismatch: %+v", idx.Variants)
+	}
+}
+
+func BenchmarkUnmarshalJSONIndex(b *testing.B) {
+	idx := &Index{
+		Version:     FormatVersion1,
+		AppName:     "benchmark-demo-service",
+		TargetOS:    testOSLinux,
+		TargetArch:  testArchAMD64,
+		CreatedUnix: 1724540000,
+		Variants: []VariantEntry{
+			{
+				Level: "v1", Offset: 1000, CompressedSize: 2000000, UncompressedSize: 5000000,
+				SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Compression: testCompression,
+			},
+			{
+				Level: "v2", Offset: 2001000, CompressedSize: 2100000, UncompressedSize: 5100000,
+				SHA256: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", Compression: testCompression,
+			},
+			{
+				Level: "v3", Offset: 4101000, CompressedSize: 2200000, UncompressedSize: 5200000,
+				SHA256: "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff", Compression: testCompression,
+			},
+			{
+				Level: "v4", Offset: 6301000, CompressedSize: 2300000, UncompressedSize: 5300000,
+				SHA256: "ffeeddccbbaa00998877665544332211ffeeddccbbaa00998877665544332211", Compression: testCompression,
+			},
+		},
+	}
+	jsonBytes, err := json.Marshal(idx)
+	if err != nil {
+		b.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, err := unmarshalJSONIndex(jsonBytes)
+		if err != nil {
+			b.Fatalf("unmarshalJSONIndex failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkUnmarshalBinaryIndex(b *testing.B) {
+	idx := &Index{
+		Version:     FormatVersion2,
+		AppName:     "benchmark-demo-service",
+		TargetOS:    testOSLinux,
+		TargetArch:  testArchAMD64,
+		CreatedUnix: 1724540000,
+		Variants: []VariantEntry{
+			{
+				Level: "v1", Offset: 1000, CompressedSize: 2000000, UncompressedSize: 5000000,
+				SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Compression: testCompression,
+			},
+			{
+				Level: "v2", Offset: 2001000, CompressedSize: 2100000, UncompressedSize: 5100000,
+				SHA256: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", Compression: testCompression,
+			},
+			{
+				Level: "v3", Offset: 4101000, CompressedSize: 2200000, UncompressedSize: 5200000,
+				SHA256: "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff", Compression: testCompression,
+			},
+			{
+				Level: "v4", Offset: 6301000, CompressedSize: 2300000, UncompressedSize: 5300000,
+				SHA256: "ffeeddccbbaa00998877665544332211ffeeddccbbaa00998877665544332211", Compression: testCompression,
+			},
+		},
+	}
+	binBytes, err := MarshalBinaryIndex(idx)
+	if err != nil {
+		b.Fatalf("MarshalBinaryIndex failed: %v", err)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, err := UnmarshalBinaryIndex(binBytes)
+		if err != nil {
+			b.Fatalf("UnmarshalBinaryIndex failed: %v", err)
+		}
+	}
+}
+
+func TestEscapeJSONString(t *testing.T) {
+	input := "test\b\f\n\r\t\"\\hello\x01world"
+	escaped := escapeJSONString(input)
+	hasAll := bytes.Contains([]byte(escaped), []byte(`\b`)) &&
+		bytes.Contains([]byte(escaped), []byte(`\n`)) &&
+		bytes.Contains([]byte(escaped), []byte(`\u0001`))
+	if !hasAll {
+		t.Fatalf("unexpected escape string result: %s", escaped)
+	}
+}
+
+func TestJSONParser_EdgeCases(t *testing.T) {
+	t.Run("escaped_characters", func(t *testing.T) {
+		jsonStr := `{"app_name":"app\n\t\r\b\f\"\\\/\u0041","version":1,"os":"linux","arch":"amd64","created_unix":100,"variants":[]}`
+		idx, err := unmarshalJSONIndex([]byte(jsonStr))
+		if err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+		if idx.AppName != "app\n\t\r\b\f\"\\/A" {
+			t.Fatalf("unexpected app name: %q", idx.AppName)
+		}
+	})
+
+	t.Run("skip_values", func(t *testing.T) {
+		jsonStr := `{"extra_bool":true,"extra_false":false,"extra_null":null,` +
+			`"extra_obj":{"k":"v","nested":[1,2,3]},"version":1,"os":"linux","arch":"amd64","created_unix":-100,"variants":[]}`
+		idx, err := unmarshalJSONIndex([]byte(jsonStr))
+		if err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+		if idx.CreatedUnix != -100 {
+			t.Fatalf("unexpected created unix: %d", idx.CreatedUnix)
+		}
+	})
+
+	t.Run("invalid_escape_sequences", func(t *testing.T) {
+		invalidCases := []string{
+			`{"app_name":"\u00"`,
+			`{"app_name":"\uZZZZ"`,
+			`{"app_name":"\x"`,
+			`{"app_name":"unterminated`,
+			`{"created_unix":-}`,
+			`{"variants":[unknown]}`,
+		}
+		for _, c := range invalidCases {
+			_, err := unmarshalJSONIndex([]byte(c))
+			if err == nil {
+				t.Fatalf("expected error for case %q, got nil", c)
+			}
+		}
+	})
 }
 
 
