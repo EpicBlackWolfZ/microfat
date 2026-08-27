@@ -106,6 +106,9 @@ const (
 	rankARM64v9_4 = 94
 	rankARM64v9_5 = 95
 
+	maxX86Features   = 17
+	maxARM64Features = 24
+
 	cpuInfoSplitParts = 2
 )
 
@@ -211,7 +214,9 @@ func ReadPolicyFromEnv() Policy {
 	p.MaxLevel = strings.TrimSpace(os.Getenv(format.EnvMaxLevel))
 
 	if dis := strings.TrimSpace(os.Getenv(format.EnvDisableVariants)); dis != "" {
-		for _, v := range strings.Split(dis, ",") {
+		parts := strings.Split(dis, ",")
+		p.DisabledVariants = make([]string, 0, len(parts))
+		for _, v := range parts {
 			v = strings.TrimSpace(v)
 			if v != "" {
 				p.DisabledVariants = append(p.DisabledVariants, v)
@@ -361,7 +366,7 @@ func filterAndRankCandidates(
 	availableLevels []string,
 	disabledSet map[string]struct{},
 ) []variantCandidate {
-	var candidates []variantCandidate
+	candidates := make([]variantCandidate, 0, len(availableLevels))
 	for _, lvl := range availableLevels {
 		norm := Normalize(lvl)
 		r := Rank(arch, norm)
@@ -810,7 +815,7 @@ func applyCoreAndMemoryTokens(feat *ARM64Features, token string) {
 }
 
 func extractX86FeatureList(f X86Features) []string {
-	var list []string
+	list := make([]string, 0, maxX86Features)
 	if f.HasCX16 {
 		list = append(list, "cx16")
 	}
@@ -866,7 +871,7 @@ func extractX86FeatureList(f X86Features) []string {
 }
 
 func extractARM64FeatureList(f ARM64Features) []string {
-	var list []string
+	list := make([]string, 0, maxARM64Features)
 	list = appendSIMDFeatureList(list, f)
 	list = appendCryptoFeatureList(list, f)
 	list = appendCoreFeatureList(list, f)

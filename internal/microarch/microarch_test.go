@@ -783,3 +783,50 @@ func TestParseLinuxCPUInfoX86(t *testing.T) {
 	_ = isHostSkylakeXOrCascadeLake()
 	_ = IsAVX512DownclockingRisk()
 }
+
+func BenchmarkSelectVariantWithPolicy(b *testing.B) {
+	amd64Variants := []string{"v1", "v2", "v3", "v4"}
+	arm64Variants := []string{"v8.0", "v8.1", "v8.2", "v8.4", "v9.0", "v9.2"}
+
+	b.Run("AMD64_Default", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, _ = SelectVariantWithPolicy(ArchAMD64, AMD64v3, amd64Variants, Policy{})
+		}
+	})
+
+	b.Run("AMD64_PolicyCaps", func(b *testing.B) {
+		b.ReportAllocs()
+		p := Policy{
+			MaxLevel:         "v2",
+			DisabledVariants: []string{"v3"},
+		}
+		for i := 0; i < b.N; i++ {
+			_, _ = SelectVariantWithPolicy(ArchAMD64, AMD64v4, amd64Variants, p)
+		}
+	})
+
+	b.Run("ARM64_Default", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, _ = SelectVariantWithPolicy(ArchARM64, ARM64v9_2, arm64Variants, Policy{})
+		}
+	})
+}
+
+func BenchmarkNormalize(b *testing.B) {
+	inputs := []string{"amd64_v3", "arm64-v8.2", "linux_v1", "V4"}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = Normalize(inputs[i%len(inputs)])
+	}
+}
+
+func BenchmarkDetect(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = Detect()
+	}
+}
+
