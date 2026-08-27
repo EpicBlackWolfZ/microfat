@@ -87,9 +87,16 @@ make clean      # Remove build artifacts and coverage files
 
 ---
 
-## 5. Git & Release Conventions
+## 5. Git, CI & Release Conventions
 
-- **Conventional Commits**: PR titles and commit messages must follow the Conventional Commits specification:
+- **Branching & PR Workflow**:
+  - **NEVER commit or push directly to the default branch (`main`)**.
+  - Always create a dedicated topic branch: `feat/<name>`, `fix/<name>`, `perf/<name>`, `refactor/<name>`, or `docs/<name>`.
+  - Open a Pull Request against `main` using `gh pr create` with a Conventional Commit title and detailed markdown body referencing the target issue (`Resolves #<id>`).
+  - **Issue Lifecycle**: Do NOT manually close issues via `gh issue close` upon pushing. Issues remain open until the associated PR is merged.
+  - **CI Monitoring**: Actively watch and monitor GitHub Actions CI checks (`gh pr checks <pr-number>` or `gh run list`) until all jobs pass green.
+  - **Merge Policy**: The project maintainer reviews and merges pull requests manually. Report back once CI is green and matrix verification is complete.
+- **Conventional Commits**: PR titles and commit messages must strictly follow the Conventional Commits specification:
   - `feat:` New feature or capability
   - `fix:` Bug fix
   - `docs:` Documentation updates
@@ -97,4 +104,7 @@ make clean      # Remove build artifacts and coverage files
   - `refactor:` Code refactoring without behavior changes
   - `test:` Test additions or enhancements
   - `chore:` Dependency bumps, CI updates, or housekeeping
+- **Benchmark & Performance Rigor**:
+  - Always distinguish between isolated micro-benchmarks (e.g., sub-microsecond in-memory parsing) and macro end-to-end process cold-start latency (dominated by ELF bootstrap, decompression, and kernel syscalls).
+  - When introducing format changes or optimizations, run a full combinatorial matrix benchmark across format versions, stub profiles, compression codecs, and execution modes (`memfd` vs `cache`) to ensure zero runtime anomalies.
 - **Release Automation**: Releases are tag-driven (`v*`) via GoReleaser on official GitHub Actions runners (`ubuntu-latest`).
