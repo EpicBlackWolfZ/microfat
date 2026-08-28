@@ -76,13 +76,14 @@ func DefaultOptions() Options {
 
 // VerificationResult contains the result of verifying an individual embedded variant.
 type VerificationResult struct {
-	Level            string
-	CompressedSize   int64
-	UncompressedSize int64
-	ExpectedSHA256   string
-	ActualSHA256     string
-	Valid            bool
-	Error            error
+	Level            string `json:"level"`
+	CompressedSize   int64  `json:"compressed_size"`
+	UncompressedSize int64  `json:"uncompressed_size"`
+	ExpectedSHA256   string `json:"expected_sha256"`
+	ActualSHA256     string `json:"actual_sha256"`
+	Valid            bool   `json:"valid"`
+	Error            error  `json:"-"`
+	ErrorString      string `json:"error,omitzero"`
 }
 
 const (
@@ -513,6 +514,7 @@ func VerifyBinary(r io.ReaderAt, totalSize int64) (*format.Index, []Verification
 		c, err := codec.Get(v.Compression)
 		if err != nil {
 			res.Error = fmt.Errorf("lookup codec %q for variant %s: %w", v.Compression, v.Level, err)
+			res.ErrorString = res.Error.Error()
 			results = append(results, res)
 			continue
 		}
@@ -521,6 +523,7 @@ func VerifyBinary(r io.ReaderAt, totalSize int64) (*format.Index, []Verification
 		hasher := sha256.New()
 		if err := codec.DecompressWithOptionalDict(c, hasher, secReader, v.UncompressedSize, dictBytes); err != nil {
 			res.Error = fmt.Errorf("decompressing variant payload: %w", err)
+			res.ErrorString = res.Error.Error()
 			results = append(results, res)
 			continue
 		}
@@ -530,6 +533,7 @@ func VerifyBinary(r io.ReaderAt, totalSize int64) (*format.Index, []Verification
 
 		if v.SHA256 != "" && actualHashHex != v.SHA256 {
 			res.Error = fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, v.SHA256, actualHashHex)
+			res.ErrorString = res.Error.Error()
 			results = append(results, res)
 			continue
 		}

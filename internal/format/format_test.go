@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/json"
+	json "encoding/json/v2"
 	"errors"
 	"os"
 	"path/filepath"

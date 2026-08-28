@@ -4,7 +4,8 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -214,11 +215,10 @@ func handlePrewarmVerify(
 			CacheDir:          cacheDir,
 			Results:           results,
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(telem); err != nil {
+		if err := json.MarshalWrite(os.Stdout, telem, jsontext.WithIndent("  ")); err != nil {
 			return fmt.Errorf("encoding json: %w", err)
 		}
+		fmt.Println()
 		if !allValid {
 			return errors.New("cache verification failed for one or more variants")
 		}
@@ -262,9 +262,11 @@ func handlePrewarmExtract(
 			CacheDir:          cacheDir,
 			Results:           results,
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(telem)
+		if err := json.MarshalWrite(os.Stdout, telem, jsontext.WithIndent("  ")); err != nil {
+			return fmt.Errorf("encoding json: %w", err)
+		}
+		fmt.Println()
+		return nil
 	}
 
 	for _, r := range results {
@@ -390,11 +392,10 @@ func printInfo(
 			Variants:         idx.Variants,
 			HostFeatures:     hostInfo.Features,
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(info); err != nil {
+		if err := json.MarshalWrite(os.Stdout, info, jsontext.WithIndent("  ")); err != nil {
 			return fmt.Errorf("encoding binary info json: %w", err)
 		}
+		fmt.Println()
 		return nil
 	}
 

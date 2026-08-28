@@ -12,7 +12,7 @@ MICROFAT ?= $(shell [ -x "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat" ] && ech
 MICROFAT_STUB ?= $(shell [ -x "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat-stub" ] && echo "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat-stub" || command -v microfat-stub 2> /dev/null || echo "$(INSTALL_DIR)/microfat-stub")
 MICROFAT_STUB_ARM64 ?= $(shell [ -x "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat-stub-arm64" ] && echo "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat-stub-arm64" || echo "$(BIN_DIR)/microfat-stub-arm64")
 
-.PHONY: all build fat fat-arm64 trim optimize run run-heavy run-ultra bench bench-heavy bench-ultra bench-startup clean help
+.PHONY: all build fat fat-arm64 trim optimize run run-heavy run-ultra run-simd bench bench-heavy bench-ultra bench-simd bench-startup clean help
 
 all: build fat
 
@@ -28,9 +28,11 @@ help:
 	@echo "  run          Execute demo application with standard benchmark workloads (~110ms)"
 	@echo "  run-heavy    Execute demo application with heavy sustained compute workloads (~500ms)"
 	@echo "  run-ultra    Execute demo application with ultra heavy sustained compute workloads (5-15s)"
+	@echo "  run-simd     Execute demo application with experimental wide-vector unrolled SIMD mode"
 	@echo "  bench        Run standard 50-iteration benchmark suite across all 5 binary modes"
 	@echo "  bench-heavy  Run heavy sustained compute benchmark suite (20 iterations) across all 5 modes"
 	@echo "  bench-ultra  Run ultra heavy sustained compute benchmark suite (5-15s per run) across all 5 modes"
+	@echo "  bench-simd   Run standard 50-iteration benchmark suite with SIMD vectorization enabled"
 	@echo "  bench-startup Run microsecond startup overhead benchmark suite across execution modes & codecs"
 	@echo "  clean        Remove compiled binaries and benchmark temporary files"
 
@@ -97,6 +99,10 @@ run-ultra: fat
 	@echo "==> Running ultra heavy sustained compute workloads (5-15s)..."
 	@$(BIN_DIR)/$(BINARY_NAME)-fat all --ultra
 
+run-simd: fat
+	@echo "==> Running demo workloads with SIMD vectorization..."
+	@$(BIN_DIR)/$(BINARY_NAME)-fat all --simd
+
 bench:
 	@echo "==> Running standard benchmark suite..."
 	@cd runner && $(GO) run main.go
@@ -108,6 +114,10 @@ bench-heavy:
 bench-ultra:
 	@echo "==> Running ultra heavy sustained compute benchmark suite..."
 	@cd runner && $(GO) run main.go -ultra
+
+bench-simd:
+	@echo "==> Running SIMD vectorization benchmark suite..."
+	@cd runner && $(GO) run main.go -simd
 
 bench-startup:
 	@echo "==> Running microsecond startup overhead & telemetry benchmark suite..."

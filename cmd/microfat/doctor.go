@@ -1,7 +1,8 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -119,10 +120,11 @@ in-memory anonymous execution (memfd_create), disk cache fallback permissions, a
 			report := runDoctor(opts)
 
 			if opts.JSONOutput {
-				enc := json.NewEncoder(opts.Out)
-				enc.SetIndent("", "  ")
-				if err := enc.Encode(report); err != nil {
+				if err := json.MarshalWrite(opts.Out, report, jsontext.WithIndent("  ")); err != nil {
 					return fmt.Errorf("encoding json: %w", err)
+				}
+				if _, err := fmt.Fprintln(opts.Out); err != nil {
+					return fmt.Errorf("writing newline: %w", err)
 				}
 			} else {
 				printDoctorReport(opts.Out, report)
