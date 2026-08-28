@@ -25,7 +25,9 @@ GOLANGCI_LINT := $(shell command -v golangci-lint 2> /dev/null)
 GOVULNCHECK := $(shell command -v govulncheck 2> /dev/null)
 GORELEASER := $(shell command -v goreleaser 2> /dev/null)
 
-.PHONY: all help build build-amd64 build-arm64 build-all test coverage lint vuln tidy snapshot demo demo-arm64 bench bench-heavy bench-ultra bench-simd bench-startup clean
+FUZZTIME ?= 5s
+
+.PHONY: all help build build-amd64 build-arm64 build-all test fuzz chaos coverage lint vuln tidy snapshot demo demo-arm64 bench bench-heavy bench-ultra bench-simd bench-startup bench-matrix test-all clean
 
 all: tidy lint vuln test coverage build ## Run complete verification pipeline (tidy, lint, vuln, test, coverage gate, build)
 
@@ -80,6 +82,33 @@ else
 	@$(GO) test -race -tags minimal ./cmd/microfat-stub/...
 endif
 	@echo "\033[32m✔\033[0m Tests passed successfully"
+
+fuzz: ## Run Go native fuzz testing targets across format, codec, cgroup, and pack
+	@echo "\033[34m==>\033[0m Running Go native fuzz targets ($(FUZZTIME) per target)..."
+	@$(GO) test -fuzz=^FuzzUnmarshalBinaryIndex$$ -fuzztime=$(FUZZTIME) ./internal/format
+	@$(GO) test -fuzz=^FuzzUnmarshalJSONIndex$$ -fuzztime=$(FUZZTIME) ./internal/format
+	@$(GO) test -fuzz=^FuzzReadTrailerAndIndex$$ -fuzztime=$(FUZZTIME) ./internal/format
+	@$(GO) test -fuzz=^FuzzDecompressZstd$$ -fuzztime=$(FUZZTIME) ./internal/codec
+	@$(GO) test -fuzz=^FuzzDecompressLZ4$$ -fuzztime=$(FUZZTIME) ./internal/codec
+	@$(GO) test -fuzz=^FuzzCalculateGOMEMLIMIT$$ -fuzztime=$(FUZZTIME) ./internal/cgroup
+	@$(GO) test -fuzz=^FuzzCalculateGOMAXPROCS$$ -fuzztime=$(FUZZTIME) ./internal/cgroup
+	@$(GO) test -fuzz=^FuzzValidateELFBinary$$ -fuzztime=$(FUZZTIME) ./internal/pack
+	@$(GO) test -fuzz=^FuzzVerifyBinary$$ -fuzztime=$(FUZZTIME) ./internal/pack
+	@echo "\033[32m✔\033[0m Fuzz testing completed cleanly"
+
+chaos: ## Run chaos and fault injection test suite
+	@echo "\033[34m==>\033[0m Running chaos and fault injection test suite..."
+	@$(GO) test -race -run=TestConcurrent ./cmd/microfat-stub/...
+	@$(GO) test -race -run=TestCorrupted ./cmd/microfat-stub/...
+	@$(GO) test -race -run=TestReadOnly ./cmd/microfat-stub/...
+	@$(GO) test -race -run=TestSimulated ./cmd/microfat-stub/...
+	@$(GO) test -race -run=TestMalicious ./cmd/microfat-stub/...
+	@$(GO) test -race -run=TestTruncated ./internal/pack/...
+	@$(GO) test -race -run=TestBitFlipped ./internal/pack/...
+	@$(GO) test -race -run=TestDictionaryTampering ./internal/pack/...
+	@echo "\033[32m✔\033[0m Chaos tests passed"
+
+test-all: tidy lint vuln test chaos coverage build ## Run complete test suite including chaos and coverage gate
 
 COVERAGE_PKGS ?= ./cmd/... ./internal/... ./runtimeinit/...
 
@@ -162,6 +191,10 @@ bench-simd: build ## Run the SIMD vectorization benchmark suite in examples/demo
 
 bench-startup: build ## Run microsecond startup latency and stub telemetry benchmark suite in examples/demo
 	@echo "\033[34m==>\033[0m Running microsecond startup benchmark suite in examples/demo..."
+	@$(MAKE) -C examples/demo bench-startup
+
+bench-matrix: build ## Run comprehensive combinatorial latency matrix benchmark suite in examples/demo
+	@echo "\033[34m==>\033[0m Running combinatorial startup latency matrix benchmark in examples/demo..."
 	@$(MAKE) -C examples/demo bench-startup
 
 clean: ## Remove build artifacts and coverage files

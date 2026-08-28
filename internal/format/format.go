@@ -115,6 +115,7 @@ var (
 	ErrInvalidJSONSyntax   = errors.New("invalid json syntax in manifest index")
 	ErrDictionaryCorrupted = errors.New("shared dictionary SHA-256 checksum mismatch")
 	ErrInvalidDictionary   = errors.New("invalid shared dictionary offset or size")
+	ErrInvalidChecksum     = errors.New("invalid sha256 checksum format")
 
 	// Launcher execution stage sentinels for typed error diagnostics.
 	ErrMemfdCreate  = errors.New("memfd_create failed")
@@ -281,6 +282,9 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 		if idx.DictionaryOffset < 0 {
 			return fmt.Errorf("%w: invalid dictionary offset %d", ErrInvalidDictionary, idx.DictionaryOffset)
 		}
+		if idx.DictionarySHA256 != "" && !ValidateChecksum(idx.DictionarySHA256) {
+			return fmt.Errorf("%w: invalid dictionary sha256 checksum format %q", ErrInvalidChecksum, idx.DictionarySHA256)
+		}
 		if idx.DictionaryOffset+idx.DictionarySize > indexOffset {
 			return fmt.Errorf("%w: dictionary payload extends past index offset %d", ErrOutOfBounds, indexOffset)
 		}
@@ -288,6 +292,9 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 	}
 
 	for i, v := range idx.Variants {
+		if v.SHA256 != "" && !ValidateChecksum(v.SHA256) {
+			return fmt.Errorf("%w: invalid sha256 checksum format for variant %s: %q", ErrInvalidChecksum, v.Level, v.SHA256)
+		}
 		if v.Offset < 0 || v.CompressedSize <= 0 || v.UncompressedSize <= 0 {
 			return fmt.Errorf("%w: invalid dimensions for variant %s", ErrOutOfBounds, v.Level)
 		}
@@ -307,6 +314,7 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 }
 
 const (
+	maxSHA256HexLen             = 64
 	defaultCompressionAlgorithm = "zstd"
 	minBinaryHeaderSize         = 34
 	binaryHeaderFixedSize       = 34
@@ -316,6 +324,23 @@ const (
 	uint16LenPrefixSize         = 2
 	uint64FieldSize             = 8
 )
+
+// ValidateChecksum verifies that a SHA-256 hex string contains only valid hex characters (up to 64 chars).
+func ValidateChecksum(s string) bool {
+	if s == "" {
+		return true
+	}
+	if len(s) > maxSHA256HexLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
 
 // MarshalBinaryIndex serializes an Index struct into a compact Format v2 binary representation.
 func MarshalBinaryIndex(idx *Index) ([]byte, error) {

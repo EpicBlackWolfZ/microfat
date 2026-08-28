@@ -40,6 +40,7 @@ const (
 	execModeMemfd      = "memfd"
 	execModeColdCache  = "cold-cache"
 	execModeWarmCache  = "warm-cache"
+	envExecModeMemfd   = "MICROFAT_EXEC_MODE=memfd"
 )
 
 type Config struct {
@@ -245,17 +246,60 @@ func buildStartupScenarios(srcDir, benchDir, microfatStub, microfatCli string) [
 		"-o", fatNone,
 	)
 
-	// 4. Trimmed Fat
+	// 4. Zstd with Shared Inter-Variant Dictionary
+	fatDict := filepath.Join(benchDir, "07_fat_dict")
+	mustRun(benchDir, microfatCli, "pack",
+		"--stub", microfatStub,
+		"--name", "demo-app",
+		"--dict",
+		"-v", "v1="+v1Native,
+		"-v", "v2="+v2Native,
+		"-v", "v3="+v3Native,
+		"-v", "v4="+v4Native,
+		"-o", fatDict,
+	)
+
+	// 5. Format v1 JSON Manifest Format
+	fatV1 := filepath.Join(benchDir, "08_fat_v1")
+	mustRun(benchDir, microfatCli, "pack",
+		"--stub", microfatStub,
+		"--name", "demo-app",
+		"--format-version", "1",
+		"-v", "v1="+v1Native,
+		"-v", "v2="+v2Native,
+		"-v", "v3="+v3Native,
+		"-v", "v4="+v4Native,
+		"-o", fatV1,
+	)
+
+	// 6. Minimal Stub Profile (if available)
+	microfatStubMinimal := resolveBinary("microfat-stub-minimal")
+	fatMinimal := filepath.Join(benchDir, "09_fat_minimal")
+	hasMinimal := false
+	if _, err := os.Stat(microfatStubMinimal); err == nil {
+		mustRun(benchDir, microfatCli, "pack",
+			"--stub", microfatStubMinimal,
+			"--name", "demo-app",
+			"-v", "v1="+v1Native,
+			"-v", "v2="+v2Native,
+			"-v", "v3="+v3Native,
+			"-v", "v4="+v4Native,
+			"-o", fatMinimal,
+		)
+		hasMinimal = true
+	}
+
+	// 7. Trimmed Fat
 	mustRun(benchDir, microfatCli, "trim", fatZstd, "-o", fatTrimmed)
 
-	// 5. Optimized raw ELF
+	// 8. Optimized raw ELF
 	// #nosec G204 -- benchmark runner invokes locally built fat binary for optimize-to test
 	cmdOpt := exec.Command(fatZstd, "--microfat:optimize-to="+optimizedV3)
 	if err := cmdOpt.Run(); err != nil {
 		panic(err)
 	}
 
-	// 6. Pre-warm dedicated cache directory for warm-cache scenario
+	// 9. Pre-warm dedicated cache directory for warm-cache scenario
 	warmCacheDir := filepath.Join(benchDir, "warm_cache")
 	if err := os.MkdirAll(warmCacheDir, dirPermission); err != nil {
 		panic(err)
@@ -271,14 +315,28 @@ func buildStartupScenarios(srcDir, benchDir, microfatStub, microfatCli string) [
 		{Name: "1. Native v1 (Baseline SSE2)", Path: v1Native, ExecMode: execModeNative, Size: getFileSize(v1Native)},
 		{Name: "2. Native v3 (AVX2/FMA)", Path: v3Native, ExecMode: execModeNative, Size: getFileSize(v3Native)},
 		{
-			Name:     "3. Universal FAT (Cold memfd)",
+			Name:     "3. Universal FAT Format v2 (Cold memfd)",
 			Path:     fatZstd,
 			ExecMode: execModeMemfd,
-			Env:      []string{"MICROFAT_EXEC_MODE=memfd"},
+			Env:      []string{envExecModeMemfd},
 			Size:     getFileSize(fatZstd),
 		},
 		{
-			Name:     "4. Universal FAT (Cold cache)",
+			Name:     "4. Universal FAT Format v1 JSON (Cold memfd)",
+			Path:     fatV1,
+			ExecMode: execModeMemfd,
+			Env:      []string{envExecModeMemfd},
+			Size:     getFileSize(fatV1),
+		},
+		{
+			Name:     "5. Universal FAT Zstd-Dict (Cold memfd)",
+			Path:     fatDict,
+			ExecMode: execModeMemfd,
+			Env:      []string{envExecModeMemfd},
+			Size:     getFileSize(fatDict),
+		},
+		{
+			Name:     "6. Universal FAT (Cold cache)",
 			Path:     fatZstd,
 			ExecMode: execModeColdCache,
 			IsCold:   true,
@@ -286,7 +344,7 @@ func buildStartupScenarios(srcDir, benchDir, microfatStub, microfatCli string) [
 			Size:     getFileSize(fatZstd),
 		},
 		{
-			Name:      "5. Universal FAT (Warm cache)",
+			Name:      "7. Universal FAT (Warm cache)",
 			Path:      fatZstd,
 			ExecMode:  execModeWarmCache,
 			WarmCache: warmCacheDir,
@@ -294,28 +352,41 @@ func buildStartupScenarios(srcDir, benchDir, microfatStub, microfatCli string) [
 			Size:      getFileSize(fatZstd),
 		},
 		{
-			Name:     "6. Universal FAT LZ4 (Cold memfd)",
+			Name:     "8. Universal FAT LZ4 (Cold memfd)",
 			Path:     fatLZ4,
 			ExecMode: execModeMemfd,
-			Env:      []string{"MICROFAT_EXEC_MODE=memfd"},
+			Env:      []string{envExecModeMemfd},
 			Size:     getFileSize(fatLZ4),
 		},
 		{
-			Name:     "7. Universal FAT None (Cold memfd)",
+			Name:     "9. Universal FAT None (Cold memfd)",
 			Path:     fatNone,
 			ExecMode: execModeMemfd,
-			Env:      []string{"MICROFAT_EXEC_MODE=memfd"},
+			Env:      []string{envExecModeMemfd},
 			Size:     getFileSize(fatNone),
 		},
-		{
-			Name:     "8. Trimmed FAT (Cold memfd)",
+	}
+
+	if hasMinimal {
+		scenarios = append(scenarios, StartupScenario{
+			Name:     "10. Universal FAT Minimal Stub (Cold memfd)",
+			Path:     fatMinimal,
+			ExecMode: execModeMemfd,
+			Env:      []string{envExecModeMemfd},
+			Size:     getFileSize(fatMinimal),
+		})
+	}
+
+	scenarios = append(scenarios,
+		StartupScenario{
+			Name:     "11. Trimmed FAT (Cold memfd)",
 			Path:     fatTrimmed,
 			ExecMode: execModeMemfd,
-			Env:      []string{"MICROFAT_EXEC_MODE=memfd"},
+			Env:      []string{envExecModeMemfd},
 			Size:     getFileSize(fatTrimmed),
 		},
-		{Name: "9. Optimized v3 (from FAT)", Path: optimizedV3, ExecMode: execModeNative, Size: getFileSize(optimizedV3)},
-	}
+		StartupScenario{Name: "12. Optimized v3 (from FAT)", Path: optimizedV3, ExecMode: execModeNative, Size: getFileSize(optimizedV3)},
+	)
 
 	for _, s := range scenarios {
 		fmt.Printf("  • %-36s -> %6.2f MB (%d bytes)\n", s.Name, float64(s.Size)/bytesInMegabyte, s.Size)

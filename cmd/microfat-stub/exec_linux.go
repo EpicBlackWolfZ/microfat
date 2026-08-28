@@ -380,6 +380,13 @@ func executeViaCache(
 		return errOut
 	}
 
+	if !format.ValidateChecksum(entry.SHA256) || entry.SHA256 == "" {
+		errOut := fmt.Errorf("%w: launcher execution failed: invalid variant sha256 checksum format %q",
+			format.ErrCacheWrite, entry.SHA256)
+		logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "invalid cache filename")
+		return errOut
+	}
+
 	cachedBinary := filepath.Join(cacheDir, filepath.Clean(entry.SHA256))
 	var decompDuration time.Duration
 	stat, statErr := os.Stat(cachedBinary)

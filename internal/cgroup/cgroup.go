@@ -227,7 +227,11 @@ func CalculateGOMEMLIMIT(limitBytes int64, ratio float64, minHeadroomBytes int64
 		chosen = float64(limitBytes) * smallContainerFallbackRatio
 	}
 
-	return int64(chosen), true
+	res := int64(chosen)
+	if res <= 0 {
+		return 0, false
+	}
+	return res, true
 }
 
 // CalculateGOMAXPROCS computes the recommended GOMAXPROCS value from a fractional CPU quota.

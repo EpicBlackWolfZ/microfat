@@ -92,6 +92,14 @@ jobs:
         run: |
           gotestsum --junitfile junit.xml --format pkgname -- -race -coverprofile=coverage.out -covermode=atomic ./cmd/... ./internal/... ./runtimeinit/...
 
+      - name: Run Chaos and Fault Injection Test Suite
+        run: |
+          make chaos
+
+      - name: Run Fuzz Sanity Checks (2s per target)
+        run: |
+          make fuzz FUZZTIME=2s
+
       - name: Publish Test Results to GitHub View
         uses: dorny/test-reporter@v3
         if: success() || failure()
