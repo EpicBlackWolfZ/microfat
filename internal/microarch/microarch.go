@@ -106,10 +106,19 @@ const (
 	rankARM64v9_4 = 94
 	rankARM64v9_5 = 95
 
-	maxX86Features   = 17
+	maxX86Features   = 20
 	maxARM64Features = 24
 
 	cpuInfoSplitParts = 2
+
+	cpuidBasicLeafInfo     = 0x0
+	cpuidBasicLeafFeatures = 0x1
+	cpuidExtLeafInfo       = 0x80000000
+	cpuidExtLeafFeatures   = 0x80000001
+
+	cpuidLeaf1ECXMOVBEBit  = 22
+	cpuidLeaf1ECXF16CBit   = 29
+	cpuidLeafExt1ECXABMBit = 5
 )
 
 var readCPUInfoFunc = readLinuxCPUInfoARM64
@@ -137,6 +146,9 @@ type X86Features struct {
 	HasBMI2     bool
 	HasFMA      bool
 	HasOSXSAVE  bool
+	HasF16C     bool
+	HasLZCNT    bool
+	HasMOVBE    bool
 	HasAVX512F  bool
 	HasAVX512BW bool
 	HasAVX512CD bool
@@ -496,8 +508,9 @@ func EvaluateAMD64(f X86Features) string {
 		return AMD64v1
 	}
 
-	// v3: v2 + AVX, AVX2, BMI1, BMI2, FMA, OSXSAVE
-	hasV3 := hasV2 && f.HasAVX && f.HasAVX2 && f.HasBMI1 && f.HasBMI2 && f.HasFMA && f.HasOSXSAVE
+	// v3: v2 + AVX, AVX2, BMI1, BMI2, FMA, OSXSAVE, F16C, LZCNT, MOVBE
+	hasV3 := hasV2 && f.HasAVX && f.HasAVX2 && f.HasBMI1 && f.HasBMI2 && f.HasFMA && f.HasOSXSAVE &&
+		f.HasF16C && f.HasLZCNT && f.HasMOVBE
 	if !hasV3 {
 		return AMD64v2
 	}
@@ -550,7 +563,9 @@ func EvaluateARM64(f ARM64Features) string {
 }
 
 func currentX86Features() X86Features {
-	return X86Features{
+	hasF16C, hasLZCNT, hasMOVBE := probeX86ExtraFeaturesFunc()
+
+	feat := X86Features{
 		HasCX16:     cpu.X86.HasCX16,
 		HasPOPCNT:   cpu.X86.HasPOPCNT,
 		HasSSE3:     cpu.X86.HasSSE3,
@@ -563,12 +578,31 @@ func currentX86Features() X86Features {
 		HasBMI2:     cpu.X86.HasBMI2,
 		HasFMA:      cpu.X86.HasFMA,
 		HasOSXSAVE:  cpu.X86.HasOSXSAVE,
+		HasF16C:     hasF16C,
+		HasLZCNT:    hasLZCNT,
+		HasMOVBE:    hasMOVBE,
 		HasAVX512F:  cpu.X86.HasAVX512F,
 		HasAVX512BW: cpu.X86.HasAVX512BW,
 		HasAVX512CD: cpu.X86.HasAVX512CD,
 		HasAVX512DQ: cpu.X86.HasAVX512DQ,
 		HasAVX512VL: cpu.X86.HasAVX512VL,
 	}
+
+	// Fallback to /proc/cpuinfo on Linux if CPUID returned false for extra features
+	if runtime.GOOS == "linux" && (!feat.HasF16C || !feat.HasLZCNT || !feat.HasMOVBE) && readCPUInfoX86FlagsFunc != nil {
+		f16c, lzcnt, movbe := readCPUInfoX86FlagsFunc()
+		if f16c {
+			feat.HasF16C = true
+		}
+		if lzcnt {
+			feat.HasLZCNT = true
+		}
+		if movbe {
+			feat.HasMOVBE = true
+		}
+	}
+
+	return feat
 }
 
 func currentARM64Features() ARM64Features {
@@ -620,8 +654,67 @@ type x86CPUModelInfo struct {
 
 var (
 	readCPUInfoX86Func          = readLinuxCPUInfoX86
+	readCPUInfoX86FlagsFunc     = readLinuxCPUInfoX86Flags
+	probeX86ExtraFeaturesFunc   = probeX86ExtraFeatures
 	isSkylakeXOrCascadeLakeFunc = isHostSkylakeXOrCascadeLake
 )
+
+func probeX86ExtraFeatures() (hasF16C, hasLZCNT, hasMOVBE bool) {
+	if runtime.GOARCH != ArchAMD64 {
+		return false, false, false
+	}
+
+	maxBasic, _, _, _ := cpuid(cpuidBasicLeafInfo, 0)
+	if maxBasic >= cpuidBasicLeafFeatures {
+		_, _, ecx, _ := cpuid(cpuidBasicLeafFeatures, 0)
+		hasMOVBE = (ecx & (1 << cpuidLeaf1ECXMOVBEBit)) != 0
+		hasF16C = (ecx & (1 << cpuidLeaf1ECXF16CBit)) != 0
+	}
+
+	maxExt, _, _, _ := cpuid(cpuidExtLeafInfo, 0)
+	if maxExt >= cpuidExtLeafFeatures {
+		_, _, ecx, _ := cpuid(cpuidExtLeafFeatures, 0)
+		hasLZCNT = (ecx & (1 << cpuidLeafExt1ECXABMBit)) != 0
+	}
+
+	return hasF16C, hasLZCNT, hasMOVBE
+}
+
+func readLinuxCPUInfoX86Flags() (hasF16C, hasLZCNT, hasMOVBE bool) {
+	// #nosec G304 -- reading linux system cpuinfo
+	f, err := os.Open("/proc/cpuinfo")
+	if err != nil {
+		return false, false, false
+	}
+	defer func() { _ = f.Close() }()
+	return parseLinuxCPUInfoX86Flags(f)
+}
+
+func parseLinuxCPUInfoX86Flags(r io.Reader) (hasF16C, hasLZCNT, hasMOVBE bool) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "flags") && !strings.HasPrefix(line, "Features") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", cpuInfoSplitParts)
+		if len(parts) < cpuInfoSplitParts {
+			continue
+		}
+		tokens := strings.Fields(parts[1])
+		for _, token := range tokens {
+			switch strings.ToLower(token) {
+			case "f16c":
+				hasF16C = true
+			case "abm", "lzcnt":
+				hasLZCNT = true
+			case "movbe":
+				hasMOVBE = true
+			}
+		}
+	}
+	return hasF16C, hasLZCNT, hasMOVBE
+}
 
 // IsAVX512DownclockingRisk reports whether the host CPU is an AMD64 processor subject to
 // AVX-512 frequency downclocking (such as Intel Skylake-X or Cascade Lake Xeon).
@@ -851,6 +944,15 @@ func extractX86FeatureList(f X86Features) []string {
 	}
 	if f.HasOSXSAVE {
 		list = append(list, "osxsave")
+	}
+	if f.HasF16C {
+		list = append(list, "f16c")
+	}
+	if f.HasLZCNT {
+		list = append(list, "lzcnt")
+	}
+	if f.HasMOVBE {
+		list = append(list, "movbe")
 	}
 	if f.HasAVX512F {
 		list = append(list, "avx512f")

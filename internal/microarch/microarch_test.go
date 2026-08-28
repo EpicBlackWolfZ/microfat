@@ -96,8 +96,71 @@ func TestEvaluateAMD64(t *testing.T) {
 				HasBMI2:    true,
 				HasFMA:      true,
 				HasOSXSAVE:  true,
+				HasF16C:     true,
+				HasLZCNT:    true,
+				HasMOVBE:    true,
 			},
 			expected: AMD64v3,
+		},
+		{
+			name: "v3 missing F16C",
+			features: X86Features{
+				HasCX16:    true,
+				HasPOPCNT:  true,
+				HasSSE3:    true,
+				HasSSSE3:   true,
+				HasSSE41:   true,
+				HasSSE42:   true,
+				HasAVX:     true,
+				HasAVX2:    true,
+				HasBMI1:    true,
+				HasBMI2:    true,
+				HasFMA:      true,
+				HasOSXSAVE:  true,
+				HasLZCNT:    true,
+				HasMOVBE:    true,
+			},
+			expected: AMD64v2,
+		},
+		{
+			name: "v3 missing LZCNT",
+			features: X86Features{
+				HasCX16:    true,
+				HasPOPCNT:  true,
+				HasSSE3:    true,
+				HasSSSE3:   true,
+				HasSSE41:   true,
+				HasSSE42:   true,
+				HasAVX:     true,
+				HasAVX2:    true,
+				HasBMI1:    true,
+				HasBMI2:    true,
+				HasFMA:      true,
+				HasOSXSAVE:  true,
+				HasF16C:     true,
+				HasMOVBE:    true,
+			},
+			expected: AMD64v2,
+		},
+		{
+			name: "v3 missing MOVBE",
+			features: X86Features{
+				HasCX16:    true,
+				HasPOPCNT:  true,
+				HasSSE3:    true,
+				HasSSSE3:   true,
+				HasSSE41:   true,
+				HasSSE42:   true,
+				HasAVX:     true,
+				HasAVX2:    true,
+				HasBMI1:    true,
+				HasBMI2:    true,
+				HasFMA:      true,
+				HasOSXSAVE:  true,
+				HasF16C:     true,
+				HasLZCNT:    true,
+			},
+			expected: AMD64v2,
 		},
 		{
 			name: "complete v4 (AVX-512)",
@@ -114,6 +177,9 @@ func TestEvaluateAMD64(t *testing.T) {
 				HasBMI2:     true,
 				HasFMA:      true,
 				HasOSXSAVE:  true,
+				HasF16C:     true,
+				HasLZCNT:    true,
+				HasMOVBE:    true,
 				HasAVX512F:  true,
 				HasAVX512BW: true,
 				HasAVX512CD: true,
@@ -429,6 +495,9 @@ func TestExtractFeatureLists(t *testing.T) {
 		HasBMI2:     true,
 		HasFMA:      true,
 		HasOSXSAVE:  true,
+		HasF16C:     true,
+		HasLZCNT:    true,
+		HasMOVBE:    true,
 		HasAVX512F:  true,
 		HasAVX512BW: true,
 		HasAVX512CD: true,
@@ -436,7 +505,7 @@ func TestExtractFeatureLists(t *testing.T) {
 		HasAVX512VL: true,
 	}
 	x86List := extractX86FeatureList(allX86)
-	const expectedX86Count = 17
+	const expectedX86Count = 20
 	if len(x86List) != expectedX86Count {
 		t.Errorf("expected %d x86 features, got %d", expectedX86Count, len(x86List))
 	}
@@ -778,8 +847,21 @@ func TestParseLinuxCPUInfoX86(t *testing.T) {
 		t.Errorf("unexpected parsed x86 cpu info: %+v", info)
 	}
 
-	// Test default reader implementation
+	hasF16C, hasLZCNT, hasMOVBE := parseLinuxCPUInfoX86Flags(strings.NewReader(mockSkylakeX))
+	if !hasF16C || !hasLZCNT || !hasMOVBE {
+		t.Errorf("expected true for f16c, lzcnt, movbe on mock fixture; got f16c=%v, lzcnt=%v, movbe=%v", hasF16C, hasLZCNT, hasMOVBE)
+	}
+
+	// Empty and malformed flags reader
+	emptyF16C, emptyLZCNT, emptyMOVBE := parseLinuxCPUInfoX86Flags(strings.NewReader("random text without flags\n"))
+	if emptyF16C || emptyLZCNT || emptyMOVBE {
+		t.Errorf("expected false flags for invalid cpuinfo, got f16c=%v, lzcnt=%v, movbe=%v", emptyF16C, emptyLZCNT, emptyMOVBE)
+	}
+
+	// Test default reader implementations
 	_ = readLinuxCPUInfoX86()
+	_, _, _ = readLinuxCPUInfoX86Flags()
+	_, _, _ = probeX86ExtraFeatures()
 	_ = isHostSkylakeXOrCascadeLake()
 	_ = IsAVX512DownclockingRisk()
 }

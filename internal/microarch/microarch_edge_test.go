@@ -165,3 +165,113 @@ func TestLinuxCPUInfoARM64ParsingEdgeCases(t *testing.T) {
 		t.Errorf("parseLinuxCPUInfoARM64 failed on formatted input: %+v", featuresARM64)
 	}
 }
+
+func TestX86FeaturePermutationsFallback(t *testing.T) {
+	t.Parallel()
+
+	baseV3 := X86Features{
+		HasCX16:    true,
+		HasPOPCNT:  true,
+		HasSSE3:    true,
+		HasSSSE3:   true,
+		HasSSE41:   true,
+		HasSSE42:   true,
+		HasAVX:     true,
+		HasAVX2:    true,
+		HasBMI1:    true,
+		HasBMI2:    true,
+		HasFMA:      true,
+		HasOSXSAVE:  true,
+		HasF16C:     true,
+		HasLZCNT:    true,
+		HasMOVBE:    true,
+	}
+
+	if got := EvaluateAMD64(baseV3); got != AMD64v3 {
+		t.Fatalf("EvaluateAMD64(baseV3) = %q, want %q", got, AMD64v3)
+	}
+
+	v3MissingTests := []struct {
+		name    string
+		mutate  func(f *X86Features)
+		wantLvl string
+	}{
+		{name: "missing F16C", mutate: func(f *X86Features) { f.HasF16C = false }, wantLvl: AMD64v2},
+		{name: "missing LZCNT", mutate: func(f *X86Features) { f.HasLZCNT = false }, wantLvl: AMD64v2},
+		{name: "missing MOVBE", mutate: func(f *X86Features) { f.HasMOVBE = false }, wantLvl: AMD64v2},
+		{name: "missing AVX", mutate: func(f *X86Features) { f.HasAVX = false }, wantLvl: AMD64v2},
+		{name: "missing AVX2", mutate: func(f *X86Features) { f.HasAVX2 = false }, wantLvl: AMD64v2},
+		{name: "missing BMI1", mutate: func(f *X86Features) { f.HasBMI1 = false }, wantLvl: AMD64v2},
+		{name: "missing BMI2", mutate: func(f *X86Features) { f.HasBMI2 = false }, wantLvl: AMD64v2},
+		{name: "missing FMA", mutate: func(f *X86Features) { f.HasFMA = false }, wantLvl: AMD64v2},
+		{name: "missing OSXSAVE", mutate: func(f *X86Features) { f.HasOSXSAVE = false }, wantLvl: AMD64v2},
+		{name: "missing SSE4.2 (drops to v1)", mutate: func(f *X86Features) { f.HasSSE42 = false }, wantLvl: AMD64v1},
+		{name: "missing CX16 (drops to v1)", mutate: func(f *X86Features) { f.HasCX16 = false }, wantLvl: AMD64v1},
+		{name: "missing POPCNT (drops to v1)", mutate: func(f *X86Features) { f.HasPOPCNT = false }, wantLvl: AMD64v1},
+	}
+
+	for _, tc := range v3MissingTests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			feat := baseV3
+			tc.mutate(&feat)
+			if got := EvaluateAMD64(feat); got != tc.wantLvl {
+				t.Errorf("EvaluateAMD64() with %s = %q, want %q", tc.name, got, tc.wantLvl)
+			}
+		})
+	}
+}
+
+func TestCurrentX86FeaturesWithFallback(t *testing.T) {
+	origProbe := probeX86ExtraFeaturesFunc
+	origFlags := readCPUInfoX86FlagsFunc
+	defer func() {
+		probeX86ExtraFeaturesFunc = origProbe
+		readCPUInfoX86FlagsFunc = origFlags
+	}()
+
+	// Simulate CPUID probe returning false, but cpuinfo fallback returning true
+	probeX86ExtraFeaturesFunc = func() (bool, bool, bool) {
+		return false, false, false
+	}
+	readCPUInfoX86FlagsFunc = func() (bool, bool, bool) {
+		return true, true, true
+	}
+
+	feat := currentX86Features()
+	if !feat.HasF16C || !feat.HasLZCNT || !feat.HasMOVBE {
+		t.Errorf("expected cpuinfo fallback to populate extra features; got f16c=%v, lzcnt=%v, movbe=%v",
+			feat.HasF16C, feat.HasLZCNT, feat.HasMOVBE)
+	}
+}
+
+func TestCPUIDDirectProbing(t *testing.T) {
+	t.Parallel()
+
+	// Call cpuid directly on basic and extended leaves
+	maxBasic, _, _, _ := cpuid(cpuidBasicLeafInfo, 0)
+	if maxBasic > 0 {
+		_, _, ecx, _ := cpuid(cpuidBasicLeafFeatures, 0)
+		_ = (ecx & (1 << cpuidLeaf1ECXMOVBEBit)) != 0
+		_ = (ecx & (1 << cpuidLeaf1ECXF16CBit)) != 0
+	}
+
+	maxExt, _, _, _ := cpuid(cpuidExtLeafInfo, 0)
+	if maxExt >= cpuidExtLeafFeatures {
+		_, _, ecx, _ := cpuid(cpuidExtLeafFeatures, 0)
+		_ = (ecx & (1 << cpuidLeafExt1ECXABMBit)) != 0
+	}
+}
+
+func TestParseLinuxCPUInfoX86FlagsEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	// Line starting with 'flags' but without ':'
+	badLines := "flags without colon\nFeatures : unknown_token f16c\nflags :\n"
+	f16c, lzcnt, movbe := parseLinuxCPUInfoX86Flags(strings.NewReader(badLines))
+	if !f16c || lzcnt || movbe {
+		t.Errorf("unexpected parsing outcome: f16c=%v, lzcnt=%v, movbe=%v", f16c, lzcnt, movbe)
+	}
+}
+
+
