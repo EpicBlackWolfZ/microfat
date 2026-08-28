@@ -426,20 +426,35 @@ func newPackCmd() *cobra.Command {
 				variants[level] = parts[1]
 			}
 
-			opts := pack.Options{
-				StubPath:          stubPath,
-				OutputPath:        outputPath,
-				AppName:           appName,
-				TargetOS:          targetOS,
-				TargetArch:        targetArch,
-				Variants:          variants,
-				SkipELFValidation: skipELFValidation,
-				Profile:           profile,
-				Compression:       compression,
-				CompressionLevel:  compressionLevel,
-				EnableDict:        enableDict,
-				DictSize:          dictSize,
-				FormatVersion:     formatVersion,
+			opts := pack.DefaultOptions()
+			opts.StubPath = stubPath
+			opts.OutputPath = outputPath
+			opts.AppName = appName
+			if targetOS != "" {
+				opts.TargetOS = targetOS
+			}
+			if targetArch != "" {
+				opts.TargetArch = targetArch
+			}
+			opts.Variants = variants
+			opts.SkipELFValidation = skipELFValidation
+			if profile != "" {
+				opts.Profile = profile
+			}
+			if compression != "" {
+				opts.Compression = compression
+			}
+			if compressionLevel != "" {
+				opts.CompressionLevel = compressionLevel
+			}
+			if enableDict {
+				opts.EnableDict = enableDict
+			}
+			if dictSize > 0 {
+				opts.DictSize = dictSize
+			}
+			if formatVersion != 0 {
+				opts.FormatVersion = formatVersion
 			}
 
 			fmt.Printf("Packaging fat binary '%s'...\n", outputPath)

@@ -31,7 +31,7 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 | 📖 [**Architecture & Binary Format**](docs/architecture.md) | Technical specification of the 56-byte trailer, JSON Index schema, and `memfd_create` lifecycle. |
 | ⚙️ [**Container Resource Auto-Tuning**](docs/runtime-tuning.md) | Linux cgroup v1/v2 auto-tuning (`GOMEMLIMIT` / `GOMAXPROCS`), GC mechanics, and workload `GOGC` tuning recipes. |
 | 🔄 [**Binary Lifecycle Modes**](docs/lifecycle-modes.md) | Comprehensive comparison and workflows for Universal Fat, Trimmed Fat, and Native ELF modes. |
-| 🚀 [**Advanced Compiler Optimizations**](docs/advanced-optimizations.md) | AVX-512 downclocking protection, Profile-Guided Optimization (PGO), and C allocators (`mimalloc`). |
+| 🚀 [**Advanced Optimizations & Compression Matrix**](docs/advanced-optimizations.md) | AVX-512 downclocking mitigation, Compression Decision Matrix, PGO matrices, and C allocators. |
 
 ---
 
@@ -225,6 +225,48 @@ Every fat executable supports reserved meta-commands for diagnostics and disk sp
 | `MICROFAT_CACHE_DIR` | *(unset)* | Custom node cache directory (defaults to `$XDG_CACHE_HOME/microfat` or `~/.cache/microfat`). |
 | `GOMEMLIMIT` | *(unset)* | If already set by the user or Kubernetes YAML, `microfat` **never** overrides it. |
 | `GOMAXPROCS` | *(unset)* | If already set by the user or Kubernetes YAML, `microfat` **never** overrides it. |
+
+---
+
+## Compression Decision Matrix & Go API Integration
+
+`microfat` provides three compression profiles to balance cold-start startup overhead against disk size and network transfer bandwidth:
+
+| Profile | Codec | Typical Payload Size | Cold-Start Overhead | Ratio | Best-Fit Workload |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `latency` | `none` / `lz4` | `< 10 MB` | **< 80 µs – 350 µs** | 0% – 48% | Sub-millisecond serverless functions, low-latency CLI tools |
+| `balanced` *(default)* | `zstd` | `10 MB – 50 MB` | **< 1.5 ms** | ~50% – 60% | Kubernetes daemon sets, general cloud microservices |
+| `size` | `zstd:best` (+`--dict`) | `> 50 MB` | **< 4.5 ms – 6.0 ms** | **~65% – 78%** | Multi-variant matrices, bandwidth-constrained edge IoT, large monoliths |
+
+For full benchmarks and sizing recipes, see the [Advanced Optimizations Guide](docs/advanced-optimizations.md#4-compression-profiles--decision-matrix).
+
+### Programmatic Packaging in Go
+
+To package binaries programmatically, initialize options with `pack.DefaultOptions()`:
+
+```go
+package main
+
+import (
+	"log"
+
+	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+)
+
+func main() {
+	opts := pack.DefaultOptions()
+	opts.StubPath = "bin/microfat-stub"
+	opts.OutputPath = "bin/myapp-fat"
+	opts.AppName = "myapp"
+	opts.Variants["v1"] = "dist/app_v1"
+	opts.Variants["v3"] = "dist/app_v3"
+	opts.Variants["v4"] = "dist/app_v4"
+
+	if _, err := pack.Pack(opts); err != nil {
+		log.Fatalf("Packaging failed: %v", err)
+	}
+}
+```
 
 ---
 

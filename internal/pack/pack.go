@@ -59,6 +59,21 @@ type Options struct {
 	SkipELFValidation  bool // Optional flag to bypass ELF header validation (primarily for testing)
 }
 
+// DefaultOptions returns a new Options instance initialized with safe, recommended defaults:
+// Format v2 binary table, balanced profile with Zstandard compression, standard 0755 file permissions,
+// linux/amd64 target OS/architecture, and an initialized variants map.
+func DefaultOptions() Options {
+	return Options{
+		TargetOS:      "linux",
+		TargetArch:    microarch.ArchAMD64,
+		Variants:      make(map[string]string),
+		Profile:       codec.ProfileBalanced,
+		Compression:   codec.AlgorithmZstd,
+		Permissions:   defaultFileMode,
+		FormatVersion: format.FormatVersionCurrent,
+	}
+}
+
 // VerificationResult contains the result of verifying an individual embedded variant.
 type VerificationResult struct {
 	Level            string

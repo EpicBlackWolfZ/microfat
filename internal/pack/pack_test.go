@@ -10,7 +10,9 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -1675,6 +1677,122 @@ func TestSampleVariantPayloadsEdgeCases(t *testing.T) {
 		t.Fatalf("expected error for missing variant file in sampleVariantPayloads")
 	}
 }
+
+func TestDefaultOptions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("DefaultValues", func(t *testing.T) {
+		t.Parallel()
+		opts := DefaultOptions()
+
+		if opts.FormatVersion != format.FormatVersionCurrent {
+			t.Errorf("expected FormatVersion %d, got %d", format.FormatVersionCurrent, opts.FormatVersion)
+		}
+		if opts.Profile != codec.ProfileBalanced {
+			t.Errorf("expected Profile %q, got %q", codec.ProfileBalanced, opts.Profile)
+		}
+		if opts.Compression != codec.AlgorithmZstd {
+			t.Errorf("expected Compression %q, got %q", codec.AlgorithmZstd, opts.Compression)
+		}
+		if opts.Permissions != defaultFileMode {
+			t.Errorf("expected Permissions %o, got %o", defaultFileMode, opts.Permissions)
+		}
+		if opts.TargetOS != "linux" {
+			t.Errorf("expected TargetOS %q, got %q", "linux", opts.TargetOS)
+		}
+		if opts.TargetArch != microarch.ArchAMD64 {
+			t.Errorf("expected TargetArch %q, got %q", microarch.ArchAMD64, opts.TargetArch)
+		}
+		if opts.Variants == nil {
+			t.Fatal("expected Variants map to be initialized non-nil")
+		}
+		if len(opts.Variants) != 0 {
+			t.Errorf("expected empty Variants map, got %d items", len(opts.Variants))
+		}
+	})
+
+	t.Run("MapIsolation", func(t *testing.T) {
+		t.Parallel()
+		opts1 := DefaultOptions()
+		opts1.Variants["v3"] = "/tmp/fake-v3"
+
+		opts2 := DefaultOptions()
+		if len(opts2.Variants) != 0 {
+			t.Errorf("expected isolated Variants map in second call, got %d items", len(opts2.Variants))
+		}
+	})
+
+	t.Run("EndToEndPackWithDefaultOptions", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+
+		stubPath := filepath.Join(tempDir, "stub")
+		if err := os.WriteFile(stubPath, []byte("#!/bin/sh\necho Stub\n"), 0o755); err != nil {
+			t.Fatalf("failed to write stub: %v", err)
+		}
+
+		v1Path := filepath.Join(tempDir, "bin-v1")
+		if err := os.WriteFile(v1Path, []byte("#!/bin/sh\necho v1\n"), 0o755); err != nil {
+			t.Fatalf("failed to write v1: %v", err)
+		}
+
+		v3Path := filepath.Join(tempDir, "bin-v3")
+		if err := os.WriteFile(v3Path, []byte("#!/bin/sh\necho v3\n"), 0o755); err != nil {
+			t.Fatalf("failed to write v3: %v", err)
+		}
+
+		outputPath := filepath.Join(tempDir, "packed.fat")
+
+		opts := DefaultOptions()
+		opts.StubPath = stubPath
+		opts.OutputPath = outputPath
+		opts.AppName = "default-opts-test"
+		opts.SkipELFValidation = true
+		opts.Variants["v1"] = v1Path
+		opts.Variants["v3"] = v3Path
+
+		idx, err := Pack(opts)
+		if err != nil {
+			t.Fatalf("Pack with DefaultOptions failed: %v", err)
+		}
+
+		if idx.Version != format.FormatVersionCurrent {
+			t.Errorf("expected index version %d, got %d", format.FormatVersionCurrent, idx.Version)
+		}
+		if len(idx.Variants) != 2 {
+			t.Fatalf("expected 2 variants, got %d", len(idx.Variants))
+		}
+
+		f, err := os.Open(outputPath)
+		if err != nil {
+			t.Fatalf("failed to open generated fat binary: %v", err)
+		}
+		defer func() { _ = f.Close() }()
+
+		stat, err := f.Stat()
+		if err != nil {
+			t.Fatalf("stat failed: %v", err)
+		}
+
+		if !format.IsFatBinary(f, stat.Size()) {
+			t.Error("expected IsFatBinary to be true")
+		}
+
+		vIdx, results, err := VerifyBinary(f, stat.Size())
+		if err != nil {
+			t.Fatalf("VerifyBinary failed: %v", err)
+		}
+		if vIdx.Version != format.FormatVersionCurrent {
+			t.Errorf("verified index version mismatch: expected %d, got %d", format.FormatVersionCurrent, vIdx.Version)
+		}
+		for _, r := range results {
+			if !r.Valid {
+				t.Errorf("variant %s verification failed: %v", r.Level, r.Error)
+			}
+		}
+	})
+}
+
 
 
 
