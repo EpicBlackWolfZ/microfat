@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -18,6 +20,7 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
+	"golang.org/x/sys/unix"
 )
 
 // createSyntheticFatFile creates a synthetic fat binary file with a dummy payload.
@@ -606,6 +609,112 @@ func TestOversizedDictionaryChaos(t *testing.T) {
 		}
 	})
 }
+
+func TestMemfdSealingVerificationAndImmutability(t *testing.T) {
+	payload := []byte("#!/bin/sh\necho 'memfd-sealing-test'\n")
+	fatFile, entry, idx := createSyntheticFatFile(t, payload)
+
+	origExecve := execveFunc
+	origSeal := memfdSealFunc
+	t.Cleanup(func() {
+		execveFunc = origExecve
+		memfdSealFunc = origSeal
+	})
+
+	var sealedFD int
+	var execveCalled bool
+	var actualSeals int
+	var writeErr error
+
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		execveCalled = true
+		// argv0 is /proc/self/fd/<fd>
+		parts := strings.Split(argv0, "/")
+		if len(parts) > 0 {
+			fdNum, err := strconv.Atoi(parts[len(parts)-1])
+			if err == nil {
+				sealedFD = fdNum
+				// Query active seals on fd
+				seals, getErr := unix.FcntlInt(uintptr(sealedFD), unix.F_GET_SEALS, 0)
+				if getErr == nil {
+					actualSeals = seals
+				}
+				// Attempt to write to sealed memfd
+				_, writeErr = unix.Write(sealedFD, []byte("tampered"))
+			}
+		}
+		return nil
+	}
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{}
+
+	err := executeViaMemfd(fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
+	if err != nil {
+		t.Fatalf("executeViaMemfd failed: %v", err)
+	}
+	if !execveCalled {
+		t.Fatal("expected execve to be called")
+	}
+
+	expectedSeals := unix.F_SEAL_WRITE | unix.F_SEAL_SHRINK | unix.F_SEAL_GROW | unix.F_SEAL_SEAL
+	if actualSeals != expectedSeals {
+		t.Errorf("active seals mismatch: got %d, want %d", actualSeals, expectedSeals)
+	}
+
+	if writeErr == nil {
+		t.Error("expected write to sealed memfd to fail with EPERM/EBUSY, but it succeeded")
+	} else if !errors.Is(writeErr, syscall.EPERM) && !errors.Is(writeErr, syscall.EBUSY) {
+		t.Errorf("expected write error to be EPERM or EBUSY, got: %v", writeErr)
+	}
+}
+
+func TestMemfdSealingGracefulFallback(t *testing.T) {
+	payload := []byte("#!/bin/sh\necho 'memfd-seal-fallback-test'\n")
+	fatFile, entry, idx := createSyntheticFatFile(t, payload)
+
+	origExecve := execveFunc
+	origSeal := memfdSealFunc
+	t.Cleanup(func() {
+		execveFunc = origExecve
+		memfdSealFunc = origSeal
+	})
+
+	testCases := []struct {
+		name    string
+		sealErr error
+	}{
+		{name: "ENOSYS", sealErr: syscall.ENOSYS},
+		{name: "EINVAL", sealErr: syscall.EINVAL},
+		{name: "EPERM", sealErr: syscall.EPERM},
+	}
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(format.EnvDebug, "1")
+			var execveCalled bool
+			execveFunc = func(argv0 string, argv []string, envv []string) error {
+				execveCalled = true
+				return nil
+			}
+			memfdSealFunc = func(fd int, seals int) error {
+				return tc.sealErr
+			}
+
+			err := executeViaMemfd(fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
+			if err != nil {
+				t.Fatalf("expected executeViaMemfd to succeed despite seal error %v, got %v", tc.sealErr, err)
+			}
+			if !execveCalled {
+				t.Fatal("expected execve to be called on graceful seal fallback")
+			}
+		})
+	}
+}
+
 
 
 
