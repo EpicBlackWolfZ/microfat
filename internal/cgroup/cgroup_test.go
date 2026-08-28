@@ -727,3 +727,404 @@ func TestResolveTuningPlan_Profiles(t *testing.T) {
 		}
 	})
 }
+
+func TestReadLimitsCgroupV2Nested_LeafLimit(t *testing.T) {
+	tempDir := t.TempDir()
+	cgroupRoot := filepath.Join(tempDir, "sys_fs_cgroup")
+	procFile := filepath.Join(tempDir, "proc_cgroup")
+
+	leafDir := filepath.Join(cgroupRoot, "user.slice", "user-1000.slice", "app.slice")
+	if err := os.MkdirAll(leafDir, 0o755); err != nil {
+		t.Fatalf("mkdir leafDir: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(cgroupRoot, "memory.max"), []byte("max\n"), 0o600); err != nil {
+		t.Fatalf("writing root memory.max: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cgroupRoot, "cpu.max"), []byte("max 100000\n"), 0o600); err != nil {
+		t.Fatalf("writing root cpu.max: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(leafDir, "memory.max"), []byte("1073741824\n"), 0o600); err != nil {
+		t.Fatalf("writing leaf memory.max: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(leafDir, "cpu.max"), []byte("200000 100000\n"), 0o600); err != nil {
+		t.Fatalf("writing leaf cpu.max: %v", err)
+	}
+
+	procContent := "0::/user.slice/user-1000.slice/app.slice\n"
+	if err := os.WriteFile(procFile, []byte(procContent), 0o600); err != nil {
+		t.Fatalf("writing procFile: %v", err)
+	}
+
+	limits, err := ReadLimitsCustom(cgroupRoot, procFile)
+	if err != nil {
+		t.Fatalf("ReadLimitsCustom failed: %v", err)
+	}
+
+	if limits.CgroupVersion != VersionV2 {
+		t.Errorf("expected VersionV2, got %d", limits.CgroupVersion)
+	}
+	if limits.MemoryLimitBytes != testBytes1GB {
+		t.Errorf("expected MemoryLimitBytes %d, got %d", testBytes1GB, limits.MemoryLimitBytes)
+	}
+	const expectedQuota = 2.0
+	if limits.CPUQuota != expectedQuota {
+		t.Errorf("expected CPUQuota %f, got %f", expectedQuota, limits.CPUQuota)
+	}
+	if limits.CPUs != 2 {
+		t.Errorf("expected CPUs 2, got %d", limits.CPUs)
+	}
+}
+
+func TestReadLimitsCgroupV2Nested_InheritedAncestorLimit(t *testing.T) {
+	tempDir := t.TempDir()
+	cgroupRoot := filepath.Join(tempDir, "sys_fs_cgroup")
+	procFile := filepath.Join(tempDir, "proc_cgroup")
+
+	parentDir := filepath.Join(cgroupRoot, "user.slice", "user-1000.slice")
+	leafDir := filepath.Join(parentDir, "app.slice")
+	if err := os.MkdirAll(leafDir, 0o755); err != nil {
+		t.Fatalf("mkdir leafDir: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(cgroupRoot, "memory.max"), []byte("max\n"), 0o600); err != nil {
+		t.Fatalf("writing root memory.max: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cgroupRoot, "cpu.max"), []byte("max 100000\n"), 0o600); err != nil {
+		t.Fatalf("writing root cpu.max: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(parentDir, "memory.max"), []byte("2147483648\n"), 0o600); err != nil {
+		t.Fatalf("writing parent memory.max: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(parentDir, "cpu.max"), []byte("400000 100000\n"), 0o600); err != nil {
+		t.Fatalf("writing parent cpu.max: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(leafDir, "memory.max"), []byte("max\n"), 0o600); err != nil {
+		t.Fatalf("writing leaf memory.max: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(leafDir, "cpu.max"), []byte("max 100000\n"), 0o600); err != nil {
+		t.Fatalf("writing leaf cpu.max: %v", err)
+	}
+
+	procContent := "0::/user.slice/user-1000.slice/app.slice\n"
+	if err := os.WriteFile(procFile, []byte(procContent), 0o600); err != nil {
+		t.Fatalf("writing procFile: %v", err)
+	}
+
+	limits, err := ReadLimitsCustom(cgroupRoot, procFile)
+	if err != nil {
+		t.Fatalf("ReadLimitsCustom failed: %v", err)
+	}
+
+	if limits.MemoryLimitBytes != testBytes2GB {
+		t.Errorf("expected MemoryLimitBytes %d inherited from parent, got %d", testBytes2GB, limits.MemoryLimitBytes)
+	}
+	const expectedQuota = 4.0
+	if limits.CPUQuota != expectedQuota {
+		t.Errorf("expected CPUQuota %f, got %f", expectedQuota, limits.CPUQuota)
+	}
+	if limits.CPUs != 4 {
+		t.Errorf("expected CPUs 4, got %d", limits.CPUs)
+	}
+}
+
+func TestReadLimitsCgroupV2Nested_MultiLevelStrictestLimit(t *testing.T) {
+	tempDir := t.TempDir()
+	cgroupRoot := filepath.Join(tempDir, "sys_fs_cgroup")
+	procFile := filepath.Join(tempDir, "proc_cgroup")
+
+	userSlice := filepath.Join(cgroupRoot, "user.slice")
+	user1000Slice := filepath.Join(userSlice, "user-1000.slice")
+	leafDir := filepath.Join(user1000Slice, "app.slice")
+	if err := os.MkdirAll(leafDir, 0o755); err != nil {
+		t.Fatalf("mkdir leafDir: %v", err)
+	}
+
+	const bytes4GB = int64(4 * 1024 * 1024 * 1024)
+	if err := os.WriteFile(filepath.Join(cgroupRoot, "memory.max"), []byte("4294967296\n"), 0o600); err != nil {
+		t.Fatalf("writing root memory.max: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cgroupRoot, "cpu.max"), []byte("800000 100000\n"), 0o600); err != nil {
+		t.Fatalf("writing root cpu.max: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(userSlice, "memory.max"), []byte("2147483648\n"), 0o600); err != nil {
+		t.Fatalf("writing user.slice memory.max: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userSlice, "cpu.max"), []byte("400000 100000\n"), 0o600); err != nil {
+		t.Fatalf("writing user.slice cpu.max: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(user1000Slice, "memory.max"), []byte("1073741824\n"), 0o600); err != nil {
+		t.Fatalf("writing user-1000.slice memory.max: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(user1000Slice, "cpu.max"), []byte("200000 100000\n"), 0o600); err != nil {
+		t.Fatalf("writing user-1000.slice cpu.max: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(leafDir, "memory.max"), []byte("max\n"), 0o600); err != nil {
+		t.Fatalf("writing leaf memory.max: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(leafDir, "cpu.max"), []byte("max 100000\n"), 0o600); err != nil {
+		t.Fatalf("writing leaf cpu.max: %v", err)
+	}
+
+	procContent := "0::/user.slice/user-1000.slice/app.slice\n"
+	if err := os.WriteFile(procFile, []byte(procContent), 0o600); err != nil {
+		t.Fatalf("writing procFile: %v", err)
+	}
+
+	limits, err := ReadLimitsCustom(cgroupRoot, procFile)
+	if err != nil {
+		t.Fatalf("ReadLimitsCustom failed: %v", err)
+	}
+
+	if limits.MemoryLimitBytes != testBytes1GB {
+		t.Errorf("expected strictest MemoryLimitBytes %d, got %d", testBytes1GB, limits.MemoryLimitBytes)
+	}
+	const expectedQuota = 2.0
+	if limits.CPUQuota != expectedQuota {
+		t.Errorf("expected strictest CPUQuota %f, got %f", expectedQuota, limits.CPUQuota)
+	}
+	if limits.CPUs != 2 {
+		t.Errorf("expected CPUs 2, got %d", limits.CPUs)
+	}
+	_ = bytes4GB
+}
+
+func TestReadLimitsCgroupV2Nested_RootPath(t *testing.T) {
+	tempDir := t.TempDir()
+	cgroupRoot := filepath.Join(tempDir, "sys_fs_cgroup")
+	procFile := filepath.Join(tempDir, "proc_cgroup")
+	if err := os.MkdirAll(cgroupRoot, 0o755); err != nil {
+		t.Fatalf("mkdir cgroupRoot: %v", err)
+	}
+
+	const bytes512MB = int64(512 * 1024 * 1024)
+	if err := os.WriteFile(filepath.Join(cgroupRoot, "memory.max"), []byte("536870912\n"), 0o600); err != nil {
+		t.Fatalf("writing root memory.max: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cgroupRoot, "cpu.max"), []byte("150000 100000\n"), 0o600); err != nil {
+		t.Fatalf("writing root cpu.max: %v", err)
+	}
+
+	if err := os.WriteFile(procFile, []byte("0::/\n"), 0o600); err != nil {
+		t.Fatalf("writing procFile: %v", err)
+	}
+
+	limits, err := ReadLimitsCustom(cgroupRoot, procFile)
+	if err != nil {
+		t.Fatalf("ReadLimitsCustom failed: %v", err)
+	}
+
+	if limits.MemoryLimitBytes != bytes512MB {
+		t.Errorf("expected MemoryLimitBytes %d, got %d", bytes512MB, limits.MemoryLimitBytes)
+	}
+	const expectedQuota = 1.5
+	if limits.CPUQuota != expectedQuota {
+		t.Errorf("expected CPUQuota %f, got %f", expectedQuota, limits.CPUQuota)
+	}
+	if limits.CPUs != 1 {
+		t.Errorf("expected CPUs 1, got %d", limits.CPUs)
+	}
+}
+
+func TestReadLimitsCgroupV1Nested_MemoryAndCpu(t *testing.T) {
+	tempDir := t.TempDir()
+	cgroupRoot := filepath.Join(tempDir, "sys_fs_cgroup")
+	procFile := filepath.Join(tempDir, "proc_cgroup")
+
+	memLeaf := filepath.Join(cgroupRoot, "memory", "docker", "container123")
+	cpuLeaf := filepath.Join(cgroupRoot, "cpu", "docker", "container123")
+	if err := os.MkdirAll(memLeaf, 0o755); err != nil {
+		t.Fatalf("mkdir memLeaf: %v", err)
+	}
+	if err := os.MkdirAll(cpuLeaf, 0o755); err != nil {
+		t.Fatalf("mkdir cpuLeaf: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(cgroupRoot, "memory", "memory.limit_in_bytes"), []byte("4294967296\n"), 0o600); err != nil {
+		t.Fatalf("writing root mem limit: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cgroupRoot, "cpu", "cpu.cfs_quota_us"), []byte("-1\n"), 0o600); err != nil {
+		t.Fatalf("writing root cpu quota: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cgroupRoot, "cpu", "cpu.cfs_period_us"), []byte("100000\n"), 0o600); err != nil {
+		t.Fatalf("writing root cpu period: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(memLeaf, "memory.limit_in_bytes"), []byte("1073741824\n"), 0o600); err != nil {
+		t.Fatalf("writing leaf mem limit: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cpuLeaf, "cpu.cfs_quota_us"), []byte("300000\n"), 0o600); err != nil {
+		t.Fatalf("writing leaf cpu quota: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cpuLeaf, "cpu.cfs_period_us"), []byte("100000\n"), 0o600); err != nil {
+		t.Fatalf("writing leaf cpu period: %v", err)
+	}
+
+	procContent := "5:memory:/docker/container123\n4:cpu,cpuacct:/docker/container123\n"
+	if err := os.WriteFile(procFile, []byte(procContent), 0o600); err != nil {
+		t.Fatalf("writing procFile: %v", err)
+	}
+
+	limits, err := ReadLimitsCustom(cgroupRoot, procFile)
+	if err != nil {
+		t.Fatalf("ReadLimitsCustom failed: %v", err)
+	}
+
+	if limits.CgroupVersion != VersionV1 {
+		t.Errorf("expected VersionV1, got %d", limits.CgroupVersion)
+	}
+	if limits.MemoryLimitBytes != testBytes1GB {
+		t.Errorf("expected MemoryLimitBytes %d, got %d", testBytes1GB, limits.MemoryLimitBytes)
+	}
+	const expectedQuota = 3.0
+	if limits.CPUQuota != expectedQuota {
+		t.Errorf("expected CPUQuota %f, got %f", expectedQuota, limits.CPUQuota)
+	}
+	if limits.CPUs != 3 {
+		t.Errorf("expected CPUs 3, got %d", limits.CPUs)
+	}
+}
+
+func TestReadLimitsCgroupV1Nested_AliasedCpuController(t *testing.T) {
+	tempDir := t.TempDir()
+	cgroupRoot := filepath.Join(tempDir, "sys_fs_cgroup")
+	procFile := filepath.Join(tempDir, "proc_cgroup")
+
+	cpuAcctLeaf := filepath.Join(cgroupRoot, "cpu,cpuacct", "system.slice", "service.scope")
+	memDir := filepath.Join(cgroupRoot, "memory")
+	if err := os.MkdirAll(cpuAcctLeaf, 0o755); err != nil {
+		t.Fatalf("mkdir cpuAcctLeaf: %v", err)
+	}
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatalf("mkdir memDir: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(memDir, "memory.limit_in_bytes"), []byte("2147483648\n"), 0o600); err != nil {
+		t.Fatalf("writing mem limit: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cpuAcctLeaf, "cpu.cfs_quota_us"), []byte("200000\n"), 0o600); err != nil {
+		t.Fatalf("writing leaf cpu quota: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cpuAcctLeaf, "cpu.cfs_period_us"), []byte("100000\n"), 0o600); err != nil {
+		t.Fatalf("writing leaf cpu period: %v", err)
+	}
+
+	procContent := "2:cpu,cpuacct:/system.slice/service.scope\n3:memory:/\n"
+	if err := os.WriteFile(procFile, []byte(procContent), 0o600); err != nil {
+		t.Fatalf("writing procFile: %v", err)
+	}
+
+	limits, err := ReadLimitsCustom(cgroupRoot, procFile)
+	if err != nil {
+		t.Fatalf("ReadLimitsCustom failed: %v", err)
+	}
+
+	if limits.CgroupVersion != VersionV1 {
+		t.Errorf("expected VersionV1, got %d", limits.CgroupVersion)
+	}
+	if limits.MemoryLimitBytes != testBytes2GB {
+		t.Errorf("expected MemoryLimitBytes %d, got %d", testBytes2GB, limits.MemoryLimitBytes)
+	}
+	const expectedQuota = 2.0
+	if limits.CPUQuota != expectedQuota {
+		t.Errorf("expected CPUQuota %f, got %f", expectedQuota, limits.CPUQuota)
+	}
+	if limits.CPUs != 2 {
+		t.Errorf("expected CPUs 2, got %d", limits.CPUs)
+	}
+}
+
+func TestReadLimitsProcCgroup_EdgeCases(t *testing.T) {
+	tempDir := t.TempDir()
+	cgroupRoot := filepath.Join(tempDir, "sys_fs_cgroup")
+	if err := os.MkdirAll(cgroupRoot, 0o755); err != nil {
+		t.Fatalf("mkdir cgroupRoot: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(cgroupRoot, "memory.max"), []byte("1073741824\n"), 0o600); err != nil {
+		t.Fatalf("writing root memory.max: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cgroupRoot, "cpu.max"), []byte("200000 100000\n"), 0o600); err != nil {
+		t.Fatalf("writing root cpu.max: %v", err)
+	}
+
+	t.Run("MissingProcFileFallback", func(t *testing.T) {
+		limits, err := ReadLimitsCustom(cgroupRoot, filepath.Join(tempDir, "non_existent_proc"))
+		if err != nil {
+			t.Fatalf("ReadLimitsCustom failed on missing proc: %v", err)
+		}
+		if limits.MemoryLimitBytes != testBytes1GB {
+			t.Errorf("expected fallback to root memory %d, got %d", testBytes1GB, limits.MemoryLimitBytes)
+		}
+	})
+
+	t.Run("EmptyProcFilePathDefaultsToProcSelfCgroup", func(t *testing.T) {
+		_, err := ReadLimitsCustom(cgroupRoot, "")
+		if err != nil {
+			t.Fatalf("ReadLimitsCustom failed with empty proc path: %v", err)
+		}
+	})
+
+	t.Run("MalformedLinesAndCommentsIgnored", func(t *testing.T) {
+		corruptProc := filepath.Join(t.TempDir(), "corrupt_proc")
+		corruptContent := "# Comment header\n\nmalformed_line_no_colons\n1:only_two_parts\n:::\n"
+		if err := os.WriteFile(corruptProc, []byte(corruptContent), 0o600); err != nil {
+			t.Fatalf("writing corruptProc: %v", err)
+		}
+
+		limits, err := ReadLimitsCustom(cgroupRoot, corruptProc)
+		if err != nil {
+			t.Fatalf("ReadLimitsCustom failed on corrupt proc: %v", err)
+		}
+		if limits.MemoryLimitBytes != testBytes1GB {
+			t.Errorf("expected root memory %d, got %d", testBytes1GB, limits.MemoryLimitBytes)
+		}
+	})
+
+	t.Run("PathEscapeSanitization", func(t *testing.T) {
+		escapeProc := filepath.Join(t.TempDir(), "escape_proc")
+		escapeContent := "0::../../../../../../etc\n"
+		if err := os.WriteFile(escapeProc, []byte(escapeContent), 0o600); err != nil {
+			t.Fatalf("writing escapeProc: %v", err)
+		}
+
+		limits, err := ReadLimitsCustom(cgroupRoot, escapeProc)
+		if err != nil {
+			t.Fatalf("ReadLimitsCustom failed on escape attempt: %v", err)
+		}
+		if limits.MemoryLimitBytes != testBytes1GB {
+			t.Errorf("expected root memory %d, got %d", testBytes1GB, limits.MemoryLimitBytes)
+		}
+	})
+}
+
+func TestIsSubpathHelper(t *testing.T) {
+	tests := []struct {
+		root string
+		path string
+		want bool
+	}{
+		{defaultCgroupMount, defaultCgroupMount, true},
+		{defaultCgroupMount, defaultCgroupMount + "/user.slice", true},
+		{defaultCgroupMount, defaultCgroupMount + "/user.slice/app.slice", true},
+		{defaultCgroupMount, defaultCgroupMount + "_other", false},
+		{defaultCgroupMount, "/sys/fs", false},
+		{"/", "/user.slice", true},
+		{"/", "/", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.root+"_"+tt.path, func(t *testing.T) {
+			got := isSubpath(tt.root, tt.path)
+			if got != tt.want {
+				t.Errorf("isSubpath(%q, %q) = %v, want %v", tt.root, tt.path, got, tt.want)
+			}
+		})
+	}
+}
