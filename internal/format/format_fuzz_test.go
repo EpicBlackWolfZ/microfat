@@ -21,7 +21,7 @@ func FuzzUnmarshalBinaryIndex(f *testing.F) {
 				Offset:           100,
 				CompressedSize:   200,
 				UncompressedSize: 500,
-				SHA256:           "abcdef123456",
+				SHA256:           testSHA256Sample,
 				Compression:      testCompression,
 			},
 			{
@@ -29,7 +29,7 @@ func FuzzUnmarshalBinaryIndex(f *testing.F) {
 				Offset:           300,
 				CompressedSize:   250,
 				UncompressedSize: 600,
-				SHA256:           "987654fedcba",
+				SHA256:           testSHA256Sample2,
 				Compression:      "lz4",
 			},
 		},
@@ -48,7 +48,7 @@ func FuzzUnmarshalBinaryIndex(f *testing.F) {
 		CreatedUnix:      1724545000,
 		DictionaryOffset: 50,
 		DictionarySize:   128,
-		DictionarySHA256: "dictsha256sample",
+		DictionarySHA256: testSHA256Sample,
 		DictionaryID:     0x12345678,
 		Variants: []VariantEntry{
 			{
@@ -56,7 +56,7 @@ func FuzzUnmarshalBinaryIndex(f *testing.F) {
 				Offset:           178,
 				CompressedSize:   300,
 				UncompressedSize: 800,
-				SHA256:           "v80sha",
+				SHA256:           testSHA256Sample2,
 				Compression:      testCompression,
 			},
 		},
@@ -132,13 +132,15 @@ func FuzzUnmarshalBinaryIndex(f *testing.F) {
 func FuzzUnmarshalJSONIndex(f *testing.F) {
 	// Seed 1: Standard valid format v1 JSON
 	seedJSON1 := `{"version":1,"app_name":"demo","os":"linux","arch":"amd64","created_unix":1724540000,` +
-		`"variants":[{"level":"v1","offset":100,"compressed_size":200,"uncompressed_size":500,"sha256":"abc","compression":"zstd"}]}`
+		`"variants":[{"level":"v1","offset":100,"compressed_size":200,"uncompressed_size":500,` +
+		`"sha256":"` + testSHA256Sample + `","compression":"zstd"}]}`
 	f.Add([]byte(seedJSON1))
 
 	// Seed 2: JSON with dictionary
 	seedJSON2 := `{"version":1,"app_name":"demo-dict","os":"linux","arch":"amd64","created_unix":1724540000,` +
-		`"dictionary_offset":64,"dictionary_size":256,"dictionary_sha256":"dsha","dictionary_id":42,` +
-		`"variants":[{"level":"v2","offset":320,"compressed_size":150,"uncompressed_size":400,"sha256":"def","compression":"lz4"}]}`
+		`"dictionary_offset":64,"dictionary_size":256,"dictionary_sha256":"` + testSHA256Sample + `","dictionary_id":42,` +
+		`"variants":[{"level":"v2","offset":320,"compressed_size":150,"uncompressed_size":400,` +
+		`"sha256":"` + testSHA256Sample2 + `","compression":"lz4"}]}`
 	f.Add([]byte(seedJSON2))
 
 	// Seed 3: Whitespace and empty fields
@@ -214,7 +216,7 @@ func FuzzReadTrailerAndIndex(f *testing.F) {
 				Offset:           16,
 				CompressedSize:   32,
 				UncompressedSize: 64,
-				SHA256:           "aabbcc",
+				SHA256:           testSHA256Sample,
 				Compression:      "none",
 			},
 		},
