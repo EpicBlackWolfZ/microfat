@@ -1,5 +1,9 @@
 # Advanced Compiler & Architecture Optimizations
 
+[**← Lifecycle Modes**](lifecycle-modes.md) | [**Main Index**](../README.md#documentation-guide) | [**Troubleshooting & Runbook →**](troubleshooting.md)
+
+---
+
 This guide covers advanced tuning techniques that can be combined with Microfat packaging to achieve optimal throughput and latency in Go and CGO applications.
 
 ---
@@ -7,7 +11,7 @@ This guide covers advanced tuning techniques that can be combined with Microfat 
 ## 1. AVX-512 Frequency Downclocking Protection
 
 ### The Challenge
-On older Intel microarchitectures (Intel Skylake-X, Cascadelake), executing heavy 512-bit vector instructions causes the CPU core power license to switch from `License 0` to `License 2`. This reduces CPU core clock frequencies by **15% to 25%** for all scalar operations on that core for ~2 milliseconds after the vector instruction executes.
+On older Intel microarchitectures (Intel Skylake-X, Cascade Lake Xeon), executing heavy 512-bit vector instructions causes the CPU core power license to switch from `License 0` to `License 2`. This reduces CPU core clock frequencies by **15% to 25%** for all scalar operations on that core for ~2 milliseconds after the vector instruction executes.
 
 ### Modern Architecture Status
 - **Modern AMD Zen 4 & Zen 5**: Uses native dual 256-bit or full 512-bit vector pipelines with **zero frequency penalty**.
@@ -90,7 +94,7 @@ GOAMD64=v4 go build -pgo=profiles/v4.pgo -o bin/app_v4 ./cmd/myapp
 
 # 4. Pack into universal self-dispatching fat binary
 microfat pack \
-  --stub ~/.local/bin/microfat-stub \
+  --stub bin/microfat-stub \
   --name myapp \
   -v v1=bin/app_v1 \
   -v v3=bin/app_v3 \
@@ -125,7 +129,7 @@ Combined with `microfat-stub`'s automated `GOMEMLIMIT` pacing, memory fragmentat
 
 ## 4. Compression Profiles & Decision Matrix
 
-`microfat` supports multi-codec compression (`zstd`, `lz4`, `none`), inter-variant dictionary training, and profile-based configuration to balance cold-start launch overhead against binary size and container image transfer speed.
+`microfat` supports multi-codec compression (`zstd`, `lz4`, `none`), inter-variant dictionary training (`--dict`), and profile-based configuration to balance cold-start launch overhead against binary size and container image transfer speed.
 
 ### Decision Matrix
 
@@ -135,9 +139,11 @@ Combined with `microfat-stub`'s automated `GOMEMLIMIT` pacing, memory fragmentat
 | **Ultra-Fast Decompression** | `latency` | `lz4` | `10 MB – 50 MB` | **< 350 µs** | ~40% – 48% | Latency-sensitive microservices, frequently restarted worker pods |
 | **General Purpose (Default)** | `balanced` | `zstd` (level 3 / better) | `10 MB – 50 MB` | **< 1.5 ms** | ~50% – 60% | Kubernetes daemon sets, general cloud microservices, CI/CD pipeline builds |
 | **Maximum Disk & Network Reduction** | `size` | `zstd:best` | `> 50 MB` | **< 4.5 ms** | ~62% – 70% | Bandwidth-constrained deployments, registry storage optimization, large monoliths |
-| **Multi-Architecture Matrix (Shared Dict)** | `size` + `--dict` | `zstd` + trained dictionary | `> 50 MB` (multi-variant) | **< 6.0 ms** | **~70% – 78%** | 4+ variant matrices (`v1`–`v4`, `v8.0`–`v9.2`), edge IoT gateways, golden VM images |
+| **Multi-Architecture Matrix (Shared Dict)** | `size` + `--dict` | `zstd` + trained dictionary | `> 50 MB` (multi-variant) | **< 6.0 ms** | **~70% – 78%** | 4+ variant matrices (`v1`–`v4`, `v8.0`–`v9.5`), edge IoT gateways, golden VM images |
 
-### Programmatic Go API Integration
+---
+
+## 5. Programmatic Go API Integration
 
 When creating fat executables programmatically via the `pack` Go package, use `pack.DefaultOptions()` to obtain a safe baseline pre-configured for Format v2 and balanced Zstandard compression:
 
@@ -172,3 +178,6 @@ func main() {
 }
 ```
 
+---
+
+[**← Lifecycle Modes**](lifecycle-modes.md) | [**Main Index**](../README.md#documentation-guide) | [**Troubleshooting & Runbook →**](troubleshooting.md)

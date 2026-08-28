@@ -1,23 +1,26 @@
 # Microfat
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/EpicBlackWolfZ/microfat.svg)](https://pkg.go.dev/github.com/EpicBlackWolfZ/microfat)
-[![Go Report Card](https://goreportcard.com/badge/github.com/EpicBlackWolfZ/microfat)](https://goreportcard.com/report/github.com/EpicBlackWolfZ/microfat)
+[![GitHub Release](https://img.shields.io/github/v/release/EpicBlackWolfZ/microfat?logo=github)](https://github.com/EpicBlackWolfZ/microfat/releases)
+[![CI Status](https://img.shields.io/github/actions/workflow/status/EpicBlackWolfZ/microfat/ci.yml?branch=main&logo=github&label=CI)](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/ci.yml)
+[![CodeQL](https://img.shields.io/github/actions/workflow/status/EpicBlackWolfZ/microfat/codeql.yml?branch=main&logo=github&label=CodeQL)](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/codeql.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Microfat** combines multiple CPU microarchitecture-specific ELF binaries (`v1`, `v2`, `v3`, `v4`) into a single, self-dispatching Linux executable with zero persistent process overhead, automatic container resource tuning (`GOMEMLIMIT` & `GOMAXPROCS`), and cryptographic integrity validation.
+**Microfat** combines multiple CPU microarchitecture-specific ELF binaries (`v1`, `v2`, `v3`, `v4` or `v8.0`..`v9.5`) into a single, self-dispatching Linux executable with zero persistent process overhead, automatic container resource auto-tuning (`GOMEMLIMIT` & `GOMAXPROCS`), and cryptographic integrity validation.
 
 ---
 
 ## Key Highlights
 
-- 🚀 **Dynamic Hardware Dispatch**: Automatically detects host CPU instruction sets (`AVX2`, `FMA`, `BMI2`, `AVX-512`) and boots the optimal machine code at startup.
+- 🚀 **Dynamic Hardware Dispatch**: Automatically probes host CPU instruction extensions (`AVX2`, `FMA`, `BMI2`, `AVX-512`, `SVE`, `SVE2`) and boots the optimal machine code at startup.
 - ⚡ **Zero Persistent Process Overhead**: Dispatches via Linux `memfd_create` and `syscall.Exec` directly from anonymous RAM (no wrapper daemon, PID 1 preserved in containers).
-- 🛡️ **Container Auto-Tuning**: Automatically parses Linux cgroup v1 & v2 limits to set safe `GOMEMLIMIT` pacing (preventing OOMKills) and `GOMAXPROCS` (preventing CPU throttling).
+- 🛡️ **Container Auto-Tuning**: Automatically parses Linux cgroup v1 & v2 limits to set safe `GOMEMLIMIT` pacing (preventing OOMKills) and `GOMAXPROCS` (preventing CFS CPU quota throttling).
 - ✂️ **Flexible Lifecycle Modes**:
-  - **Universal Fat Binary**: Distribute a single file that runs everywhere (`v1`–`v4`).
-  - **Trimmed Fat Binary (`--microfat:trim`)**: Discard unneeded variants on disk (~45%–50% size reduction) while retaining launcher auto-tuning and RAM execution.
+  - **Universal Fat Binary**: Distribute a single executable that runs everywhere (`v1`–`v4` or `v8.0`–`v9.5`).
+  - **Trimmed Fat Binary (`--microfat:trim` / `microfat trim`)**: Discard unneeded variants on disk (~50% size reduction) while retaining launcher auto-tuning and RAM execution.
   - **Raw Native ELF (`--microfat:optimize`)**: Permanently specialize to raw uncompressed ELF machine code with 0.0ms launch overhead.
 - 🔒 **Cryptographic Verification**: 56-byte cryptographic trailer with SHA-256 index hashing and variant checksum validation.
+- 📦 **Shared Inter-Variant Dictionary**: Multi-variant compression with trained Zstandard dictionaries achieving up to **~75%** binary size reduction.
 
 ---
 
@@ -28,10 +31,12 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 | Guide | Description |
 | :--- | :--- |
 | 📊 [**Demo & Benchmark Suite**](examples/demo/README.md) | Multi-workload benchmark application testing SIMD vector math, JSON/Zstd processing, and concurrent workers. |
-| 📖 [**Architecture & Binary Format**](docs/architecture.md) | Technical specification of the 56-byte trailer, JSON Index schema, and `memfd_create` lifecycle. |
+| 📖 [**Architecture & Binary Format**](docs/architecture.md) | Technical specification of the 56-byte trailer, Format v2 binary table layout, shared dictionaries, and `memfd_create` lifecycle. |
+| 💻 [**CLI & Launcher Stub Reference**](docs/cli-reference.md) | Complete reference for `microfat` CLI commands, flags, launcher stub meta-commands, exit codes, and environment variables. |
 | ⚙️ [**Container Resource Auto-Tuning**](docs/runtime-tuning.md) | Linux cgroup v1/v2 auto-tuning (`GOMEMLIMIT` / `GOMAXPROCS`), GC mechanics, and workload `GOGC` tuning recipes. |
-| 🔄 [**Binary Lifecycle Modes**](docs/lifecycle-modes.md) | Comprehensive comparison and workflows for Universal Fat, Trimmed Fat, and Native ELF modes. |
-| 🚀 [**Advanced Optimizations & Compression Matrix**](docs/advanced-optimizations.md) | AVX-512 downclocking mitigation, Compression Decision Matrix, PGO matrices, and C allocators. |
+| 🔄 [**Binary Lifecycle Modes**](docs/lifecycle-modes.md) | Comprehensive comparison and workflows for Universal Fat, Trimmed Fat, Raw Native ELF, and node cache prewarming. |
+| 🚀 [**Advanced Optimizations & Compression Matrix**](docs/advanced-optimizations.md) | AVX-512 downclocking mitigation, Compression Decision Matrix, declarative PGO matrices, and high-performance C allocators. |
+| 🩺 [**Troubleshooting & Runbook**](docs/troubleshooting.md) | Diagnostic workflows with `microfat doctor`, seccomp `memfd_create` remediation, read-only rootfs fallback, and FAQ. |
 
 ---
 
@@ -81,8 +86,9 @@ microfat doctor --json
     • Auto GOMAXPROCS: 4
 
 [✔] Toolchain & Version Metadata
-    • Version:        dev
-    • Commit:         none
+    • Version:        1.4.0
+    • Commit:         7a8b9c0
+    • Build Date:     2026-08-28T02:00:00Z
 
 Summary: Environment is fully ready for high-performance Microfat dispatch!
 ```
@@ -98,7 +104,7 @@ GOAMD64=v4 go build -o bin/app_v4 main.go
 
 # 2. Package with microfat
 microfat pack \
-  --stub ~/.local/bin/microfat-stub \
+  --stub bin/microfat-stub \
   --name myapp \
   -v v1=bin/app_v1 \
   -v v3=bin/app_v3 \
@@ -113,11 +119,12 @@ GOOS=linux GOARCH=arm64 GOARM64=v8.0 go build -o bin/app_arm64_v8.0 main.go
 GOOS=linux GOARCH=arm64 GOARM64=v8.2 go build -o bin/app_arm64_v8.2 main.go
 GOOS=linux GOARCH=arm64 GOARM64=v9.0 go build -o bin/app_arm64_v9.0 main.go
 
-# 2. Package universal ARM64 fat binary
+# 2. Package universal ARM64 fat binary with shared dictionary compression
 microfat pack \
   --stub bin/microfat-stub-arm64 \
   --name myapp \
   --arch arm64 \
+  --dict \
   -v v8.0=bin/app_arm64_v8.0 \
   -v v8.2=bin/app_arm64_v8.2 \
   -v v9.0=bin/app_arm64_v9.0 \
@@ -132,6 +139,7 @@ Automate variant compilation and Profile-Guided Optimization packaging in a sing
 name: myapp
 package: ./cmd/myapp
 output: bin/myapp
+stub: bin/microfat-stub
 variants:
   - level: v1
     pgo: "off"
@@ -216,6 +224,7 @@ Every fat executable supports reserved meta-commands for diagnostics and disk sp
 | :--- | :--- | :--- |
 | `MICROFAT_AUTOTUNE` | `1` / `true` | Set to `0` or `false` to disable automatic `GOMEMLIMIT` and `GOMAXPROCS` injection. |
 | `MICROFAT_MEM_RATIO` | `0.90` | Fraction of container cgroup memory limit to assign to `GOMEMLIMIT` (e.g. `0.85`). |
+| `MICROFAT_GC_PROFILE` | `default` | Workload GC profile preset (`latency_critical`, `memory_constrained`, `batch_etl`, `adaptive`, `default`). |
 | `MICROFAT_FORCE_LEVEL` | *(unset)* | Pin execution strictly to a specific level (`v1`, `v2`, `v3`, `v4`, `v8.0`..`v9.5`). Fails fast on incompatibility. |
 | `MICROFAT_MAX_LEVEL` | *(unset)* | Cap selection ceiling level (e.g. `v3` or `v8.2`). |
 | `MICROFAT_DISABLE_VARIANTS` | *(unset)* | Comma-separated list of variant levels to exclude from selection (e.g. `v4`). |
