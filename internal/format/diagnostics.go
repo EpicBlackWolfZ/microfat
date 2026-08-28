@@ -4,8 +4,9 @@ package format
 
 import (
 	"errors"
-	"strings"
 	"syscall"
+
+	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 )
 
 // Standard launcher execution stage names.
@@ -63,11 +64,31 @@ func DiagnoseError(stage string, err error) string {
 		return diagnoseCacheWrite(err)
 	case StageCacheExec:
 		return diagnoseExec(err)
+	case StageCodecLookup:
+		return diagnoseCodec(err)
+	case StageDecompress:
+		return diagnoseDecompress(err)
 	case StageLauncherMain:
 		return diagnoseGeneric(err)
 	default:
 		return diagnoseGeneric(err)
 	}
+}
+
+func diagnoseCodec(err error) string {
+	if errors.Is(err, codec.ErrUnsupportedCodec) {
+		return HintUnsupportedCodec
+	}
+	return diagnoseGeneric(err)
+}
+
+func diagnoseDecompress(err error) string {
+	if errors.Is(err, codec.ErrDecompressionFailed) ||
+		errors.Is(err, codec.ErrSizeMismatch) ||
+		errors.Is(err, ErrDictionaryCorrupted) {
+		return HintDecompressFailed
+	}
+	return diagnoseGeneric(err)
 }
 
 func diagnoseMemfdCreate(err error) string {
@@ -112,6 +133,41 @@ func diagnoseExec(err error) string {
 }
 
 func diagnoseGeneric(err error) string {
+	if hint := diagnoseCodecAndIntegrity(err); hint != "" {
+		return hint
+	}
+	if hint := diagnoseExecutionSentinels(err); hint != "" {
+		return hint
+	}
+	return diagnoseFallbackSyscall(err)
+}
+
+func diagnoseCodecAndIntegrity(err error) string {
+	if errors.Is(err, codec.ErrUnsupportedCodec) {
+		return HintUnsupportedCodec
+	}
+	if errors.Is(err, codec.ErrDecompressionFailed) ||
+		errors.Is(err, codec.ErrSizeMismatch) ||
+		errors.Is(err, ErrDictionaryCorrupted) {
+		return HintDecompressFailed
+	}
+	return ""
+}
+
+func diagnoseExecutionSentinels(err error) string {
+	if errors.Is(err, ErrExecve) {
+		return diagnoseExec(err)
+	}
+	if errors.Is(err, ErrMemfdCreate) {
+		return diagnoseMemfdCreate(err)
+	}
+	if errors.Is(err, ErrCacheInit) || errors.Is(err, ErrCacheWrite) || errors.Is(err, ErrCacheExtract) {
+		return diagnoseCacheWrite(err)
+	}
+	return ""
+}
+
+func diagnoseFallbackSyscall(err error) string {
 	switch {
 	case errors.Is(err, syscall.EROFS):
 		return HintReadOnlyFS
@@ -126,22 +182,8 @@ func diagnoseGeneric(err error) string {
 	case errors.Is(err, syscall.EMFILE), errors.Is(err, syscall.ENFILE):
 		return HintFileDescriptorLimit
 	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
-		errStr := err.Error()
-		if strings.Contains(errStr, "execve") || strings.Contains(errStr, "exec") {
-			return HintExecNoExec
-		}
-		if strings.Contains(errStr, "memfd") {
-			return HintMemfdSeccomp
-		}
 		return HintCacheUnwritable
 	default:
-		errStr := err.Error()
-		if strings.Contains(errStr, "unsupported compression") {
-			return HintUnsupportedCodec
-		}
-		if strings.Contains(errStr, "decompression failed") || strings.Contains(errStr, "decompressing") {
-			return HintDecompressFailed
-		}
 		return ""
 	}
 }

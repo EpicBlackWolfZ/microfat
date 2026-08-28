@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"syscall"
 	"testing"
+
+	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 )
 
 func TestDiagnoseError(t *testing.T) {
@@ -125,6 +127,30 @@ func TestDiagnoseError(t *testing.T) {
 			expectedHint: "",
 		},
 		{
+			name:         "codec lookup with ErrUnsupportedCodec",
+			stage:        StageCodecLookup,
+			err:          fmt.Errorf("%w: foo", codec.ErrUnsupportedCodec),
+			expectedHint: HintUnsupportedCodec,
+		},
+		{
+			name:         "decompress with ErrDecompressionFailed",
+			stage:        StageDecompress,
+			err:          fmt.Errorf("%w: corrupted frame", codec.ErrDecompressionFailed),
+			expectedHint: HintDecompressFailed,
+		},
+		{
+			name:         "decompress with ErrSizeMismatch",
+			stage:        StageDecompress,
+			err:          fmt.Errorf("%w: expected 100, got 50", codec.ErrSizeMismatch),
+			expectedHint: HintDecompressFailed,
+		},
+		{
+			name:         "decompress with ErrDictionaryCorrupted",
+			stage:        StageDecompress,
+			err:          fmt.Errorf("%w: mismatch", ErrDictionaryCorrupted),
+			expectedHint: HintDecompressFailed,
+		},
+		{
 			name:         "generic launcher_main EROFS",
 			stage:        StageLauncherMain,
 			err:          syscall.EROFS,
@@ -167,19 +193,85 @@ func TestDiagnoseError(t *testing.T) {
 			expectedHint: HintFileDescriptorLimit,
 		},
 		{
-			name:         "generic launcher_main EACCES with execve in message",
+			name:         "generic launcher_main ErrExecve with EACCES",
 			stage:        StageLauncherMain,
-			err:          fmt.Errorf("execve failed on cached binary: %w", syscall.EACCES),
+			err:          fmt.Errorf("%w on cached binary: %w", ErrExecve, syscall.EACCES),
 			expectedHint: HintExecNoExec,
 		},
 		{
-			name:         "generic launcher_main EPERM with memfd in message",
+			name:         "generic launcher_main ErrExecve with EPERM",
 			stage:        StageLauncherMain,
-			err:          fmt.Errorf("memfd_create failed: %w", syscall.EPERM),
+			err:          fmt.Errorf("%w: %w", ErrExecve, syscall.EPERM),
+			expectedHint: HintExecNoExec,
+		},
+		{
+			name:         "generic launcher_main ErrExecve with ETXTBSY",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrExecve, syscall.ETXTBSY),
+			expectedHint: HintTextBusy,
+		},
+		{
+			name:         "generic launcher_main ErrExecve with ENOEXEC",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrExecve, syscall.ENOEXEC),
+			expectedHint: HintExecFormat,
+		},
+		{
+			name:         "generic launcher_main ErrMemfdCreate with EPERM",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrMemfdCreate, syscall.EPERM),
 			expectedHint: HintMemfdSeccomp,
 		},
 		{
-			name:         "generic launcher_main EACCES fallback",
+			name:         "generic launcher_main ErrMemfdCreate with EACCES",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrMemfdCreate, syscall.EACCES),
+			expectedHint: HintMemfdSeccomp,
+		},
+		{
+			name:         "generic launcher_main ErrMemfdCreate with ENOSYS",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrMemfdCreate, syscall.ENOSYS),
+			expectedHint: HintMemfdKernelUnsupported,
+		},
+		{
+			name:         "generic launcher_main ErrMemfdCreate with EMFILE",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrMemfdCreate, syscall.EMFILE),
+			expectedHint: HintFileDescriptorLimit,
+		},
+		{
+			name:         "generic launcher_main ErrMemfdCreate with ENFILE",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrMemfdCreate, syscall.ENFILE),
+			expectedHint: HintFileDescriptorLimit,
+		},
+		{
+			name:         "generic launcher_main ErrCacheInit with EROFS",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrCacheInit, syscall.EROFS),
+			expectedHint: HintReadOnlyFS,
+		},
+		{
+			name:         "generic launcher_main ErrCacheWrite with EACCES",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrCacheWrite, syscall.EACCES),
+			expectedHint: HintCacheUnwritable,
+		},
+		{
+			name:         "generic launcher_main ErrCacheExtract with ENOSPC",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrCacheExtract, syscall.ENOSPC),
+			expectedHint: HintDiskFull,
+		},
+		{
+			name:         "generic launcher_main ErrCacheExtract with EMFILE",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrCacheExtract, syscall.EMFILE),
+			expectedHint: HintFileDescriptorLimit,
+		},
+		{
+			name:         "generic launcher_main fallback EACCES without sentinel",
 			stage:        StageLauncherMain,
 			err:          fmt.Errorf("creating directory: %w", syscall.EACCES),
 			expectedHint: HintCacheUnwritable,
@@ -192,14 +284,26 @@ func TestDiagnoseError(t *testing.T) {
 		},
 		{
 			name:         "generic launcher_main unsupported compression",
-			stage:        StageCodecLookup,
-			err:          errors.New("unsupported compression algorithm: foo"),
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("resolving codec: %w", codec.ErrUnsupportedCodec),
 			expectedHint: HintUnsupportedCodec,
 		},
 		{
 			name:         "generic launcher_main decompression failed",
-			stage:        StageDecompress,
-			err:          errors.New("decompression failed: corrupted frame"),
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("reading variant: %w", codec.ErrDecompressionFailed),
+			expectedHint: HintDecompressFailed,
+		},
+		{
+			name:         "generic launcher_main size mismatch",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("decompressing variant: %w", codec.ErrSizeMismatch),
+			expectedHint: HintDecompressFailed,
+		},
+		{
+			name:         "generic launcher_main dictionary corrupted",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("reading dict: %w", ErrDictionaryCorrupted),
 			expectedHint: HintDecompressFailed,
 		},
 		{
