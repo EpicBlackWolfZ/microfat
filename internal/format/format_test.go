@@ -1176,6 +1176,66 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 		}
 	})
 
+	t.Run("Negative dictionary size", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion2,
+			DictionaryOffset: 1000,
+			DictionarySize:   -1,
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 1500, CompressedSize: 500, UncompressedSize: 1000},
+			},
+		}
+		if err := idx.ValidateBounds(3000); !errors.Is(err, ErrInvalidDictionary) {
+			t.Fatalf("expected ErrInvalidDictionary for negative dictionary size, got %v", err)
+		}
+	})
+
+	t.Run("Max allowed dictionary size boundary", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion2,
+			DictionaryOffset: 1000,
+			DictionarySize:   MaxDictionarySize,
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 1000 + MaxDictionarySize, CompressedSize: 500, UncompressedSize: 1000},
+			},
+		}
+		if err := idx.ValidateBounds(1000 + MaxDictionarySize + 1000); err != nil {
+			t.Fatalf("expected valid bounds for exact MaxDictionarySize, got %v", err)
+		}
+	})
+
+	t.Run("Exceeded MaxDictionarySize boundary", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion2,
+			DictionaryOffset: 1000,
+			DictionarySize:   MaxDictionarySize + 1,
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 1000 + MaxDictionarySize + 1000, CompressedSize: 500, UncompressedSize: 1000},
+			},
+		}
+		if err := idx.ValidateBounds(1000 + MaxDictionarySize + 2000); !errors.Is(err, ErrInvalidDictionary) {
+			t.Fatalf("expected ErrInvalidDictionary when DictionarySize exceeds MaxDictionarySize, got %v", err)
+		}
+	})
+
+	t.Run("Extreme oversized dictionary size DoS protection", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion2,
+			DictionaryOffset: 1000,
+			DictionarySize:   500 * 1024 * 1024,
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 600 * 1024 * 1024, CompressedSize: 500, UncompressedSize: 1000},
+			},
+		}
+		if err := idx.ValidateBounds(700 * 1024 * 1024); !errors.Is(err, ErrInvalidDictionary) {
+			t.Fatalf("expected ErrInvalidDictionary for massive dictionary size, got %v", err)
+		}
+	})
+
 	t.Run("Oversized DictionarySHA256 limit error", func(t *testing.T) {
 		t.Parallel()
 		longSHA := strings.Repeat("A", 300)

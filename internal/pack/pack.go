@@ -489,6 +489,10 @@ func VerifyBinary(r io.ReaderAt, totalSize int64) (*format.Index, []Verification
 
 	var dictBytes []byte
 	if idx.DictionarySize > 0 {
+		if idx.DictionarySize > format.MaxDictionarySize || idx.DictionaryOffset < 0 {
+			return nil, nil, fmt.Errorf("%w: dictionary size %d or offset %d out of bounds",
+				format.ErrInvalidDictionary, idx.DictionarySize, idx.DictionaryOffset)
+		}
 		dictBytes = make([]byte, idx.DictionarySize)
 		if _, err := r.ReadAt(dictBytes, idx.DictionaryOffset); err != nil {
 			return nil, nil, fmt.Errorf("reading shared dictionary: %w", err)
@@ -674,6 +678,10 @@ func PrewarmBinary(
 
 	var dictBytes []byte
 	if idx.DictionarySize > 0 {
+		if idx.DictionarySize > format.MaxDictionarySize || idx.DictionaryOffset < 0 {
+			return nil, nil, fmt.Errorf("%w: dictionary size %d or offset %d out of bounds",
+				format.ErrInvalidDictionary, idx.DictionarySize, idx.DictionaryOffset)
+		}
 		dictBytes = make([]byte, idx.DictionarySize)
 		if _, err := r.ReadAt(dictBytes, idx.DictionaryOffset); err != nil {
 			return nil, nil, fmt.Errorf("reading shared dictionary: %w", err)

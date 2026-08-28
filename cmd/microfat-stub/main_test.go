@@ -2137,3 +2137,53 @@ func TestStubDictionaryCorruptedError(t *testing.T) {
 	}
 }
 
+func TestExtractVariantToWriter_OversizedDictionaryGuard(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	fatPath := filepath.Join(tmpDir, "test.fat")
+	dummyData := bytes.Repeat([]byte{0x42}, 1024)
+	if err := os.WriteFile(fatPath, dummyData, 0o755); err != nil {
+		t.Fatalf("write dummy file: %v", err)
+	}
+
+	selfFile, err := os.Open(fatPath)
+	if err != nil {
+		t.Fatalf("open dummy file: %v", err)
+	}
+	defer func() { _ = selfFile.Close() }()
+
+	entry := &format.VariantEntry{
+		Level:            "v1",
+		Compression:      "none",
+		Offset:           0,
+		CompressedSize:   100,
+		UncompressedSize: 100,
+	}
+
+	var buf bytes.Buffer
+
+	// 1. Oversized dictionary size (> MaxDictionarySize)
+	oversizedIdx := &format.Index{
+		Version:          format.FormatVersion2,
+		DictionaryOffset: 0,
+		DictionarySize:   format.MaxDictionarySize + 1,
+	}
+	err = extractVariantToWriter(selfFile, entry, oversizedIdx, &buf)
+	if err == nil || !errors.Is(err, format.ErrInvalidDictionary) {
+		t.Fatalf("expected ErrInvalidDictionary for oversized dictionary in extractVariantToWriter, got %v", err)
+	}
+
+	// 2. Negative dictionary offset
+	negativeOffsetIdx := &format.Index{
+		Version:          format.FormatVersion2,
+		DictionaryOffset: -1,
+		DictionarySize:   1024,
+	}
+	err = extractVariantToWriter(selfFile, entry, negativeOffsetIdx, &buf)
+	if err == nil || !errors.Is(err, format.ErrInvalidDictionary) {
+		t.Fatalf("expected ErrInvalidDictionary for negative dictionary offset in extractVariantToWriter, got %v", err)
+	}
+}
+
+

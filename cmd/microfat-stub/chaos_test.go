@@ -546,4 +546,66 @@ func TestWarmCacheVerifyOption(t *testing.T) {
 	})
 }
 
+func TestOversizedDictionaryChaos(t *testing.T) {
+	payload := []byte("#!/bin/sh\necho 'microfat-oversized-dict-payload'\n")
+	fatFile, entry, idx := createSyntheticFatFile(t, payload)
+
+	var execveCalled bool
+	origExecve := execveFunc
+	t.Cleanup(func() {
+		execveFunc = origExecve
+	})
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		execveCalled = true
+		return nil
+	}
+
+	oversizedIdx := *idx
+	oversizedIdx.DictionarySize = format.MaxDictionarySize + 1024
+	oversizedIdx.DictionaryOffset = 0
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{}
+
+	t.Run("Oversized dictionary fails in extractVariantToWriter", func(t *testing.T) {
+		var out bytes.Buffer
+		err := extractVariantToWriter(fatFile, entry, &oversizedIdx, &out)
+		if err == nil {
+			t.Fatal("expected error from extractVariantToWriter on oversized dictionary, got nil")
+		}
+		if !errors.Is(err, format.ErrInvalidDictionary) {
+			t.Fatalf("expected ErrInvalidDictionary, got: %v", err)
+		}
+	})
+
+	t.Run("Blocked on memfd path", func(t *testing.T) {
+		execveCalled = false
+		err := executeViaMemfd(fatFile, entry, &oversizedIdx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
+		if err == nil {
+			t.Fatal("expected error executing oversized dictionary entry via memfd, got nil")
+		}
+		if !errors.Is(err, format.ErrInvalidDictionary) {
+			t.Fatalf("expected ErrInvalidDictionary, got: %v", err)
+		}
+		if execveCalled {
+			t.Fatal("execve was called despite oversized dictionary size on memfd path")
+		}
+	})
+
+	t.Run("Blocked on cache path", func(t *testing.T) {
+		execveCalled = false
+		err := executeViaCache(fatFile, entry, &oversizedIdx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now())
+		if err == nil {
+			t.Fatal("expected error executing oversized dictionary entry via cache, got nil")
+		}
+		if !errors.Is(err, format.ErrCacheExtract) || !errors.Is(err, format.ErrInvalidDictionary) {
+			t.Fatalf("expected ErrCacheExtract wrapping ErrInvalidDictionary, got: %v", err)
+		}
+		if execveCalled {
+			t.Fatal("execve was called despite oversized dictionary size on cache path")
+		}
+	})
+}
+
+
 

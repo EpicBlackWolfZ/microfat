@@ -1843,3 +1843,53 @@ func TestVerifyCacheVariantCoverage(t *testing.T) {
 		t.Errorf("expected PrewarmStatusCorrupted for hash mismatch, got: %+v", resHash)
 	}
 }
+
+func TestPack_OversizedDictionaryGuard(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	payload := bytes.Repeat([]byte{0x00}, 2048)
+
+	// 1. Oversized dictionary index
+	oversizedIdx := &format.Index{
+		Version:          format.FormatVersion2,
+		AppName:          "oversized-dict-test",
+		TargetOS:         "linux",
+		TargetArch:       "amd64",
+		DictionaryOffset: 0,
+		DictionarySize:   format.MaxDictionarySize + 1024,
+		Variants: []format.VariantEntry{
+			{
+				Level:            "v1",
+				Compression:      "none",
+				Offset:           format.MaxDictionarySize + 2048,
+				CompressedSize:   100,
+				UncompressedSize: 100,
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	buf.Write(payload)
+	_, err := format.WriteIndexAndTrailer(&buf, oversizedIdx, int64(buf.Len()))
+	if err != nil {
+		t.Fatalf("WriteIndexAndTrailer failed: %v", err)
+	}
+
+	reader := bytes.NewReader(buf.Bytes())
+	totalSize := int64(buf.Len())
+
+	// VerifyBinary must fail with ErrInvalidDictionary
+	_, _, err = VerifyBinary(reader, totalSize)
+	if err == nil || !errors.Is(err, format.ErrInvalidDictionary) {
+		t.Fatalf("expected ErrInvalidDictionary in VerifyBinary for oversized dictionary, got %v", err)
+	}
+
+	// PrewarmBinary must fail with ErrInvalidDictionary
+	_, _, err = PrewarmBinary(reader, totalSize, nil, tmpDir)
+	if err == nil || !errors.Is(err, format.ErrInvalidDictionary) {
+		t.Fatalf("expected ErrInvalidDictionary in PrewarmBinary for oversized dictionary, got %v", err)
+	}
+}
+
+

@@ -78,6 +78,19 @@ func FuzzUnmarshalBinaryIndex(f *testing.F) {
 	// Seed 5: Truncated buffer
 	f.Add([]byte("\x00\xFAM2\x02\x00"))
 
+	// Seed 6: Oversized dictionary size
+	seedOversizedDictIdx := &Index{
+		Version:          FormatVersion2,
+		AppName:          "fuzz-oversized-dict",
+		TargetOS:         testOSLinux,
+		TargetArch:       "amd64",
+		DictionaryOffset: 50,
+		DictionarySize:   MaxDictionarySize + 1024,
+	}
+	if seedOversizedBytes, err := MarshalBinaryIndex(seedOversizedDictIdx); err == nil {
+		f.Add(seedOversizedBytes)
+	}
+
 	f.Fuzz(func(t *testing.T, data []byte) {
 		idx, err := UnmarshalBinaryIndex(data)
 		if err != nil {
