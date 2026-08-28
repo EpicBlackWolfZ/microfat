@@ -46,6 +46,10 @@ func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, idx *
 
 	var dictBytes []byte
 	if idx != nil && idx.DictionarySize > 0 {
+		if idx.DictionarySize > format.MaxDictionarySize || idx.DictionaryOffset < 0 {
+			return fmt.Errorf("%w: dictionary size %d or offset %d out of bounds",
+				format.ErrInvalidDictionary, idx.DictionarySize, idx.DictionaryOffset)
+		}
 		dictBytes = make([]byte, idx.DictionarySize)
 		if _, err := selfFile.ReadAt(dictBytes, idx.DictionaryOffset); err != nil {
 			return fmt.Errorf("reading shared dictionary: %w", err)

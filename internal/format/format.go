@@ -54,6 +54,9 @@ const (
 	// MaxPayloadSize is the maximum allowable single payload uncompressed size (1 GB).
 	MaxPayloadSize = 1024 * 1024 * 1024
 
+	// MaxDictionarySize is the maximum allowable shared dictionary size (1 MB).
+	MaxDictionarySize = 1024 * 1024
+
 	// Environment variable names for telemetry and control.
 	EnvSelectedVariant  = "MICROFAT_SELECTED_VARIANT"
 	EnvHostArch         = "MICROFAT_HOST_ARCH"
@@ -277,6 +280,10 @@ func (idx *Index) FindVariant(level string) (*VariantEntry, bool) {
 func (idx *Index) ValidateBounds(indexOffset int64) error {
 	if idx.Version != FormatVersion1 && idx.Version != FormatVersion2 {
 		return fmt.Errorf("%w: got version %d, expected %d or %d", ErrUnsupportedVersion, idx.Version, FormatVersion1, FormatVersion2)
+	}
+
+	if idx.DictionarySize < 0 || idx.DictionarySize > MaxDictionarySize {
+		return fmt.Errorf("%w: invalid dictionary size %d (max allowed %d bytes)", ErrInvalidDictionary, idx.DictionarySize, MaxDictionarySize)
 	}
 
 	var lastEnd int64
