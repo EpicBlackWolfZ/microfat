@@ -29,8 +29,9 @@ const (
 // DefaultLatencyUncompressedThreshold is the maximum uncompressed payload size (512 KB)
 // that will be automatically promoted to uncompressed (none) under the latency profile.
 const (
-	DefaultLatencyUncompressedThreshold = 512 * 1024
-	specParts                           = 2
+	DefaultLatencyUncompressedThreshold       = 512 * 1024
+	DefaultMaxPayloadSize               int64 = 1024 * 1024 * 1024 // 1 GiB safety ceiling for unbounded decompression
+	specParts                                 = 2
 )
 
 // Standard error definitions for codec operations.
@@ -74,6 +75,51 @@ func DecompressWithOptionalDict(c Codec, w io.Writer, r io.Reader, uncompressedS
 		}
 	}
 	return c.Decompress(w, r, uncompressedSize)
+}
+
+// boundedWriter wraps an io.Writer and enforces an upper bound on total bytes written.
+// If a write operation attempts to exceed the bound, it writes up to the bound and returns ErrSizeMismatch.
+type boundedWriter struct {
+	w       io.Writer
+	limit   int64
+	written int64
+}
+
+// newBoundedWriter constructs a boundedWriter with the specified limit.
+// If limit <= 0, it falls back to DefaultMaxPayloadSize.
+func newBoundedWriter(w io.Writer, limit int64) *boundedWriter {
+	if limit <= 0 {
+		limit = DefaultMaxPayloadSize
+	}
+	return &boundedWriter{
+		w:     w,
+		limit: limit,
+	}
+}
+
+func (bw *boundedWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+
+	remaining := bw.limit - bw.written
+	if remaining <= 0 {
+		return 0, fmt.Errorf("%w: payload exceeds limit of %d bytes", ErrSizeMismatch, bw.limit)
+	}
+
+	if int64(len(p)) > remaining {
+		allowed := int(remaining)
+		n, err := bw.w.Write(p[:allowed])
+		bw.written += int64(n)
+		if err != nil {
+			return n, err
+		}
+		return n, fmt.Errorf("%w: payload exceeds limit of %d bytes", ErrSizeMismatch, bw.limit)
+	}
+
+	n, err := bw.w.Write(p)
+	bw.written += int64(n)
+	return n, err
 }
 
 var (
