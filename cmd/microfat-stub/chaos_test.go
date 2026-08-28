@@ -381,3 +381,169 @@ func TestDecompressionBombPayloadBlocked(t *testing.T) {
 	})
 }
 
+func TestPayloadChecksumMismatchAbort(t *testing.T) {
+	payload := []byte("#!/bin/sh\necho 'microfat-payload-hash-integrity-test'\n")
+	fatFile, entry, idx := createSyntheticFatFile(t, payload)
+
+	cacheDir := t.TempDir()
+	origResolve := resolveCacheDirFunc
+	origExecve := execveFunc
+	origMemfd := memfdCreateFunc
+	t.Cleanup(func() {
+		resolveCacheDirFunc = origResolve
+		execveFunc = origExecve
+		memfdCreateFunc = origMemfd
+	})
+
+	resolveCacheDirFunc = func(string) (string, error) {
+		return cacheDir, nil
+	}
+
+	var execveCalled bool
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		execveCalled = true
+		return nil
+	}
+
+	// Tampered entry with mismatched SHA256 checksum
+	fakeSHA := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	tamperedEntry := &format.VariantEntry{
+		Level:            entry.Level,
+		Offset:           entry.Offset,
+		CompressedSize:   entry.CompressedSize,
+		UncompressedSize: entry.UncompressedSize,
+		SHA256:           fakeSHA,
+		Compression:      entry.Compression,
+	}
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{}
+
+	t.Run("Mismatched hash fails in extractVariantToWriter", func(t *testing.T) {
+		var out bytes.Buffer
+		err := extractVariantToWriter(fatFile, tamperedEntry, idx, &out)
+		if err == nil {
+			t.Fatal("expected error from extractVariantToWriter on tampered hash, got nil")
+		}
+		if !errors.Is(err, format.ErrPayloadCorrupted) {
+			t.Fatalf("expected ErrPayloadCorrupted, got: %v", err)
+		}
+	})
+
+	t.Run("Blocked on memfd path", func(t *testing.T) {
+		execveCalled = false
+		err := executeViaMemfd(fatFile, tamperedEntry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
+		if err == nil {
+			t.Fatal("expected error executing tampered entry via memfd, got nil")
+		}
+		if !errors.Is(err, format.ErrPayloadCorrupted) {
+			t.Fatalf("expected ErrPayloadCorrupted, got: %v", err)
+		}
+		if execveCalled {
+			t.Fatal("execve was called despite payload checksum mismatch on memfd path")
+		}
+	})
+
+	t.Run("Blocked on cache path", func(t *testing.T) {
+		execveCalled = false
+		err := executeViaCache(fatFile, tamperedEntry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now())
+		if err == nil {
+			t.Fatal("expected error executing tampered entry via cache, got nil")
+		}
+		if !errors.Is(err, format.ErrCacheExtract) || !errors.Is(err, format.ErrPayloadCorrupted) {
+			t.Fatalf("expected ErrCacheExtract wrapping ErrPayloadCorrupted, got: %v", err)
+		}
+		if execveCalled {
+			t.Fatal("execve was called despite payload checksum mismatch on cache path")
+		}
+	})
+
+	t.Run("executeVariant aborts fast without attempting cache fallback", func(t *testing.T) {
+		execveCalled = false
+		err := executeVariant(fatFile, tamperedEntry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
+		if err == nil {
+			t.Fatal("expected error executing tampered entry via executeVariant, got nil")
+		}
+		if !errors.Is(err, format.ErrPayloadCorrupted) {
+			t.Fatalf("expected ErrPayloadCorrupted, got: %v", err)
+		}
+		if execveCalled {
+			t.Fatal("execve was called despite payload checksum mismatch in executeVariant")
+		}
+	})
+}
+
+func TestWarmCacheVerifyOption(t *testing.T) {
+	payload := []byte("#!/bin/sh\necho 'microfat-warm-cache-verify-payload'\n")
+	fatFile, entry, idx := createSyntheticFatFile(t, payload)
+
+	cacheDir := t.TempDir()
+	origResolve := resolveCacheDirFunc
+	origExecve := execveFunc
+	t.Cleanup(func() {
+		resolveCacheDirFunc = origResolve
+		execveFunc = origExecve
+	})
+
+	resolveCacheDirFunc = func(string) (string, error) {
+		return cacheDir, nil
+	}
+
+	cachedBinary := filepath.Join(cacheDir, entry.SHA256)
+
+	// 1. Plant a modified/tampered file with matching size but different content
+	tamperedContent := bytes.Repeat([]byte("X"), len(payload))
+	if err := os.WriteFile(cachedBinary, tamperedContent, 0o755); err != nil {
+		t.Fatalf("failed to plant tampered cache file: %v", err)
+	}
+
+	var executedPath string
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		executedPath = argv0
+		return nil
+	}
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{}
+
+	t.Run("Warm cache hit without verification uses existing disk file", func(t *testing.T) {
+		t.Setenv(format.EnvVerifyCache, "0")
+		executedPath = ""
+		err := executeViaCache(fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now())
+		if err != nil {
+			t.Fatalf("executeViaCache failed: %v", err)
+		}
+		if executedPath != cachedBinary {
+			t.Fatalf("expected execution of %q, got %q", cachedBinary, executedPath)
+		}
+		diskBytes, _ := os.ReadFile(cachedBinary)
+		if !bytes.Equal(diskBytes, tamperedContent) {
+			t.Fatalf("expected tampered file to remain untouched when verification is disabled")
+		}
+	})
+
+	t.Run("Warm cache hit with MICROFAT_VERIFY_CACHE=1 invalidates and re-extracts", func(t *testing.T) {
+		t.Setenv(format.EnvVerifyCache, "1")
+		t.Setenv(format.EnvDebug, "1")
+		executedPath = ""
+
+		err := executeViaCache(fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now())
+		if err != nil {
+			t.Fatalf("executeViaCache with verify failed: %v", err)
+		}
+		if executedPath != cachedBinary {
+			t.Fatalf("expected execution of %q, got %q", cachedBinary, executedPath)
+		}
+
+		// Check that the corrupted cache file was replaced with the real payload
+		diskBytes, err := os.ReadFile(cachedBinary)
+		if err != nil {
+			t.Fatalf("failed to read cached binary after re-extraction: %v", err)
+		}
+		if !bytes.Equal(diskBytes, payload) {
+			t.Fatalf("cached binary content mismatch: got %q, want %q", string(diskBytes), string(payload))
+		}
+	})
+}
+
+

@@ -81,6 +81,7 @@ const (
 	EnvPolicy                     = "MICROFAT_POLICY"
 	EnvAVX512DownclockProtection  = "MICROFAT_AVX512_DOWNCLOCK_PROTECTION"
 	EnvCacheDir                   = "MICROFAT_CACHE_DIR"
+	EnvVerifyCache                = "MICROFAT_VERIFY_CACHE"
 	EnvPolicyApplied              = "MICROFAT_POLICY_APPLIED"
 	EnvOverrideReason             = "MICROFAT_OVERRIDE_REASON"
 
@@ -114,6 +115,7 @@ var (
 	ErrTruncatedIndex      = errors.New("truncated index data")
 	ErrInvalidJSONSyntax   = errors.New("invalid json syntax in manifest index")
 	ErrDictionaryCorrupted = errors.New("shared dictionary SHA-256 checksum mismatch")
+	ErrPayloadCorrupted    = errors.New("variant payload SHA-256 checksum mismatch")
 	ErrInvalidDictionary   = errors.New("invalid shared dictionary offset or size")
 	ErrInvalidChecksum     = errors.New("invalid sha256 checksum format")
 

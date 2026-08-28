@@ -85,7 +85,8 @@ func diagnoseCodec(err error) string {
 func diagnoseDecompress(err error) string {
 	if errors.Is(err, codec.ErrDecompressionFailed) ||
 		errors.Is(err, codec.ErrSizeMismatch) ||
-		errors.Is(err, ErrDictionaryCorrupted) {
+		errors.Is(err, ErrDictionaryCorrupted) ||
+		errors.Is(err, ErrPayloadCorrupted) {
 		return HintDecompressFailed
 	}
 	return diagnoseGeneric(err)
@@ -148,7 +149,8 @@ func diagnoseCodecAndIntegrity(err error) string {
 	}
 	if errors.Is(err, codec.ErrDecompressionFailed) ||
 		errors.Is(err, codec.ErrSizeMismatch) ||
-		errors.Is(err, ErrDictionaryCorrupted) {
+		errors.Is(err, ErrDictionaryCorrupted) ||
+		errors.Is(err, ErrPayloadCorrupted) {
 		return HintDecompressFailed
 	}
 	return ""
