@@ -20,6 +20,7 @@ const (
 	testOSLinux            = "linux"
 	testArchAMD64          = "amd64"
 	testCompressionFastest = "fastest"
+	testValidSHA256        = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
 )
 
 func TestPackAndVerify(t *testing.T) {
@@ -353,7 +354,7 @@ func TestVerifyCorruptedVariant(t *testing.T) {
 				Offset:           0,
 				CompressedSize:   int64(len(payloadBytes)),
 				UncompressedSize: int64(len("valid-uncompressed-content")) + 50, // wrong uncompressed size
-				SHA256:           "hash",
+				SHA256:           testValidSHA256,
 			},
 		},
 	}
@@ -630,7 +631,7 @@ func TestPackEdgeCasesAndValidation(t *testing.T) {
 				Offset:           0,
 				CompressedSize:   int64(len(corruptPayload)),
 				UncompressedSize: 100,
-				SHA256:           "hash",
+				SHA256:           testValidSHA256,
 			},
 		},
 	}
@@ -1212,7 +1213,7 @@ func TestMultiCodecPackagingAndVerification(t *testing.T) {
 				Offset:           0,
 				CompressedSize:   10,
 				UncompressedSize: 10,
-				SHA256:           "hash",
+				SHA256:           testValidSHA256,
 				Compression:      "nonexistent_codec",
 			},
 		},
@@ -1231,7 +1232,7 @@ func TestMultiCodecPackagingAndVerification(t *testing.T) {
 		Offset:           0,
 		CompressedSize:   10,
 		UncompressedSize: 10,
-		SHA256:           "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+		SHA256:           testValidSHA256,
 		Compression:      "nonexistent_codec",
 	}
 	if _, _, _, err := PrewarmVariant(bytes.NewReader(make([]byte, 10)), entryUnknown, cacheDir); err == nil {
@@ -1793,8 +1794,52 @@ func TestDefaultOptions(t *testing.T) {
 	})
 }
 
+func TestVerifyCacheVariantCoverage(t *testing.T) {
+	t.Parallel()
 
+	// 1. Invalid checksum format
+	invalidEntry := &format.VariantEntry{
+		Level:            "v1",
+		SHA256:           "../../invalid",
+		UncompressedSize: 100,
+	}
+	resInvalid := VerifyCacheVariant(invalidEntry, t.TempDir())
+	if resInvalid.Valid || resInvalid.Status != format.PrewarmStatusCorrupted {
+		t.Errorf("expected PrewarmStatusCorrupted for invalid checksum, got: %+v", resInvalid)
+	}
 
+	// 2. PrewarmVariant with invalid checksum
+	_, _, _, prewarmErr := PrewarmVariantWithDict(nil, invalidEntry, t.TempDir(), nil)
+	if prewarmErr == nil {
+		t.Error("expected error for PrewarmVariantWithDict on invalid checksum, got nil")
+	}
 
+	// 3. Size mismatch
+	tempDir := t.TempDir()
+	validHash := testValidSHA256
+	cachedFile := filepath.Join(tempDir, validHash)
+	if err := os.WriteFile(cachedFile, []byte("short"), 0o755); err != nil {
+		t.Fatalf("failed to write cached file: %v", err)
+	}
 
+	entrySizeMismatch := &format.VariantEntry{
+		Level:            "v1",
+		SHA256:           validHash,
+		UncompressedSize: 100,
+	}
+	resSize := VerifyCacheVariant(entrySizeMismatch, tempDir)
+	if resSize.Valid || resSize.Status != format.PrewarmStatusCorrupted {
+		t.Errorf("expected PrewarmStatusCorrupted for size mismatch, got: %+v", resSize)
+	}
 
+	// 4. Checksum mismatch
+	entryHashMismatch := &format.VariantEntry{
+		Level:            "v1",
+		SHA256:           validHash,
+		UncompressedSize: 5,
+	}
+	resHash := VerifyCacheVariant(entryHashMismatch, tempDir)
+	if resHash.Valid || resHash.Status != format.PrewarmStatusCorrupted {
+		t.Errorf("expected PrewarmStatusCorrupted for hash mismatch, got: %+v", resHash)
+	}
+}

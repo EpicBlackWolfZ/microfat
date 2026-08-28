@@ -1137,7 +1137,7 @@ func TestStubPrewarmAndCacheDispatch(t *testing.T) {
 		StubPath:          stubPath,
 		OutputPath:        fatPath,
 		AppName:           "stubprewarmapp",
-		TargetArch:        "amd64",
+		TargetArch:        testArchAMD64,
 		SkipELFValidation: true,
 		Variants: map[string]string{
 			"v1": v1Path,

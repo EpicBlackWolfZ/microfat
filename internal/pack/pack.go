@@ -589,8 +589,8 @@ func PrewarmVariantWithDict(
 	cacheDir string,
 	dict []byte,
 ) (cachedPath string, alreadyCached bool, duration time.Duration, err error) {
-	if entry.SHA256 == "" {
-		return "", false, 0, errors.New("variant missing SHA-256 checksum")
+	if entry.SHA256 == "" || !format.ValidateChecksum(entry.SHA256) {
+		return "", false, 0, fmt.Errorf("%w: invalid or missing variant checksum %q", format.ErrInvalidChecksum, entry.SHA256)
 	}
 
 	cleanDir := filepath.Clean(cacheDir)
@@ -755,6 +755,12 @@ func VerifyCacheVariant(
 			return res
 		}
 		cacheDir = resolved
+	}
+
+	if entry.SHA256 == "" || !format.ValidateChecksum(entry.SHA256) {
+		res.Status = format.PrewarmStatusCorrupted
+		res.Error = fmt.Sprintf("invalid checksum format %q", entry.SHA256)
+		return res
 	}
 
 	cleanDir := filepath.Clean(cacheDir)

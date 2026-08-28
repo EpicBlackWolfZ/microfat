@@ -755,8 +755,8 @@ func TestMarshalBinaryIndexFieldLimits(t *testing.T) {
 	}
 
 	idxBadLevel := &Index{
-		TargetOS:   "linux",
-		TargetArch: "amd64",
+		TargetOS:   testOSLinux,
+		TargetArch: testArchAMD64,
 		Variants: []VariantEntry{
 			{Level: longString},
 		},
@@ -793,11 +793,11 @@ func TestUnmarshalBinaryIndexErrors(t *testing.T) {
 	goodIdx := &Index{
 		Version:     FormatVersion2,
 		AppName:     "test",
-		TargetOS:    "linux",
-		TargetArch:  "amd64",
+		TargetOS:    testOSLinux,
+		TargetArch:  testArchAMD64,
 		CreatedUnix: 123456,
 		Variants: []VariantEntry{
-			{Level: "v1", Offset: 100, CompressedSize: 200, UncompressedSize: 300, SHA256: "abc", Compression: "zstd"},
+			{Level: "v1", Offset: 100, CompressedSize: 200, UncompressedSize: 300, SHA256: "abc", Compression: testCompression},
 		},
 	}
 	goodData, err := MarshalBinaryIndex(goodIdx)
