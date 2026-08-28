@@ -49,19 +49,24 @@ const (
 )
 
 func TestPrepareBenchArgs(t *testing.T) {
-	stdArgs := prepareBenchArgs(false, false)
+	stdArgs := prepareBenchArgs(false, false, false)
 	if !reflect.DeepEqual(stdArgs, []string{flagJSON, cmdAll}) {
 		t.Errorf("unexpected std args: %v", stdArgs)
 	}
 
-	heavyArgs := prepareBenchArgs(false, true)
+	heavyArgs := prepareBenchArgs(false, true, false)
 	if !reflect.DeepEqual(heavyArgs, []string{flagJSON, cmdAll, "--heavy"}) {
 		t.Errorf("unexpected heavy args: %v", heavyArgs)
 	}
 
-	ultraArgs := prepareBenchArgs(true, false)
+	ultraArgs := prepareBenchArgs(true, false, false)
 	if !reflect.DeepEqual(ultraArgs, []string{flagJSON, cmdAll, "--ultra"}) {
 		t.Errorf("unexpected ultra args: %v", ultraArgs)
+	}
+
+	simdArgs := prepareBenchArgs(false, false, true)
+	if !reflect.DeepEqual(simdArgs, []string{flagJSON, cmdAll, "--simd"}) {
+		t.Errorf("unexpected simd args: %v", simdArgs)
 	}
 }
 

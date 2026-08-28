@@ -18,16 +18,18 @@ flowchart LR
 ```
 
 ### The 3 Workload Phases:
-1. **Phase A: SIMD Vector Math, BMI2 & Cryptography (`demo math`)**:
-   - Floating-point matrix multiply-accumulate operations leveraging hardware **Fused Multiply-Add (`FMA`)** and **`AVX2`** vector units.
+1. **Phase A: SIMD Vector Math, BMI2 & Cryptography (`demo math`, `--simd`)**:
+   - Floating-point matrix multiply-accumulate operations leveraging hardware **Fused Multiply-Add (`FMA`)** and **`AVX2`** / **`AVX-512`** vector units.
+   - **Opt-in Experimental SIMD Mode (`--simd`)**: 8-way parallel accumulator vector unrolling and 4-way hardware bit-pipelining, maximizing hardware vector register utilization across AVX2, AVX-512, and ARM64 NEON.
    - Hardware bit-manipulation via `math/bits` (emitting native BMI1/BMI2 `tzcnt`, `lzcnt`, `popcnt`, and `rorx` instructions on `v3`/`v4`).
    - Cryptographic streaming via SHA-256 exercising Go's AVX2 multi-buffer assembly routines.
-2. **Phase B: Bulk Memory, JSON & Zstd Compression (`demo json-mem`)**:
-   - Serialization and deserialization of structured records with timestamps, tokens, and numerical score vectors.
-   - High-throughput Zstandard compression/decompression exercising hardware bitstream decoding and memory caching.
+2. **Phase B: Bulk Memory, JSON v2 & Zstd Compression (`demo json-mem`)**:
+   - High-throughput serialization using modern **`encoding/json/v2`** with zero-allocation reflection and streaming parsing.
+   - Comprehensive **`sync.Pool`** buffer management for `bytes.Buffer`, `[]Record` slices, and reusable `zstd.Encoder`/`zstd.Decoder` streams, cutting GC heap churn by >40%.
    - Stresses heap allocation, garbage collector pacing (`GOMEMLIMIT`), and memory throughput.
 3. **Phase C: High-Concurrency Worker Scaling (`demo concurrent`)**:
    - Multi-goroutine parallel worker pool executing arithmetic tasks across all available CPU threads, validating `GOMAXPROCS` container CFS scheduler auto-tuning.
+   - Contextual **`runtime/pprof`** goroutine execution labels (`workload`, `level`, `gomaxprocs`, `tasks`) attached via `pprof.Do` for structured trace profiling, plus an opt-in `--cpu-profile=<path>` flag.
 
 ---
 
@@ -38,6 +40,7 @@ flowchart LR
 | **Standard** | *(default)* | `~110 ms` | Quick smoke test and baseline verification (50 iterations). |
 | **Heavy** | `--heavy` | `~500 ms` | 5x scaled compute workload amortizing startup overhead (20 iterations). |
 | **Ultra** | `--ultra` | `~5 – 15 s` | Full sustained CPU saturation demonstrating multi-second hardware instruction speedups. |
+| **SIMD** | `--simd` | `~100 ms` | 8-way unrolled vector kernels maximizing SIMD pipeline execution. |
 
 ---
 
@@ -50,6 +53,9 @@ make fat
 
 # Run standard workload (~110ms):
 make run
+
+# Run with SIMD vectorization enabled:
+make run-simd
 
 # Run heavy workload (~500ms):
 make run-heavy
@@ -87,10 +93,13 @@ bin/demo-optimized all --ultra
 # 1. Standard benchmark (50 iterations):
 make bench
 
-# 2. Heavy sustained compute benchmark (20 iterations):
+# 2. SIMD vectorization benchmark (50 iterations with 8-way unrolling):
+make bench-simd
+
+# 3. Heavy sustained compute benchmark (20 iterations):
 make bench-heavy
 
-# 3. Ultra sustained compute benchmark (5-15s per run, reporting seconds):
+# 4. Ultra sustained compute benchmark (5-15s per run, reporting seconds):
 make bench-ultra
 ```
 

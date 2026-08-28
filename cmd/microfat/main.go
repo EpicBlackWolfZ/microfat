@@ -2,7 +2,8 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -73,9 +74,11 @@ func newDetectCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			info := microarch.Detect()
 			if jsonOutput {
-				enc := json.NewEncoder(os.Stdout)
-				enc.SetIndent("", "  ")
-				return enc.Encode(info)
+				if err := json.MarshalWrite(os.Stdout, info, jsontext.WithIndent("  ")); err != nil {
+					return fmt.Errorf("encoding json: %w", err)
+				}
+				fmt.Println()
+				return nil
 			}
 
 			fmt.Printf("OS:       %s\n", info.OS)
@@ -121,9 +124,11 @@ func newInspectCmd() *cobra.Command {
 			}
 
 			if jsonOutput {
-				enc := json.NewEncoder(os.Stdout)
-				enc.SetIndent("", "  ")
-				return enc.Encode(idx)
+				if err := json.MarshalWrite(os.Stdout, idx, jsontext.WithIndent("  ")); err != nil {
+					return fmt.Errorf("encoding json: %w", err)
+				}
+				fmt.Println()
+				return nil
 			}
 
 			fmt.Printf("Binary Path:       %s\n", path)
@@ -193,9 +198,11 @@ func newVerifyCmd() *cobra.Command {
 						break
 					}
 				}
-				enc := json.NewEncoder(os.Stdout)
-				enc.SetIndent("", "  ")
-				return enc.Encode(out)
+				if err := json.MarshalWrite(os.Stdout, out, jsontext.WithIndent("  ")); err != nil {
+					return fmt.Errorf("encoding json: %w", err)
+				}
+				fmt.Println()
+				return nil
 			}
 
 			fmt.Printf("Verifying '%s' (%s - %s/%s)...\n\n", path, idx.AppName, idx.TargetOS, idx.TargetArch)
@@ -677,11 +684,10 @@ func newPrewarmCmd() *cobra.Command {
 						CacheDir:          resolvedDir,
 						Results:           results,
 					}
-					enc := json.NewEncoder(os.Stdout)
-					enc.SetIndent("", "  ")
-					if err := enc.Encode(telem); err != nil {
+					if err := json.MarshalWrite(os.Stdout, telem, jsontext.WithIndent("  ")); err != nil {
 						return fmt.Errorf("encoding json: %w", err)
 					}
+					fmt.Println()
 					if !allValid {
 						return errors.New("cache verification failed for one or more variants")
 					}
@@ -719,9 +725,11 @@ func newPrewarmCmd() *cobra.Command {
 					CacheDir:          resolvedDir,
 					Results:           results,
 				}
-				enc := json.NewEncoder(os.Stdout)
-				enc.SetIndent("", "  ")
-				return enc.Encode(telem)
+				if err := json.MarshalWrite(os.Stdout, telem, jsontext.WithIndent("  ")); err != nil {
+					return fmt.Errorf("encoding json: %w", err)
+				}
+				fmt.Println()
+				return nil
 			}
 
 			fmt.Printf("Prewarming cache for '%s' (%s - %s/%s)...\n", path, idx.AppName, idx.TargetOS, idx.TargetArch)

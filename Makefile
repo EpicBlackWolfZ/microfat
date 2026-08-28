@@ -25,7 +25,7 @@ GOLANGCI_LINT := $(shell command -v golangci-lint 2> /dev/null)
 GOVULNCHECK := $(shell command -v govulncheck 2> /dev/null)
 GORELEASER := $(shell command -v goreleaser 2> /dev/null)
 
-.PHONY: all help build build-amd64 build-arm64 build-all test coverage lint vuln tidy snapshot demo demo-arm64 bench bench-heavy bench-ultra bench-startup clean
+.PHONY: all help build build-amd64 build-arm64 build-all test coverage lint vuln tidy snapshot demo demo-arm64 bench bench-heavy bench-ultra bench-simd bench-startup clean
 
 all: tidy lint vuln test coverage build ## Run complete verification pipeline (tidy, lint, vuln, test, coverage gate, build)
 
@@ -155,6 +155,10 @@ bench-heavy: build ## Run the heavy sustained compute benchmark suite (~500ms) i
 bench-ultra: build ## Run the ultra heavy sustained compute benchmark suite (5-15s) in examples/demo
 	@echo "\033[34m==>\033[0m Running ultra heavy sustained compute demo benchmark suite..."
 	@$(MAKE) -C examples/demo bench-ultra
+
+bench-simd: build ## Run the SIMD vectorization benchmark suite in examples/demo
+	@echo "\033[34m==>\033[0m Running SIMD vectorization demo benchmark suite..."
+	@$(MAKE) -C examples/demo bench-simd
 
 bench-startup: build ## Run microsecond startup latency and stub telemetry benchmark suite in examples/demo
 	@echo "\033[34m==>\033[0m Running microsecond startup benchmark suite in examples/demo..."

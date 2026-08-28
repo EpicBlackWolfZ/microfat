@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/csv"
-	"encoding/json"
+	json "encoding/json/v2"
 	"flag"
 	"fmt"
 	"math"
@@ -97,12 +97,14 @@ func main() {
 	csvPtr := flag.String("csv", "", "Path to export CSV benchmark results (defaults to timestamped file in -startup mode)")
 	ultraPtr := flag.Bool("ultra", false, "Run ULTRA sustained heavy compute benchmark (10s of seconds)")
 	heavyPtr := flag.Bool("heavy", false, "Run heavy compute-intensive benchmark (~500ms workload)")
+	simdPtr := flag.Bool("simd", false, "Run benchmarks with experimental wide-vector unrolled SIMD mode enabled")
 	itersPtr := flag.Int("n", 0, "Number of benchmark iterations")
 	flag.Parse()
 
 	isStartup := *startupPtr
 	isUltra := *ultraPtr
 	isHeavy := *heavyPtr && !isUltra
+	isSIMD := *simdPtr
 
 	iterations := stdIterations
 	warmups := stdWarmup
@@ -142,13 +144,16 @@ func main() {
 	} else if isHeavy {
 		modeStr = "HEAVY Sustained Compute (~500ms per run)"
 	}
+	if isSIMD {
+		modeStr += " [SIMD 8-Way Unrolled Mode]"
+	}
 
 	fmt.Println("==========================================================================================")
 	fmt.Printf("      Microfat Performance Benchmark Suite [%s - %d runs]   \n", modeStr, iterations)
 	fmt.Println("==========================================================================================")
 
 	configs := buildAndPackageConfigs(srcDir, benchDir, microfatStub, microfatCli)
-	benchArgs := prepareBenchArgs(isUltra, isHeavy)
+	benchArgs := prepareBenchArgs(isUltra, isHeavy, isSIMD)
 
 	runWarmups(configs, warmups, benchArgs)
 
@@ -635,12 +640,15 @@ func buildAndPackageConfigs(srcDir, benchDir, microfatStub, microfatCli string) 
 	return configs
 }
 
-func prepareBenchArgs(isUltra, isHeavy bool) []string {
+func prepareBenchArgs(isUltra, isHeavy, isSIMD bool) []string {
 	benchArgs := []string{"--json", "all"}
 	if isUltra {
 		benchArgs = append(benchArgs, "--ultra")
 	} else if isHeavy {
 		benchArgs = append(benchArgs, "--heavy")
+	}
+	if isSIMD {
+		benchArgs = append(benchArgs, "--simd")
 	}
 	return benchArgs
 }
