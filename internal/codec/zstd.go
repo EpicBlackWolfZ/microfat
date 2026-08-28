@@ -21,6 +21,12 @@ const (
 	// MaxDictSize is the upper bound for a dictionary size (1 MB).
 	MaxDictSize = 1024 * 1024
 
+	// DefaultDecoderMaxMemory is the maximum memory allocation allowed for the zstd decoder (512 MiB).
+	DefaultDecoderMaxMemory uint64 = 512 * 1024 * 1024
+
+	// DefaultDecoderMaxWindow is the maximum sliding window size allowed for the zstd decoder (128 MiB).
+	DefaultDecoderMaxWindow uint64 = 128 * 1024 * 1024
+
 	// historySampleFractionDivisor is the portion of total sample bytes allocated for the dictionary history window.
 	historySampleFractionDivisor = 4
 )
@@ -113,7 +119,10 @@ func (c *ZstdCodec) Decompress(w io.Writer, r io.Reader, uncompressedSize int64)
 
 // DecompressWithDict decompresses a zstd stream from r into w using a shared dictionary.
 func (c *ZstdCodec) DecompressWithDict(w io.Writer, r io.Reader, uncompressedSize int64, dict []byte) error {
-	var opts []zstd.DOption
+	opts := []zstd.DOption{
+		zstd.WithDecoderMaxMemory(DefaultDecoderMaxMemory),
+		zstd.WithDecoderMaxWindow(DefaultDecoderMaxWindow),
+	}
 	if len(dict) > 0 {
 		opts = append(opts, zstd.WithDecoderDicts(dict))
 	}
@@ -124,13 +133,17 @@ func (c *ZstdCodec) DecompressWithDict(w io.Writer, r io.Reader, uncompressedSiz
 	}
 	defer reader.Close()
 
-	written, err := io.Copy(w, reader)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrDecompressionFailed, err)
+	bw := newBoundedWriter(w, uncompressedSize)
+	_, copyErr := io.Copy(bw, reader)
+	if copyErr != nil {
+		if errors.Is(copyErr, ErrSizeMismatch) {
+			return copyErr
+		}
+		return fmt.Errorf("%w: %v", ErrDecompressionFailed, copyErr)
 	}
 
-	if uncompressedSize > 0 && written != uncompressedSize {
-		return fmt.Errorf("%w: expected %d bytes, got %d", ErrSizeMismatch, uncompressedSize, written)
+	if uncompressedSize > 0 && bw.written != uncompressedSize {
+		return fmt.Errorf("%w: expected %d bytes, got %d", ErrSizeMismatch, uncompressedSize, bw.written)
 	}
 
 	return nil

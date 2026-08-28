@@ -309,3 +309,75 @@ func TestMaliciousPathTraversalChecksumBlocked(t *testing.T) {
 		t.Fatalf("expected ErrCacheWrite, got: %v", err)
 	}
 }
+
+func TestDecompressionBombPayloadBlocked(t *testing.T) {
+	const (
+		bombPayloadBytes  = 1024 * 1024 // 1 MB
+		declaredFakeBytes = 256         // 256 bytes declared
+	)
+
+	largePayload := bytes.Repeat([]byte("MICROFAT_HOSTILE_DECOMPRESSION_BOMB_PAYLOAD_TEST_0123456789\n"), bombPayloadBytes/60)
+
+	fatFile, _, idx := createSyntheticFatFile(t, largePayload)
+
+	cacheDir := t.TempDir()
+	origResolve := resolveCacheDirFunc
+	origExecve := execveFunc
+	t.Cleanup(func() {
+		resolveCacheDirFunc = origResolve
+		execveFunc = origExecve
+	})
+
+	resolveCacheDirFunc = func(string) (string, error) {
+		return cacheDir, nil
+	}
+
+	var execveCalled bool
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		execveCalled = true
+		return nil
+	}
+
+	// Craft hostile entry with declared fake size much smaller than true payload
+	h := sha256.Sum256(largePayload)
+	hostileEntry := &format.VariantEntry{
+		Level:            "v3",
+		Offset:           64,
+		CompressedSize:   idx.Variants[0].CompressedSize,
+		UncompressedSize: declaredFakeBytes,
+		SHA256:           hex.EncodeToString(h[:]),
+		Compression:      codec.AlgorithmZstd,
+	}
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{}
+
+	t.Run("Blocked on memfd path", func(t *testing.T) {
+		execveCalled = false
+		err := executeViaMemfd(fatFile, hostileEntry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
+		if err == nil {
+			t.Fatal("expected error decompressing bomb payload into memfd, got nil")
+		}
+		if !errors.Is(err, codec.ErrSizeMismatch) {
+			t.Fatalf("expected ErrSizeMismatch, got %v", err)
+		}
+		if execveCalled {
+			t.Fatal("execve was called despite decompression bomb error")
+		}
+	})
+
+	t.Run("Blocked on cache path", func(t *testing.T) {
+		execveCalled = false
+		err := executeViaCache(fatFile, hostileEntry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now())
+		if err == nil {
+			t.Fatal("expected error decompressing bomb payload into cache, got nil")
+		}
+		if !errors.Is(err, format.ErrCacheExtract) || !errors.Is(err, codec.ErrSizeMismatch) {
+			t.Fatalf("expected ErrCacheExtract wrapping ErrSizeMismatch, got %v", err)
+		}
+		if execveCalled {
+			t.Fatal("execve was called despite cache decompression error")
+		}
+	})
+}
+

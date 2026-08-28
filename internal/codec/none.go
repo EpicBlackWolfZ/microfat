@@ -1,6 +1,7 @@
 package codec
 
 import (
+	"errors"
 	"fmt"
 	"io"
 )
@@ -28,14 +29,19 @@ func (c *NoneCodec) Compress(w io.Writer, src []byte, _ string) error {
 
 // Decompress reads raw bytes from r directly into w, verifying size if specified.
 func (c *NoneCodec) Decompress(w io.Writer, r io.Reader, uncompressedSize int64) error {
-	written, err := io.Copy(w, r)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrDecompressionFailed, err)
+	bw := newBoundedWriter(w, uncompressedSize)
+	_, copyErr := io.Copy(bw, r)
+	if copyErr != nil {
+		if errors.Is(copyErr, ErrSizeMismatch) {
+			return copyErr
+		}
+		return fmt.Errorf("%w: %v", ErrDecompressionFailed, copyErr)
 	}
 
-	if uncompressedSize > 0 && written != uncompressedSize {
-		return fmt.Errorf("%w: expected %d bytes, got %d", ErrSizeMismatch, uncompressedSize, written)
+	if uncompressedSize > 0 && bw.written != uncompressedSize {
+		return fmt.Errorf("%w: expected %d bytes, got %d", ErrSizeMismatch, uncompressedSize, bw.written)
 	}
 
 	return nil
 }
+

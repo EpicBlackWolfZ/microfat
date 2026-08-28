@@ -484,6 +484,124 @@ func TestTrainDictionaryValidation(t *testing.T) {
 	})
 }
 
+func TestDecompressionBombRejection(t *testing.T) {
+	t.Parallel()
+
+	const (
+		bombPayloadSize   = 2 * 1024 * 1024 // 2 MB expanded payload
+		declaredLimitSize = 512             // 512 bytes declared limit
+	)
+
+	// Create a highly repetitive payload that compresses to very few bytes
+	largeData := bytes.Repeat([]byte("MICROFAT_HIGH_COMPRESSION_RATIO_REPETITIVE_PATTERN_0123456789\n"), bombPayloadSize/64)
+
+	t.Run("Zstd decompression bomb rejected early", func(t *testing.T) {
+		t.Parallel()
+		zCodec, err := codec.Get(codec.AlgorithmZstd)
+		if err != nil {
+			t.Fatalf("Get zstd: %v", err)
+		}
+
+		var compressed bytes.Buffer
+		if err := zCodec.Compress(&compressed, largeData, "best"); err != nil {
+			t.Fatalf("Compress failed: %v", err)
+		}
+
+		var dest bytes.Buffer
+		err = zCodec.Decompress(&dest, bytes.NewReader(compressed.Bytes()), declaredLimitSize)
+		if err == nil {
+			t.Fatal("expected error decompressing payload exceeding declared limit, got nil")
+		}
+		if !errors.Is(err, codec.ErrSizeMismatch) {
+			t.Fatalf("expected ErrSizeMismatch, got %v", err)
+		}
+		if int64(dest.Len()) > declaredLimitSize {
+			t.Fatalf("decompressed buffer exceeded limit: got %d bytes, limit was %d", dest.Len(), declaredLimitSize)
+		}
+	})
+
+	t.Run("LZ4 decompression bomb rejected early", func(t *testing.T) {
+		t.Parallel()
+		lzCodec, err := codec.Get(codec.AlgorithmLZ4)
+		if err != nil {
+			t.Fatalf("Get lz4: %v", err)
+		}
+
+		var compressed bytes.Buffer
+		if err := lzCodec.Compress(&compressed, largeData, "best"); err != nil {
+			t.Fatalf("Compress failed: %v", err)
+		}
+
+		var dest bytes.Buffer
+		err = lzCodec.Decompress(&dest, bytes.NewReader(compressed.Bytes()), declaredLimitSize)
+		if err == nil {
+			t.Fatal("expected error decompressing payload exceeding declared limit, got nil")
+		}
+		if !errors.Is(err, codec.ErrSizeMismatch) {
+			t.Fatalf("expected ErrSizeMismatch, got %v", err)
+		}
+		if int64(dest.Len()) > declaredLimitSize {
+			t.Fatalf("decompressed buffer exceeded limit: got %d bytes, limit was %d", dest.Len(), declaredLimitSize)
+		}
+	})
+
+	t.Run("None decompression bomb rejected early", func(t *testing.T) {
+		t.Parallel()
+		nCodec, err := codec.Get(codec.AlgorithmNone)
+		if err != nil {
+			t.Fatalf("Get none: %v", err)
+		}
+
+		var dest bytes.Buffer
+		err = nCodec.Decompress(&dest, bytes.NewReader(largeData), declaredLimitSize)
+		if err == nil {
+			t.Fatal("expected error decompressing payload exceeding declared limit, got nil")
+		}
+		if !errors.Is(err, codec.ErrSizeMismatch) {
+			t.Fatalf("expected ErrSizeMismatch, got %v", err)
+		}
+		if int64(dest.Len()) > declaredLimitSize {
+			t.Fatalf("decompressed buffer exceeded limit: got %d bytes, limit was %d", dest.Len(), declaredLimitSize)
+		}
+	})
+
+	t.Run("Zstd dictionary decompression bomb rejected early", func(t *testing.T) {
+		t.Parallel()
+		samples := generateDictionarySamples()
+		dict, err := codec.TrainDictionary(samples, 32*1024, "default")
+		if err != nil {
+			t.Fatalf("TrainDictionary failed: %v", err)
+		}
+
+		zCodecRaw, err := codec.Get(codec.AlgorithmZstd)
+		if err != nil {
+			t.Fatalf("Get zstd: %v", err)
+		}
+		zCodec, ok := zCodecRaw.(codec.DictCodec)
+		if !ok {
+			t.Fatalf("expected DictCodec")
+		}
+
+		var compressed bytes.Buffer
+		if err := zCodec.CompressWithDict(&compressed, largeData, "fastest", dict); err != nil {
+			t.Fatalf("CompressWithDict failed: %v", err)
+		}
+
+		var dest bytes.Buffer
+		err = zCodec.DecompressWithDict(&dest, bytes.NewReader(compressed.Bytes()), declaredLimitSize, dict)
+		if err == nil {
+			t.Fatal("expected error decompressing payload with dict exceeding declared limit, got nil")
+		}
+		if !errors.Is(err, codec.ErrSizeMismatch) {
+			t.Fatalf("expected ErrSizeMismatch, got %v", err)
+		}
+		if int64(dest.Len()) > declaredLimitSize {
+			t.Fatalf("decompressed buffer exceeded limit: got %d bytes, limit was %d", dest.Len(), declaredLimitSize)
+		}
+	})
+}
+
+
 func BenchmarkCodecs(b *testing.B) {
 	data := generateTestData(1024 * 1024) // 1 MB payload
 

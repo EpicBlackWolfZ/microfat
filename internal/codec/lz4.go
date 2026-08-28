@@ -1,6 +1,7 @@
 package codec
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -87,13 +88,17 @@ func (c *LZ4Codec) Compress(w io.Writer, src []byte, level string) error {
 func (c *LZ4Codec) Decompress(w io.Writer, r io.Reader, uncompressedSize int64) error {
 	reader := lz4.NewReader(r)
 
-	written, err := io.Copy(w, reader)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrDecompressionFailed, err)
+	bw := newBoundedWriter(w, uncompressedSize)
+	_, copyErr := io.Copy(bw, reader)
+	if copyErr != nil {
+		if errors.Is(copyErr, ErrSizeMismatch) {
+			return copyErr
+		}
+		return fmt.Errorf("%w: %v", ErrDecompressionFailed, copyErr)
 	}
 
-	if uncompressedSize > 0 && written != uncompressedSize {
-		return fmt.Errorf("%w: expected %d bytes, got %d", ErrSizeMismatch, uncompressedSize, written)
+	if uncompressedSize > 0 && bw.written != uncompressedSize {
+		return fmt.Errorf("%w: expected %d bytes, got %d", ErrSizeMismatch, uncompressedSize, bw.written)
 	}
 
 	return nil
