@@ -100,7 +100,7 @@ const (
 
 var userHomeDirFunc = os.UserHomeDir
 
-// Standard error definitions for binary format parsing.
+// Standard error definitions for binary format parsing and execution.
 var (
 	ErrBinaryTooSmall      = errors.New("binary size is smaller than trailer size")
 	ErrInvalidMagic        = errors.New("invalid microfat magic bytes at EOF")
@@ -115,6 +115,13 @@ var (
 	ErrInvalidJSONSyntax   = errors.New("invalid json syntax in manifest index")
 	ErrDictionaryCorrupted = errors.New("shared dictionary SHA-256 checksum mismatch")
 	ErrInvalidDictionary   = errors.New("invalid shared dictionary offset or size")
+
+	// Launcher execution stage sentinels for typed error diagnostics.
+	ErrMemfdCreate  = errors.New("memfd_create failed")
+	ErrExecve       = errors.New("execve failed")
+	ErrCacheInit    = errors.New("cache directory initialization failed")
+	ErrCacheWrite   = errors.New("cache file creation failed")
+	ErrCacheExtract = errors.New("cache decompression failed")
 )
 
 // VariantEntry describes an individual compressed microarchitecture variant payload.

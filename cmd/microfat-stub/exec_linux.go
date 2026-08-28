@@ -334,7 +334,7 @@ func executeViaMemfd(
 	fd, err := memfdCreateFunc("microfat_payload", unix.MFD_CLOEXEC)
 	if err != nil {
 		logErrorDiagnostics(format.StageMemfdCreate, err, hostInfo, entry, policyRes, "falling back to disk cache")
-		return fmt.Errorf("memfd_create failed: %w", err)
+		return fmt.Errorf("%w: memfd_create failed: %w", format.ErrMemfdCreate, err)
 	}
 
 	memFile := os.NewFile(uintptr(fd), "microfat_payload")
@@ -356,7 +356,7 @@ func executeViaMemfd(
 		return nil
 	}
 	logErrorDiagnostics(format.StageMemfdExec, execErr, hostInfo, entry, policyRes, "execve failed on "+procPath)
-	return fmt.Errorf("execve on %s failed: %w", procPath, execErr)
+	return fmt.Errorf("%w: execve on %s failed: %w", format.ErrExecve, procPath, execErr)
 }
 
 func executeViaCache(
@@ -374,7 +374,8 @@ func executeViaCache(
 
 	cacheDir, err := resolveCacheDirFunc("")
 	if err != nil {
-		errOut := fmt.Errorf("launcher execution failed: unable to initialize cache: %w (primary memfd error: %v)", err, primaryErr)
+		errOut := fmt.Errorf("%w: launcher execution failed: unable to initialize cache: %w (primary memfd error: %v)",
+			format.ErrCacheInit, err, primaryErr)
 		logErrorDiagnostics(format.StageCacheDirInit, errOut, hostInfo, entry, policyRes, "cache directory creation failed")
 		return errOut
 	}
@@ -395,8 +396,8 @@ func executeViaCache(
 		}
 		tmpFile, err := os.CreateTemp(cacheDir, ".exec-*.tmp")
 		if err != nil {
-			errOut := fmt.Errorf("launcher execution failed: cannot create temp file in %s: %w (primary memfd error: %v)",
-				cacheDir, err, primaryErr)
+			errOut := fmt.Errorf("%w: launcher execution failed: cannot create temp file in %s: %w (primary memfd error: %v)",
+				format.ErrCacheWrite, cacheDir, err, primaryErr)
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "temp file creation failed in "+cacheDir)
 			return errOut
 		}
@@ -409,7 +410,7 @@ func executeViaCache(
 		decompStart := time.Now()
 		if err := extractVariantToWriter(selfFile, entry, idx, tmpFile); err != nil {
 			logErrorDiagnostics(format.StageCacheExtract, err, hostInfo, entry, policyRes, "decompressing payload to cache failed")
-			return fmt.Errorf("extracting to cache fallback: %w", err)
+			return fmt.Errorf("%w: extracting to cache fallback: %w", format.ErrCacheExtract, err)
 		}
 		decompDuration = time.Since(decompStart)
 
@@ -428,7 +429,8 @@ func executeViaCache(
 	}
 	logErrorDiagnostics(format.StageCacheExec, execErr, hostInfo, entry, policyRes, "execve failed on cached binary "+cachedBinary)
 	if primaryErr != nil {
-		return fmt.Errorf("cache fallback execve failed (%s): %w (primary memfd error: %v)", cachedBinary, execErr, primaryErr)
+		return fmt.Errorf("%w: cache fallback execve failed (%s): %w (primary memfd error: %v)",
+			format.ErrExecve, cachedBinary, execErr, primaryErr)
 	}
-	return fmt.Errorf("cache execve failed (%s): %w", cachedBinary, execErr)
+	return fmt.Errorf("%w: cache execve failed (%s): %w", format.ErrExecve, cachedBinary, execErr)
 }
