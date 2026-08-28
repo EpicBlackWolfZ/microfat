@@ -303,6 +303,15 @@ func TestLogDiagnostics(t *testing.T) {
 	logErrorDiagnostics("test_stage", errors.New("silent error"), hostInfo, entry, policyRes, "should not log")
 }
 
+func TestEscapeJSONString(t *testing.T) {
+	input := "hello \"world\" \\ \b \f \n \r \t \x00 \x1f test"
+	escaped := escapeJSONString(input)
+	expected := `hello \"world\" \\ \b \f \n \r \t \u0000 \u001f test`
+	if escaped != expected {
+		t.Errorf("escapeJSONString mismatch: got %q, want %q", escaped, expected)
+	}
+}
+
 func TestGetSelfExecutablePath(t *testing.T) {
 	path, err := getSelfExecutablePathFunc()
 	if err != nil {

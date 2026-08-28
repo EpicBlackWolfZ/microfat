@@ -26,11 +26,16 @@ const (
 	privateCacheDirMode = 0o700
 	privateExecMode     = 0o700
 	extraEnvCapacity    = 16
+	memfdTargetSeals    = unix.F_SEAL_WRITE | unix.F_SEAL_SHRINK | unix.F_SEAL_GROW | unix.F_SEAL_SEAL
 )
 
 var (
 	execveFunc           = syscall.Exec
 	memfdCreateFunc      = unix.MemfdCreate
+	memfdSealFunc        = func(fd int, seals int) error {
+		_, err := unix.FcntlInt(uintptr(fd), unix.F_ADD_SEALS, seals)
+		return err
+	}
 	readCgroupLimitsFunc = cgroup.ReadLimits
 	resolveCacheDirFunc  = format.ResolveCacheDir
 	userHomeDirFunc      = os.UserHomeDir
@@ -351,7 +356,7 @@ func executeViaMemfd(
 ) error {
 	env, limits := buildAutoTunedEnviron(baseEnv, entry, format.ExecModeMemfd, hostInfo, policyRes)
 
-	fd, err := memfdCreateFunc("microfat_payload", unix.MFD_CLOEXEC)
+	fd, err := memfdCreateFunc("microfat_payload", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
 	if err != nil {
 		logErrorDiagnostics(format.StageMemfdCreate, err, hostInfo, entry, policyRes, "falling back to disk cache")
 		return fmt.Errorf("%w: memfd_create failed: %w", format.ErrMemfdCreate, err)
@@ -366,6 +371,13 @@ func executeViaMemfd(
 		return fmt.Errorf("decompressing into memfd: %w", err)
 	}
 	decompDuration := time.Since(decompStart)
+
+	// Seal anonymous memory file descriptor to prevent tampering prior to execution
+	if sealErr := memfdSealFunc(fd, memfdTargetSeals); sealErr != nil {
+		if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
+			fmt.Fprintf(os.Stderr, "[microfat:debug] warning: memfd sealing returned %v (proceeding to execve)\n", sealErr)
+		}
+	}
 
 	logDiagnostics(entry, format.ExecModeMemfd, hostInfo, policyRes, env, limits, decompDuration, time.Since(startTime))
 
@@ -458,6 +470,11 @@ func executeViaCache(
 		decompDuration = time.Since(decompStart)
 
 		_ = tmpFile.Chmod(format.PrivateExecMode)
+		if err := tmpFile.Sync(); err != nil {
+			errOut := fmt.Errorf("%w: syncing temp cache file %s: %w", format.ErrCacheWrite, tmpPath, err)
+			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "syncing temp cache file failed")
+			return errOut
+		}
 		_ = tmpFile.Close()
 		// #nosec G703 -- atomic move to cache location
 		_ = os.Rename(tmpPath, cachedBinary)
