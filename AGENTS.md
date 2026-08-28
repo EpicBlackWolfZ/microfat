@@ -6,15 +6,15 @@ Welcome to `microfat`! This document serves as the primary technical runbook, ar
 
 ## 1. Project Overview & Architecture
 
-`microfat` is a high-performance developer and CI toolkit that packages multiple microarchitecture-specialized Go ELF binaries (e.g., `amd64_v1`, `v2`, `v3`, `v4` or `arm64_v8.0`..`v9.2`) into a single self-dispatching executable.
+`microfat` is a high-performance developer and CI toolkit that packages multiple microarchitecture-specialized Go ELF binaries (e.g., `amd64_v1`, `v2`, `v3`, `v4` or `arm64_v8.0`..`v9.5`) into a single self-dispatching executable.
 
 ### Core Architecture
 - **`cmd/microfat`**: The primary developer CLI for detecting host CPU capabilities, packing fat binaries, inspecting embedded manifests, verifying integrity, and trimming variants.
 - **`cmd/microfat-stub`**: The minimal launcher stub stitched to the front of fat executables. At launch time, it probes the host CPU via `internal/microarch`, detects container resource limits via `internal/cgroup`, and executes the optimal variant directly in RAM using Linux `memfd_create` (falling back to `$XDG_CACHE_HOME/microfat` if memfd is restricted).
-- **`internal/format`**: Binary format definition, JSON index manifest serialization, and fixed 56-byte trailer verification (`\x00\xFA\x7FMICRO` magic).
-- **`internal/pack`**: Compression engine utilizing `klauspost/compress/zstd` for parallel frame compression, variant sorting, ELF header validation, and atomic file replacement.
+- **`internal/format`**: Binary format definition (Format v2 compact binary table and Format v1 JSON manifest), shared dictionary metadata, and fixed 56-byte trailer verification (`\x00\xFA\x7FMICRO` magic).
+- **`internal/pack`**: Compression engine utilizing `klauspost/compress/zstd` for parallel frame compression, trained dictionary compression, variant sorting, ELF header validation, and atomic file replacement.
 - **`internal/cgroup`**: Linux cgroup v1 and v2 memory/CPU limit parser. Computes optimal runtime parameters (`GOMEMLIMIT` at 90% container ceiling, `GOMAXPROCS` matching CPU CFS quotas).
-- **`internal/microarch`**: Dynamic runtime CPU microarchitecture level detection (AMD64 v1-v4, ARM64 v8.0-v9.2) and ranking engine.
+- **`internal/microarch`**: Dynamic runtime CPU microarchitecture level detection (AMD64 v1-v4, ARM64 v8.0-v9.5) and ranking engine.
 - **`internal/version`**: Build-time metadata container injected via ldflags (`Version`, `Commit`, `Date`, `BuiltBy`, `Vendor`).
 
 ---
@@ -26,13 +26,15 @@ A `microfat` fat binary consists of contiguous segments:
 +-------------------------------------------------------------+
 | Launcher Stub Binary (ELF)                                  |
 +-------------------------------------------------------------+
-| Compressed Variant Payload 1 (zstd)                         |
+| Shared Inter-Variant Dictionary (Optional Zstd Dict)        |
 +-------------------------------------------------------------+
-| Compressed Variant Payload 2 (zstd)                         |
+| Compressed Variant Payload 1 (zstd / lz4 / none)            |
++-------------------------------------------------------------+
+| Compressed Variant Payload 2 (zstd / lz4 / none)            |
 +-------------------------------------------------------------+
 | ...                                                         |
 +-------------------------------------------------------------+
-| Index Manifest (JSON)                                       |
+| Metadata Index Table (Format v2 Binary / Format v1 JSON)    |
 +-------------------------------------------------------------+
 | Trailer (56 Bytes Fixed at EOF)                             |
 |  - 8 Bytes uint64 LE : Index Offset                         |

@@ -1,5 +1,9 @@
 # Microfat Demonstration & Benchmark Suite
 
+[**← Troubleshooting & Runbook**](../../docs/troubleshooting.md) | [**Main Index**](../../README.md#documentation-guide) | [**Architecture Specification →**](../../docs/architecture.md)
+
+---
+
 This directory contains a complete, self-contained demonstration project showing the real-world performance impact of **CPU microarchitecture specialization (`v1` vs `v2` vs `v3` vs `v4`)**, **binary lifecycle modes (Universal Fat vs Trimmed Fat vs Native ELF)**, and **runtime container resource tuning (`GOMEMLIMIT` & `GOMAXPROCS`)**.
 
 ---
@@ -101,6 +105,9 @@ make bench-heavy
 
 # 4. Ultra sustained compute benchmark (5-15s per run, reporting seconds):
 make bench-ultra
+
+# 5. Startup latency benchmark:
+make bench-startup
 ```
 
 ### Benchmark Metrics Measured:
@@ -126,3 +133,6 @@ When evaluating fat binaries vs native binaries, it is important to distinguish 
 > [!NOTE]
 > The **~6.8ms decompression overhead** occurs **only once at process launch** when streaming the payload into anonymous RAM (`memfd_create`). Once running, CPU vector instructions execute at full native hardware speed. For persistent microservices and servers, this overhead is completely negligible. For ultra-fast sub-2ms CLI utilities, use `--microfat:optimize` to eliminate the startup overhead entirely.
 
+---
+
+[**← Troubleshooting & Runbook**](../../docs/troubleshooting.md) | [**Main Index**](../../README.md#documentation-guide) | [**Architecture Specification →**](../../docs/architecture.md)

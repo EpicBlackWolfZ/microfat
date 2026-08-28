@@ -1,5 +1,9 @@
 # Binary Lifecycle Modes
 
+[**← Container Runtime Tuning**](runtime-tuning.md) | [**Main Index**](../README.md#documentation-guide) | [**Advanced Optimizations →**](advanced-optimizations.md)
+
+---
+
 Microfat supports three distinct binary operational modes to accommodate different stages of the application lifecycle, from multi-architecture release distribution to tight container image optimization and raw host performance.
 
 ---
@@ -30,14 +34,14 @@ Microfat supports three distinct binary operational modes to accommodate differe
 
 | Characteristic | 1. Universal Fat Binary | 2. Trimmed Fat Binary (`--trim`) | 3. Raw Native ELF (`--optimize`) |
 | :--- | :--- | :--- | :--- |
-| **Command** | Default build artifact | `./app --microfat:trim` | `./app --microfat:optimize` |
+| **Command** | Default build artifact | `./app --microfat:trim` or `microfat trim app` | `./app --microfat:optimize` |
 | **Disk Size** | `~12.6 MB` | `~6.3 MB` (**-50%**) | `~7.1 MB` |
-| **Microarch Portability** | Runs on **any** machine (`v1`–`v4`) | Locked to host level (`v3`) | Locked to host level (`v3`) |
-| **Container Auto-Tuning** | ✅ Continuous `GOMEMLIMIT` & `GOMAXPROCS` | ✅ Continuous `GOMEMLIMIT` & `GOMAXPROCS` | ❌ Requires application-level `pkg/cgroup` |
+| **Microarch Portability** | Runs on **any** machine (`v1`–`v4` or `v8.0`–`v9.5`) | Locked to chosen level (e.g. `v3`) | Locked to chosen level (e.g. `v3`) |
+| **Container Auto-Tuning** | ✅ Continuous `GOMEMLIMIT` & `GOMAXPROCS` | ✅ Continuous `GOMEMLIMIT` & `GOMAXPROCS` | ❌ Requires standalone `runtimeinit` import |
 | **In-Memory RAM Exec** | ✅ Anonymous RAM (`memfd_create`) | ✅ Anonymous RAM (`memfd_create`) | ❌ Standard OS disk `mmap` |
 | **Read-Only Rootfs** | ✅ Zero disk I/O | ✅ Zero disk I/O | ✅ Native disk read |
-| **Startup Latency** | `~1.5 ms` (zstd decompression) | `~1.5 ms` (zstd decompression) | `0.0 ms` (direct kernel exec) |
-| **Runtime Execution** | Native `v3` speed (AVX2/FMA) | Native `v3` speed (AVX2/FMA) | Native `v3` speed (AVX2/FMA) |
+| **Startup Latency** | `~1.5 ms` (zstd decompression) | `~1.5 ms` (zstd decompression) | `0.0 ms` (direct kernel execve) |
+| **Runtime Execution** | Native hardware speed (AVX2/FMA/SVE) | Native hardware speed (AVX2/FMA/SVE) | Native hardware speed (AVX2/FMA/SVE) |
 
 ---
 
@@ -52,7 +56,7 @@ Microfat supports three distinct binary operational modes to accommodate differe
 
 ---
 
-### Mode 2: Trimmed Fat Binary (`--microfat:trim`)
+### Mode 2: Trimmed Fat Binary (`--microfat:trim` / `microfat trim`)
 - **Best For**: Production container images where container memory and CPU auto-tuning are desired, but image layer size must be minimized.
 - **Containerfile Recipe**:
   ```dockerfile
@@ -82,7 +86,7 @@ Microfat supports three distinct binary operational modes to accommodate differe
 
 ---
 
-## 4. Symlinks & In-Place Operations
+## 4. Symlinks & Atomic In-Place Operations
 
 When executing in-place mutations (`--microfat:trim` or `--microfat:optimize`):
 - If the binary is invoked via a symbolic link (e.g. `/usr/local/bin/app -> /opt/app/bin/app_fat`), Microfat evaluates the symlink (`filepath.EvalSymlinks`) to atomically replace the physical destination binary while preserving permissions.
@@ -90,10 +94,10 @@ When executing in-place mutations (`--microfat:trim` or `--microfat:optimize`):
   ```
   [microfat] Notice: resolved symlink '/usr/local/bin/app' -> target '/opt/app/bin/app_fat'
   ```
-- To create a specialized binary without modifying the original or symlinked file, use the explicit destination commands:
+- To create a specialized binary without modifying the original or symlinked file, use explicit destination commands:
   ```bash
-  ./app --microfat:trim-to=/path/to/trimmed-binary
-  ./app --microfat:optimize-to=/path/to/extracted-elf
+  ./app --microfat:trim-to /path/to/trimmed-binary
+  ./app --microfat:optimize-to /path/to/extracted-elf
   ```
 
 ---
@@ -132,6 +136,9 @@ microfat prewarm /usr/local/bin/myapp
 # Prewarm all variants into cache (e.g. for shared multi-tenant cache partitions):
 microfat prewarm --all --cache-dir /var/cache/microfat /usr/local/bin/myapp
 
+# Verify cache health without extracting:
+microfat prewarm --verify /usr/local/bin/myapp
+
 # Structured JSON output:
 microfat prewarm --json /usr/local/bin/myapp
 ```
@@ -143,11 +150,16 @@ microfat prewarm --json /usr/local/bin/myapp
 
 # Decompress all variants:
 /usr/local/bin/myapp --microfat:prewarm=all
+
+# Verify cache health:
+/usr/local/bin/myapp --microfat:prewarm=verify
 ```
 
-### Cold-Start Optimization Recipes
+---
 
-#### A. Kubernetes `initContainer` Recipe
+## 6. Cold-Start Optimization Recipes
+
+### A. Kubernetes `initContainer` Recipe
 ```yaml
 apiVersion: v1
 kind: Pod
@@ -175,7 +187,7 @@ spec:
       emptyDir: {}
 ```
 
-#### B. Systemd Unit `ExecStartPre` Hook
+### B. Systemd Unit `ExecStartPre` Hook
 ```ini
 [Unit]
 Description=High Performance Microfat Service
@@ -189,3 +201,6 @@ ExecStart=/usr/local/bin/myapp --port 8080
 Restart=always
 ```
 
+---
+
+[**← Container Runtime Tuning**](runtime-tuning.md) | [**Main Index**](../README.md#documentation-guide) | [**Advanced Optimizations →**](advanced-optimizations.md)
