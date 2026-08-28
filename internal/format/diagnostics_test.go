@@ -151,6 +151,12 @@ func TestDiagnoseError(t *testing.T) {
 			expectedHint: HintDecompressFailed,
 		},
 		{
+			name:         "decompress with ErrPayloadCorrupted",
+			stage:        StageDecompress,
+			err:          fmt.Errorf("%w: mismatch", ErrPayloadCorrupted),
+			expectedHint: HintDecompressFailed,
+		},
+		{
 			name:         "generic launcher_main EROFS",
 			stage:        StageLauncherMain,
 			err:          syscall.EROFS,

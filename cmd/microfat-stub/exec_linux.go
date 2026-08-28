@@ -5,6 +5,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -35,7 +36,8 @@ var (
 	userHomeDirFunc      = os.UserHomeDir
 )
 
-// extractVariantToWriter seeks to the variant offset and streams decompressed bytes to w.
+// extractVariantToWriter seeks to the variant offset and streams decompressed bytes to w,
+// verifying the payload SHA-256 digest concurrently during decompression.
 func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, idx *format.Index, w io.Writer) error {
 	c, err := codec.Get(entry.Compression)
 	if err != nil {
@@ -58,8 +60,17 @@ func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, idx *
 	}
 
 	secReader := io.NewSectionReader(selfFile, entry.Offset, entry.CompressedSize)
-	if err := codec.DecompressWithOptionalDict(c, w, secReader, entry.UncompressedSize, dictBytes); err != nil {
+	hasher := sha256.New()
+	mw := io.MultiWriter(w, hasher)
+	if err := codec.DecompressWithOptionalDict(c, mw, secReader, entry.UncompressedSize, dictBytes); err != nil {
 		return fmt.Errorf("decompressing variant payload: %w", err)
+	}
+
+	if entry.SHA256 != "" {
+		actualHex := hex.EncodeToString(hasher.Sum(nil))
+		if actualHex != entry.SHA256 {
+			return fmt.Errorf("%w: expected %s, got %s", format.ErrPayloadCorrupted, entry.SHA256, actualHex)
+		}
 	}
 
 	return nil
@@ -91,6 +102,11 @@ func executeVariant(
 	err := executeViaMemfd(selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, startTime)
 	if err == nil {
 		return nil
+	}
+
+	// If fat binary payload or dictionary is corrupted, fail fast without attempting fallback
+	if errors.Is(err, format.ErrPayloadCorrupted) || errors.Is(err, format.ErrDictionaryCorrupted) {
+		return err
 	}
 
 	// 2. Fallback to cached file execution
@@ -390,10 +406,26 @@ func executeViaCache(
 	cachedBinary := filepath.Join(cacheDir, filepath.Clean(entry.SHA256))
 	var decompDuration time.Duration
 	stat, statErr := os.Stat(cachedBinary)
+	needExtract := statErr != nil || stat.Size() != entry.UncompressedSize
+
+	if !needExtract && isVerifyCacheEnabled() {
+		if !verifyCachedFileSHA256(cachedBinary, entry.SHA256) {
+			if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
+				fmt.Fprintf(
+					os.Stderr,
+					"[microfat:debug] corrupted cache file detected (checksum mismatch in %s), re-extracting\n",
+					cachedBinary,
+				)
+			}
+			_ = os.Remove(cachedBinary)
+			needExtract = true
+		}
+	}
+
 	// #nosec G703 -- cache entry existence and size verification
-	if statErr != nil || stat.Size() != entry.UncompressedSize {
+	if needExtract {
 		if statErr == nil && stat.Size() != entry.UncompressedSize {
-			if os.Getenv(format.EnvDebug) == "1" {
+			if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
 				fmt.Fprintf(
 					os.Stderr,
 					"[microfat:debug] truncated cache file detected (%s, expected %d B, got %d B), re-extracting\n",
@@ -441,3 +473,24 @@ func executeViaCache(
 	}
 	return fmt.Errorf("%w: cache execve failed (%s): %w", format.ErrExecve, cachedBinary, execErr)
 }
+
+func isVerifyCacheEnabled() bool {
+	val := os.Getenv(format.EnvVerifyCache)
+	return val == "1" || strings.EqualFold(val, "true")
+}
+
+func verifyCachedFileSHA256(path, expectedHex string) bool {
+	// #nosec G304 -- opening resolved cached binary for hash verification
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, f); err != nil {
+		return false
+	}
+	return hex.EncodeToString(hasher.Sum(nil)) == expectedHex
+}
+
