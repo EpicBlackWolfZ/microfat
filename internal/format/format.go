@@ -282,6 +282,10 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 		return fmt.Errorf("%w: got version %d, expected %d or %d", ErrUnsupportedVersion, idx.Version, FormatVersion1, FormatVersion2)
 	}
 
+	if indexOffset < 0 {
+		return fmt.Errorf("%w: invalid negative index offset %d", ErrOutOfBounds, indexOffset)
+	}
+
 	if idx.DictionarySize < 0 || idx.DictionarySize > MaxDictionarySize {
 		return fmt.Errorf("%w: invalid dictionary size %d (max allowed %d bytes)", ErrInvalidDictionary, idx.DictionarySize, MaxDictionarySize)
 	}
@@ -294,7 +298,7 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 		if idx.DictionarySHA256 != "" && !ValidateChecksum(idx.DictionarySHA256) {
 			return fmt.Errorf("%w: invalid dictionary sha256 checksum format %q", ErrInvalidChecksum, idx.DictionarySHA256)
 		}
-		if idx.DictionaryOffset+idx.DictionarySize > indexOffset {
+		if idx.DictionaryOffset > indexOffset || idx.DictionarySize > indexOffset-idx.DictionaryOffset {
 			return fmt.Errorf("%w: dictionary payload extends past index offset %d", ErrOutOfBounds, indexOffset)
 		}
 		lastEnd = idx.DictionaryOffset + idx.DictionarySize
@@ -310,7 +314,7 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 		if v.UncompressedSize > MaxPayloadSize {
 			return fmt.Errorf("%w: variant %s exceeds 1GB limit (%d bytes)", ErrPayloadTooLarge, v.Level, v.UncompressedSize)
 		}
-		if v.Offset+v.CompressedSize > indexOffset {
+		if v.Offset > indexOffset || v.CompressedSize > indexOffset-v.Offset {
 			return fmt.Errorf("%w: variant %s payload extends past index offset %d", ErrOutOfBounds, v.Level, indexOffset)
 		}
 		if (i > 0 || idx.DictionarySize > 0) && v.Offset < lastEnd {
@@ -334,12 +338,13 @@ const (
 	uint64FieldSize             = 8
 )
 
-// ValidateChecksum verifies that a SHA-256 hex string contains only valid hex characters (up to 64 chars).
+// ValidateChecksum verifies that a SHA-256 hex string contains exactly 64 valid hex characters.
+// An empty string is treated as valid to support optional dictionary or unchecksummed fields.
 func ValidateChecksum(s string) bool {
 	if s == "" {
 		return true
 	}
-	if len(s) > maxSHA256HexLen {
+	if len(s) != maxSHA256HexLen {
 		return false
 	}
 	for i := 0; i < len(s); i++ {
@@ -666,7 +671,7 @@ func parseJSONString(data []byte, pos int) (string, int, error) {
 				pos += 5
 				continue
 			default:
-				sb.WriteByte(data[pos])
+				return "", pos, fmt.Errorf("%w: invalid escape sequence \\%c at byte %d", ErrInvalidJSONSyntax, data[pos], pos)
 			}
 			pos++
 			continue
@@ -1067,7 +1072,7 @@ func ReadTrailerAndIndex(r io.ReaderAt, totalSize int64) (*Index, error) {
 		return nil, fmt.Errorf("%w: offset %d beyond trailer %d",
 			ErrInvalidIndexOffset, indexOffset, trailerOffset)
 	}
-	if indexSize <= 0 || indexSize > MaxIndexSize || indexOffset+indexSize != trailerOffset {
+	if indexSize <= 0 || indexSize > MaxIndexSize || indexSize != trailerOffset-indexOffset {
 		return nil, fmt.Errorf("%w: index size %d with offset %d does not match trailer boundary %d",
 			ErrInvalidIndexSize, indexSize, indexOffset, trailerOffset)
 	}

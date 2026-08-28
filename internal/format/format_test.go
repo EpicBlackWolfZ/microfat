@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	json "encoding/json/v2"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,11 +14,12 @@ import (
 )
 
 const (
-	testCompression  = "zstd"
-	testArchAMD64    = "amd64"
-	testOSLinux      = "linux"
-	testAppName      = "testapp"
-	testSHA256Sample = "abcdef123456"
+	testCompression   = "zstd"
+	testArchAMD64     = "amd64"
+	testOSLinux       = "linux"
+	testAppName       = "testapp"
+	testSHA256Sample  = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	testSHA256Sample2 = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 )
 
 func TestFormatRoundTrip(t *testing.T) {
@@ -43,7 +45,7 @@ func TestFormatRoundTrip(t *testing.T) {
 				Offset:           500,
 				CompressedSize:   400,
 				UncompressedSize: 900,
-				SHA256:           "123456abcdef",
+				SHA256:           testSHA256Sample2,
 				Compression:      testCompression,
 			},
 		},
@@ -645,7 +647,7 @@ func TestFormatVersion1JSONRoundTrip(t *testing.T) {
 				Offset:           500,
 				CompressedSize:   400,
 				UncompressedSize: 900,
-				SHA256:           "123456abcdef",
+				SHA256:           testSHA256Sample2,
 				Compression:      testCompression,
 			},
 		},
@@ -700,7 +702,7 @@ func TestFormatVersion2BinaryRoundTrip(t *testing.T) {
 				Offset:           500,
 				CompressedSize:   400,
 				UncompressedSize: 950,
-				SHA256:           "123456abcdef",
+				SHA256:           testSHA256Sample2,
 				Compression:      testCompression,
 			},
 		},
@@ -797,7 +799,7 @@ func TestUnmarshalBinaryIndexErrors(t *testing.T) {
 		TargetArch:  testArchAMD64,
 		CreatedUnix: 123456,
 		Variants: []VariantEntry{
-			{Level: "v1", Offset: 100, CompressedSize: 200, UncompressedSize: 300, SHA256: "abc", Compression: testCompression},
+			{Level: "v1", Offset: 100, CompressedSize: 200, UncompressedSize: 300, SHA256: testSHA256Sample, Compression: testCompression},
 		},
 	}
 	goodData, err := MarshalBinaryIndex(goodIdx)
@@ -840,7 +842,7 @@ func TestUnmarshalJSONIndexErrorsAndEdges(t *testing.T) {
 				"offset": 100,
 				"compressed_size": 200,
 				"uncompressed_size": 300,
-				"sha256": "abc",
+				"sha256": "` + testSHA256Sample + `",
 				"compression": "lz4",
 				"extra": "ignore"
 			}
@@ -1245,6 +1247,275 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 		}
 		if _, err := MarshalBinaryIndex(idx); err == nil {
 			t.Fatalf("expected error for oversized DictionarySHA256")
+		}
+	})
+}
+
+func TestValidateBounds_IntegerOverflow(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Variant offset near MaxInt64 overflowing addition", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version: FormatVersion2,
+			Variants: []VariantEntry{
+				{
+					Level:            "v1",
+					Offset:           math.MaxInt64 - 100,
+					CompressedSize:   200,
+					UncompressedSize: 1000,
+				},
+			},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrOutOfBounds) {
+			t.Fatalf("expected ErrOutOfBounds for near-MaxInt64 offset, got %v", err)
+		}
+	})
+
+	t.Run("Variant compressed size near MaxInt64 overflowing addition", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version: FormatVersion2,
+			Variants: []VariantEntry{
+				{
+					Level:            "v1",
+					Offset:           100,
+					CompressedSize:   math.MaxInt64 - 50,
+					UncompressedSize: 1000,
+				},
+			},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrOutOfBounds) {
+			t.Fatalf("expected ErrOutOfBounds for near-MaxInt64 compressed size, got %v", err)
+		}
+	})
+
+	t.Run("Dictionary offset near MaxInt64 overflowing addition", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion2,
+			DictionaryOffset: math.MaxInt64 - 50,
+			DictionarySize:   100,
+			Variants: []VariantEntry{
+				{
+					Level:            "v1",
+					Offset:           200,
+					CompressedSize:   300,
+					UncompressedSize: 1000,
+				},
+			},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrOutOfBounds) {
+			t.Fatalf("expected ErrOutOfBounds for near-MaxInt64 dictionary offset, got %v", err)
+		}
+	})
+
+	t.Run("Negative index offset", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version: FormatVersion2,
+			Variants: []VariantEntry{
+				{
+					Level:            "v1",
+					Offset:           100,
+					CompressedSize:   200,
+					UncompressedSize: 1000,
+				},
+			},
+		}
+		err := idx.ValidateBounds(-500)
+		if !errors.Is(err, ErrOutOfBounds) {
+			t.Fatalf("expected ErrOutOfBounds for negative index offset, got %v", err)
+		}
+	})
+
+	t.Run("ReadTrailerAndIndex with overflowing trailer offset check", func(t *testing.T) {
+		t.Parallel()
+		// Construct full file buffer where indexOffset is near MaxInt64
+		fileBuf := make([]byte, TrailerSize+1000)
+		trailerBuf := fileBuf[1000:]
+		binary.LittleEndian.PutUint64(trailerBuf[0:OffsetLen], uint64(math.MaxInt64-100))
+		binary.LittleEndian.PutUint64(trailerBuf[OffsetLen:OffsetLen+SizeLen], 200)
+		copy(trailerBuf[TrailerSize-MagicLen:], []byte(MagicString))
+
+		totalSize := int64(len(fileBuf))
+		_, err := ReadTrailerAndIndex(bytes.NewReader(fileBuf), totalSize)
+		if !errors.Is(err, ErrInvalidIndexOffset) {
+			t.Fatalf("expected ErrInvalidIndexOffset for extreme indexOffset, got %v", err)
+		}
+	})
+
+	t.Run("ReadTrailerAndIndex with mismatched index size vs trailer boundary", func(t *testing.T) {
+		t.Parallel()
+		fileBuf := make([]byte, TrailerSize+1000)
+		trailerBuf := fileBuf[1000:]
+		// trailerOffset = 1000; set indexOffset = 200, indexSize = 900 (200 + 900 = 1100 != 1000)
+		binary.LittleEndian.PutUint64(trailerBuf[0:OffsetLen], 200)
+		binary.LittleEndian.PutUint64(trailerBuf[OffsetLen:OffsetLen+SizeLen], 900)
+		copy(trailerBuf[TrailerSize-MagicLen:], []byte(MagicString))
+
+		totalSize := int64(len(fileBuf))
+		_, err := ReadTrailerAndIndex(bytes.NewReader(fileBuf), totalSize)
+		if !errors.Is(err, ErrInvalidIndexSize) {
+			t.Fatalf("expected ErrInvalidIndexSize for boundary mismatch, got %v", err)
+		}
+	})
+}
+
+func TestValidateChecksum(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{
+			name:     "empty string allowed for optional fields",
+			input:    "",
+			expected: true,
+		},
+		{
+			name:     "valid lowercase 64 hex characters",
+			input:    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			expected: true,
+		},
+		{
+			name:     "valid uppercase 64 hex characters",
+			input:    "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
+			expected: true,
+		},
+		{
+			name:     "valid mixed-case 64 hex characters",
+			input:    "0123456789aBcDeF0123456789AbCdEf0123456789aBcDeF0123456789AbCdEf",
+			expected: true,
+		},
+		{
+			name:     "single character hex string rejected",
+			input:    "a",
+			expected: false,
+		},
+		{
+			name:     "truncated 63 hex characters rejected",
+			input:    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde",
+			expected: false,
+		},
+		{
+			name:     "oversized 65 hex characters rejected",
+			input:    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0",
+			expected: false,
+		},
+		{
+			name:     "64 characters containing invalid character g",
+			input:    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg",
+			expected: false,
+		},
+		{
+			name:     "64 characters containing path traversal characters",
+			input:    "../../../../tmp/malicious_payload_with_enough_padding_to_reach_64",
+			expected: false,
+		},
+		{
+			name:     "64 characters containing control or punctuation characters",
+			input:    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde-",
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := ValidateChecksum(tc.input)
+			if got != tc.expected {
+				t.Fatalf("ValidateChecksum(%q) = %v, expected %v", tc.input, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestParseJSONString_Escapes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Valid JSON escapes and unicode", func(t *testing.T) {
+		t.Parallel()
+		raw := []byte(`"hello\nworld\t\"quotes\"\\slash\/back\bform\ffeed\rcarriage\u0041"`)
+		parsed, nextPos, err := parseJSONString(raw, 0)
+		if err != nil {
+			t.Fatalf("unexpected error parsing valid escapes: %v", err)
+		}
+		if nextPos != len(raw) {
+			t.Fatalf("expected nextPos %d, got %d", len(raw), nextPos)
+		}
+		expected := "hello\nworld\t\"quotes\"\\slash/back\bform\ffeed\rcarriageA"
+		if parsed != expected {
+			t.Fatalf("expected %q, got %q", expected, parsed)
+		}
+	})
+
+	t.Run("Invalid escape sequence \\q returns ErrInvalidJSONSyntax", func(t *testing.T) {
+		t.Parallel()
+		raw := []byte(`"invalid \q escape"`)
+		_, _, err := parseJSONString(raw, 0)
+		if !errors.Is(err, ErrInvalidJSONSyntax) {
+			t.Fatalf("expected ErrInvalidJSONSyntax for \\q, got %v", err)
+		}
+	})
+
+	t.Run("Invalid escape sequence \\a returns ErrInvalidJSONSyntax", func(t *testing.T) {
+		t.Parallel()
+		raw := []byte(`"invalid \a escape"`)
+		_, _, err := parseJSONString(raw, 0)
+		if !errors.Is(err, ErrInvalidJSONSyntax) {
+			t.Fatalf("expected ErrInvalidJSONSyntax for \\a, got %v", err)
+		}
+	})
+
+	t.Run("Invalid escape sequence \\1 returns ErrInvalidJSONSyntax", func(t *testing.T) {
+		t.Parallel()
+		raw := []byte(`"invalid \1 escape"`)
+		_, _, err := parseJSONString(raw, 0)
+		if !errors.Is(err, ErrInvalidJSONSyntax) {
+			t.Fatalf("expected ErrInvalidJSONSyntax for \\1, got %v", err)
+		}
+	})
+
+	t.Run("Invalid escape sequence \\x returns ErrInvalidJSONSyntax", func(t *testing.T) {
+		t.Parallel()
+		raw := []byte(`"invalid \x hex escape"`)
+		_, _, err := parseJSONString(raw, 0)
+		if !errors.Is(err, ErrInvalidJSONSyntax) {
+			t.Fatalf("expected ErrInvalidJSONSyntax for \\x, got %v", err)
+		}
+	})
+
+	t.Run("Unterminated escape sequence at EOF", func(t *testing.T) {
+		t.Parallel()
+		raw := []byte(`"trailing escape \`)
+		_, _, err := parseJSONString(raw, 0)
+		if !errors.Is(err, ErrInvalidJSONSyntax) {
+			t.Fatalf("expected ErrInvalidJSONSyntax for trailing escape, got %v", err)
+		}
+	})
+
+	t.Run("Invalid unicode escape digits", func(t *testing.T) {
+		t.Parallel()
+		raw := []byte(`"invalid unicode \u00GZ"`)
+		_, _, err := parseJSONString(raw, 0)
+		if !errors.Is(err, ErrInvalidJSONSyntax) {
+			t.Fatalf("expected ErrInvalidJSONSyntax for bad unicode escape, got %v", err)
+		}
+	})
+
+	t.Run("Truncated unicode escape", func(t *testing.T) {
+		t.Parallel()
+		raw := []byte(`"truncated unicode \u00"`)
+		_, _, err := parseJSONString(raw, 0)
+		if !errors.Is(err, ErrInvalidJSONSyntax) {
+			t.Fatalf("expected ErrInvalidJSONSyntax for truncated unicode escape, got %v", err)
 		}
 	})
 }
