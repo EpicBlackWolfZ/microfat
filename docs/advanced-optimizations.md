@@ -120,3 +120,55 @@ CGO_LDFLAGS="-lmimalloc" \
 go build -o bin/app_v3 main.go
 ```
 Combined with `microfat-stub`'s automated `GOMEMLIMIT` pacing, memory fragmentation and OOM terminations are virtually eliminated.
+
+---
+
+## 4. Compression Profiles & Decision Matrix
+
+`microfat` supports multi-codec compression (`zstd`, `lz4`, `none`), inter-variant dictionary training, and profile-based configuration to balance cold-start launch overhead against binary size and container image transfer speed.
+
+### Decision Matrix
+
+| Optimization Goal | Profile | Recommended Codec / Level | Binary Payload Size | Cold-Start Overhead | Typical Compression Ratio | Best-Fit Workload Archetypes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Instant Launch / Zero Decompression** | `latency` | `none` (raw uncompressed) | `< 10 MB` | **< 80 µs** | 0% (full size) | Sub-millisecond serverless functions, low-latency CLI tools, node boot hooks |
+| **Ultra-Fast Decompression** | `latency` | `lz4` | `10 MB – 50 MB` | **< 350 µs** | ~40% – 48% | Latency-sensitive microservices, frequently restarted worker pods |
+| **General Purpose (Default)** | `balanced` | `zstd` (level 3 / better) | `10 MB – 50 MB` | **< 1.5 ms** | ~50% – 60% | Kubernetes daemon sets, general cloud microservices, CI/CD pipeline builds |
+| **Maximum Disk & Network Reduction** | `size` | `zstd:best` | `> 50 MB` | **< 4.5 ms** | ~62% – 70% | Bandwidth-constrained deployments, registry storage optimization, large monoliths |
+| **Multi-Architecture Matrix (Shared Dict)** | `size` + `--dict` | `zstd` + trained dictionary | `> 50 MB` (multi-variant) | **< 6.0 ms** | **~70% – 78%** | 4+ variant matrices (`v1`–`v4`, `v8.0`–`v9.2`), edge IoT gateways, golden VM images |
+
+### Programmatic Go API Integration
+
+When creating fat executables programmatically via the `pack` Go package, use `pack.DefaultOptions()` to obtain a safe baseline pre-configured for Format v2 and balanced Zstandard compression:
+
+```go
+package main
+
+import (
+	"log"
+
+	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+)
+
+func main() {
+	// Initialize default configuration (Format v2, balanced Zstd, 0755 permissions, linux/amd64)
+	opts := pack.DefaultOptions()
+	opts.StubPath = "bin/microfat-stub"
+	opts.OutputPath = "bin/myapp-fat"
+	opts.AppName = "myapp"
+
+	// Register microarchitecture variant binaries
+	opts.Variants["v1"] = "dist/app_v1"
+	opts.Variants["v3"] = "dist/app_v3"
+	opts.Variants["v4"] = "dist/app_v4"
+
+	// Package universal executable
+	idx, err := pack.Pack(opts)
+	if err != nil {
+		log.Fatalf("Packaging failed: %v", err)
+	}
+
+	log.Printf("Successfully packaged %d variants into Format v%d fat binary", len(idx.Variants), idx.Version)
+}
+```
+

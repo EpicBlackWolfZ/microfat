@@ -410,15 +410,20 @@ func assemblePackOptions(
 	compiledMap map[string]string,
 	opts BuildOptions,
 ) pack.Options {
-	packOpts := pack.Options{
-		StubPath:          stubPath,
-		OutputPath:        finalOutput,
-		AppName:           appName,
-		TargetOS:          m.TargetOS,
-		TargetArch:        m.TargetArch,
-		Variants:          compiledMap,
-		SkipELFValidation: opts.SkipELFValidation,
-		FormatVersion:     opts.FormatVersion,
+	packOpts := pack.DefaultOptions()
+	packOpts.StubPath = stubPath
+	packOpts.OutputPath = finalOutput
+	packOpts.AppName = appName
+	if m.TargetOS != "" {
+		packOpts.TargetOS = m.TargetOS
+	}
+	if m.TargetArch != "" {
+		packOpts.TargetArch = m.TargetArch
+	}
+	packOpts.Variants = compiledMap
+	packOpts.SkipELFValidation = opts.SkipELFValidation
+	if opts.FormatVersion != 0 {
+		packOpts.FormatVersion = opts.FormatVersion
 	}
 
 	if m.Compression != nil {
