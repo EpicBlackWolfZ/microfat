@@ -847,20 +847,8 @@ func TestParseLinuxCPUInfoX86(t *testing.T) {
 		t.Errorf("unexpected parsed x86 cpu info: %+v", info)
 	}
 
-	hasF16C, hasLZCNT, hasMOVBE := parseLinuxCPUInfoX86Flags(strings.NewReader(mockSkylakeX))
-	if !hasF16C || !hasLZCNT || !hasMOVBE {
-		t.Errorf("expected true for f16c, lzcnt, movbe on mock fixture; got f16c=%v, lzcnt=%v, movbe=%v", hasF16C, hasLZCNT, hasMOVBE)
-	}
-
-	// Empty and malformed flags reader
-	emptyF16C, emptyLZCNT, emptyMOVBE := parseLinuxCPUInfoX86Flags(strings.NewReader("random text without flags\n"))
-	if emptyF16C || emptyLZCNT || emptyMOVBE {
-		t.Errorf("expected false flags for invalid cpuinfo, got f16c=%v, lzcnt=%v, movbe=%v", emptyF16C, emptyLZCNT, emptyMOVBE)
-	}
-
 	// Test default reader implementations
 	_ = readLinuxCPUInfoX86()
-	_, _, _ = readLinuxCPUInfoX86Flags()
 	_, _, _ = probeX86ExtraFeatures()
 	_ = isHostSkylakeXOrCascadeLake()
 	_ = IsAVX512DownclockingRisk()

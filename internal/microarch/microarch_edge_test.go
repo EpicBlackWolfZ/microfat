@@ -222,26 +222,29 @@ func TestX86FeaturePermutationsFallback(t *testing.T) {
 	}
 }
 
-func TestCurrentX86FeaturesWithFallback(t *testing.T) {
+func TestCurrentX86FeaturesExclusiveCPUID(t *testing.T) {
 	origProbe := probeX86ExtraFeaturesFunc
-	origFlags := readCPUInfoX86FlagsFunc
 	defer func() {
 		probeX86ExtraFeaturesFunc = origProbe
-		readCPUInfoX86FlagsFunc = origFlags
 	}()
 
-	// Simulate CPUID probe returning false, but cpuinfo fallback returning true
+	// Verify currentX86Features strictly reflects CPUID probe responses without any fallback
 	probeX86ExtraFeaturesFunc = func() (bool, bool, bool) {
-		return false, false, false
+		return true, false, true
 	}
-	readCPUInfoX86FlagsFunc = func() (bool, bool, bool) {
-		return true, true, true
+	feat1 := currentX86Features()
+	if !feat1.HasF16C || feat1.HasLZCNT || !feat1.HasMOVBE {
+		t.Errorf("expected feat1: f16c=true, lzcnt=false, movbe=true; got f16c=%v, lzcnt=%v, movbe=%v",
+			feat1.HasF16C, feat1.HasLZCNT, feat1.HasMOVBE)
 	}
 
-	feat := currentX86Features()
-	if !feat.HasF16C || !feat.HasLZCNT || !feat.HasMOVBE {
-		t.Errorf("expected cpuinfo fallback to populate extra features; got f16c=%v, lzcnt=%v, movbe=%v",
-			feat.HasF16C, feat.HasLZCNT, feat.HasMOVBE)
+	probeX86ExtraFeaturesFunc = func() (bool, bool, bool) {
+		return false, true, false
+	}
+	feat2 := currentX86Features()
+	if feat2.HasF16C || !feat2.HasLZCNT || feat2.HasMOVBE {
+		t.Errorf("expected feat2: f16c=false, lzcnt=true, movbe=false; got f16c=%v, lzcnt=%v, movbe=%v",
+			feat2.HasF16C, feat2.HasLZCNT, feat2.HasMOVBE)
 	}
 }
 
@@ -260,17 +263,6 @@ func TestCPUIDDirectProbing(t *testing.T) {
 	if maxExt >= cpuidExtLeafFeatures {
 		_, _, ecx, _ := cpuid(cpuidExtLeafFeatures, 0)
 		_ = (ecx & (1 << cpuidLeafExt1ECXABMBit)) != 0
-	}
-}
-
-func TestParseLinuxCPUInfoX86FlagsEdgeCases(t *testing.T) {
-	t.Parallel()
-
-	// Line starting with 'flags' but without ':'
-	badLines := "flags without colon\nFeatures : unknown_token f16c\nflags :\n"
-	f16c, lzcnt, movbe := parseLinuxCPUInfoX86Flags(strings.NewReader(badLines))
-	if !f16c || lzcnt || movbe {
-		t.Errorf("unexpected parsing outcome: f16c=%v, lzcnt=%v, movbe=%v", f16c, lzcnt, movbe)
 	}
 }
 

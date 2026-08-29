@@ -563,9 +563,11 @@ func EvaluateARM64(f ARM64Features) string {
 }
 
 func currentX86Features() X86Features {
+	// CPUID is the exclusive authoritative source of truth for AMD64 instruction feature flags.
+	// We query golang.org/x/sys/cpu alongside native assembly CPUID leaf probing for extra features.
 	hasF16C, hasLZCNT, hasMOVBE := probeX86ExtraFeaturesFunc()
 
-	feat := X86Features{
+	return X86Features{
 		HasCX16:     cpu.X86.HasCX16,
 		HasPOPCNT:   cpu.X86.HasPOPCNT,
 		HasSSE3:     cpu.X86.HasSSE3,
@@ -587,22 +589,6 @@ func currentX86Features() X86Features {
 		HasAVX512DQ: cpu.X86.HasAVX512DQ,
 		HasAVX512VL: cpu.X86.HasAVX512VL,
 	}
-
-	// Fallback to /proc/cpuinfo on Linux if CPUID returned false for extra features
-	if runtime.GOOS == "linux" && (!feat.HasF16C || !feat.HasLZCNT || !feat.HasMOVBE) && readCPUInfoX86FlagsFunc != nil {
-		f16c, lzcnt, movbe := readCPUInfoX86FlagsFunc()
-		if f16c {
-			feat.HasF16C = true
-		}
-		if lzcnt {
-			feat.HasLZCNT = true
-		}
-		if movbe {
-			feat.HasMOVBE = true
-		}
-	}
-
-	return feat
 }
 
 func currentARM64Features() ARM64Features {
@@ -654,7 +640,6 @@ type x86CPUModelInfo struct {
 
 var (
 	readCPUInfoX86Func          = readLinuxCPUInfoX86
-	readCPUInfoX86FlagsFunc     = readLinuxCPUInfoX86Flags
 	probeX86ExtraFeaturesFunc   = probeX86ExtraFeatures
 	isSkylakeXOrCascadeLakeFunc = isHostSkylakeXOrCascadeLake
 )
@@ -677,42 +662,6 @@ func probeX86ExtraFeatures() (hasF16C, hasLZCNT, hasMOVBE bool) {
 		hasLZCNT = (ecx & (1 << cpuidLeafExt1ECXABMBit)) != 0
 	}
 
-	return hasF16C, hasLZCNT, hasMOVBE
-}
-
-func readLinuxCPUInfoX86Flags() (hasF16C, hasLZCNT, hasMOVBE bool) {
-	// #nosec G304 -- reading linux system cpuinfo
-	f, err := os.Open("/proc/cpuinfo")
-	if err != nil {
-		return false, false, false
-	}
-	defer func() { _ = f.Close() }()
-	return parseLinuxCPUInfoX86Flags(f)
-}
-
-func parseLinuxCPUInfoX86Flags(r io.Reader) (hasF16C, hasLZCNT, hasMOVBE bool) {
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if !strings.HasPrefix(line, "flags") && !strings.HasPrefix(line, "Features") {
-			continue
-		}
-		parts := strings.SplitN(line, ":", cpuInfoSplitParts)
-		if len(parts) < cpuInfoSplitParts {
-			continue
-		}
-		tokens := strings.Fields(parts[1])
-		for _, token := range tokens {
-			switch strings.ToLower(token) {
-			case "f16c":
-				hasF16C = true
-			case "abm", "lzcnt":
-				hasLZCNT = true
-			case "movbe":
-				hasMOVBE = true
-			}
-		}
-	}
 	return hasF16C, hasLZCNT, hasMOVBE
 }
 
