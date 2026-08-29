@@ -5,6 +5,7 @@ package microarch
 
 import (
 	"bufio"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -107,7 +108,7 @@ const (
 	rankARM64v9_5 = 95
 
 	maxX86Features   = 20
-	maxARM64Features = 24
+	maxARM64Features = 32
 
 	cpuInfoSplitParts = 2
 
@@ -119,17 +120,45 @@ const (
 	cpuidLeaf1ECXMOVBEBit  = 22
 	cpuidLeaf1ECXF16CBit   = 29
 	cpuidLeafExt1ECXABMBit = 5
+
+	auxvAT_HWCAP2 = 26
+	hwcap2BF16    = uint64(1) << 14
+	hwcap2SME     = uint64(1) << 23
+	hwcap2WFXT    = uint64(1) << 31
+	hwcap2SME2    = uint64(1) << 37
 )
 
-var readCPUInfoFunc = readLinuxCPUInfoARM64
+var readLinuxAuxvARM64Func = readLinuxAuxvARM64
+
+// LevelRequirement defines the prerequisite levels, required CPU instruction features,
+// and official specification reference for a microarchitecture tier.
+type LevelRequirement struct {
+	Level            string                   `json:"level"`
+	Prereqs          []string                 `json:"prereqs,omitempty"`
+	RequiredFeatures []string                 `json:"required_features,omitempty"`
+	CheckFeatures    func(ARM64Features) bool `json:"-"`
+	SourceDoc        string                   `json:"source_doc"`
+}
+
+// ARM64LevelStatus represents the evaluation outcome and prerequisite diagnostic details for an ARM64 level.
+type ARM64LevelStatus struct {
+	Level            string   `json:"level"`
+	Satisfied        bool     `json:"satisfied"`
+	Prereqs          []string `json:"prereqs,omitempty"`
+	MissingPrereqs   []string `json:"missing_prereqs,omitempty"`
+	RequiredFeatures []string `json:"required_features,omitempty"`
+	MissingFeatures  []string `json:"missing_features,omitempty"`
+	SourceDoc        string   `json:"source_doc"`
+}
 
 // Info describes the host's operating system, architecture, highest microarchitecture
 // level, and detected CPU instruction feature flags.
 type Info struct {
-	OS       string   `json:"os"`
-	Arch     string   `json:"arch"`
-	Level    string   `json:"level"`
-	Features []string `json:"features"`
+	OS       string             `json:"os"`
+	Arch     string             `json:"arch"`
+	Level    string             `json:"level"`
+	Features []string           `json:"features"`
+	Levels   []ARM64LevelStatus `json:"levels,omitempty"`
 }
 
 // X86Features represents an inspectable set of x86/amd64 CPU feature flags.
@@ -174,6 +203,7 @@ type ARM64Features struct {
 	HasSVE2     bool
 	HasI8MM     bool
 	HasBF16     bool
+	HasWFxT     bool
 	HasSME      bool
 	HasSME2     bool
 	HasAES      bool
@@ -204,7 +234,9 @@ func detectForArch(goos, goarch string, x86Feat X86Features, armFeat ARM64Featur
 		info.Level = EvaluateAMD64(x86Feat)
 		info.Features = extractX86FeatureList(x86Feat)
 	case ArchARM64:
-		info.Level = EvaluateARM64(armFeat)
+		var statuses []ARM64LevelStatus
+		info.Level, statuses = EvaluateARM64Detailed(armFeat)
+		info.Levels = statuses
 		info.Features = extractARM64FeatureList(armFeat)
 	default:
 		info.Level = "v1"
@@ -524,42 +556,309 @@ func EvaluateAMD64(f X86Features) string {
 	return AMD64v4
 }
 
+var arm64LevelRequirements = []LevelRequirement{
+	{
+		Level:            ARM64v8_0,
+		Prereqs:          nil,
+		RequiredFeatures: []string{"fp", "asimd"},
+		CheckFeatures: func(f ARM64Features) bool {
+			return f.HasFP && f.HasASIMD
+		},
+		SourceDoc: "Go compiler GOARM64=v8.0: Base 64-bit ARM architecture with floating-point and Advanced SIMD (NEON)",
+	},
+	{
+		Level:            ARM64v8_1,
+		Prereqs:          []string{ARM64v8_0},
+		RequiredFeatures: []string{"atomics", "crc32"},
+		CheckFeatures: func(f ARM64Features) bool {
+			return f.HasATOMICS && f.HasCRC32
+		},
+		SourceDoc: "Go compiler GOARM64=v8.1: v8.0 + Large System Extensions (LSE/ATOMICS) and CRC32 instructions",
+	},
+	{
+		Level:            ARM64v8_2,
+		Prereqs:          []string{ARM64v8_1},
+		RequiredFeatures: []string{"fphp", "asimdhp"},
+		CheckFeatures: func(f ARM64Features) bool {
+			return f.HasFPHP && f.HasASIMDHP
+		},
+		SourceDoc: "Go compiler GOARM64=v8.2: v8.1 + Half-precision floating-point (FPHP) and Advanced SIMD half-precision (ASIMDHP)",
+	},
+	{
+		Level:            ARM64v8_3,
+		Prereqs:          []string{ARM64v8_2},
+		RequiredFeatures: []string{"jscvt", "fcma", "lrcpc"},
+		CheckFeatures: func(f ARM64Features) bool {
+			return f.HasJSCVT && f.HasFCMA && f.HasLRCPC
+		},
+		SourceDoc: "Go compiler GOARM64=v8.3: v8.2 + JSCVT, FCMA, and LRCPC instructions",
+	},
+	{
+		Level:            ARM64v8_4,
+		Prereqs:          []string{ARM64v8_3},
+		RequiredFeatures: []string{"dcpop", "asimddp"},
+		CheckFeatures: func(f ARM64Features) bool {
+			return f.HasDCPOP && f.HasASIMDDP
+		},
+		SourceDoc: "Go compiler GOARM64=v8.4: v8.3 + DCPOP and ASIMDDP instructions",
+	},
+	{
+		Level:            ARM64v8_5,
+		Prereqs:          []string{ARM64v8_4},
+		RequiredFeatures: []string{"dit"},
+		CheckFeatures: func(f ARM64Features) bool {
+			return f.HasDIT
+		},
+		SourceDoc: "Go compiler GOARM64=v8.5: v8.4 + Data Independent Timing (DIT)",
+	},
+	{
+		Level:            ARM64v8_6,
+		Prereqs:          []string{ARM64v8_5},
+		RequiredFeatures: []string{"i8mm", "bf16"},
+		CheckFeatures: func(f ARM64Features) bool {
+			return f.HasI8MM && f.HasBF16
+		},
+		SourceDoc: "Go compiler GOARM64=v8.6: v8.5 + Int8 matrix multiplication (I8MM) and BFloat16 instructions (BF16)",
+	},
+	{
+		Level:            ARM64v8_7,
+		Prereqs:          []string{ARM64v8_6},
+		RequiredFeatures: []string{"wfxt"},
+		CheckFeatures: func(f ARM64Features) bool {
+			return f.HasWFxT
+		},
+		SourceDoc: "Go compiler GOARM64=v8.7: v8.6 + Wait For Event/Interrupt with Timeout instructions (WFxT / WFIT / WFIS)",
+	},
+	{
+		Level:            ARM64v9_0,
+		Prereqs:          []string{ARM64v8_5},
+		RequiredFeatures: []string{"sve"},
+		CheckFeatures: func(f ARM64Features) bool {
+			return f.HasSVE
+		},
+		SourceDoc: "Go compiler GOARM64=v9.0: v8.5 + Scalable Vector Extension (SVE)",
+	},
+	{
+		Level:            ARM64v9_1,
+		Prereqs:          []string{ARM64v9_0, ARM64v8_6},
+		RequiredFeatures: nil,
+		CheckFeatures: func(f ARM64Features) bool {
+			return true
+		},
+		SourceDoc: "Go compiler GOARM64=v9.1: v9.0 + v8.6 (includes SVE, I8MM, BF16, and DIT)",
+	},
+	{
+		Level:            ARM64v9_2,
+		Prereqs:          []string{ARM64v9_1},
+		RequiredFeatures: []string{"sve2"},
+		CheckFeatures: func(f ARM64Features) bool {
+			return f.HasSVE2
+		},
+		SourceDoc: "Go compiler GOARM64=v9.2: v9.1 + Scalable Vector Extension 2 (SVE2)",
+	},
+	{
+		Level:            ARM64v9_3,
+		Prereqs:          []string{ARM64v9_2},
+		RequiredFeatures: []string{"sme"},
+		CheckFeatures: func(f ARM64Features) bool {
+			return f.HasSME
+		},
+		SourceDoc: "Go compiler GOARM64=v9.3: v9.2 + Scalable Matrix Extension (SME)",
+	},
+	{
+		Level:            ARM64v9_4,
+		Prereqs:          []string{ARM64v9_3},
+		RequiredFeatures: nil,
+		CheckFeatures: func(f ARM64Features) bool {
+			return true
+		},
+		SourceDoc: "Go compiler GOARM64=v9.4: v9.3 baseline architecture level",
+	},
+	{
+		Level:            ARM64v9_5,
+		Prereqs:          []string{ARM64v9_4},
+		RequiredFeatures: []string{"sme2"},
+		CheckFeatures: func(f ARM64Features) bool {
+			return f.HasSME2
+		},
+		SourceDoc: "Go compiler GOARM64=v9.5: v9.4 + Scalable Matrix Extension 2 (SME2)",
+	},
+}
+
+var arm64RequirementsMap = func() map[string]LevelRequirement {
+	m := make(map[string]LevelRequirement, len(arm64LevelRequirements))
+	for _, req := range arm64LevelRequirements {
+		m[req.Level] = req
+	}
+	return m
+}()
+
+var arm64OrderedLevels = []string{
+	ARM64v9_5,
+	ARM64v9_4,
+	ARM64v9_3,
+	ARM64v9_2,
+	ARM64v9_1,
+	ARM64v9_0,
+	ARM64v8_7,
+	ARM64v8_6,
+	ARM64v8_5,
+	ARM64v8_4,
+	ARM64v8_3,
+	ARM64v8_2,
+	ARM64v8_1,
+	ARM64v8_0,
+}
+
+// ARM64Requirements returns a copy of the declarative list of ARM64 microarchitecture level requirements.
+func ARM64Requirements() []LevelRequirement {
+	reqs := make([]LevelRequirement, len(arm64LevelRequirements))
+	copy(reqs, arm64LevelRequirements)
+	return reqs
+}
+
 // EvaluateARM64 computes the highest ARM64 level supported by the given feature set.
 func EvaluateARM64(f ARM64Features) string {
-	if f.HasSME2 || (f.HasSME && f.HasSVE2) {
-		return ARM64v9_5
-	}
-	if f.HasSME {
-		return ARM64v9_3
-	}
-	if f.HasSVE2 && f.HasI8MM {
-		return ARM64v9_2
-	}
-	if f.HasSVE2 {
-		return ARM64v9_1
-	}
-	if f.HasSVE {
-		return ARM64v9_0
-	}
-	if f.HasI8MM || f.HasBF16 {
-		return ARM64v8_6
-	}
-	if f.HasDIT && f.HasDCPOP {
-		return ARM64v8_5
-	}
-	if f.HasDCPOP && f.HasASIMDDP {
-		return ARM64v8_4
-	}
-	if f.HasJSCVT && f.HasFCMA && f.HasLRCPC {
-		return ARM64v8_3
-	}
-	if f.HasFPHP && f.HasASIMDHP {
-		return ARM64v8_2
-	}
-	if f.HasATOMICS && f.HasCRC32 {
-		return ARM64v8_1
+	satisfiedCache := make(map[string]bool, len(arm64LevelRequirements))
+	for _, lvl := range arm64OrderedLevels {
+		if checkARM64LevelSatisfied(lvl, f, satisfiedCache, make(map[string]bool)) {
+			return lvl
+		}
 	}
 	return ARM64v8_0
+}
+
+func checkARM64LevelSatisfied(level string, f ARM64Features, cache map[string]bool, visiting map[string]bool) bool {
+	if sat, ok := cache[level]; ok {
+		return sat
+	}
+	if visiting[level] {
+		return false
+	}
+	visiting[level] = true
+	defer delete(visiting, level)
+
+	req, exists := arm64RequirementsMap[level]
+	if !exists {
+		cache[level] = false
+		return false
+	}
+
+	if req.CheckFeatures != nil && !req.CheckFeatures(f) {
+		cache[level] = false
+		return false
+	}
+
+	for _, prereq := range req.Prereqs {
+		if !checkARM64LevelSatisfied(prereq, f, cache, visiting) {
+			cache[level] = false
+			return false
+		}
+	}
+
+	cache[level] = true
+	return true
+}
+
+// EvaluateARM64Detailed evaluates f against all ARM64 level requirements and returns the highest satisfied level
+// along with a detailed status list for every level (in descending rank order).
+func EvaluateARM64Detailed(f ARM64Features) (string, []ARM64LevelStatus) {
+	satisfiedCache := make(map[string]bool, len(arm64LevelRequirements))
+	statuses := make([]ARM64LevelStatus, 0, len(arm64OrderedLevels))
+	highestLevel := ARM64v8_0
+
+	for _, lvl := range arm64OrderedLevels {
+		req := arm64RequirementsMap[lvl]
+		status := ARM64LevelStatus{
+			Level:            lvl,
+			Prereqs:          req.Prereqs,
+			RequiredFeatures: req.RequiredFeatures,
+			SourceDoc:        req.SourceDoc,
+		}
+
+		if req.CheckFeatures != nil && !req.CheckFeatures(f) {
+			status.MissingFeatures = findMissingARM64Features(req.RequiredFeatures, f)
+		}
+
+		for _, prereq := range req.Prereqs {
+			if !checkARM64LevelSatisfied(prereq, f, satisfiedCache, make(map[string]bool)) {
+				status.MissingPrereqs = append(status.MissingPrereqs, prereq)
+			}
+		}
+
+		isSat := len(status.MissingFeatures) == 0 && len(status.MissingPrereqs) == 0
+		status.Satisfied = isSat
+		satisfiedCache[lvl] = isSat
+
+		if isSat && highestLevel == ARM64v8_0 && lvl != ARM64v8_0 {
+			highestLevel = lvl
+		}
+
+		statuses = append(statuses, status)
+	}
+
+	if highestLevel == ARM64v8_0 {
+		if checkARM64LevelSatisfied(ARM64v8_0, f, satisfiedCache, make(map[string]bool)) {
+			highestLevel = ARM64v8_0
+		}
+	}
+
+	return highestLevel, statuses
+}
+
+func findMissingARM64Features(required []string, f ARM64Features) []string {
+	var missing []string
+	for _, feat := range required {
+		if !hasARM64NamedFeature(feat, f) {
+			missing = append(missing, feat)
+		}
+	}
+	return missing
+}
+
+func hasARM64NamedFeature(name string, f ARM64Features) bool {
+	switch name {
+	case "fp":
+		return f.HasFP
+	case "asimd":
+		return f.HasASIMD
+	case "atomics":
+		return f.HasATOMICS
+	case "crc32":
+		return f.HasCRC32
+	case "fphp":
+		return f.HasFPHP
+	case "asimdhp":
+		return f.HasASIMDHP
+	case "jscvt":
+		return f.HasJSCVT
+	case "fcma":
+		return f.HasFCMA
+	case "lrcpc":
+		return f.HasLRCPC
+	case "dcpop":
+		return f.HasDCPOP
+	case "asimddp":
+		return f.HasASIMDDP
+	case "dit":
+		return f.HasDIT
+	case "i8mm":
+		return f.HasI8MM
+	case "bf16":
+		return f.HasBF16
+	case "wfxt":
+		return f.HasWFxT
+	case "sve":
+		return f.HasSVE
+	case "sve2":
+		return f.HasSVE2
+	case "sme":
+		return f.HasSME
+	case "sme2":
+		return f.HasSME2
+	default:
+		return false
+	}
 }
 
 func currentX86Features() X86Features {
@@ -620,11 +919,19 @@ func currentARM64Features() ARM64Features {
 		HasASIMDRDM: cpu.ARM64.HasASIMDRDM,
 	}
 
-	// Fallback to /proc/cpuinfo on Linux if auxv returned zero features
-	if runtime.GOOS == "linux" && !feat.HasFP && !feat.HasASIMD && readCPUInfoFunc != nil {
-		fallback := readCPUInfoFunc()
-		if fallback.HasFP || fallback.HasASIMD {
-			return fallback
+	if runtime.GOOS == "linux" && readLinuxAuxvARM64Func != nil {
+		bf16, wfxt, sme, sme2 := readLinuxAuxvARM64Func()
+		if bf16 {
+			feat.HasBF16 = true
+		}
+		if wfxt {
+			feat.HasWFxT = true
+		}
+		if sme {
+			feat.HasSME = true
+		}
+		if sme2 {
+			feat.HasSME2 = true
 		}
 	}
 
@@ -739,121 +1046,36 @@ func parseLinuxCPUInfoX86(r io.Reader) x86CPUModelInfo {
 	return info
 }
 
-func readLinuxCPUInfoARM64() ARM64Features {
-	// #nosec G304 -- reading linux system cpuinfo
-	f, err := os.Open("/proc/cpuinfo")
+func parseLinuxAuxvARM64(data []byte) (hasBF16, hasWFxT, hasSME, hasSME2 bool) {
+	const (
+		entrySize    = 16
+		tagOffset    = 0
+		valOffset    = 8
+		valEndOffset = 16
+	)
+	for i := 0; i+entrySize <= len(data); i += entrySize {
+		tag := binary.LittleEndian.Uint64(data[i+tagOffset : i+valOffset])
+		val := binary.LittleEndian.Uint64(data[i+valOffset : i+valEndOffset])
+		if tag == 0 {
+			break
+		}
+		if tag == auxvAT_HWCAP2 {
+			hasBF16 = (val & hwcap2BF16) != 0
+			hasWFxT = (val & hwcap2WFXT) != 0
+			hasSME = (val & hwcap2SME) != 0
+			hasSME2 = (val & hwcap2SME2) != 0
+		}
+	}
+	return hasBF16, hasWFxT, hasSME, hasSME2
+}
+
+func readLinuxAuxvARM64() (hasBF16, hasWFxT, hasSME, hasSME2 bool) {
+	// #nosec G304 -- reading linux system auxiliary vector
+	data, err := os.ReadFile("/proc/self/auxv")
 	if err != nil {
-		return ARM64Features{}
+		return false, false, false, false
 	}
-	defer func() { _ = f.Close() }()
-	return parseLinuxCPUInfoARM64(f)
-}
-
-func parseLinuxCPUInfoARM64(r io.Reader) ARM64Features {
-	var feat ARM64Features
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if !strings.HasPrefix(line, "Features") && !strings.HasPrefix(line, "flags") {
-			continue
-		}
-		parts := strings.SplitN(line, ":", cpuInfoSplitParts)
-		if len(parts) < cpuInfoSplitParts {
-			continue
-		}
-		tokens := strings.Fields(parts[1])
-		for _, token := range tokens {
-			applyCPUInfoToken(&feat, strings.ToLower(token))
-		}
-	}
-	return feat
-}
-
-func applyCPUInfoToken(feat *ARM64Features, token string) {
-	if applySIMDAndVectorTokens(feat, token) {
-		return
-	}
-	if applyCryptoTokens(feat, token) {
-		return
-	}
-	applyCoreAndMemoryTokens(feat, token)
-}
-
-func applySIMDAndVectorTokens(feat *ARM64Features, token string) bool {
-	switch token {
-	case "fp":
-		feat.HasFP = true
-	case "asimd", "neon":
-		feat.HasASIMD = true
-	case "fphp":
-		feat.HasFPHP = true
-	case "asimdhp":
-		feat.HasASIMDHP = true
-	case "asimddp", "dotprod":
-		feat.HasASIMDDP = true
-	case "sve":
-		feat.HasSVE = true
-	case "sve2":
-		feat.HasSVE2 = true
-	case "i8mm", "svei8mm":
-		feat.HasI8MM = true
-	case "bf16", "svebf16":
-		feat.HasBF16 = true
-	case "sme":
-		feat.HasSME = true
-	case "sme2":
-		feat.HasSME2 = true
-	case "asimdfhm":
-		feat.HasASIMDFHM = true
-	case "asimdrdm":
-		feat.HasASIMDRDM = true
-	default:
-		return false
-	}
-	return true
-}
-
-func applyCryptoTokens(feat *ARM64Features, token string) bool {
-	switch token {
-	case "aes":
-		feat.HasAES = true
-	case "pmull":
-		feat.HasPMULL = true
-	case "sha1":
-		feat.HasSHA1 = true
-	case "sha2", "sha256":
-		feat.HasSHA2 = true
-	case "sha3":
-		feat.HasSHA3 = true
-	case "sha512":
-		feat.HasSHA512 = true
-	case "sm3":
-		feat.HasSM3 = true
-	case "sm4":
-		feat.HasSM4 = true
-	default:
-		return false
-	}
-	return true
-}
-
-func applyCoreAndMemoryTokens(feat *ARM64Features, token string) {
-	switch token {
-	case "atomics", "lse":
-		feat.HasATOMICS = true
-	case "crc32":
-		feat.HasCRC32 = true
-	case "jscvt":
-		feat.HasJSCVT = true
-	case "fcma":
-		feat.HasFCMA = true
-	case "lrcpc":
-		feat.HasLRCPC = true
-	case "dcpop":
-		feat.HasDCPOP = true
-	case "dit":
-		feat.HasDIT = true
-	}
+	return parseLinuxAuxvARM64(data)
 }
 
 func extractX86FeatureList(f X86Features) []string {
@@ -1021,6 +1243,9 @@ func appendCoreFeatureList(list []string, f ARM64Features) []string {
 	}
 	if f.HasDIT {
 		list = append(list, "dit")
+	}
+	if f.HasWFxT {
+		list = append(list, "wfxt")
 	}
 	return list
 }
