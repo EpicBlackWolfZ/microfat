@@ -1,6 +1,7 @@
 package microarch
 
 import (
+	"encoding/binary"
 	"errors"
 	"strings"
 	"testing"
@@ -201,6 +202,109 @@ func TestEvaluateAMD64(t *testing.T) {
 	}
 }
 
+func arm64BaseV8_0() ARM64Features {
+	return ARM64Features{HasFP: true, HasASIMD: true}
+}
+
+func arm64BaseV8_1() ARM64Features {
+	f := arm64BaseV8_0()
+	f.HasATOMICS = true
+	f.HasCRC32 = true
+	return f
+}
+
+func arm64BaseV8_2() ARM64Features {
+	f := arm64BaseV8_1()
+	f.HasFPHP = true
+	f.HasASIMDHP = true
+	return f
+}
+
+func arm64BaseV8_3() ARM64Features {
+	f := arm64BaseV8_2()
+	f.HasJSCVT = true
+	f.HasFCMA = true
+	f.HasLRCPC = true
+	return f
+}
+
+func arm64BaseV8_4() ARM64Features {
+	f := arm64BaseV8_3()
+	f.HasDCPOP = true
+	f.HasASIMDDP = true
+	return f
+}
+
+func arm64BaseV8_5() ARM64Features {
+	f := arm64BaseV8_4()
+	f.HasDIT = true
+	return f
+}
+
+func arm64BaseV8_6() ARM64Features {
+	f := arm64BaseV8_5()
+	f.HasI8MM = true
+	f.HasBF16 = true
+	return f
+}
+
+func arm64BaseV8_7() ARM64Features {
+	f := arm64BaseV8_6()
+	f.HasWFxT = true
+	return f
+}
+
+func arm64BaseV9_0() ARM64Features {
+	f := arm64BaseV8_5()
+	f.HasSVE = true
+	return f
+}
+
+func arm64BaseV9_1() ARM64Features {
+	f := arm64BaseV9_0()
+	f.HasI8MM = true
+	f.HasBF16 = true
+	return f
+}
+
+func arm64BaseV9_2() ARM64Features {
+	f := arm64BaseV9_1()
+	f.HasSVE2 = true
+	return f
+}
+
+func arm64BaseV9_3() ARM64Features {
+	f := arm64BaseV9_2()
+	f.HasSME = true
+	return f
+}
+
+func arm64BaseV9_4() ARM64Features {
+	return arm64BaseV9_3()
+}
+
+func arm64BaseV9_5() ARM64Features {
+	f := arm64BaseV9_4()
+	f.HasSME2 = true
+	return f
+}
+
+func TestARM64Requirements(t *testing.T) {
+	t.Parallel()
+	reqs := ARM64Requirements()
+	if len(reqs) != 14 {
+		t.Fatalf("expected 14 ARM64 level requirements, got %d", len(reqs))
+	}
+	for _, req := range reqs {
+		if req.Level == "" {
+			t.Errorf("expected non-empty level")
+		}
+		if req.SourceDoc == "" {
+			t.Errorf("expected non-empty SourceDoc for level %s", req.Level)
+		}
+	}
+}
+
 func TestEvaluateARM64(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -210,87 +314,72 @@ func TestEvaluateARM64(t *testing.T) {
 	}{
 		{
 			name:     "baseline v8.0",
-			features: ARM64Features{HasFP: true, HasASIMD: true},
+			features: arm64BaseV8_0(),
 			expected: ARM64v8_0,
 		},
 		{
 			name:     "v8.1 (atomics + crc32)",
-			features: ARM64Features{HasATOMICS: true, HasCRC32: true},
+			features: arm64BaseV8_1(),
 			expected: ARM64v8_1,
 		},
 		{
 			name:     "v8.2 (fp16)",
-			features: ARM64Features{HasATOMICS: true, HasCRC32: true, HasFPHP: true, HasASIMDHP: true},
+			features: arm64BaseV8_2(),
 			expected: ARM64v8_2,
 		},
 		{
-			name: "v8.3 (jscvt, fcma, lrcpc)",
-			features: ARM64Features{
-				HasATOMICS: true, HasCRC32: true, HasFPHP: true, HasASIMDHP: true,
-				HasJSCVT: true, HasFCMA: true, HasLRCPC: true,
-			},
+			name:     "v8.3 (jscvt, fcma, lrcpc)",
+			features: arm64BaseV8_3(),
 			expected: ARM64v8_3,
 		},
 		{
-			name: "v8.4 (dcpop, asimddp)",
-			features: ARM64Features{
-				HasATOMICS: true, HasCRC32: true, HasFPHP: true, HasASIMDHP: true,
-				HasJSCVT: true, HasFCMA: true, HasLRCPC: true,
-				HasDCPOP: true, HasASIMDDP: true,
-			},
+			name:     "v8.4 (dcpop, asimddp)",
+			features: arm64BaseV8_4(),
 			expected: ARM64v8_4,
 		},
 		{
-			name: "v8.5 (dit + dcpop)",
-			features: ARM64Features{
-				HasATOMICS: true, HasCRC32: true, HasFPHP: true, HasASIMDHP: true,
-				HasJSCVT: true, HasFCMA: true, HasLRCPC: true,
-				HasDCPOP: true, HasASIMDDP: true, HasDIT: true,
-			},
+			name:     "v8.5 (dit + dcpop)",
+			features: arm64BaseV8_5(),
 			expected: ARM64v8_5,
 		},
 		{
-			name: "v8.6 (i8mm or bf16)",
-			features: ARM64Features{
-				HasATOMICS: true, HasCRC32: true, HasI8MM: true,
-			},
+			name:     "v8.6 (i8mm + bf16)",
+			features: arm64BaseV8_6(),
 			expected: ARM64v8_6,
 		},
 		{
-			name: "v8.6 (bf16)",
-			features: ARM64Features{
-				HasATOMICS: true, HasCRC32: true, HasBF16: true,
-			},
-			expected: ARM64v8_6,
+			name:     "v8.7 (wfxt)",
+			features: arm64BaseV8_7(),
+			expected: ARM64v8_7,
 		},
 		{
-			name:     "v9.0 (sve)",
-			features: ARM64Features{HasSVE: true},
+			name:     "v9.0 (sve + v8.5)",
+			features: arm64BaseV9_0(),
 			expected: ARM64v9_0,
 		},
 		{
-			name:     "v9.1 (sve2)",
-			features: ARM64Features{HasSVE2: true},
+			name:     "v9.1 (v9.0 + v8.6)",
+			features: arm64BaseV9_1(),
 			expected: ARM64v9_1,
 		},
 		{
-			name:     "v9.2 (sve2 + i8mm)",
-			features: ARM64Features{HasSVE2: true, HasI8MM: true},
+			name:     "v9.2 (v9.1 + sve2)",
+			features: arm64BaseV9_2(),
 			expected: ARM64v9_2,
 		},
 		{
-			name:     "v9.3 (sme)",
-			features: ARM64Features{HasSME: true},
-			expected: ARM64v9_3,
+			name:     "v9.3 / v9.4 (v9.2 + sme)",
+			features: arm64BaseV9_3(),
+			expected: ARM64v9_4,
 		},
 		{
-			name:     "v9.5 (sme2)",
-			features: ARM64Features{HasSME2: true},
-			expected: ARM64v9_5,
+			name:     "v9.4 (v9.3)",
+			features: arm64BaseV9_4(),
+			expected: ARM64v9_4,
 		},
 		{
-			name:     "v9.5 (sme + sve2)",
-			features: ARM64Features{HasSME: true, HasSVE2: true},
+			name:     "v9.5 (v9.4 + sme2)",
+			features: arm64BaseV9_5(),
 			expected: ARM64v9_5,
 		},
 	}
@@ -303,6 +392,137 @@ func TestEvaluateARM64(t *testing.T) {
 				t.Errorf("EvaluateARM64() = %q, expected %q", got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestEvaluateARM64_PrerequisiteFailures(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		features ARM64Features
+		expected string
+	}{
+		{
+			name: "v9.0 with missing v8.1 atomics falls back to v8.0",
+			features: func() ARM64Features {
+				f := arm64BaseV9_0()
+				f.HasATOMICS = false
+				return f
+			}(),
+			expected: ARM64v8_0,
+		},
+		{
+			name: "v9.0 with missing v8.5 DIT falls back to v8.4",
+			features: func() ARM64Features {
+				f := arm64BaseV9_0()
+				f.HasDIT = false
+				return f
+			}(),
+			expected: ARM64v8_4,
+		},
+		{
+			name: "v9.1 with missing v8.6 BF16 falls back to v9.0",
+			features: func() ARM64Features {
+				f := arm64BaseV9_1()
+				f.HasBF16 = false
+				return f
+			}(),
+			expected: ARM64v9_0,
+		},
+		{
+			name: "v9.1 with missing v9.0 SVE falls back to v8.6",
+			features: func() ARM64Features {
+				f := arm64BaseV9_1()
+				f.HasSVE = false
+				return f
+			}(),
+			expected: ARM64v8_6,
+		},
+		{
+			name: "v8.7 with missing v8.6 I8MM falls back to v8.5",
+			features: func() ARM64Features {
+				f := arm64BaseV8_7()
+				f.HasI8MM = false
+				return f
+			}(),
+			expected: ARM64v8_5,
+		},
+		{
+			name: "v8.7 with missing WFxT falls back to v8.6",
+			features: func() ARM64Features {
+				f := arm64BaseV8_7()
+				f.HasWFxT = false
+				return f
+			}(),
+			expected: ARM64v8_6,
+		},
+		{
+			name: "v9.5 with missing SME falls back to v9.2",
+			features: func() ARM64Features {
+				f := arm64BaseV9_5()
+				f.HasSME = false
+				return f
+			}(),
+			expected: ARM64v9_2,
+		},
+		{
+			name: "v9.5 with missing SVE2 falls back to v9.1",
+			features: func() ARM64Features {
+				f := arm64BaseV9_5()
+				f.HasSVE2 = false
+				return f
+			}(),
+			expected: ARM64v9_1,
+		},
+		{
+			name: "missing FP and ASIMD returns baseline v8.0",
+			features: func() ARM64Features {
+				return ARM64Features{HasSVE: true}
+			}(),
+			expected: ARM64v8_0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := EvaluateARM64(tt.features)
+			if got != tt.expected {
+				t.Errorf("EvaluateARM64() = %q, expected %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestEvaluateARM64Detailed(t *testing.T) {
+	t.Parallel()
+
+	// 1. Fully satisfied v9.2
+	f := arm64BaseV9_2()
+	highest, statuses := EvaluateARM64Detailed(f)
+	if highest != ARM64v9_2 {
+		t.Errorf("expected highest %s, got %s", ARM64v9_2, highest)
+	}
+	if len(statuses) != 14 {
+		t.Fatalf("expected 14 statuses, got %d", len(statuses))
+	}
+
+	// 2. Missing v8.6 BF16
+	f2 := arm64BaseV9_2()
+	f2.HasBF16 = false
+	highest2, statuses2 := EvaluateARM64Detailed(f2)
+	if highest2 != ARM64v9_0 {
+		t.Errorf("expected highest %s, got %s", ARM64v9_0, highest2)
+	}
+	for _, st := range statuses2 {
+		if st.Level == ARM64v9_1 {
+			if st.Satisfied {
+				t.Errorf("expected v9.1 to not be satisfied")
+			}
+			if len(st.MissingPrereqs) == 0 {
+				t.Errorf("expected missing prereqs for v9.1")
+			}
+		}
 	}
 }
 
@@ -538,10 +758,11 @@ func TestExtractFeatureLists(t *testing.T) {
 		HasSM3:      true,
 		HasSM4:      true,
 		HasASIMDFHM: true,
+		HasWFxT:     true,
 		HasASIMDRDM: true,
 	}
 	armList := extractARM64FeatureList(allARM64)
-	const expectedARM64Count = 28
+	const expectedARM64Count = 29
 	if len(armList) != expectedARM64Count {
 		t.Errorf("expected %d arm64 features, got %d", expectedARM64Count, len(armList))
 	}
@@ -577,7 +798,7 @@ func TestDetectForArch(t *testing.T) {
 
 	// Detect ARM64
 	armInfo := detectForArch("linux", ArchARM64, X86Features{}, ARM64Features{HasFP: true, HasASIMD: true, HasATOMICS: true})
-	if armInfo.Arch != ArchARM64 || armInfo.Level != "v8.0" || len(armInfo.Features) == 0 {
+	if armInfo.Arch != ArchARM64 || armInfo.Level != "v8.0" || len(armInfo.Features) == 0 || len(armInfo.Levels) == 0 {
 		t.Errorf("unexpected arm64 detect info: %+v", armInfo)
 	}
 
@@ -588,92 +809,136 @@ func TestDetectForArch(t *testing.T) {
 	}
 }
 
-func TestParseLinuxCPUInfoARM64AllTokens(t *testing.T) {
+func TestParseLinuxAuxvARM64(t *testing.T) {
 	t.Parallel()
-	// Comprehensive test string containing all supported ARM64 tokens and aliases
-	allTokens := `
-Features : fp asimd neon atomics lse crc32 fphp asimdhp jscvt fcma lrcpc dcpop
-Features : asimddp dotprod dit sve sve2 i8mm svei8mm bf16 svebf16 sme sme2
-Features : aes pmull sha1 sha2 sha256 sha3 sha512 sm3 sm4 asimdfhm asimdrdm
-`
-	feat := parseLinuxCPUInfoARM64(strings.NewReader(allTokens))
-	if !feat.HasFP || !feat.HasASIMD || !feat.HasATOMICS || !feat.HasCRC32 ||
-		!feat.HasFPHP || !feat.HasASIMDHP || !feat.HasJSCVT || !feat.HasFCMA ||
-		!feat.HasLRCPC || !feat.HasDCPOP || !feat.HasASIMDDP || !feat.HasDIT ||
-		!feat.HasSVE || !feat.HasSVE2 || !feat.HasI8MM || !feat.HasBF16 ||
-		!feat.HasSME || !feat.HasSME2 || !feat.HasAES || !feat.HasPMULL ||
-		!feat.HasSHA1 || !feat.HasSHA2 || !feat.HasSHA3 || !feat.HasSHA512 ||
-		!feat.HasSM3 || !feat.HasSM4 || !feat.HasASIMDFHM || !feat.HasASIMDRDM {
-		t.Errorf("expected all ARM64 feature flags to be true, got %+v", feat)
+
+	// 1. Construct valid auxv binary data with AT_HWCAP2
+	auxvData := make([]byte, 32)
+	binary.LittleEndian.PutUint64(auxvData[0:8], auxvAT_HWCAP2)
+	binary.LittleEndian.PutUint64(auxvData[8:16], hwcap2BF16|hwcap2WFXT|hwcap2SME|hwcap2SME2)
+	binary.LittleEndian.PutUint64(auxvData[16:24], 0)
+	binary.LittleEndian.PutUint64(auxvData[24:32], 0)
+
+	bf16, wfxt, sme, sme2 := parseLinuxAuxvARM64(auxvData)
+	if !bf16 || !wfxt || !sme || !sme2 {
+		t.Errorf("expected all auxv flags to be true, got bf16=%v, wfxt=%v, sme=%v, sme2=%v", bf16, wfxt, sme, sme2)
+	}
+
+	// 2. Empty / truncated data
+	bf16, wfxt, sme, sme2 = parseLinuxAuxvARM64([]byte{1, 2, 3})
+	if bf16 || wfxt || sme || sme2 {
+		t.Errorf("expected all false for truncated auxv data")
+	}
+
+	// 3. Different tag
+	otherTagData := make([]byte, 16)
+	binary.LittleEndian.PutUint64(otherTagData[0:8], 16) // AT_HWCAP
+	binary.LittleEndian.PutUint64(otherTagData[8:16], 0xFFFFFFFFFFFFFFFF)
+	bf16, wfxt, sme, sme2 = parseLinuxAuxvARM64(otherTagData)
+	if bf16 || wfxt || sme || sme2 {
+		t.Errorf("expected all false for non-HWCAP2 tag")
 	}
 }
 
-func TestParseLinuxCPUInfoARM64(t *testing.T) {
+func TestEvaluateARM64_RealWorldHardware(t *testing.T) {
 	t.Parallel()
-	// Mock AWS Graviton 3 cpuinfo snippet
-	mockGraviton3 := `
-processor	: 0
-BogoMIPS	: 2100.00
-Features	: fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid
-Features	: asimdrdm jscvt fcma lrcpc dcpop asimddp sha3 sha512 sve sve2 i8mm bf16 dit
-CPU implementer	: 0x41
-CPU architecture: 8
-CPU variant	: 0x1
-CPU part	: 0xd40
-CPU revision	: 1
-`
-	feat := parseLinuxCPUInfoARM64(strings.NewReader(mockGraviton3))
-	if !feat.HasFP || !feat.HasASIMD || !feat.HasATOMICS || !feat.HasCRC32 || !feat.HasSVE || !feat.HasSVE2 || !feat.HasI8MM || !feat.HasBF16 {
-		t.Errorf("parseLinuxCPUInfoARM64 failed on Graviton3 fixture: %+v", feat)
+
+	tests := []struct {
+		name     string
+		features ARM64Features
+		expected string
+	}{
+		{
+			name: "AWS Graviton 2 (Neoverse N1: ARMv8.2-A)",
+			features: func() ARM64Features {
+				f := arm64BaseV8_2()
+				f.HasAES = true
+				f.HasPMULL = true
+				f.HasSHA1 = true
+				f.HasSHA2 = true
+				f.HasCRC32 = true
+				f.HasATOMICS = true
+				return f
+			}(),
+			expected: ARM64v8_2,
+		},
+		{
+			name: "AWS Graviton 3 (Neoverse V1: ARMv8.4-A + SVE + BF16 + I8MM + DIT -> v9.1)",
+			features: func() ARM64Features {
+				f := arm64BaseV8_5()
+				f.HasSVE = true
+				f.HasBF16 = true
+				f.HasI8MM = true
+				return f
+			}(),
+			expected: ARM64v9_1,
+		},
+		{
+			name: "AWS Graviton 4 / NVIDIA Grace (Neoverse V2: ARMv9.0-A + SVE2 + BF16 + I8MM -> v9.2)",
+			features: func() ARM64Features {
+				f := arm64BaseV8_5()
+				f.HasSVE = true
+				f.HasSVE2 = true
+				f.HasBF16 = true
+				f.HasI8MM = true
+				return f
+			}(),
+			expected: ARM64v9_2,
+		},
+		{
+			name: "Apple Silicon M1/M2/M3 (ARMv8.5-A + BF16 + I8MM -> v8.6)",
+			features: func() ARM64Features {
+				f := arm64BaseV8_5()
+				f.HasBF16 = true
+				f.HasI8MM = true
+				return f
+			}(),
+			expected: ARM64v8_6,
+		},
+		{
+			name: "Raspberry Pi 4 (Cortex-A72: ARMv8.0-A + CRC32)",
+			features: func() ARM64Features {
+				f := arm64BaseV8_0()
+				f.HasCRC32 = true
+				return f
+			}(),
+			expected: ARM64v8_0,
+		},
+		{
+			name: "Raspberry Pi 5 (Cortex-A76: ARMv8.2-A + DotProd)",
+			features: func() ARM64Features {
+				f := arm64BaseV8_2()
+				f.HasASIMDDP = true
+				return f
+			}(),
+			expected: ARM64v8_2,
+		},
 	}
 
-	level := EvaluateARM64(feat)
-	if level != ARM64v9_2 {
-		t.Errorf("expected Graviton 3 to evaluate to %s, got %s", ARM64v9_2, level)
-	}
-
-	// Mock Raspberry Pi 4 (Cortex-A72) cpuinfo
-	mockRpi4 := `
-processor	: 0
-Features	: fp asimd evtstrm crc32 cpuid
-`
-	rpiFeat := parseLinuxCPUInfoARM64(strings.NewReader(mockRpi4))
-	if !rpiFeat.HasFP || !rpiFeat.HasASIMD || !rpiFeat.HasCRC32 {
-		t.Errorf("parseLinuxCPUInfoARM64 failed on RPi4 fixture: %+v", rpiFeat)
-	}
-	rpiLevel := EvaluateARM64(rpiFeat)
-	if rpiLevel != ARM64v8_0 {
-		t.Errorf("expected RPi4 to evaluate to %s, got %s", ARM64v8_0, rpiLevel)
-	}
-
-	// Empty and malformed reader
-	emptyFeat := parseLinuxCPUInfoARM64(strings.NewReader("random text without features line\n"))
-	if emptyFeat.HasFP || emptyFeat.HasASIMD {
-		t.Errorf("expected empty features from invalid cpuinfo, got %+v", emptyFeat)
-	}
-
-	// Line with flags prefix (e.g. QEMU or x86 emulation)
-	flagsFeat := parseLinuxCPUInfoARM64(strings.NewReader("flags : fp neon lse sve\n"))
-	if !flagsFeat.HasFP || !flagsFeat.HasASIMD || !flagsFeat.HasATOMICS || !flagsFeat.HasSVE {
-		t.Errorf("flags prefix parsing failed: %+v", flagsFeat)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := EvaluateARM64(tt.features)
+			if got != tt.expected {
+				t.Errorf("EvaluateARM64() = %q, expected %q", got, tt.expected)
+			}
+		})
 	}
 }
 
-func TestCurrentARM64FeaturesFallback(t *testing.T) {
-	origFunc := readCPUInfoFunc
-	defer func() { readCPUInfoFunc = origFunc }()
+func TestCurrentARM64FeaturesAuxv(t *testing.T) {
+	origFunc := readLinuxAuxvARM64Func
+	defer func() { readLinuxAuxvARM64Func = origFunc }()
 
-	// Test fallback returning true features
-	readCPUInfoFunc = func() ARM64Features {
-		return ARM64Features{HasFP: true, HasASIMD: true, HasATOMICS: true}
+	readLinuxAuxvARM64Func = func() (bool, bool, bool, bool) {
+		return true, true, true, true
 	}
 	f := currentARM64Features()
-	if !f.HasFP && !f.HasASIMD {
-		t.Errorf("expected fallback to provide features, got %+v", f)
+	if !f.HasBF16 || !f.HasWFxT || !f.HasSME || !f.HasSME2 {
+		t.Errorf("expected mock auxv flags to be populated, got %+v", f)
 	}
 
-	// Call default implementation directly
-	_ = readLinuxCPUInfoARM64()
+	_, _, _, _ = readLinuxAuxvARM64()
 }
 
 func TestReadPolicyFromEnv(t *testing.T) {
@@ -897,6 +1162,29 @@ func BenchmarkDetect(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_ = Detect()
+	}
+}
+
+func TestARM64Evaluation_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	// 1. Unknown level in checkARM64LevelSatisfied
+	sat := checkARM64LevelSatisfied("v_unknown", ARM64Features{}, make(map[string]bool), make(map[string]bool))
+	if sat {
+		t.Errorf("expected unknown level to not be satisfied")
+	}
+
+	// 2. Unknown feature in hasARM64NamedFeature
+	hasFeat := hasARM64NamedFeature("unknown_feat", ARM64Features{})
+	if hasFeat {
+		t.Errorf("expected unknown feature to return false")
+	}
+
+	// 3. Cycle guard simulation in checkARM64LevelSatisfied
+	visiting := map[string]bool{"v8.1": true}
+	satCycle := checkARM64LevelSatisfied("v8.1", ARM64Features{}, make(map[string]bool), visiting)
+	if satCycle {
+		t.Errorf("expected visiting level to return false")
 	}
 }
 

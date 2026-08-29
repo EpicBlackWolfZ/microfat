@@ -57,12 +57,13 @@ type DoctorReport struct {
 
 // CPUReport contains CPU microarchitecture level and vector capability details.
 type CPUReport struct {
-	OS                    string   `json:"os"`
-	Arch                  string   `json:"arch"`
-	Level                 string   `json:"level"`
-	Features              []string `json:"features"`
-	AVX512DownclockRisk   bool     `json:"avx512_downclock_risk,omitempty"`
-	AVX512DownclockNotice string   `json:"avx512_downclock_notice,omitempty"`
+	OS                    string                     `json:"os"`
+	Arch                  string                     `json:"arch"`
+	Level                 string                     `json:"level"`
+	Features              []string                   `json:"features"`
+	Levels                []microarch.ARM64LevelStatus `json:"levels,omitempty"`
+	AVX512DownclockRisk   bool                       `json:"avx512_downclock_risk,omitempty"`
+	AVX512DownclockNotice string                     `json:"avx512_downclock_notice,omitempty"`
 }
 
 // MemfdReport contains in-memory anonymous file descriptor capability details.
@@ -153,6 +154,7 @@ func runDoctor(opts DoctorOptions) *DoctorReport {
 		Arch:                hostInfo.Arch,
 		Level:               hostInfo.Level,
 		Features:            hostInfo.Features,
+		Levels:              hostInfo.Levels,
 		AVX512DownclockRisk: downclockRisk,
 	}
 

@@ -1,6 +1,7 @@
 package microarch
 
 import (
+	"encoding/binary"
 	"strings"
 	"testing"
 )
@@ -155,14 +156,26 @@ func TestAVX512DownclockingRiskEdgeCases(t *testing.T) {
 	}
 }
 
-func TestLinuxCPUInfoARM64ParsingEdgeCases(t *testing.T) {
+func TestLinuxAuxvARM64ParsingEdgeCases(t *testing.T) {
 	t.Parallel()
 
-	arm64Input := "Features\t: fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid " +
-		"asimdrdm jscvt fcma lrcpc dcpop sha3 sm3 sm4 asimddp sha512 sve sve2\n"
-	featuresARM64 := parseLinuxCPUInfoARM64(strings.NewReader(arm64Input))
-	if !featuresARM64.HasSVE || !featuresARM64.HasSVE2 || !featuresARM64.HasAES || !featuresARM64.HasCRC32 {
-		t.Errorf("parseLinuxCPUInfoARM64 failed on formatted input: %+v", featuresARM64)
+	// Multi-entry auxv data with various tags, including duplicate AT_HWCAP2 and terminating AT_NULL
+	auxvData := make([]byte, 64)
+	binary.LittleEndian.PutUint64(auxvData[0:8], 16) // AT_HWCAP
+	binary.LittleEndian.PutUint64(auxvData[8:16], 0x1234)
+	binary.LittleEndian.PutUint64(auxvData[16:24], auxvAT_HWCAP2) // AT_HWCAP2
+	binary.LittleEndian.PutUint64(auxvData[24:32], hwcap2BF16|hwcap2WFXT)
+	binary.LittleEndian.PutUint64(auxvData[32:40], 0) // AT_NULL
+	binary.LittleEndian.PutUint64(auxvData[40:48], 0)
+	binary.LittleEndian.PutUint64(auxvData[48:56], auxvAT_HWCAP2) // After AT_NULL (should be ignored)
+	binary.LittleEndian.PutUint64(auxvData[56:64], hwcap2SME|hwcap2SME2)
+
+	bf16, wfxt, sme, sme2 := parseLinuxAuxvARM64(auxvData)
+	if !bf16 || !wfxt {
+		t.Errorf("expected bf16 and wfxt to be true, got bf16=%v, wfxt=%v", bf16, wfxt)
+	}
+	if sme || sme2 {
+		t.Errorf("expected sme and sme2 to be false due to AT_NULL termination, got sme=%v, sme2=%v", sme, sme2)
 	}
 }
 
