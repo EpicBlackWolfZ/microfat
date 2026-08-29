@@ -603,10 +603,8 @@ func PrewarmVariantWithDict(
 	}
 
 	cachedBinary := filepath.Join(cleanDir, filepath.Clean(entry.SHA256))
-	if stat, err := os.Stat(cachedBinary); err == nil {
-		if stat.Size() == entry.UncompressedSize {
-			return cachedBinary, true, 0, nil
-		}
+	if verifyCachedBinary(cachedBinary, entry.UncompressedSize, entry.SHA256) {
+		return cachedBinary, true, 0, nil
 	}
 
 	tmpFile, err := os.CreateTemp(cleanDir, ".prewarm-*.tmp")
@@ -653,6 +651,29 @@ func PrewarmVariantWithDict(
 	}
 
 	return cachedBinary, false, decompDuration, nil
+}
+
+// verifyCachedBinary validates that a cached binary exists, matches the expected size,
+// and strictly matches the expected cryptographic SHA-256 checksum.
+func verifyCachedBinary(path string, expectedSize int64, expectedSHA256 string) bool {
+	stat, err := os.Stat(path)
+	if err != nil || stat.Size() != expectedSize {
+		return false
+	}
+
+	// #nosec G304 -- opening resolved cached binary for hash verification
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, f); err != nil {
+		return false
+	}
+
+	return hex.EncodeToString(hasher.Sum(nil)) == expectedSHA256
 }
 
 // PrewarmBinary extracts the specified variant levels (or all variants if targetLevels is empty)
