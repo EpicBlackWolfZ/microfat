@@ -202,9 +202,15 @@ Microfat supports ARM64 microarchitecture levels aligned with the Go compiler `G
 | `v9.2` | `GOARM64=v9.2` | `v9.0` + SVE2 + `i8mm` + `bf16` | AI & HPC cloud instances |
 | `v9.3`–`v9.5` | `GOARM64=v9.3..9.5` | Scalable Matrix Extension (`sme`, `sme2`) | Next-generation server processors |
 
-### Dual-Layer CPU Feature Probing
-1. **Primary Layer**: Directly inspects Linux Auxiliary Vector (`AT_HWCAP` & `AT_HWCAP2` via `golang.org/x/sys/cpu`) or Darwin `sysctl`.
-2. **Fallback Layer**: If running in restricted containers, chroots, or QEMU user emulation where auxiliary vectors are stripped, `internal/microarch` automatically falls back to parsing `/proc/cpuinfo` `Features:` and `flags:` token streams.
+### Dual-Tier CPU Feature Probing Architecture
+
+1. **AMD64 Microarchitecture (Exclusive CPUID Authority)**:
+   - Queries hardware instruction flags directly via unprivileged native CPUID instructions (`golang.org/x/sys/cpu` and native assembly CPUID leaf probing in `cpuid_amd64.s` for `MOVBE`, `F16C`, and `LZCNT`/`ABM`).
+   - CPUID acts as the **sole authoritative source of truth**, eliminating false-positive feature flag promotions and runtime `SIGILL` hazards across virtualized or asymmetric multi-core systems. `/proc/cpuinfo` is restricted strictly to non-authoritative model metadata (e.g., detecting Intel Xeon AVX-512 frequency downclocking risks).
+
+2. **ARM64 Microarchitecture (Auxiliary Vectors & Fallback)**:
+   - **Primary Layer**: Directly inspects Linux Auxiliary Vectors (`AT_HWCAP` & `AT_HWCAP2` via `golang.org/x/sys/cpu`) or Darwin `sysctl`.
+   - **Fallback Layer**: If running in restricted containers, chroots, or QEMU user emulation where auxiliary vectors are stripped, `internal/microarch` automatically falls back to parsing `/proc/cpuinfo` `Features:` token streams.
 
 ---
 
