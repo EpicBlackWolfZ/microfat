@@ -620,6 +620,7 @@ func TestAutoTune_WithCgroupRoot_LiveFilesystem(t *testing.T) {
 	tmpDir := t.TempDir()
 	v2MemMax := filepath.Join(tmpDir, "memory.max")
 	v2CPUMax := filepath.Join(tmpDir, "cpu.max")
+	procFile := filepath.Join(tmpDir, "proc_cgroup")
 
 	const testMemLimit = "1073741824"   // 1 GB
 	const testCPUQuota = "200000 100000" // 2 CPUs
@@ -630,6 +631,15 @@ func TestAutoTune_WithCgroupRoot_LiveFilesystem(t *testing.T) {
 	if err := os.WriteFile(v2CPUMax, []byte(testCPUQuota+"\n"), testFilePerm); err != nil {
 		t.Fatalf("writing cpu.max: %v", err)
 	}
+	if err := os.WriteFile(procFile, []byte("0::/\n"), testFilePerm); err != nil {
+		t.Fatalf("writing proc_cgroup: %v", err)
+	}
+
+	origReadFrom := readLimitsFromFunc
+	readLimitsFromFunc = func(root string) (cgroup.Limits, error) {
+		return cgroup.ReadLimitsCustom(root, procFile)
+	}
+	defer func() { readLimitsFromFunc = origReadFrom }()
 
 	withIsolatedEnv(t, nil, nil, nil, func(memLimit *int64, maxProcs *int, _ *int, _ *bytes.Buffer) {
 		res := AutoTune(WithCgroupRoot(tmpDir))

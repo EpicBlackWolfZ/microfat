@@ -1,6 +1,7 @@
 package cgroup
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -82,6 +83,10 @@ func TestCgroupV2MalformedFiles(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
+	procFile := filepath.Join(tempDir, "proc_cgroup")
+	if err := os.WriteFile(procFile, []byte("0::/\n"), 0o600); err != nil {
+		t.Fatalf("failed to write procFile: %v", err)
+	}
 
 	// 1. memory.max with whitespace and trailing text
 	memPath := filepath.Join(tempDir, "memory.max")
@@ -95,19 +100,15 @@ func TestCgroupV2MalformedFiles(t *testing.T) {
 		t.Fatalf("failed to write cpu.max: %v", err)
 	}
 
-	limits, err := ReadLimitsFrom(tempDir)
-	if err != nil {
-		t.Fatalf("ReadLimitsFrom failed: %v", err)
+	limits, err := ReadLimitsCustom(tempDir, procFile)
+	if err == nil {
+		t.Fatalf("expected error on malformed single-token cpu.max")
 	}
-
-	if limits.CgroupVersion != VersionV2 {
-		t.Fatalf("expected VersionV2, got %d", limits.CgroupVersion)
+	if limits.CgroupVersion != VersionUnknown {
+		t.Fatalf("expected VersionUnknown on malformed cpu.max, got %d", limits.CgroupVersion)
 	}
-	if limits.MemoryLimitBytes != 104857600 {
-		t.Fatalf("expected MemoryLimitBytes=104857600, got %d", limits.MemoryLimitBytes)
-	}
-	if limits.CPUQuota != 0.0 {
-		t.Fatalf("expected CPUQuota=0.0 on malformed single-token cpu.max, got %v", limits.CPUQuota)
+	if !errors.Is(err, ErrCgroupLimitCorrupted) {
+		t.Fatalf("expected ErrCgroupLimitCorrupted, got %v", err)
 	}
 }
 
@@ -115,6 +116,11 @@ func TestCgroupV1MalformedFiles(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
+	procFile := filepath.Join(tempDir, "proc_cgroup")
+	if err := os.WriteFile(procFile, []byte("1:memory:/\n2:cpu:/\n"), 0o600); err != nil {
+		t.Fatalf("failed to write procFile: %v", err)
+	}
+
 	memDir := filepath.Join(tempDir, "memory")
 	cpuDir := filepath.Join(tempDir, "cpu")
 	if err := os.MkdirAll(memDir, 0o755); err != nil {
@@ -137,18 +143,87 @@ func TestCgroupV1MalformedFiles(t *testing.T) {
 		t.Fatalf("failed to write cfs_period: %v", err)
 	}
 
-	limits, err := ReadLimitsFrom(tempDir)
-	if err != nil {
-		t.Fatalf("ReadLimitsFrom failed: %v", err)
+	limits, err := ReadLimitsCustom(tempDir, procFile)
+	if err == nil {
+		t.Fatalf("expected error on zero cpu.cfs_period_us")
 	}
+	if limits.CgroupVersion != VersionUnknown {
+		t.Fatalf("expected VersionUnknown on corrupted period, got %d", limits.CgroupVersion)
+	}
+	if !errors.Is(err, ErrCgroupLimitCorrupted) {
+		t.Fatalf("expected ErrCgroupLimitCorrupted, got %v", err)
+	}
+}
 
-	if limits.CgroupVersion != VersionV1 {
-		t.Fatalf("expected VersionV1, got %d", limits.CgroupVersion)
-	}
-	if limits.MemoryLimitBytes != 209715200 {
-		t.Fatalf("expected MemoryLimitBytes=209715200, got %d", limits.MemoryLimitBytes)
-	}
-	if limits.CPUQuota != 0.0 {
-		t.Fatalf("expected CPUQuota=0.0 on zero period_us, got %v", limits.CPUQuota)
-	}
+func TestCgroupCorruptedLimitValues(t *testing.T) {
+	t.Parallel()
+
+	t.Run("CgroupV2_NonNumericMemory", func(t *testing.T) {
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		_ = os.WriteFile(procFile, []byte("0::/\n"), 0o600)
+		_ = os.WriteFile(filepath.Join(tempDir, "memory.max"), []byte("invalid_non_numeric\n"), 0o600)
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		if err == nil || limits.CgroupVersion != VersionUnknown || !errors.Is(err, ErrCgroupLimitCorrupted) {
+			t.Fatalf("expected VersionUnknown + ErrCgroupLimitCorrupted, got limits=%+v, err=%v", limits, err)
+		}
+	})
+
+	t.Run("CgroupV2_NegativeMemory", func(t *testing.T) {
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		_ = os.WriteFile(procFile, []byte("0::/\n"), 0o600)
+		_ = os.WriteFile(filepath.Join(tempDir, "memory.max"), []byte("-104857600\n"), 0o600)
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		if err == nil || limits.CgroupVersion != VersionUnknown || !errors.Is(err, ErrCgroupLimitCorrupted) {
+			t.Fatalf("expected VersionUnknown + ErrCgroupLimitCorrupted, got limits=%+v, err=%v", limits, err)
+		}
+	})
+
+	t.Run("CgroupV2_ZeroPeriodCPU", func(t *testing.T) {
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		_ = os.WriteFile(procFile, []byte("0::/\n"), 0o600)
+		_ = os.WriteFile(filepath.Join(tempDir, "memory.max"), []byte("max\n"), 0o600)
+		_ = os.WriteFile(filepath.Join(tempDir, "cpu.max"), []byte("max 0\n"), 0o600)
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		if err == nil || limits.CgroupVersion != VersionUnknown || !errors.Is(err, ErrCgroupLimitCorrupted) {
+			t.Fatalf("expected VersionUnknown + ErrCgroupLimitCorrupted, got limits=%+v, err=%v", limits, err)
+		}
+	})
+
+	t.Run("CgroupV1_NonNumericMemory", func(t *testing.T) {
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		_ = os.WriteFile(procFile, []byte("1:memory:/\n"), 0o600)
+		memDir := filepath.Join(tempDir, "memory")
+		_ = os.MkdirAll(memDir, 0o755)
+		_ = os.WriteFile(filepath.Join(memDir, "memory.limit_in_bytes"), []byte("corrupt\n"), 0o600)
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		if err == nil || limits.CgroupVersion != VersionUnknown || !errors.Is(err, ErrCgroupLimitCorrupted) {
+			t.Fatalf("expected VersionUnknown + ErrCgroupLimitCorrupted, got limits=%+v, err=%v", limits, err)
+		}
+	})
+
+	t.Run("CgroupV1_InvalidCPUQuota", func(t *testing.T) {
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		_ = os.WriteFile(procFile, []byte("1:memory:/\n2:cpu:/\n"), 0o600)
+		memDir := filepath.Join(tempDir, "memory")
+		cpuDir := filepath.Join(tempDir, "cpu")
+		_ = os.MkdirAll(memDir, 0o755)
+		_ = os.MkdirAll(cpuDir, 0o755)
+		_ = os.WriteFile(filepath.Join(memDir, "memory.limit_in_bytes"), []byte("104857600\n"), 0o600)
+		_ = os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_quota_us"), []byte("not_a_number\n"), 0o600)
+		_ = os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_period_us"), []byte("100000\n"), 0o600)
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		if err == nil || limits.CgroupVersion != VersionUnknown || !errors.Is(err, ErrCgroupLimitCorrupted) {
+			t.Fatalf("expected VersionUnknown + ErrCgroupLimitCorrupted, got limits=%+v, err=%v", limits, err)
+		}
+	})
 }

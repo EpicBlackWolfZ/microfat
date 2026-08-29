@@ -151,6 +151,13 @@ func buildAutoTunedEnviron(
 
 	limits, err := readCgroupLimitsFunc()
 	if err != nil || limits.CgroupVersion == cgroup.VersionUnknown {
+		if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[microfat:debug] cgroup autotuning skipped: %v\n", err)
+			} else {
+				fmt.Fprintf(os.Stderr, "[microfat:debug] cgroup autotuning skipped: cgroup version unknown\n")
+			}
+		}
 		return env, nil
 	}
 
