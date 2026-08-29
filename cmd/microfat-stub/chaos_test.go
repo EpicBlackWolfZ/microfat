@@ -673,12 +673,19 @@ func TestMemfdSealingGracefulFallback(t *testing.T) {
 	payload := []byte("#!/bin/sh\necho 'memfd-seal-fallback-test'\n")
 	fatFile, entry, idx := createSyntheticFatFile(t, payload)
 
+	cacheDir := t.TempDir()
+	origResolve := resolveCacheDirFunc
 	origExecve := execveFunc
 	origSeal := memfdSealFunc
 	t.Cleanup(func() {
+		resolveCacheDirFunc = origResolve
 		execveFunc = origExecve
 		memfdSealFunc = origSeal
 	})
+
+	resolveCacheDirFunc = func(string) (string, error) {
+		return cacheDir, nil
+	}
 
 	testCases := []struct {
 		name    string
@@ -693,8 +700,7 @@ func TestMemfdSealingGracefulFallback(t *testing.T) {
 	policyRes := microarch.PolicyResult{}
 
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(format.EnvDebug, "1")
+		t.Run(tc.name+"_executeViaMemfd_fails_fast", func(t *testing.T) {
 			var execveCalled bool
 			execveFunc = func(argv0 string, argv []string, envv []string) error {
 				execveCalled = true
@@ -705,11 +711,66 @@ func TestMemfdSealingGracefulFallback(t *testing.T) {
 			}
 
 			err := executeViaMemfd(fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
-			if err != nil {
-				t.Fatalf("expected executeViaMemfd to succeed despite seal error %v, got %v", tc.sealErr, err)
+			if err == nil {
+				t.Fatalf("expected executeViaMemfd to fail on seal error %v, got nil", tc.sealErr)
 			}
-			if !execveCalled {
-				t.Fatal("expected execve to be called on graceful seal fallback")
+			if !errors.Is(err, format.ErrMemfdSealingFailed) {
+				t.Errorf("expected ErrMemfdSealingFailed in error chain, got: %v", err)
+			}
+			if execveCalled {
+				t.Fatal("execve must NOT be called on unsealed memfd descriptor")
+			}
+		})
+
+		t.Run(tc.name+"_executeVariant_auto_mode_cache_fallback", func(t *testing.T) {
+			t.Setenv(format.EnvExecMode, "")
+			t.Setenv(format.EnvDispatchMode, "")
+			t.Setenv(format.EnvDebug, "1")
+
+			var cacheExecuted bool
+			expectedTarget := filepath.Join(cacheDir, entry.SHA256)
+			execveFunc = func(argv0 string, argv []string, envv []string) error {
+				if argv0 == expectedTarget {
+					cacheExecuted = true
+					return nil
+				}
+				return errors.New("unexpected exec path: " + argv0)
+			}
+			memfdSealFunc = func(fd int, seals int) error {
+				return tc.sealErr
+			}
+
+			err := executeVariant(fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
+			if err != nil {
+				t.Fatalf("expected executeVariant to cleanly fallback to cache on seal error %v, got: %v", tc.sealErr, err)
+			}
+			if !cacheExecuted {
+				t.Fatal("expected cache execution fallback when memfd sealing fails in auto mode")
+			}
+		})
+
+		t.Run(tc.name+"_executeVariant_explicit_memfd_mode_fails_fast", func(t *testing.T) {
+			t.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+			t.Setenv(format.EnvDebug, "1")
+
+			var execveCalled bool
+			execveFunc = func(argv0 string, argv []string, envv []string) error {
+				execveCalled = true
+				return nil
+			}
+			memfdSealFunc = func(fd int, seals int) error {
+				return tc.sealErr
+			}
+
+			err := executeVariant(fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
+			if err == nil {
+				t.Fatalf("expected executeVariant to fail in explicit memfd mode on seal error %v, got nil", tc.sealErr)
+			}
+			if !errors.Is(err, format.ErrMemfdSealingFailed) {
+				t.Errorf("expected ErrMemfdSealingFailed, got: %v", err)
+			}
+			if execveCalled {
+				t.Fatal("execve must NOT be called when explicit memfd mode fails")
 			}
 		})
 	}
