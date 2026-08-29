@@ -2,12 +2,15 @@ package pack
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
@@ -1891,5 +1894,248 @@ func TestPack_OversizedDictionaryGuard(t *testing.T) {
 		t.Fatalf("expected ErrInvalidDictionary in PrewarmBinary for oversized dictionary, got %v", err)
 	}
 }
+
+func TestVerifyCachedBinary(t *testing.T) {
+	tempDir := t.TempDir()
+
+	validContent := []byte("hello-microfat-cached-binary-test-content")
+	validSize := int64(len(validContent))
+	h := sha256.Sum256(validContent)
+	validSHA := hex.EncodeToString(h[:])
+
+	validPath := filepath.Join(tempDir, "valid_file")
+	if err := os.WriteFile(validPath, validContent, 0o755); err != nil {
+		t.Fatalf("writing valid file: %v", err)
+	}
+
+	t.Run("ValidFile_MatchesSizeAndChecksum", func(t *testing.T) {
+		if !verifyCachedBinary(validPath, validSize, validSHA) {
+			t.Errorf("expected verifyCachedBinary to return true for valid file")
+		}
+	})
+
+	t.Run("NonexistentFile", func(t *testing.T) {
+		if verifyCachedBinary(filepath.Join(tempDir, "nonexistent"), validSize, validSHA) {
+			t.Errorf("expected verifyCachedBinary to return false for nonexistent file")
+		}
+	})
+
+	t.Run("DirectoryPath", func(t *testing.T) {
+		if verifyCachedBinary(tempDir, validSize, validSHA) {
+			t.Errorf("expected verifyCachedBinary to return false for directory path")
+		}
+	})
+
+	t.Run("SizeMismatch", func(t *testing.T) {
+		if verifyCachedBinary(validPath, validSize+10, validSHA) {
+			t.Errorf("expected verifyCachedBinary to return false for size mismatch")
+		}
+	})
+
+	t.Run("ChecksumMismatch", func(t *testing.T) {
+		mismatchedSHA := "0000000000000000000000000000000000000000000000000000000000000000"
+		if verifyCachedBinary(validPath, validSize, mismatchedSHA) {
+			t.Errorf("expected verifyCachedBinary to return false for checksum mismatch")
+		}
+	})
+
+	t.Run("UnreadableFile", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("skipping unreadable file test as root")
+		}
+		unreadablePath := filepath.Join(tempDir, "unreadable_file")
+		if err := os.WriteFile(unreadablePath, validContent, 0o000); err != nil {
+			t.Skip("skipping chmod 0000 test")
+		}
+		defer func() { _ = os.Chmod(unreadablePath, 0o600) }()
+		if verifyCachedBinary(unreadablePath, validSize, validSHA) {
+			t.Errorf("expected verifyCachedBinary to return false for unreadable file")
+		}
+	})
+}
+
+func TestPrewarmVariantWithDict_IntegrityAndAtomicReplacement(t *testing.T) {
+	tempDir := t.TempDir()
+
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("stub-payload-bytes"), 0o755)
+
+	v1Path := filepath.Join(tempDir, "v1")
+	v1Content := []byte("v1-binary-integrity-test-payload-1234567890")
+	_ = os.WriteFile(v1Path, v1Content, 0o755)
+
+	fatPath := filepath.Join(tempDir, "fat_integrity.bin")
+	opts := Options{
+		StubPath:          stubPath,
+		OutputPath:        fatPath,
+		AppName:           "integrity-app",
+		TargetOS:          testOSLinux,
+		TargetArch:        testArchAMD64,
+		SkipELFValidation: true,
+		Variants: map[string]string{
+			"v1": v1Path,
+		},
+	}
+
+	_, err := Pack(opts)
+	if err != nil {
+		t.Fatalf("Pack failed: %v", err)
+	}
+
+	f, err := os.Open(fatPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	stat, err := f.Stat()
+	if err != nil {
+		t.Fatalf("Stat failed: %v", err)
+	}
+
+	idx, err := format.ReadTrailerAndIndex(f, stat.Size())
+	if err != nil {
+		t.Fatalf("ReadTrailerAndIndex failed: %v", err)
+	}
+	if len(idx.Variants) != 1 {
+		t.Fatalf("expected 1 variant, got %d", len(idx.Variants))
+	}
+	entry := &idx.Variants[0]
+
+	cacheDir := filepath.Join(tempDir, "integrity_cache")
+
+	t.Run("CacheHit_Valid", func(t *testing.T) {
+		cachedPath, alreadyCached, _, prewarmErr := PrewarmVariantWithDict(f, entry, cacheDir, nil)
+		if prewarmErr != nil {
+			t.Fatalf("first PrewarmVariantWithDict failed: %v", prewarmErr)
+		}
+		if alreadyCached {
+			t.Errorf("expected alreadyCached=false on initial extraction")
+		}
+
+		// Second prewarm should be a verified cache hit
+		cachedPath2, alreadyCached2, _, prewarmErr2 := PrewarmVariantWithDict(f, entry, cacheDir, nil)
+		if prewarmErr2 != nil {
+			t.Fatalf("second PrewarmVariantWithDict failed: %v", prewarmErr2)
+		}
+		if !alreadyCached2 {
+			t.Errorf("expected alreadyCached=true on second prewarm")
+		}
+		if cachedPath != cachedPath2 {
+			t.Errorf("expected cached paths to match: %q != %q", cachedPath, cachedPath2)
+		}
+	})
+
+	t.Run("CacheHit_CorruptedPayload", func(t *testing.T) {
+		cachedFile := filepath.Join(cacheDir, entry.SHA256)
+		corruptedBytes := bytes.Repeat([]byte{0xFF}, int(entry.UncompressedSize))
+		if writeErr := os.WriteFile(cachedFile, corruptedBytes, format.PrivateExecMode); writeErr != nil {
+			t.Fatalf("writing corrupted cache file: %v", writeErr)
+		}
+
+		// PrewarmVariantWithDict should detect hash mismatch, re-extract, and atomically replace the file
+		cachedPath, alreadyCached, _, prewarmErr := PrewarmVariantWithDict(f, entry, cacheDir, nil)
+		if prewarmErr != nil {
+			t.Fatalf("PrewarmVariantWithDict recovery failed: %v", prewarmErr)
+		}
+		if alreadyCached {
+			t.Errorf("expected alreadyCached=false on corrupted file recovery")
+		}
+
+		fixedData, readErr := os.ReadFile(cachedPath)
+		if readErr != nil {
+			t.Fatalf("reading recovered cached file: %v", readErr)
+		}
+		if !bytes.Equal(fixedData, v1Content) {
+			t.Errorf("recovered cached content mismatch: expected %q, got %q", v1Content, fixedData)
+		}
+	})
+
+	t.Run("CacheHit_TruncatedPayload", func(t *testing.T) {
+		cachedFile := filepath.Join(cacheDir, entry.SHA256)
+		if truncErr := os.Truncate(cachedFile, 5); truncErr != nil {
+			t.Fatalf("truncating cache file: %v", truncErr)
+		}
+
+		// PrewarmVariantWithDict should detect size mismatch and restore the valid binary
+		cachedPath, alreadyCached, _, prewarmErr := PrewarmVariantWithDict(f, entry, cacheDir, nil)
+		if prewarmErr != nil {
+			t.Fatalf("PrewarmVariantWithDict truncated recovery failed: %v", prewarmErr)
+		}
+		if alreadyCached {
+			t.Errorf("expected alreadyCached=false on truncated file recovery")
+		}
+
+		fixedData, readErr := os.ReadFile(cachedPath)
+		if readErr != nil {
+			t.Fatalf("reading recovered cached file: %v", readErr)
+		}
+		if !bytes.Equal(fixedData, v1Content) {
+			t.Errorf("recovered cached content mismatch: expected %q, got %q", v1Content, fixedData)
+		}
+	})
+
+	t.Run("DecompressionFailure_PreservesDiskState", func(t *testing.T) {
+		corruptedReader := bytes.NewReader([]byte("not-a-valid-payload"))
+		corruptedEntry := &format.VariantEntry{
+			Level:            "v1",
+			Compression:      "zstd",
+			Offset:           0,
+			CompressedSize:   int64(len("not-a-valid-payload")),
+			UncompressedSize: 500,
+			SHA256:           entry.SHA256,
+		}
+
+		_, _, _, errCorrupt := PrewarmVariantWithDict(corruptedReader, corruptedEntry, cacheDir, nil)
+		if errCorrupt == nil {
+			t.Fatalf("expected error decompressing invalid payload")
+		}
+
+		// Verify no dangling .prewarm-*.tmp files in cacheDir
+		entries, dirErr := os.ReadDir(cacheDir)
+		if dirErr != nil {
+			t.Fatalf("reading cacheDir: %v", dirErr)
+		}
+		for _, e := range entries {
+			if filepath.Ext(e.Name()) == ".tmp" {
+				t.Errorf("dangling temporary file found after failed decompression: %s", e.Name())
+			}
+		}
+	})
+
+	t.Run("ConcurrentPrewarmRace", func(t *testing.T) {
+		const concurrentWorkers = 20
+		var wg sync.WaitGroup
+		errs := make(chan error, concurrentWorkers)
+
+		for i := 0; i < concurrentWorkers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, _, _, pErr := PrewarmVariantWithDict(f, entry, cacheDir, nil)
+				if pErr != nil {
+					errs <- pErr
+				}
+			}()
+		}
+
+		wg.Wait()
+		close(errs)
+
+		for pErr := range errs {
+			t.Errorf("concurrent PrewarmVariantWithDict error: %v", pErr)
+		}
+
+		cachedFile := filepath.Join(cacheDir, entry.SHA256)
+		statFile, statErr := os.Stat(cachedFile)
+		if statErr != nil {
+			t.Fatalf("stat on concurrent cached file: %v", statErr)
+		}
+		if statFile.Size() != entry.UncompressedSize {
+			t.Errorf("unexpected file size after concurrent race: expected %d, got %d", entry.UncompressedSize, statFile.Size())
+		}
+	})
+}
+
 
 
