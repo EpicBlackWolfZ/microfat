@@ -1,6 +1,7 @@
 package cgroup
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +14,10 @@ const (
 
 func TestReadLimitsCgroupV2(t *testing.T) {
 	tempDir := t.TempDir()
+	procFile := filepath.Join(tempDir, "proc_cgroup")
+	if err := os.WriteFile(procFile, []byte("0::/\n"), 0o600); err != nil {
+		t.Fatalf("writing procFile: %v", err)
+	}
 
 	// Mock cgroup v2 files
 	memPath := filepath.Join(tempDir, "memory.max")
@@ -25,9 +30,9 @@ func TestReadLimitsCgroupV2(t *testing.T) {
 		t.Fatalf("writing cpu.max: %v", err)
 	}
 
-	limits, err := ReadLimitsFrom(tempDir)
+	limits, err := ReadLimitsCustom(tempDir, procFile)
 	if err != nil {
-		t.Fatalf("ReadLimitsFrom failed: %v", err)
+		t.Fatalf("ReadLimitsCustom failed: %v", err)
 	}
 
 	if limits.CgroupVersion != VersionV2 {
@@ -47,6 +52,10 @@ func TestReadLimitsCgroupV2(t *testing.T) {
 
 func TestReadLimitsCgroupV2Unlimited(t *testing.T) {
 	tempDir := t.TempDir()
+	procFile := filepath.Join(tempDir, "proc_cgroup")
+	if err := os.WriteFile(procFile, []byte("0::/\n"), 0o600); err != nil {
+		t.Fatalf("writing procFile: %v", err)
+	}
 
 	memPath := filepath.Join(tempDir, "memory.max")
 	cpuPath := filepath.Join(tempDir, "cpu.max")
@@ -58,9 +67,9 @@ func TestReadLimitsCgroupV2Unlimited(t *testing.T) {
 		t.Fatalf("writing cpu.max: %v", err)
 	}
 
-	limits, err := ReadLimitsFrom(tempDir)
+	limits, err := ReadLimitsCustom(tempDir, procFile)
 	if err != nil {
-		t.Fatalf("ReadLimitsFrom failed: %v", err)
+		t.Fatalf("ReadLimitsCustom failed: %v", err)
 	}
 
 	if limits.MemoryLimitBytes != 0 {
@@ -73,6 +82,10 @@ func TestReadLimitsCgroupV2Unlimited(t *testing.T) {
 
 func TestReadLimitsCgroupV1(t *testing.T) {
 	tempDir := t.TempDir()
+	procFile := filepath.Join(tempDir, "proc_cgroup")
+	if err := os.WriteFile(procFile, []byte("1:memory:/\n2:cpu:/\n"), 0o600); err != nil {
+		t.Fatalf("writing procFile: %v", err)
+	}
 
 	memDir := filepath.Join(tempDir, "memory")
 	cpuDir := filepath.Join(tempDir, "cpu")
@@ -97,9 +110,9 @@ func TestReadLimitsCgroupV1(t *testing.T) {
 		t.Fatalf("writing cpu.cfs_period_us: %v", err)
 	}
 
-	limits, err := ReadLimitsFrom(tempDir)
+	limits, err := ReadLimitsCustom(tempDir, procFile)
 	if err != nil {
-		t.Fatalf("ReadLimitsFrom failed: %v", err)
+		t.Fatalf("ReadLimitsCustom failed: %v", err)
 	}
 
 	if limits.CgroupVersion != VersionV1 {
@@ -115,15 +128,25 @@ func TestReadLimitsCgroupV1(t *testing.T) {
 }
 
 func TestReadLimitsNonExistentMount(t *testing.T) {
-	_, err := ReadLimitsFrom("/non/existent/path/for/test")
+	limits, err := ReadLimitsFrom("/non/existent/path/for/test")
 	if err == nil {
 		t.Errorf("expected error for non-existent path")
+	}
+	if limits.CgroupVersion != VersionUnknown {
+		t.Errorf("expected VersionUnknown on inaccessible mount, got %d", limits.CgroupVersion)
+	}
+	if !errors.Is(err, ErrCgroupMountInaccessible) {
+		t.Errorf("expected ErrCgroupMountInaccessible, got %v", err)
 	}
 }
 
 func TestReadLimitsUnknown(t *testing.T) {
 	tempDir := t.TempDir()
-	limits, err := ReadLimitsFrom(tempDir)
+	procFile := filepath.Join(tempDir, "proc_cgroup")
+	if err := os.WriteFile(procFile, []byte("0::/\n"), 0o600); err != nil {
+		t.Fatalf("writing procFile: %v", err)
+	}
+	limits, err := ReadLimitsCustom(tempDir, procFile)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1054,36 +1077,56 @@ func TestReadLimitsProcCgroup_EdgeCases(t *testing.T) {
 		t.Fatalf("writing root cpu.max: %v", err)
 	}
 
-	t.Run("MissingProcFileFallback", func(t *testing.T) {
+	t.Run("MissingProcFileReturnsVersionUnknown", func(t *testing.T) {
 		limits, err := ReadLimitsCustom(cgroupRoot, filepath.Join(tempDir, "non_existent_proc"))
-		if err != nil {
-			t.Fatalf("ReadLimitsCustom failed on missing proc: %v", err)
+		if err == nil {
+			t.Fatalf("expected error on missing proc file")
 		}
-		if limits.MemoryLimitBytes != testBytes1GB {
-			t.Errorf("expected fallback to root memory %d, got %d", testBytes1GB, limits.MemoryLimitBytes)
+		if limits.CgroupVersion != VersionUnknown {
+			t.Errorf("expected VersionUnknown on missing proc, got %d", limits.CgroupVersion)
+		}
+		if !errors.Is(err, ErrCgroupProcUnreadable) {
+			t.Errorf("expected ErrCgroupProcUnreadable, got %v", err)
 		}
 	})
 
 	t.Run("EmptyProcFilePathDefaultsToProcSelfCgroup", func(t *testing.T) {
-		_, err := ReadLimitsCustom(cgroupRoot, "")
-		if err != nil {
-			t.Fatalf("ReadLimitsCustom failed with empty proc path: %v", err)
-		}
+		// Calling with default sysfs mount and empty proc path invokes host /proc/self/cgroup
+		_, _ = ReadLimitsCustom(defaultCgroupMount, "")
 	})
 
-	t.Run("MalformedLinesAndCommentsIgnored", func(t *testing.T) {
+	t.Run("MalformedLinesAndCommentsWithValidEntry", func(t *testing.T) {
 		corruptProc := filepath.Join(t.TempDir(), "corrupt_proc")
-		corruptContent := "# Comment header\n\nmalformed_line_no_colons\n1:only_two_parts\n:::\n"
+		corruptContent := "# Comment header\n\nmalformed_line_no_colons\n1:only_two_parts\n:::\n0::/\n"
 		if err := os.WriteFile(corruptProc, []byte(corruptContent), 0o600); err != nil {
 			t.Fatalf("writing corruptProc: %v", err)
 		}
 
 		limits, err := ReadLimitsCustom(cgroupRoot, corruptProc)
 		if err != nil {
-			t.Fatalf("ReadLimitsCustom failed on corrupt proc: %v", err)
+			t.Fatalf("ReadLimitsCustom failed on corrupt proc with valid entry: %v", err)
 		}
 		if limits.MemoryLimitBytes != testBytes1GB {
 			t.Errorf("expected root memory %d, got %d", testBytes1GB, limits.MemoryLimitBytes)
+		}
+	})
+
+	t.Run("ProcFileWithNoValidEntriesFails", func(t *testing.T) {
+		invalidProc := filepath.Join(t.TempDir(), "invalid_proc")
+		invalidContent := "# Only comments\n\nmalformed_line_no_colons\n1:only_two_parts\n"
+		if err := os.WriteFile(invalidProc, []byte(invalidContent), 0o600); err != nil {
+			t.Fatalf("writing invalidProc: %v", err)
+		}
+
+		limits, err := ReadLimitsCustom(cgroupRoot, invalidProc)
+		if err == nil {
+			t.Fatalf("expected error on proc with no valid entries")
+		}
+		if limits.CgroupVersion != VersionUnknown {
+			t.Errorf("expected VersionUnknown, got %d", limits.CgroupVersion)
+		}
+		if !errors.Is(err, ErrCgroupProcUnreadable) {
+			t.Errorf("expected ErrCgroupProcUnreadable, got %v", err)
 		}
 	})
 
@@ -1095,11 +1138,33 @@ func TestReadLimitsProcCgroup_EdgeCases(t *testing.T) {
 		}
 
 		limits, err := ReadLimitsCustom(cgroupRoot, escapeProc)
-		if err != nil {
-			t.Fatalf("ReadLimitsCustom failed on escape attempt: %v", err)
+		if err == nil {
+			t.Fatalf("expected error on path escape attempt")
 		}
-		if limits.MemoryLimitBytes != testBytes1GB {
-			t.Errorf("expected root memory %d, got %d", testBytes1GB, limits.MemoryLimitBytes)
+		if limits.CgroupVersion != VersionUnknown {
+			t.Errorf("expected VersionUnknown on escape attempt, got %d", limits.CgroupVersion)
+		}
+		if !errors.Is(err, ErrCgroupHierarchyNotFound) {
+			t.Errorf("expected ErrCgroupHierarchyNotFound, got %v", err)
+		}
+	})
+
+	t.Run("NonExistentHierarchySubpathFails", func(t *testing.T) {
+		missingSubpathProc := filepath.Join(t.TempDir(), "missing_subpath_proc")
+		procContent := "0::/docker/non_existent_container_id\n"
+		if err := os.WriteFile(missingSubpathProc, []byte(procContent), 0o600); err != nil {
+			t.Fatalf("writing missingSubpathProc: %v", err)
+		}
+
+		limits, err := ReadLimitsCustom(cgroupRoot, missingSubpathProc)
+		if err == nil {
+			t.Fatalf("expected error on missing cgroup subpath")
+		}
+		if limits.CgroupVersion != VersionUnknown {
+			t.Errorf("expected VersionUnknown on missing hierarchy, got %d", limits.CgroupVersion)
+		}
+		if !errors.Is(err, ErrCgroupHierarchyNotFound) {
+			t.Errorf("expected ErrCgroupHierarchyNotFound, got %v", err)
 		}
 	})
 }
@@ -1127,4 +1192,87 @@ func TestIsSubpathHelper(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCgroupV1FlatLayoutAndEdgeCases(t *testing.T) {
+	t.Run("FlatV1MountAtRoot", func(t *testing.T) {
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		if err := os.WriteFile(procFile, []byte("1:memory:/\n2:cpu:/\n"), 0o600); err != nil {
+			t.Fatalf("writing procFile: %v", err)
+		}
+
+		// Write limit files directly at root of tempDir (flat v1 mount)
+		if err := os.WriteFile(filepath.Join(tempDir, "memory.limit_in_bytes"), []byte("1073741824\n"), 0o600); err != nil {
+			t.Fatalf("writing memory.limit_in_bytes: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(tempDir, "cpu.cfs_quota_us"), []byte("200000\n"), 0o600); err != nil {
+			t.Fatalf("writing cpu.cfs_quota_us: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(tempDir, "cpu.cfs_period_us"), []byte("100000\n"), 0o600); err != nil {
+			t.Fatalf("writing cpu.cfs_period_us: %v", err)
+		}
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		if err != nil {
+			t.Fatalf("ReadLimitsCustom failed on flat v1 layout: %v", err)
+		}
+		if limits.CgroupVersion != VersionV1 {
+			t.Errorf("expected VersionV1, got %d", limits.CgroupVersion)
+		}
+		if limits.MemoryLimitBytes != testBytes1GB {
+			t.Errorf("expected MemoryLimitBytes %d, got %d", testBytes1GB, limits.MemoryLimitBytes)
+		}
+		if limits.CPUQuota != 2.0 || limits.CPUs != 2 {
+			t.Errorf("expected CPUQuota=2.0, CPUs=2, got quota=%f, cpus=%d", limits.CPUQuota, limits.CPUs)
+		}
+	})
+
+	t.Run("V1UnlimitedQuotaAndMemory", func(t *testing.T) {
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		if err := os.WriteFile(procFile, []byte("1:memory:/\n2:cpu:/\n"), 0o600); err != nil {
+			t.Fatalf("writing procFile: %v", err)
+		}
+
+		memDir := filepath.Join(tempDir, "memory")
+		cpuDir := filepath.Join(tempDir, "cpu")
+		_ = os.MkdirAll(memDir, 0o755)
+		_ = os.MkdirAll(cpuDir, 0o755)
+
+		_ = os.WriteFile(filepath.Join(memDir, "memory.limit_in_bytes"), []byte("-1\n"), 0o600)
+		_ = os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_quota_us"), []byte("-1\n"), 0o600)
+		_ = os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_period_us"), []byte("100000\n"), 0o600)
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		if err != nil {
+			t.Fatalf("ReadLimitsCustom failed on v1 unlimited: %v", err)
+		}
+		if limits.MemoryLimitBytes != 0 {
+			t.Errorf("expected MemoryLimitBytes 0 on -1, got %d", limits.MemoryLimitBytes)
+		}
+		if limits.CPUQuota != 0 || limits.CPUs != 0 {
+			t.Errorf("expected CPUQuota 0 and CPUs 0 on -1 quota, got %f, %d", limits.CPUQuota, limits.CPUs)
+		}
+	})
+
+	t.Run("V1InvalidPeriodOnUnlimitedQuota", func(t *testing.T) {
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		_ = os.WriteFile(procFile, []byte("1:memory:/\n2:cpu:/\n"), 0o600)
+
+		memDir := filepath.Join(tempDir, "memory")
+		cpuDir := filepath.Join(tempDir, "cpu")
+		_ = os.MkdirAll(memDir, 0o755)
+		_ = os.MkdirAll(cpuDir, 0o755)
+
+		_ = os.WriteFile(filepath.Join(memDir, "memory.limit_in_bytes"), []byte("1073741824\n"), 0o600)
+		_ = os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_quota_us"), []byte("-1\n"), 0o600)
+		_ = os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_period_us"), []byte("0\n"), 0o600)
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		if err == nil || limits.CgroupVersion != VersionUnknown || !errors.Is(err, ErrCgroupLimitCorrupted) {
+			t.Fatalf("expected ErrCgroupLimitCorrupted on zero period for v1, got limits=%+v, err=%v", limits, err)
+		}
+	})
 }

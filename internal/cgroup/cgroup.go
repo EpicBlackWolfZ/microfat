@@ -114,6 +114,21 @@ type TuningPlan struct {
 	GOGCApplied     bool      `json:"gogc_applied"`
 }
 
+// Sentinel errors for cgroup inspection and hierarchy resolution.
+var (
+	// ErrCgroupMountInaccessible indicates that the specified cgroup mount directory cannot be accessed.
+	ErrCgroupMountInaccessible = errors.New("cgroup mount inaccessible")
+
+	// ErrCgroupProcUnreadable indicates that /proc/self/cgroup or the specified procfs file could not be read or parsed.
+	ErrCgroupProcUnreadable = errors.New("cgroup proc file unreadable")
+
+	// ErrCgroupHierarchyNotFound indicates that the relative cgroup path from procfs does not exist under the cgroup mount.
+	ErrCgroupHierarchyNotFound = errors.New("cgroup hierarchy path not found")
+
+	// ErrCgroupLimitCorrupted indicates that a cgroup limit file contains invalid or corrupted data.
+	ErrCgroupLimitCorrupted = errors.New("cgroup limit file corrupted")
+)
+
 // ReadLimits inspects /sys/fs/cgroup and returns the active container limits.
 func ReadLimits() (Limits, error) {
 	return ReadLimitsCustom(defaultCgroupMount, defaultProcSelfCgroup)
@@ -128,10 +143,13 @@ func ReadLimitsFrom(root string) (Limits, error) {
 func ReadLimitsCustom(root string, procCgroupPath string) (Limits, error) {
 	cleanRoot := filepath.Clean(root)
 	if _, err := os.Stat(cleanRoot); err != nil {
-		return Limits{}, fmt.Errorf("cgroup mount %s not accessible: %w", cleanRoot, err)
+		return Limits{CgroupVersion: VersionUnknown}, fmt.Errorf("%w: %s: %w", ErrCgroupMountInaccessible, cleanRoot, err)
 	}
 
-	v2RelPath, v1RelPaths, _ := parseProcCgroup(procCgroupPath)
+	v2RelPath, v1RelPaths, procErr := parseProcCgroup(procCgroupPath)
+	if procErr != nil {
+		return Limits{CgroupVersion: VersionUnknown}, fmt.Errorf("%w: %w", ErrCgroupProcUnreadable, procErr)
+	}
 
 	// 1. Detect cgroup v2 (unified hierarchy: memory.max or cgroup.controllers exists at root)
 	v2MemMax := filepath.Join(cleanRoot, "memory.max")
@@ -171,6 +189,7 @@ func parseProcCgroup(procPath string) (string, map[string]string, error) {
 	}
 	defer func() { _ = f.Close() }()
 
+	hasEntries := false
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -185,6 +204,7 @@ func parseProcCgroup(procPath string) (string, map[string]string, error) {
 		controllers := parts[1]
 		relPath := parts[2]
 
+		hasEntries = true
 		if hierarchyID == cgroupV2HierarchyID && controllers == "" {
 			v2Path = relPath
 		} else {
@@ -200,6 +220,9 @@ func parseProcCgroup(procPath string) (string, map[string]string, error) {
 	if err := scanner.Err(); err != nil {
 		return v2Path, v1Paths, err
 	}
+	if !hasEntries {
+		return "", v1Paths, errors.New("empty or invalid proc cgroup file")
+	}
 	return v2Path, v1Paths, nil
 }
 
@@ -210,54 +233,83 @@ func isSubpath(root, path string) bool {
 	return strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
-func resolveTargetDirectory(baseDir, relPath string) string {
+func resolveTargetDirectory(baseDir, relPath string) (string, error) {
 	if relPath == "" || relPath == "/" || relPath == "." {
-		return baseDir
+		return baseDir, nil
 	}
 	candidate := filepath.Join(baseDir, filepath.Clean("/"+relPath))
-	if isSubpath(baseDir, candidate) {
-		return candidate
+	if !isSubpath(baseDir, candidate) {
+		return "", fmt.Errorf("%w: relative path %q escapes base %q", ErrCgroupHierarchyNotFound, relPath, baseDir)
 	}
-	return baseDir
+	if _, err := os.Stat(candidate); err != nil {
+		return "", fmt.Errorf("%w: target directory %q not found: %w", ErrCgroupHierarchyNotFound, candidate, err)
+	}
+	return candidate, nil
 }
 
-func readCgroupV2Memory(dir string) (int64, bool) {
+func readCgroupV2Memory(dir string) (int64, bool, error) {
 	memPath := filepath.Join(dir, "memory.max")
 	memBytes, err := readTrimmedFile(memPath)
-	if err != nil || memBytes == "max" || memBytes == "" {
-		return 0, false
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("%w: reading %s: %w", ErrCgroupLimitCorrupted, memPath, err)
+	}
+	if memBytes == "max" {
+		return 0, false, nil
+	}
+	if memBytes == "" {
+		return 0, false, fmt.Errorf("%w: empty memory.max in %s", ErrCgroupLimitCorrupted, dir)
 	}
 	val, parseErr := strconv.ParseInt(memBytes, 10, 64)
-	if parseErr == nil && val > 0 {
-		return val, true
+	if parseErr != nil || val <= 0 {
+		return 0, false, fmt.Errorf("%w: invalid memory.max value %q in %s", ErrCgroupLimitCorrupted, memBytes, memPath)
 	}
-	return 0, false
+	return val, true, nil
 }
 
-func readCgroupV2CPU(dir string) (float64, bool) {
+func readCgroupV2CPU(dir string) (float64, bool, error) {
 	cpuPath := filepath.Join(dir, "cpu.max")
 	cpuContent, err := readTrimmedFile(cpuPath)
-	if err != nil || cpuContent == "" {
-		return 0, false
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("%w: reading %s: %w", ErrCgroupLimitCorrupted, cpuPath, err)
+	}
+	if cpuContent == "" {
+		return 0, false, fmt.Errorf("%w: empty cpu.max in %s", ErrCgroupLimitCorrupted, dir)
 	}
 	parts := strings.Fields(cpuContent)
-	if len(parts) != expectedCPUFields || parts[0] == "max" {
-		return 0, false
+	if len(parts) != expectedCPUFields {
+		return 0, false, fmt.Errorf("%w: invalid cpu.max format %q in %s", ErrCgroupLimitCorrupted, cpuContent, cpuPath)
+	}
+	if parts[0] == "max" {
+		period, pErr := strconv.ParseFloat(parts[1], 64)
+		if pErr != nil || period <= 0 {
+			return 0, false, fmt.Errorf("%w: invalid cpu.max period %q in %s", ErrCgroupLimitCorrupted, parts[1], cpuPath)
+		}
+		return 0, false, nil
 	}
 	quota, qErr := strconv.ParseFloat(parts[0], 64)
 	period, pErr := strconv.ParseFloat(parts[1], 64)
-	if qErr == nil && pErr == nil && period > 0 && quota > 0 {
-		return quota / period, true
+	if qErr != nil || pErr != nil || period <= 0 || quota <= 0 {
+		return 0, false, fmt.Errorf("%w: invalid cpu.max values %q in %s", ErrCgroupLimitCorrupted, cpuContent, cpuPath)
 	}
-	return 0, false
+	return quota / period, true, nil
 }
 
-func traverseCgroupV2Memory(targetDir, root string) (int64, bool) {
+func traverseCgroupV2Memory(targetDir, root string) (int64, bool, error) {
 	var minMem int64
 	hasMem := false
 	curr := targetDir
 	for {
-		if val, ok := readCgroupV2Memory(curr); ok {
+		val, ok, err := readCgroupV2Memory(curr)
+		if err != nil {
+			return 0, false, err
+		}
+		if ok {
 			if !hasMem || val < minMem {
 				minMem = val
 				hasMem = true
@@ -272,15 +324,19 @@ func traverseCgroupV2Memory(targetDir, root string) (int64, bool) {
 		}
 		curr = parent
 	}
-	return minMem, hasMem
+	return minMem, hasMem, nil
 }
 
-func traverseCgroupV2CPU(targetDir, root string) (float64, bool) {
+func traverseCgroupV2CPU(targetDir, root string) (float64, bool, error) {
 	var minCPUQuota float64
 	hasCPU := false
 	curr := targetDir
 	for {
-		if qRatio, ok := readCgroupV2CPU(curr); ok {
+		qRatio, ok, err := readCgroupV2CPU(curr)
+		if err != nil {
+			return 0, false, err
+		}
+		if ok {
 			if !hasCPU || qRatio < minCPUQuota {
 				minCPUQuota = qRatio
 				hasCPU = true
@@ -295,18 +351,30 @@ func traverseCgroupV2CPU(targetDir, root string) (float64, bool) {
 		}
 		curr = parent
 	}
-	return minCPUQuota, hasCPU
+	return minCPUQuota, hasCPU, nil
 }
 
 func readCgroupV2(root, relPath string) (Limits, error) {
-	limits := Limits{CgroupVersion: VersionV2}
-	targetDir := resolveTargetDirectory(root, relPath)
+	targetDir, err := resolveTargetDirectory(root, relPath)
+	if err != nil {
+		return Limits{CgroupVersion: VersionUnknown}, err
+	}
 
-	if minMem, ok := traverseCgroupV2Memory(targetDir, root); ok {
+	limits := Limits{CgroupVersion: VersionV2}
+
+	minMem, hasMem, memErr := traverseCgroupV2Memory(targetDir, root)
+	if memErr != nil {
+		return Limits{CgroupVersion: VersionUnknown}, memErr
+	}
+	if hasMem {
 		limits.MemoryLimitBytes = minMem
 	}
 
-	if minQuota, ok := traverseCgroupV2CPU(targetDir, root); ok && minQuota > 0 {
+	minQuota, hasCPU, cpuErr := traverseCgroupV2CPU(targetDir, root)
+	if cpuErr != nil {
+		return Limits{CgroupVersion: VersionUnknown}, cpuErr
+	}
+	if hasCPU && minQuota > 0 {
 		limits.CPUQuota = minQuota
 		if cpus, ok := CalculateGOMAXPROCS(limits.CPUQuota); ok {
 			limits.CPUs = cpus
@@ -342,43 +410,74 @@ func resolveCgroupV1CPUBase(root string) string {
 	return cpuBaseDir
 }
 
-func readCgroupV1Memory(dir string) (int64, bool) {
+func readCgroupV1Memory(dir string) (int64, bool, error) {
 	memPath := filepath.Join(dir, "memory.limit_in_bytes")
 	memBytes, err := readTrimmedFile(memPath)
-	if err != nil || memBytes == "" {
-		return 0, false
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("%w: reading %s: %w", ErrCgroupLimitCorrupted, memPath, err)
+	}
+	if memBytes == "" {
+		return 0, false, fmt.Errorf("%w: empty memory.limit_in_bytes in %s", ErrCgroupLimitCorrupted, dir)
+	}
+	if memBytes == "-1" {
+		return 0, false, nil
 	}
 	val, parseErr := strconv.ParseInt(memBytes, 10, 64)
-	if parseErr == nil && val > 0 && val < UnlimitedCgroupV1MemoryThreshold {
-		return val, true
+	if parseErr != nil || val <= 0 {
+		return 0, false, fmt.Errorf("%w: invalid memory.limit_in_bytes value %q in %s", ErrCgroupLimitCorrupted, memBytes, memPath)
 	}
-	return 0, false
+	if val >= UnlimitedCgroupV1MemoryThreshold {
+		return 0, false, nil
+	}
+	return val, true, nil
 }
 
-func readCgroupV1CPU(dir string) (float64, bool) {
+func readCgroupV1CPU(dir string) (float64, bool, error) {
 	quotaPath := filepath.Join(dir, "cpu.cfs_quota_us")
 	periodPath := filepath.Join(dir, "cpu.cfs_period_us")
 	quotaStr, qErr := readTrimmedFile(quotaPath)
+	if qErr != nil {
+		if errors.Is(qErr, os.ErrNotExist) {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("%w: reading %s: %w", ErrCgroupLimitCorrupted, quotaPath, qErr)
+	}
 	periodStr, pErr := readTrimmedFile(periodPath)
-	if qErr != nil || pErr != nil {
-		return 0, false
+	if pErr != nil {
+		if errors.Is(pErr, os.ErrNotExist) {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("%w: reading %s: %w", ErrCgroupLimitCorrupted, periodPath, pErr)
+	}
+	if quotaStr == "-1" {
+		period, pParseErr := strconv.ParseFloat(periodStr, 64)
+		if pParseErr != nil || period <= 0 {
+			return 0, false, fmt.Errorf("%w: invalid cpu.cfs_period_us value %q in %s", ErrCgroupLimitCorrupted, periodStr, dir)
+		}
+		return 0, false, nil
 	}
 	quota, qParseErr := strconv.ParseFloat(quotaStr, 64)
 	period, pParseErr := strconv.ParseFloat(periodStr, 64)
-	if qParseErr == nil && pParseErr == nil && quota > 0 && period > 0 {
-		return quota / period, true
+	if qParseErr != nil || pParseErr != nil || quota <= 0 || period <= 0 {
+		return 0, false, fmt.Errorf("%w: invalid cpu quota/period %q/%q in %s", ErrCgroupLimitCorrupted, quotaStr, periodStr, dir)
 	}
-	return 0, false
+	return quota / period, true, nil
 }
 
-func traverseCgroupV1Memory(memBaseDir, relPath string) (int64, bool) {
-	targetMemDir := resolveTargetDirectory(memBaseDir, relPath)
+func traverseCgroupV1Memory(memBaseDir, targetMemDir string) (int64, bool, error) {
 	var minMem int64
 	hasMem := false
 	currMem := targetMemDir
 
 	for {
-		if val, ok := readCgroupV1Memory(currMem); ok {
+		val, ok, err := readCgroupV1Memory(currMem)
+		if err != nil {
+			return 0, false, err
+		}
+		if ok {
 			if !hasMem || val < minMem {
 				minMem = val
 				hasMem = true
@@ -393,17 +492,20 @@ func traverseCgroupV1Memory(memBaseDir, relPath string) (int64, bool) {
 		}
 		currMem = parent
 	}
-	return minMem, hasMem
+	return minMem, hasMem, nil
 }
 
-func traverseCgroupV1CPU(cpuBaseDir, relPath string) (float64, bool) {
-	targetCPUDir := resolveTargetDirectory(cpuBaseDir, relPath)
+func traverseCgroupV1CPU(cpuBaseDir, targetCPUDir string) (float64, bool, error) {
 	var minCPUQuota float64
 	hasCPU := false
 	currCPU := targetCPUDir
 
 	for {
-		if qRatio, ok := readCgroupV1CPU(currCPU); ok {
+		qRatio, ok, err := readCgroupV1CPU(currCPU)
+		if err != nil {
+			return 0, false, err
+		}
+		if ok {
 			if !hasCPU || qRatio < minCPUQuota {
 				minCPUQuota = qRatio
 				hasCPU = true
@@ -418,7 +520,7 @@ func traverseCgroupV1CPU(cpuBaseDir, relPath string) (float64, bool) {
 		}
 		currCPU = parent
 	}
-	return minCPUQuota, hasCPU
+	return minCPUQuota, hasCPU, nil
 }
 
 func readCgroupV1(root string, v1RelPaths map[string]string) (Limits, error) {
@@ -429,7 +531,15 @@ func readCgroupV1(root string, v1RelPaths map[string]string) (Limits, error) {
 	if v1RelPaths != nil {
 		memRelPath = v1RelPaths["memory"]
 	}
-	if minMem, ok := traverseCgroupV1Memory(memBaseDir, memRelPath); ok {
+	targetMemDir, err := resolveTargetDirectory(memBaseDir, memRelPath)
+	if err != nil {
+		return Limits{CgroupVersion: VersionUnknown}, err
+	}
+	minMem, hasMem, memErr := traverseCgroupV1Memory(memBaseDir, targetMemDir)
+	if memErr != nil {
+		return Limits{CgroupVersion: VersionUnknown}, memErr
+	}
+	if hasMem {
 		limits.MemoryLimitBytes = minMem
 	}
 
@@ -442,7 +552,15 @@ func readCgroupV1(root string, v1RelPaths map[string]string) (Limits, error) {
 			cpuRelPath = path
 		}
 	}
-	if minQuota, ok := traverseCgroupV1CPU(cpuBaseDir, cpuRelPath); ok && minQuota > 0 {
+	targetCPUDir, err := resolveTargetDirectory(cpuBaseDir, cpuRelPath)
+	if err != nil {
+		return Limits{CgroupVersion: VersionUnknown}, err
+	}
+	minQuota, hasCPU, cpuErr := traverseCgroupV1CPU(cpuBaseDir, targetCPUDir)
+	if cpuErr != nil {
+		return Limits{CgroupVersion: VersionUnknown}, cpuErr
+	}
+	if hasCPU && minQuota > 0 {
 		limits.CPUQuota = minQuota
 		if cpus, ok := CalculateGOMAXPROCS(limits.CPUQuota); ok {
 			limits.CPUs = cpus

@@ -193,15 +193,33 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 
 	// cgroup read error
 	readCgroupLimitsFunc = func() (cgroup.Limits, error) {
-		return cgroup.Limits{}, errors.New("cgroup error")
+		return cgroup.Limits{CgroupVersion: cgroup.VersionUnknown}, errors.New("cgroup error")
 	}
-	_, _ = buildAutoTunedEnviron([]string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
+	t.Setenv(format.EnvDebug, "1")
+	envErr, limitsErr := buildAutoTunedEnviron([]string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
+	if limitsErr != nil {
+		t.Fatalf("expected nil limits on cgroup read error, got %+v", limitsErr)
+	}
+	for _, e := range envErr {
+		if strings.HasPrefix(e, "GOMEMLIMIT=") || strings.HasPrefix(e, "GOMAXPROCS=") || strings.HasPrefix(e, "MICROFAT_CGROUP_") {
+			t.Errorf("unexpected autotuning var in env on cgroup read error: %s", e)
+		}
+	}
 
 	// cgroup unknown version
 	readCgroupLimitsFunc = func() (cgroup.Limits, error) {
 		return cgroup.Limits{CgroupVersion: cgroup.VersionUnknown}, nil
 	}
-	_, _ = buildAutoTunedEnviron([]string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
+	envUnknown, limitsUnknown := buildAutoTunedEnviron([]string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
+	if limitsUnknown != nil {
+		t.Fatalf("expected nil limits on VersionUnknown, got %+v", limitsUnknown)
+	}
+	for _, e := range envUnknown {
+		if strings.HasPrefix(e, "GOMEMLIMIT=") || strings.HasPrefix(e, "GOMAXPROCS=") || strings.HasPrefix(e, "MICROFAT_CGROUP_") {
+			t.Errorf("unexpected autotuning var in env on VersionUnknown: %s", e)
+		}
+	}
+	t.Setenv(format.EnvDebug, "")
 
 	readCgroupLimitsFunc = func() (cgroup.Limits, error) {
 		return cgroup.Limits{
