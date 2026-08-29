@@ -2213,4 +2213,111 @@ func TestExtractVariantToWriter_OversizedDictionaryGuard(t *testing.T) {
 	}
 }
 
+func TestExplicitMemfdModeEnforcement(t *testing.T) {
+	entry, rawFile := createDummyVariantFile(t, t.TempDir(), []byte("#!/bin/sh\necho 'memfd-mode-test'\n"))
+	defer func() { _ = rawFile.Close() }()
+
+	cacheDir := t.TempDir()
+	origResolve := resolveCacheDirFunc
+	origCreate := memfdCreateFunc
+	origSeal := memfdSealFunc
+	origExec := execveFunc
+	t.Cleanup(func() {
+		resolveCacheDirFunc = origResolve
+		memfdCreateFunc = origCreate
+		memfdSealFunc = origSeal
+		execveFunc = origExec
+	})
+
+	resolveCacheDirFunc = func(string) (string, error) {
+		return cacheDir, nil
+	}
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v1"}
+	policyRes := microarch.PolicyResult{}
+
+	t.Run("memfdCreate failure with MICROFAT_EXEC_MODE=memfd fails immediately without cache fallback", func(t *testing.T) {
+		t.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+
+		var cacheExecuted bool
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			if strings.HasPrefix(argv0, cacheDir) {
+				cacheExecuted = true
+			}
+			return nil
+		}
+
+		memfdCreateFunc = func(name string, flags int) (int, error) {
+			return -1, syscall.EPERM
+		}
+
+		err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		if err == nil {
+			t.Fatal("expected executeVariant to fail, got nil")
+		}
+		if !errors.Is(err, format.ErrMemfdCreate) {
+			t.Errorf("expected ErrMemfdCreate, got: %v", err)
+		}
+		if cacheExecuted {
+			t.Fatal("cache execution must NOT be attempted when MICROFAT_EXEC_MODE=memfd")
+		}
+	})
+
+	t.Run("memfdSeal failure with MICROFAT_EXEC_MODE=memfd fails immediately without cache fallback", func(t *testing.T) {
+		t.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+
+		var cacheExecuted bool
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			if strings.HasPrefix(argv0, cacheDir) {
+				cacheExecuted = true
+			}
+			return nil
+		}
+
+		memfdCreateFunc = origCreate
+		memfdSealFunc = func(fd int, seals int) error {
+			return syscall.EPERM
+		}
+
+		err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		if err == nil {
+			t.Fatal("expected executeVariant to fail on seal failure in memfd mode, got nil")
+		}
+		if !errors.Is(err, format.ErrMemfdSealingFailed) {
+			t.Errorf("expected ErrMemfdSealingFailed, got: %v", err)
+		}
+		if cacheExecuted {
+			t.Fatal("cache execution must NOT be attempted when MICROFAT_EXEC_MODE=memfd")
+		}
+	})
+
+	t.Run("memfdSeal failure with MICROFAT_EXEC_MODE=auto falls back cleanly to cache", func(t *testing.T) {
+		t.Setenv(format.EnvExecMode, "")
+		t.Setenv(format.EnvDispatchMode, "")
+
+		var cacheExecuted bool
+		expectedTarget := filepath.Join(cacheDir, entry.SHA256)
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			if argv0 == expectedTarget {
+				cacheExecuted = true
+				return nil
+			}
+			return errors.New("unexpected exec path: " + argv0)
+		}
+
+		memfdCreateFunc = origCreate
+		memfdSealFunc = func(fd int, seals int) error {
+			return syscall.ENOSYS
+		}
+
+		err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		if err != nil {
+			t.Fatalf("expected fallback to cache in auto mode on seal failure, got error: %v", err)
+		}
+		if !cacheExecuted {
+			t.Fatal("expected cache execution to succeed on seal fallback in auto mode")
+		}
+	})
+}
+
 

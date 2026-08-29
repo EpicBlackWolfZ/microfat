@@ -123,11 +123,12 @@ var (
 	ErrInvalidChecksum     = errors.New("invalid sha256 checksum format")
 
 	// Launcher execution stage sentinels for typed error diagnostics.
-	ErrMemfdCreate  = errors.New("memfd_create failed")
-	ErrExecve       = errors.New("execve failed")
-	ErrCacheInit    = errors.New("cache directory initialization failed")
-	ErrCacheWrite   = errors.New("cache file creation failed")
-	ErrCacheExtract = errors.New("cache decompression failed")
+	ErrMemfdCreate        = errors.New("memfd_create failed")
+	ErrMemfdSealingFailed = errors.New("memfd sealing failed")
+	ErrExecve             = errors.New("execve failed")
+	ErrCacheInit          = errors.New("cache directory initialization failed")
+	ErrCacheWrite         = errors.New("cache file creation failed")
+	ErrCacheExtract       = errors.New("cache decompression failed")
 )
 
 // VariantEntry describes an individual compressed microarchitecture variant payload.

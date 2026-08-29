@@ -113,6 +113,11 @@ func executeVariant(
 		return nil
 	}
 
+	// If explicit memfd execution mode was requested, fail fast without fallback
+	if strings.EqualFold(requestedMode, format.ExecModeMemfd) {
+		return err
+	}
+
 	// If fat binary payload or dictionary is corrupted, fail fast without attempting fallback
 	if errors.Is(err, format.ErrPayloadCorrupted) || errors.Is(err, format.ErrDictionaryCorrupted) {
 		return err
@@ -381,9 +386,8 @@ func executeViaMemfd(
 
 	// Seal anonymous memory file descriptor to prevent tampering prior to execution
 	if sealErr := memfdSealFunc(fd, memfdTargetSeals); sealErr != nil {
-		if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
-			fmt.Fprintf(os.Stderr, "[microfat:debug] warning: memfd sealing returned %v (proceeding to execve)\n", sealErr)
-		}
+		logErrorDiagnostics(format.StageMemfdSeal, sealErr, hostInfo, entry, policyRes, "memfd sealing failed")
+		return fmt.Errorf("%w: failed to seal memfd descriptor: %w", format.ErrMemfdSealingFailed, sealErr)
 	}
 
 	logDiagnostics(entry, format.ExecModeMemfd, hostInfo, policyRes, env, limits, decompDuration, time.Since(startTime))

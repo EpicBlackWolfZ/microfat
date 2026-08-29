@@ -12,6 +12,7 @@ import (
 // Standard launcher execution stage names.
 const (
 	StageMemfdCreate     = "memfd_create"
+	StageMemfdSeal       = "memfd_seal"
 	StageMemfdExtract    = "extract_memfd"
 	StageMemfdExec       = "execve_memfd"
 	StageCacheDirInit    = "cache_dir_init"
@@ -27,6 +28,8 @@ const (
 const (
 	HintMemfdSeccomp = "memfd_create was blocked by host seccomp/security profile. " +
 		"Fallback to cache will be used. Set MICROFAT_EXEC_MODE=cache to skip memfd probe."
+	HintMemfdSeal = "memfd sealing (F_ADD_SEALS) failed or was restricted. " +
+		"Fallback to cache will be used. Set MICROFAT_EXEC_MODE=cache or adjust kernel sealing permissions."
 	HintMemfdKernelUnsupported = "memfd_create is unsupported on this Linux kernel (< 3.17). " +
 		"Set MICROFAT_EXEC_MODE=cache."
 	HintFileDescriptorLimit = "File descriptor limit reached. " +
@@ -58,6 +61,8 @@ func DiagnoseError(stage string, err error) string {
 	switch stage {
 	case StageMemfdCreate:
 		return diagnoseMemfdCreate(err)
+	case StageMemfdSeal:
+		return diagnoseMemfdSeal(err)
 	case StageMemfdExec:
 		return diagnoseExec(err)
 	case StageCacheDirInit, StageCacheCreateTemp, StageCacheExtract:
@@ -102,6 +107,19 @@ func diagnoseMemfdCreate(err error) string {
 		return HintFileDescriptorLimit
 	default:
 		return ""
+	}
+}
+
+func diagnoseMemfdSeal(err error) string {
+	switch {
+	case errors.Is(err, syscall.ENOSYS):
+		return HintMemfdKernelUnsupported
+	case errors.Is(err, syscall.EPERM), errors.Is(err, syscall.EACCES):
+		return HintMemfdSeal
+	case errors.Is(err, syscall.EINVAL), errors.Is(err, syscall.EBADF):
+		return HintMemfdSeal
+	default:
+		return HintMemfdSeal
 	}
 }
 
@@ -162,6 +180,9 @@ func diagnoseExecutionSentinels(err error) string {
 	}
 	if errors.Is(err, ErrMemfdCreate) {
 		return diagnoseMemfdCreate(err)
+	}
+	if errors.Is(err, ErrMemfdSealingFailed) {
+		return diagnoseMemfdSeal(err)
 	}
 	if errors.Is(err, ErrCacheInit) || errors.Is(err, ErrCacheWrite) || errors.Is(err, ErrCacheExtract) {
 		return diagnoseCacheWrite(err)

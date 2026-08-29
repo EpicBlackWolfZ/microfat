@@ -61,6 +61,30 @@ func TestDiagnoseError(t *testing.T) {
 			expectedHint: "",
 		},
 		{
+			name:         "memfd_seal EPERM restricted",
+			stage:        StageMemfdSeal,
+			err:          syscall.EPERM,
+			expectedHint: HintMemfdSeal,
+		},
+		{
+			name:         "memfd_seal EACCES restricted",
+			stage:        StageMemfdSeal,
+			err:          syscall.EACCES,
+			expectedHint: HintMemfdSeal,
+		},
+		{
+			name:         "memfd_seal ENOSYS kernel unsupported",
+			stage:        StageMemfdSeal,
+			err:          syscall.ENOSYS,
+			expectedHint: HintMemfdKernelUnsupported,
+		},
+		{
+			name:         "memfd_seal EINVAL bad arg",
+			stage:        StageMemfdSeal,
+			err:          syscall.EINVAL,
+			expectedHint: HintMemfdSeal,
+		},
+		{
 			name:         "cache dir init EROFS read only fs",
 			stage:        StageCacheDirInit,
 			err:          syscall.EROFS,
@@ -251,6 +275,24 @@ func TestDiagnoseError(t *testing.T) {
 			stage:        StageLauncherMain,
 			err:          fmt.Errorf("%w: %w", ErrMemfdCreate, syscall.ENFILE),
 			expectedHint: HintFileDescriptorLimit,
+		},
+		{
+			name:         "generic launcher_main ErrMemfdSealingFailed with EPERM",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrMemfdSealingFailed, syscall.EPERM),
+			expectedHint: HintMemfdSeal,
+		},
+		{
+			name:         "generic launcher_main ErrMemfdSealingFailed with ENOSYS",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrMemfdSealingFailed, syscall.ENOSYS),
+			expectedHint: HintMemfdKernelUnsupported,
+		},
+		{
+			name:         "generic launcher_main ErrMemfdSealingFailed with EINVAL",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrMemfdSealingFailed, syscall.EINVAL),
+			expectedHint: HintMemfdSeal,
 		},
 		{
 			name:         "generic launcher_main ErrCacheInit with EROFS",
