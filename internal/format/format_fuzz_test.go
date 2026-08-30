@@ -149,11 +149,15 @@ func FuzzUnmarshalJSONIndex(f *testing.F) {
 	// Seed 4: Escaped strings and unknown extra fields
 	f.Add([]byte(`{"version":1,"app_name":"escaped\"name\\test\n","extra_field":{"nested":true},"variants":[]}`))
 
-	// Seed 5: Malformed JSON syntax
+	// Seed 5: Malformed JSON syntax and overflow boundaries
 	f.Add([]byte(`{"version": 1, "app_name": `))
 	f.Add([]byte(`{"version": "not-an-int"}`))
 	f.Add([]byte(`[1, 2, 3]`))
 	f.Add([]byte(`{"variants": [{"offset": -1}]}`))
+	f.Add([]byte(`{"version": 99999999999999999999, "variants": []}`))
+	f.Add([]byte(`{"version": 1, "created_unix": -99999999999999999999, "variants": []}`))
+	f.Add([]byte(`{"version": 1, "variants": [{"level": "v1", "offset": 9223372036854775808}]}`))
+	f.Add([]byte(`{"version": 1, "variants": [{"level": "v1", "offset": -9223372036854775809}]}`))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		idx, err := unmarshalJSONIndex(data)

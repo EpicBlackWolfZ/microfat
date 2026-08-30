@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -754,16 +755,24 @@ func parseJSONInt64(data []byte, pos int) (int64, int, error) {
 		return 0, pos, fmt.Errorf("%w: expected digit at byte %d", ErrInvalidJSONSyntax, pos)
 	}
 	var val int64
-	for pos < len(data) && data[pos] >= '0' && data[pos] <= '9' {
-		digit := int64(data[pos] - '0')
-		val = val*decimalBase + digit
-		pos++
-	}
 	if isNeg {
-		val = -val
-	}
-	if start == pos {
-		return 0, pos, fmt.Errorf("%w: no digits parsed at byte %d", ErrInvalidJSONSyntax, start)
+		for pos < len(data) && data[pos] >= '0' && data[pos] <= '9' {
+			digit := int64(data[pos] - '0')
+			if val < (math.MinInt64+digit)/decimalBase {
+				return 0, pos, fmt.Errorf("%w: integer overflow at byte %d", ErrInvalidJSONSyntax, start)
+			}
+			val = val*decimalBase - digit
+			pos++
+		}
+	} else {
+		for pos < len(data) && data[pos] >= '0' && data[pos] <= '9' {
+			digit := int64(data[pos] - '0')
+			if val > (math.MaxInt64-digit)/decimalBase {
+				return 0, pos, fmt.Errorf("%w: integer overflow at byte %d", ErrInvalidJSONSyntax, start)
+			}
+			val = val*decimalBase + digit
+			pos++
+		}
 	}
 	return val, pos, nil
 }

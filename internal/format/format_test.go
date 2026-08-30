@@ -1691,4 +1691,116 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 	})
 }
 
+func TestParseJSONInt64_BoundsAndOverflow(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		input       string
+		wantVal     int64
+		wantErr     bool
+		errSentinel error
+	}{
+		{name: "zero", input: "0", wantVal: 0, wantErr: false},
+		{name: "negative zero", input: "-0", wantVal: 0, wantErr: false},
+		{name: "leading zeroes", input: "000042", wantVal: 42, wantErr: false},
+		{name: "standard positive", input: "123456789", wantVal: 123456789, wantErr: false},
+		{name: "standard negative", input: "-123456789", wantVal: -123456789, wantErr: false},
+		{name: "max int64", input: "9223372036854775807", wantVal: math.MaxInt64, wantErr: false},
+		{name: "min int64", input: "-9223372036854775808", wantVal: math.MinInt64, wantErr: false},
+		{name: "max int64 plus 1 overflow", input: "9223372036854775808", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
+		{name: "min int64 minus 1 underflow", input: "-9223372036854775809", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
+		{name: "huge positive overflow", input: "99999999999999999999999999999999", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
+		{name: "huge negative underflow", input: "-99999999999999999999999999999999", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
+		{name: "empty input", input: "", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
+		{name: "whitespace only", input: "   ", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
+		{name: "minus sign only", input: "-", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
+		{name: "minus sign with non-digit", input: "-abc", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
+		{name: "non-digit character", input: "abc", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, nextPos, err := parseJSONInt64([]byte(tt.input), 0)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseJSONInt64(%q) expected error, got val=%d, nextPos=%d", tt.input, got, nextPos)
+				}
+				if tt.errSentinel != nil && !errors.Is(err, tt.errSentinel) {
+					t.Fatalf("parseJSONInt64(%q) error %v does not wrap sentinel %v", tt.input, err, tt.errSentinel)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("parseJSONInt64(%q) unexpected error: %v", tt.input, err)
+				}
+				if got != tt.wantVal {
+					t.Fatalf("parseJSONInt64(%q) = %d; want %d", tt.input, got, tt.wantVal)
+				}
+			}
+		})
+	}
+}
+
+func TestUnmarshalJSONIndex_IntegerOverflow(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		json string
+	}{
+		{
+			name: "overflow in version",
+			json: `{"version": 99999999999999999999, "variants": []}`,
+		},
+		{
+			name: "overflow in created_unix",
+			json: `{"version": 1, "created_unix": 99999999999999999999, "variants": []}`,
+		},
+		{
+			name: "overflow in dictionary_offset",
+			json: `{"version": 1, "dictionary_offset": 99999999999999999999, "variants": []}`,
+		},
+		{
+			name: "overflow in dictionary_size",
+			json: `{"version": 1, "dictionary_size": 99999999999999999999, "variants": []}`,
+		},
+		{
+			name: "overflow in dictionary_id",
+			json: `{"version": 1, "dictionary_id": 99999999999999999999, "variants": []}`,
+		},
+		{
+			name: "overflow in variant offset",
+			json: `{"version": 1, "variants": [{"level": "v1", "offset": 99999999999999999999}]}`,
+		},
+		{
+			name: "overflow in variant compressed_size",
+			json: `{"version": 1, "variants": [{"level": "v1", "compressed_size": 99999999999999999999}]}`,
+		},
+		{
+			name: "overflow in variant uncompressed_size",
+			json: `{"version": 1, "variants": [{"level": "v1", "uncompressed_size": 99999999999999999999}]}`,
+		},
+		{
+			name: "underflow in variant offset",
+			json: `{"version": 1, "variants": [{"level": "v1", "offset": -99999999999999999999}]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := unmarshalJSONIndex([]byte(tt.json))
+			if err == nil {
+				t.Fatalf("unmarshalJSONIndex expected error for %s, got nil", tt.name)
+			}
+			if !errors.Is(err, ErrInvalidJSONSyntax) {
+				t.Fatalf("unmarshalJSONIndex expected ErrInvalidJSONSyntax for %s, got %v", tt.name, err)
+			}
+		})
+	}
+}
+
 
