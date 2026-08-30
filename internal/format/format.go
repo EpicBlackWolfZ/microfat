@@ -121,6 +121,9 @@ var (
 	ErrPayloadCorrupted    = errors.New("variant payload SHA-256 checksum mismatch")
 	ErrInvalidDictionary   = errors.New("invalid shared dictionary offset or size")
 	ErrInvalidChecksum     = errors.New("invalid sha256 checksum format")
+	ErrNoVariantsSpecified = errors.New("at least one microarchitecture variant must be specified")
+	ErrDuplicateVariant    = errors.New("duplicate or conflicting variant level in index")
+	ErrInvalidVariant      = errors.New("invalid or empty variant level")
 
 	// Launcher execution stage sentinels for typed error diagnostics.
 	ErrMemfdCreate        = errors.New("memfd_create failed")
@@ -258,6 +261,29 @@ type CgroupInfo struct {
 	GCProfile        string  `json:"gc_profile,omitempty"`
 }
 
+// NormalizeVariant cleans up and standardizes variant level strings
+// (e.g. "amd64_v3" -> "v3", "V3" -> "v3", "v8.0" -> "v8.0", "arm64-v8.2" -> "v8.2").
+func NormalizeVariant(level string) string {
+	l := strings.ToLower(strings.TrimSpace(level))
+	l = strings.TrimPrefix(l, "linux_")
+	l = strings.TrimPrefix(l, "darwin_")
+	l = strings.TrimPrefix(l, "windows_")
+	l = strings.TrimPrefix(l, "amd64_")
+	l = strings.TrimPrefix(l, "arm64_")
+	l = strings.TrimPrefix(l, "x86_64_")
+	l = strings.TrimPrefix(l, "aarch64_")
+	l = strings.TrimPrefix(l, "arm64-")
+	l = strings.TrimPrefix(l, "aarch64-")
+
+	if l == "" {
+		return "v1"
+	}
+	if !strings.HasPrefix(l, "v") {
+		l = "v" + l
+	}
+	return l
+}
+
 // VariantLevels returns a slice of all variant level strings present in the index.
 func (idx *Index) VariantLevels() []string {
 	levels := make([]string, len(idx.Variants))
@@ -267,10 +293,11 @@ func (idx *Index) VariantLevels() []string {
 	return levels
 }
 
-// FindVariant returns the VariantEntry corresponding to the specified level string.
+// FindVariant returns the VariantEntry corresponding to the specified level string, performing normalized matching.
 func (idx *Index) FindVariant(level string) (*VariantEntry, bool) {
+	norm := NormalizeVariant(level)
 	for i := range idx.Variants {
-		if idx.Variants[i].Level == level {
+		if NormalizeVariant(idx.Variants[i].Level) == norm {
 			return &idx.Variants[i], true
 		}
 	}
@@ -287,25 +314,52 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 		return fmt.Errorf("%w: invalid negative index offset %d", ErrOutOfBounds, indexOffset)
 	}
 
+	if len(idx.Variants) == 0 {
+		return ErrNoVariantsSpecified
+	}
+
+	lastEnd, err := idx.validateDictionaryBounds(indexOffset)
+	if err != nil {
+		return err
+	}
+
+	return idx.validateVariantBounds(indexOffset, lastEnd)
+}
+
+func (idx *Index) validateDictionaryBounds(indexOffset int64) (int64, error) {
 	if idx.DictionarySize < 0 || idx.DictionarySize > MaxDictionarySize {
-		return fmt.Errorf("%w: invalid dictionary size %d (max allowed %d bytes)", ErrInvalidDictionary, idx.DictionarySize, MaxDictionarySize)
+		return 0, fmt.Errorf("%w: invalid dictionary size %d (max allowed %d bytes)",
+			ErrInvalidDictionary, idx.DictionarySize, MaxDictionarySize)
 	}
 
-	var lastEnd int64
-	if idx.DictionarySize > 0 {
-		if idx.DictionaryOffset < 0 {
-			return fmt.Errorf("%w: invalid dictionary offset %d", ErrInvalidDictionary, idx.DictionaryOffset)
-		}
-		if idx.DictionarySHA256 != "" && !ValidateChecksum(idx.DictionarySHA256) {
-			return fmt.Errorf("%w: invalid dictionary sha256 checksum format %q", ErrInvalidChecksum, idx.DictionarySHA256)
-		}
-		if idx.DictionaryOffset > indexOffset || idx.DictionarySize > indexOffset-idx.DictionaryOffset {
-			return fmt.Errorf("%w: dictionary payload extends past index offset %d", ErrOutOfBounds, indexOffset)
-		}
-		lastEnd = idx.DictionaryOffset + idx.DictionarySize
+	if idx.DictionarySize == 0 {
+		return 0, nil
 	}
 
+	if idx.DictionaryOffset < 0 {
+		return 0, fmt.Errorf("%w: invalid dictionary offset %d", ErrInvalidDictionary, idx.DictionaryOffset)
+	}
+	if idx.DictionarySHA256 != "" && !ValidateChecksum(idx.DictionarySHA256) {
+		return 0, fmt.Errorf("%w: invalid dictionary sha256 checksum format %q", ErrInvalidChecksum, idx.DictionarySHA256)
+	}
+	if idx.DictionaryOffset > indexOffset || idx.DictionarySize > indexOffset-idx.DictionaryOffset {
+		return 0, fmt.Errorf("%w: dictionary payload extends past index offset %d", ErrOutOfBounds, indexOffset)
+	}
+	return idx.DictionaryOffset + idx.DictionarySize, nil
+}
+
+func (idx *Index) validateVariantBounds(indexOffset int64, lastEnd int64) error {
+	seenLevels := make(map[string]struct{}, len(idx.Variants))
 	for i, v := range idx.Variants {
+		if strings.TrimSpace(v.Level) == "" {
+			return fmt.Errorf("%w: variant at index %d has empty level", ErrInvalidVariant, i)
+		}
+		normLevel := NormalizeVariant(v.Level)
+		if _, exists := seenLevels[normLevel]; exists {
+			return fmt.Errorf("%w: duplicate normalized variant level %q", ErrDuplicateVariant, normLevel)
+		}
+		seenLevels[normLevel] = struct{}{}
+
 		if v.SHA256 != "" && !ValidateChecksum(v.SHA256) {
 			return fmt.Errorf("%w: invalid sha256 checksum format for variant %s: %q", ErrInvalidChecksum, v.Level, v.SHA256)
 		}

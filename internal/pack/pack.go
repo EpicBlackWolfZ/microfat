@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
@@ -25,7 +26,9 @@ const (
 
 // Common error definitions.
 var (
-	ErrNoVariantsSpecified = errors.New("at least one microarchitecture variant must be specified")
+	ErrNoVariantsSpecified = format.ErrNoVariantsSpecified
+	ErrDuplicateVariant    = format.ErrDuplicateVariant
+	ErrInvalidVariant      = format.ErrInvalidVariant
 	ErrStubMissing         = errors.New("stub binary path is required and must exist")
 	ErrVariantNotFound     = errors.New("variant binary file not found")
 	ErrChecksumMismatch    = errors.New("variant payload checksum mismatch")
@@ -260,14 +263,43 @@ func validateOptions(opts *Options) error {
 		opts.FormatVersion = format.FormatVersionCurrent
 	}
 
-	if !opts.SkipELFValidation {
-		if err := ValidateELFBinary(opts.StubPath, opts.TargetOS, opts.TargetArch); err != nil {
-			return fmt.Errorf("validating stub: %w", err)
+	seenLevels := make(map[string]string, len(opts.Variants))
+	for lvl, varPath := range opts.Variants {
+		if strings.TrimSpace(lvl) == "" {
+			return fmt.Errorf("%w: variant level must not be empty", ErrInvalidVariant)
 		}
-		for lvl, varPath := range opts.Variants {
+		normLvl := format.NormalizeVariant(lvl)
+		if microarch.Rank(opts.TargetArch, normLvl) < 0 {
+			return fmt.Errorf("%w: unrecognized or invalid microarchitecture level %q for arch %s",
+				ErrInvalidVariant, lvl, opts.TargetArch)
+		}
+		if prev, exists := seenLevels[normLvl]; exists {
+			return fmt.Errorf("%w: variant %q conflicts with %q (both normalize to %q)",
+				ErrDuplicateVariant, lvl, prev, normLvl)
+		}
+		seenLevels[normLvl] = lvl
+
+		if !opts.SkipELFValidation {
 			if err := ValidateELFBinary(varPath, opts.TargetOS, opts.TargetArch); err != nil {
 				return fmt.Errorf("validating variant %s: %w", lvl, err)
 			}
+		}
+	}
+
+	for lvl := range opts.VariantCompression {
+		if strings.TrimSpace(lvl) == "" {
+			return fmt.Errorf("%w: variant compression level must not be empty", ErrInvalidVariant)
+		}
+		normLvl := format.NormalizeVariant(lvl)
+		if microarch.Rank(opts.TargetArch, normLvl) < 0 {
+			return fmt.Errorf("%w: unrecognized or invalid variant compression level %q for arch %s",
+				ErrInvalidVariant, lvl, opts.TargetArch)
+		}
+	}
+
+	if !opts.SkipELFValidation {
+		if err := ValidateELFBinary(opts.StubPath, opts.TargetOS, opts.TargetArch); err != nil {
+			return fmt.Errorf("validating stub: %w", err)
 		}
 	}
 	return nil
@@ -307,7 +339,18 @@ func writeVariantPayload(
 	compAlgo := opts.Compression
 	compLevel := opts.CompressionLevel
 
+	normLvl := format.NormalizeVariant(lvl)
 	if varComp, ok := opts.VariantCompression[lvl]; ok {
+		if varComp.Profile != "" {
+			profile = varComp.Profile
+		}
+		if varComp.Compression != "" {
+			compAlgo = varComp.Compression
+		}
+		if varComp.Level != "" {
+			compLevel = varComp.Level
+		}
+	} else if varComp, ok := opts.VariantCompression[normLvl]; ok {
 		if varComp.Profile != "" {
 			profile = varComp.Profile
 		}
@@ -346,7 +389,7 @@ func writeVariantPayload(
 	}
 
 	entry := format.VariantEntry{
-		Level:            lvl,
+		Level:            normLvl,
 		Offset:           variantOffset,
 		CompressedSize:   newOffset - variantOffset,
 		UncompressedSize: uncompressedSize,

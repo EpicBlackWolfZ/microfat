@@ -56,9 +56,9 @@ func FuzzVerifyBinary(f *testing.F) {
 	opts.StubPath = stubPath
 	opts.OutputPath = outFat
 	opts.Variants = variants
-	opts.TargetOS = "linux"
-	opts.TargetArch = "amd64"
-	opts.Compression = "zstd"
+	opts.TargetOS = testOSLinux
+	opts.TargetArch = testArchAMD64
+	opts.Compression = testCompressionZstd
 
 	if _, err := Pack(opts); err == nil {
 		if data, rErr := os.ReadFile(outFat); rErr == nil {
