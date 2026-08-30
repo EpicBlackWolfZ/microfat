@@ -22,6 +22,8 @@ import (
 const (
 	testOSLinux            = "linux"
 	testArchAMD64          = "amd64"
+	testLevelV80           = "v8.0"
+	testCompressionZstd    = "zstd"
 	testCompressionFastest = "fastest"
 	testValidSHA256        = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
 )
@@ -501,7 +503,7 @@ func TestELFValidation(t *testing.T) {
 		OutputPath: outARM64Path,
 		TargetOS:   testOSLinux,
 		TargetArch: "arm64",
-		Variants:   map[string]string{"v8.0": arm64V1},
+		Variants:   map[string]string{testLevelV80: arm64V1},
 	})
 	if err != nil {
 		t.Fatalf("expected valid ARM64 pack to succeed, got: %v", err)
@@ -1122,7 +1124,7 @@ func TestMultiCodecPackagingAndVerification(t *testing.T) {
 		Profile:           "latency",
 		VariantCompression: map[string]VariantCompressionOptions{
 			"v4": {
-				Compression: "zstd",
+				Compression: codec.AlgorithmZstd,
 				Level:       "best",
 			},
 		},
@@ -1139,7 +1141,7 @@ func TestMultiCodecPackagingAndVerification(t *testing.T) {
 	}
 
 	v1Entry, _ := idx.FindVariant("v1")
-	if v1Entry.Compression != "none" {
+	if v1Entry.Compression != codec.AlgorithmNone {
 		t.Errorf("expected v1 to auto-promote to 'none', got %q", v1Entry.Compression)
 	}
 
@@ -1149,7 +1151,7 @@ func TestMultiCodecPackagingAndVerification(t *testing.T) {
 	}
 
 	v4Entry, _ := idx.FindVariant("v4")
-	if v4Entry.Compression != "zstd" {
+	if v4Entry.Compression != codec.AlgorithmZstd {
 		t.Errorf("expected v4 to override to 'zstd', got %q", v4Entry.Compression)
 	}
 
@@ -1857,14 +1859,14 @@ func TestPack_OversizedDictionaryGuard(t *testing.T) {
 	oversizedIdx := &format.Index{
 		Version:          format.FormatVersion2,
 		AppName:          "oversized-dict-test",
-		TargetOS:         "linux",
-		TargetArch:       "amd64",
+		TargetOS:         testOSLinux,
+		TargetArch:       testArchAMD64,
 		DictionaryOffset: 0,
 		DictionarySize:   format.MaxDictionarySize + 1024,
 		Variants: []format.VariantEntry{
 			{
 				Level:            "v1",
-				Compression:      "none",
+				Compression:      codec.AlgorithmNone,
 				Offset:           format.MaxDictionarySize + 2048,
 				CompressedSize:   100,
 				UncompressedSize: 100,
@@ -2133,6 +2135,274 @@ func TestPrewarmVariantWithDict_IntegrityAndAtomicReplacement(t *testing.T) {
 		}
 		if statFile.Size() != entry.UncompressedSize {
 			t.Errorf("unexpected file size after concurrent race: expected %d, got %d", entry.UncompressedSize, statFile.Size())
+		}
+	})
+}
+
+func TestValidateOptions_NormalizedVariantsAndTiers(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	stubPath := filepath.Join(tempDir, "stub")
+	varPath := filepath.Join(tempDir, "var")
+	_ = os.WriteFile(stubPath, []byte("stub"), 0o755)
+	_ = os.WriteFile(varPath, []byte("var"), 0o755)
+
+	t.Run("Empty variant map returns ErrNoVariantsSpecified", func(t *testing.T) {
+		t.Parallel()
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        filepath.Join(tempDir, "out1"),
+			SkipELFValidation: true,
+			Variants:          map[string]string{},
+		}
+		err := validateOptions(&opts)
+		if !errors.Is(err, ErrNoVariantsSpecified) {
+			t.Fatalf("expected ErrNoVariantsSpecified, got %v", err)
+		}
+	})
+
+	t.Run("Empty variant level string returns ErrInvalidVariant", func(t *testing.T) {
+		t.Parallel()
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        filepath.Join(tempDir, "out2"),
+			SkipELFValidation: true,
+			Variants: map[string]string{
+				"   ": varPath,
+			},
+		}
+		err := validateOptions(&opts)
+		if !errors.Is(err, ErrInvalidVariant) {
+			t.Fatalf("expected ErrInvalidVariant for empty level, got %v", err)
+		}
+	})
+
+	t.Run("Unrecognized variant level for AMD64 returns ErrInvalidVariant", func(t *testing.T) {
+		t.Parallel()
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        filepath.Join(tempDir, "out3"),
+			TargetArch:        testArchAMD64,
+			SkipELFValidation: true,
+			Variants: map[string]string{
+				"v99": varPath,
+			},
+		}
+		err := validateOptions(&opts)
+		if !errors.Is(err, ErrInvalidVariant) {
+			t.Fatalf("expected ErrInvalidVariant for v99 on amd64, got %v", err)
+		}
+	})
+
+	t.Run("ARM64 variant level for AMD64 target returns ErrInvalidVariant", func(t *testing.T) {
+		t.Parallel()
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        filepath.Join(tempDir, "out4"),
+			TargetArch:        testArchAMD64,
+			SkipELFValidation: true,
+			Variants: map[string]string{
+				testLevelV80: varPath,
+			},
+		}
+		err := validateOptions(&opts)
+		if !errors.Is(err, ErrInvalidVariant) {
+			t.Fatalf("expected ErrInvalidVariant for v8.0 on amd64, got %v", err)
+		}
+	})
+
+	t.Run("AMD64 variant level for ARM64 target returns ErrInvalidVariant", func(t *testing.T) {
+		t.Parallel()
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        filepath.Join(tempDir, "out5"),
+			TargetArch:        "arm64",
+			SkipELFValidation: true,
+			Variants: map[string]string{
+				"v3": varPath,
+			},
+		}
+		err := validateOptions(&opts)
+		if !errors.Is(err, ErrInvalidVariant) {
+			t.Fatalf("expected ErrInvalidVariant for v3 on arm64, got %v", err)
+		}
+	})
+
+	t.Run("Duplicate normalized variant aliases return ErrDuplicateVariant", func(t *testing.T) {
+		t.Parallel()
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        filepath.Join(tempDir, "out6"),
+			TargetArch:        testArchAMD64,
+			SkipELFValidation: true,
+			Variants: map[string]string{
+				"v3":       varPath,
+				"amd64_v3": varPath,
+			},
+		}
+		err := validateOptions(&opts)
+		if !errors.Is(err, ErrDuplicateVariant) {
+			t.Fatalf("expected ErrDuplicateVariant for v3 + amd64_v3, got %v", err)
+		}
+	})
+
+	t.Run("Duplicate case-insensitive variant aliases return ErrDuplicateVariant", func(t *testing.T) {
+		t.Parallel()
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        filepath.Join(tempDir, "out7"),
+			TargetArch:        testArchAMD64,
+			SkipELFValidation: true,
+			Variants: map[string]string{
+				"v2": varPath,
+				"V2": varPath,
+			},
+		}
+		err := validateOptions(&opts)
+		if !errors.Is(err, ErrDuplicateVariant) {
+			t.Fatalf("expected ErrDuplicateVariant for v2 + V2, got %v", err)
+		}
+	})
+
+	t.Run("Duplicate ARM64 normalized aliases return ErrDuplicateVariant", func(t *testing.T) {
+		t.Parallel()
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        filepath.Join(tempDir, "out8"),
+			TargetArch:        "arm64",
+			SkipELFValidation: true,
+			Variants: map[string]string{
+				testLevelV80: varPath,
+				"arm64_v8.0": varPath,
+			},
+		}
+		err := validateOptions(&opts)
+		if !errors.Is(err, ErrDuplicateVariant) {
+			t.Fatalf("expected ErrDuplicateVariant for v8.0 + arm64_v8.0, got %v", err)
+		}
+	})
+
+	t.Run("Empty variant compression level returns ErrInvalidVariant", func(t *testing.T) {
+		t.Parallel()
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        filepath.Join(tempDir, "out9"),
+			TargetArch:        testArchAMD64,
+			SkipELFValidation: true,
+			Variants: map[string]string{
+				"v1": varPath,
+			},
+			VariantCompression: map[string]VariantCompressionOptions{
+				"   ": {Compression: testCompressionZstd},
+			},
+		}
+		err := validateOptions(&opts)
+		if !errors.Is(err, ErrInvalidVariant) {
+			t.Fatalf("expected ErrInvalidVariant for empty variant compression level, got %v", err)
+		}
+	})
+
+	t.Run("Invalid variant compression level returns ErrInvalidVariant", func(t *testing.T) {
+		t.Parallel()
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        filepath.Join(tempDir, "out10"),
+			TargetArch:        testArchAMD64,
+			SkipELFValidation: true,
+			Variants: map[string]string{
+				"v1": varPath,
+			},
+			VariantCompression: map[string]VariantCompressionOptions{
+				"v99": {Compression: testCompressionZstd},
+			},
+		}
+		err := validateOptions(&opts)
+		if !errors.Is(err, ErrInvalidVariant) {
+			t.Fatalf("expected ErrInvalidVariant for invalid variant compression level, got %v", err)
+		}
+	})
+}
+
+func TestPack_CanonicalLevelNormalization(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	stubPath := filepath.Join(tempDir, "stub-canonical")
+	v1Path := filepath.Join(tempDir, "bin-v1")
+	v3Path := filepath.Join(tempDir, "bin-v3")
+	fatBinaryPath := filepath.Join(tempDir, "fat-canonical")
+
+	_ = os.WriteFile(stubPath, []byte("ELF_STUB_CANONICAL"), 0o755)
+	_ = os.WriteFile(v1Path, []byte("ELF_PAYLOAD_V1_CANONICAL_TEST_DATA"), 0o755)
+	_ = os.WriteFile(v3Path, []byte("ELF_PAYLOAD_V3_CANONICAL_TEST_DATA"), 0o755)
+
+	opts := Options{
+		StubPath:          stubPath,
+		OutputPath:        fatBinaryPath,
+		AppName:           "canonical-app",
+		TargetOS:          testOSLinux,
+		TargetArch:        testArchAMD64,
+		SkipELFValidation: true,
+		VariantCompression: map[string]VariantCompressionOptions{
+			"amd64_v3": {
+				Profile:     "latency",
+				Compression: "none",
+				Level:       "fast",
+			},
+			"v1": {
+				Profile:     "size",
+				Compression: "zstd",
+				Level:       "best",
+			},
+		},
+		Variants: map[string]string{
+			"amd64_v3": v3Path,
+			"AMD64_v1": v1Path,
+		},
+	}
+
+	idx, err := Pack(opts)
+	if err != nil {
+		t.Fatalf("Pack failed with canonical aliased variants: %v", err)
+	}
+
+	if len(idx.Variants) != 2 {
+		t.Fatalf("expected 2 variants, got %d", len(idx.Variants))
+	}
+
+	if idx.Variants[0].Level != "v1" {
+		t.Errorf("expected idx.Variants[0].Level to be canonical 'v1', got %q", idx.Variants[0].Level)
+	}
+	if idx.Variants[1].Level != "v3" {
+		t.Errorf("expected idx.Variants[1].Level to be canonical 'v3', got %q", idx.Variants[1].Level)
+	}
+
+	if idx.Variants[1].Compression != "none" {
+		t.Errorf("expected v3 compression override to be applied via alias, got %q", idx.Variants[1].Compression)
+	}
+}
+
+func TestValidateOptions_ELFValidationErrors(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	invalidELFPath := filepath.Join(tempDir, "invalid-elf")
+	_ = os.WriteFile(invalidELFPath, []byte("NOT_AN_ELF_FILE"), 0o755)
+
+	t.Run("Invalid ELF variant binary returns error", func(t *testing.T) {
+		t.Parallel()
+		opts := Options{
+			StubPath:   invalidELFPath,
+			OutputPath: filepath.Join(tempDir, "out-elf-err"),
+			TargetArch: "amd64",
+			Variants: map[string]string{
+				"v1": invalidELFPath,
+			},
+		}
+		err := validateOptions(&opts)
+		if err == nil {
+			t.Fatalf("expected error for invalid ELF variant, got nil")
 		}
 	})
 }

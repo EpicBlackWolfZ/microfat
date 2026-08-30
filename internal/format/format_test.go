@@ -18,6 +18,7 @@ const (
 	testArchAMD64     = "amd64"
 	testOSLinux       = "linux"
 	testAppName       = "testapp"
+	testLevelV80      = "v8.0"
 	testSHA256Sample  = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	testSHA256Sample2 = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 )
@@ -1516,6 +1517,176 @@ func TestParseJSONString_Escapes(t *testing.T) {
 		_, _, err := parseJSONString(raw, 0)
 		if !errors.Is(err, ErrInvalidJSONSyntax) {
 			t.Fatalf("expected ErrInvalidJSONSyntax for truncated unicode escape, got %v", err)
+		}
+	})
+}
+
+func TestNormalizeVariant(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{input: "", expected: "v1"},
+		{input: "  ", expected: "v1"},
+		{input: "v1", expected: "v1"},
+		{input: "v2", expected: "v2"},
+		{input: "v3", expected: "v3"},
+		{input: "v4", expected: "v4"},
+		{input: "V3", expected: "v3"},
+		{input: "  v3  ", expected: "v3"},
+		{input: "3", expected: "v3"},
+		{input: "amd64_v1", expected: "v1"},
+		{input: "amd64_v3", expected: "v3"},
+		{input: "linux_amd64_v3", expected: "v3"},
+		{input: "darwin_amd64_v2", expected: "v2"},
+		{input: "windows_amd64_v4", expected: "v4"},
+		{input: "x86_64_v3", expected: "v3"},
+		{input: "arm64_v8.0", expected: testLevelV80},
+		{input: "arm64-v8.2", expected: "v8.2"},
+		{input: "aarch64_v9.0", expected: "v9.0"},
+		{input: "aarch64-v8.0", expected: testLevelV80},
+		{input: "8.0", expected: testLevelV80},
+		{input: "v8.0", expected: testLevelV80},
+		{input: "v9.5", expected: "v9.5"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			actual := NormalizeVariant(tt.input)
+			if actual != tt.expected {
+				t.Errorf("NormalizeVariant(%q) = %q; want %q", tt.input, actual, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFindVariant_NormalizedMatching(t *testing.T) {
+	t.Parallel()
+
+	idx := &Index{
+		Version: FormatVersionCurrent,
+		Variants: []VariantEntry{
+			{Level: "v1", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
+			{Level: "v3", Offset: 200, CompressedSize: 100, UncompressedSize: 200},
+		},
+	}
+
+	tests := []struct {
+		query       string
+		shouldFind  bool
+		expectedLvl string
+	}{
+		{query: "v1", shouldFind: true, expectedLvl: "v1"},
+		{query: "amd64_v1", shouldFind: true, expectedLvl: "v1"},
+		{query: "AMD64_V3", shouldFind: true, expectedLvl: "v3"},
+		{query: "linux_amd64_v3", shouldFind: true, expectedLvl: "v3"},
+		{query: "3", shouldFind: true, expectedLvl: "v3"},
+		{query: "v2", shouldFind: false, expectedLvl: ""},
+		{query: "v4", shouldFind: false, expectedLvl: ""},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.query, func(t *testing.T) {
+			t.Parallel()
+			entry, found := idx.FindVariant(tt.query)
+			if found != tt.shouldFind {
+				t.Fatalf("FindVariant(%q) found = %v; want %v", tt.query, found, tt.shouldFind)
+			}
+			if found && entry.Level != tt.expectedLvl {
+				t.Errorf("FindVariant(%q).Level = %q; want %q", tt.query, entry.Level, tt.expectedLvl)
+			}
+		})
+	}
+}
+
+func TestValidateBounds_VariantValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Empty variants slice returns ErrNoVariantsSpecified", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:  FormatVersionCurrent,
+			Variants: []VariantEntry{},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrNoVariantsSpecified) {
+			t.Fatalf("expected ErrNoVariantsSpecified, got %v", err)
+		}
+	})
+
+	t.Run("Nil variants slice returns ErrNoVariantsSpecified", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:  FormatVersionCurrent,
+			Variants: nil,
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrNoVariantsSpecified) {
+			t.Fatalf("expected ErrNoVariantsSpecified, got %v", err)
+		}
+	})
+
+	t.Run("Variant with empty level returns ErrInvalidVariant", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version: FormatVersionCurrent,
+			Variants: []VariantEntry{
+				{Level: "   ", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
+			},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrInvalidVariant) {
+			t.Fatalf("expected ErrInvalidVariant for whitespace level, got %v", err)
+		}
+	})
+
+	t.Run("Duplicate exact variant level returns ErrDuplicateVariant", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version: FormatVersionCurrent,
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
+				{Level: "v1", Offset: 200, CompressedSize: 100, UncompressedSize: 200},
+			},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrDuplicateVariant) {
+			t.Fatalf("expected ErrDuplicateVariant for identical level, got %v", err)
+		}
+	})
+
+	t.Run("Duplicate normalized variant aliases return ErrDuplicateVariant", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version: FormatVersionCurrent,
+			Variants: []VariantEntry{
+				{Level: "v3", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
+				{Level: "amd64_v3", Offset: 200, CompressedSize: 100, UncompressedSize: 200},
+			},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrDuplicateVariant) {
+			t.Fatalf("expected ErrDuplicateVariant for aliased levels, got %v", err)
+		}
+	})
+
+	t.Run("Duplicate case-insensitive variant levels return ErrDuplicateVariant", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version: FormatVersionCurrent,
+			Variants: []VariantEntry{
+				{Level: "v3", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
+				{Level: "V3", Offset: 200, CompressedSize: 100, UncompressedSize: 200},
+			},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrDuplicateVariant) {
+			t.Fatalf("expected ErrDuplicateVariant for case mismatch, got %v", err)
 		}
 	})
 }

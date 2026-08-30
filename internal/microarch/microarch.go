@@ -439,24 +439,7 @@ func IsSupported(level string) bool {
 
 // Normalize cleans up variant strings (e.g. "amd64_v3" -> "v3", "V3" -> "v3", "v8.0" -> "v8.0", "arm64-v8.2" -> "v8.2").
 func Normalize(level string) string {
-	l := strings.ToLower(strings.TrimSpace(level))
-	l = strings.TrimPrefix(l, "linux_")
-	l = strings.TrimPrefix(l, "darwin_")
-	l = strings.TrimPrefix(l, "windows_")
-	l = strings.TrimPrefix(l, "amd64_")
-	l = strings.TrimPrefix(l, "arm64_")
-	l = strings.TrimPrefix(l, "x86_64_")
-	l = strings.TrimPrefix(l, "aarch64_")
-	l = strings.TrimPrefix(l, "arm64-")
-	l = strings.TrimPrefix(l, "aarch64-")
-
-	if l == "" {
-		return "v1"
-	}
-	if !strings.HasPrefix(l, "v") {
-		l = "v" + l
-	}
-	return l
+	return format.NormalizeVariant(level)
 }
 
 // Rank maps a normalized level string to an integer rank for comparison.

@@ -52,7 +52,7 @@ func FuzzUnmarshalBinaryIndex(f *testing.F) {
 		DictionaryID:     0x12345678,
 		Variants: []VariantEntry{
 			{
-				Level:            "v8.0",
+				Level:            testLevelV80,
 				Offset:           178,
 				CompressedSize:   300,
 				UncompressedSize: 800,
