@@ -15,8 +15,15 @@ import (
 	"strings"
 
 	"golang.org/x/sys/cpu"
+)
 
-	"github.com/EpicBlackWolfZ/microfat/internal/format"
+// Environment variable names recognized for runtime microarchitecture policy and tuning.
+const (
+	EnvForceLevel                = "MICROFAT_FORCE_LEVEL"
+	EnvMaxLevel                  = "MICROFAT_MAX_LEVEL"
+	EnvDisableVariants           = "MICROFAT_DISABLE_VARIANTS"
+	EnvPolicy                    = "MICROFAT_POLICY"
+	EnvAVX512DownclockProtection = "MICROFAT_AVX512_DOWNCLOCK_PROTECTION"
 )
 
 // Standard error definitions for microarch operations.
@@ -74,6 +81,8 @@ const (
 	ARM64v8_5 = "v8.5"
 	ARM64v8_6 = "v8.6"
 	ARM64v8_7 = "v8.7"
+	ARM64v8_8 = "v8.8"
+	ARM64v8_9 = "v8.9"
 	ARM64v9_0 = "v9.0"
 	ARM64v9_1 = "v9.1"
 	ARM64v9_2 = "v9.2"
@@ -100,6 +109,8 @@ const (
 	rankARM64v8_5 = 85
 	rankARM64v8_6 = 86
 	rankARM64v8_7 = 87
+	rankARM64v8_8 = 88
+	rankARM64v8_9 = 89
 	rankARM64v9_0 = 90
 	rankARM64v9_1 = 91
 	rankARM64v9_2 = 92
@@ -108,7 +119,7 @@ const (
 	rankARM64v9_5 = 95
 
 	maxX86Features   = 20
-	maxARM64Features = 32
+	maxARM64Features = 40
 
 	cpuInfoSplitParts = 2
 
@@ -206,6 +217,11 @@ type ARM64Features struct {
 	HasWFxT     bool
 	HasSME      bool
 	HasSME2     bool
+	HasMOPS     bool
+	HasNMI      bool
+	HasHBC      bool
+	HasGCS      bool
+	HasTHE      bool
 	HasAES      bool
 	HasPMULL    bool
 	HasSHA1     bool
@@ -254,10 +270,10 @@ func CurrentLevel() string {
 // ReadPolicyFromEnv reads policy settings from ambient MICROFAT_* environment variables.
 func ReadPolicyFromEnv() Policy {
 	var p Policy
-	p.ForceLevel = strings.TrimSpace(os.Getenv(format.EnvForceLevel))
-	p.MaxLevel = strings.TrimSpace(os.Getenv(format.EnvMaxLevel))
+	p.ForceLevel = strings.TrimSpace(os.Getenv(EnvForceLevel))
+	p.MaxLevel = strings.TrimSpace(os.Getenv(EnvMaxLevel))
 
-	if dis := strings.TrimSpace(os.Getenv(format.EnvDisableVariants)); dis != "" {
+	if dis := strings.TrimSpace(os.Getenv(EnvDisableVariants)); dis != "" {
 		parts := strings.Split(dis, ",")
 		p.DisabledVariants = make([]string, 0, len(parts))
 		for _, v := range parts {
@@ -268,9 +284,9 @@ func ReadPolicyFromEnv() Policy {
 		}
 	}
 
-	p.Name = strings.ToLower(strings.TrimSpace(os.Getenv(format.EnvPolicy)))
+	p.Name = strings.ToLower(strings.TrimSpace(os.Getenv(EnvPolicy)))
 
-	avxVal := strings.ToLower(strings.TrimSpace(os.Getenv(format.EnvAVX512DownclockProtection)))
+	avxVal := strings.ToLower(strings.TrimSpace(os.Getenv(EnvAVX512DownclockProtection)))
 	if avxVal == "1" || avxVal == "true" || avxVal == "yes" || avxVal == "on" ||
 		p.Name == PolicySafeAVX512 || p.Name == PolicyNoDownclock {
 		p.AVX512DownclockProtection = true
@@ -439,7 +455,24 @@ func IsSupported(level string) bool {
 
 // Normalize cleans up variant strings (e.g. "amd64_v3" -> "v3", "V3" -> "v3", "v8.0" -> "v8.0", "arm64-v8.2" -> "v8.2").
 func Normalize(level string) string {
-	return format.NormalizeVariant(level)
+	l := strings.ToLower(strings.TrimSpace(level))
+	l = strings.TrimPrefix(l, "linux_")
+	l = strings.TrimPrefix(l, "darwin_")
+	l = strings.TrimPrefix(l, "windows_")
+	l = strings.TrimPrefix(l, "amd64_")
+	l = strings.TrimPrefix(l, "arm64_")
+	l = strings.TrimPrefix(l, "x86_64_")
+	l = strings.TrimPrefix(l, "aarch64_")
+	l = strings.TrimPrefix(l, "arm64-")
+	l = strings.TrimPrefix(l, "aarch64-")
+
+	if l == "" {
+		return "v1"
+	}
+	if !strings.HasPrefix(l, "v") {
+		l = "v" + l
+	}
+	return l
 }
 
 // Rank maps a normalized level string to an integer rank for comparison.
@@ -478,6 +511,10 @@ func Rank(arch, level string) int {
 			return rankARM64v8_6
 		case ARM64v8_7:
 			return rankARM64v8_7
+		case ARM64v8_8:
+			return rankARM64v8_8
+		case ARM64v8_9:
+			return rankARM64v8_9
 		case ARM64v9_0:
 			return rankARM64v9_0
 		case ARM64v9_1:
@@ -613,6 +650,24 @@ var arm64LevelRequirements = []LevelRequirement{
 		SourceDoc: "Go compiler GOARM64=v8.7: v8.6 + Wait For Event/Interrupt with Timeout instructions (WFxT / WFIT / WFIS)",
 	},
 	{
+		Level:            ARM64v8_8,
+		Prereqs:          []string{ARM64v8_7},
+		RequiredFeatures: []string{"mops", "nmi", "hbc"},
+		CheckFeatures: func(f ARM64Features) bool {
+			return f.HasMOPS && f.HasNMI && f.HasHBC
+		},
+		SourceDoc: "Go compiler GOARM64=v8.8: v8.7 + Memory Operations (MOPS), NMI, and Hinted Conditional Branches (HBC)",
+	},
+	{
+		Level:            ARM64v8_9,
+		Prereqs:          []string{ARM64v8_8},
+		RequiredFeatures: []string{"gcs", "the"},
+		CheckFeatures: func(f ARM64Features) bool {
+			return f.HasGCS && f.HasTHE
+		},
+		SourceDoc: "Go compiler GOARM64=v8.9: v8.8 + Guarded Control Stack (GCS) and Translation Hardening (THE)",
+	},
+	{
 		Level:            ARM64v9_0,
 		Prereqs:          []string{ARM64v8_5},
 		RequiredFeatures: []string{"sve"},
@@ -683,6 +738,8 @@ var arm64OrderedLevels = []string{
 	ARM64v9_2,
 	ARM64v9_1,
 	ARM64v9_0,
+	ARM64v8_9,
+	ARM64v8_8,
 	ARM64v8_7,
 	ARM64v8_6,
 	ARM64v8_5,
@@ -839,6 +896,16 @@ func hasARM64NamedFeature(name string, f ARM64Features) bool {
 		return f.HasSME
 	case "sme2":
 		return f.HasSME2
+	case "mops":
+		return f.HasMOPS
+	case "nmi":
+		return f.HasNMI
+	case "hbc":
+		return f.HasHBC
+	case "gcs":
+		return f.HasGCS
+	case "the":
+		return f.HasTHE
 	default:
 		return false
 	}
@@ -1229,6 +1296,21 @@ func appendCoreFeatureList(list []string, f ARM64Features) []string {
 	}
 	if f.HasWFxT {
 		list = append(list, "wfxt")
+	}
+	if f.HasMOPS {
+		list = append(list, "mops")
+	}
+	if f.HasNMI {
+		list = append(list, "nmi")
+	}
+	if f.HasHBC {
+		list = append(list, "hbc")
+	}
+	if f.HasGCS {
+		list = append(list, "gcs")
+	}
+	if f.HasTHE {
+		list = append(list, "the")
 	}
 	return list
 }

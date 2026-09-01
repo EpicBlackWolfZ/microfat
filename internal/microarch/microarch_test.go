@@ -254,6 +254,21 @@ func arm64BaseV8_7() ARM64Features {
 	return f
 }
 
+func arm64BaseV8_8() ARM64Features {
+	f := arm64BaseV8_7()
+	f.HasMOPS = true
+	f.HasNMI = true
+	f.HasHBC = true
+	return f
+}
+
+func arm64BaseV8_9() ARM64Features {
+	f := arm64BaseV8_8()
+	f.HasGCS = true
+	f.HasTHE = true
+	return f
+}
+
 func arm64BaseV9_0() ARM64Features {
 	f := arm64BaseV8_5()
 	f.HasSVE = true
@@ -292,8 +307,8 @@ func arm64BaseV9_5() ARM64Features {
 func TestARM64Requirements(t *testing.T) {
 	t.Parallel()
 	reqs := ARM64Requirements()
-	if len(reqs) != 14 {
-		t.Fatalf("expected 14 ARM64 level requirements, got %d", len(reqs))
+	if len(reqs) != 16 {
+		t.Fatalf("expected 16 ARM64 level requirements, got %d", len(reqs))
 	}
 	for _, req := range reqs {
 		if req.Level == "" {
@@ -351,6 +366,16 @@ func TestEvaluateARM64(t *testing.T) {
 			name:     "v8.7 (wfxt)",
 			features: arm64BaseV8_7(),
 			expected: ARM64v8_7,
+		},
+		{
+			name:     "v8.8 (mops + nmi + hbc)",
+			features: arm64BaseV8_8(),
+			expected: ARM64v8_8,
+		},
+		{
+			name:     "v8.9 (gcs + the)",
+			features: arm64BaseV8_9(),
+			expected: ARM64v8_9,
 		},
 		{
 			name:     "v9.0 (sve + v8.5)",
@@ -457,6 +482,24 @@ func TestEvaluateARM64_PrerequisiteFailures(t *testing.T) {
 			expected: ARM64v8_6,
 		},
 		{
+			name: "v8.8 with missing MOPS falls back to v8.7",
+			features: func() ARM64Features {
+				f := arm64BaseV8_8()
+				f.HasMOPS = false
+				return f
+			}(),
+			expected: ARM64v8_7,
+		},
+		{
+			name: "v8.9 with missing GCS falls back to v8.8",
+			features: func() ARM64Features {
+				f := arm64BaseV8_9()
+				f.HasGCS = false
+				return f
+			}(),
+			expected: ARM64v8_8,
+		},
+		{
 			name: "v9.5 with missing SME falls back to v9.2",
 			features: func() ARM64Features {
 				f := arm64BaseV9_5()
@@ -503,8 +546,8 @@ func TestEvaluateARM64Detailed(t *testing.T) {
 	if highest != ARM64v9_2 {
 		t.Errorf("expected highest %s, got %s", ARM64v9_2, highest)
 	}
-	if len(statuses) != 14 {
-		t.Fatalf("expected 14 statuses, got %d", len(statuses))
+	if len(statuses) != 16 {
+		t.Fatalf("expected 16 statuses, got %d", len(statuses))
 	}
 
 	// 2. Missing v8.6 BF16
@@ -660,13 +703,20 @@ func TestNormalizeAndRank(t *testing.T) {
 
 	armLevels := []string{
 		ARM64v8_0, ARM64v8_1, ARM64v8_2, ARM64v8_3, ARM64v8_4,
-		ARM64v8_5, ARM64v8_6, ARM64v8_7, ARM64v9_0, ARM64v9_1,
-		ARM64v9_2, ARM64v9_3, ARM64v9_4, ARM64v9_5,
+		ARM64v8_5, ARM64v8_6, ARM64v8_7, ARM64v8_8, ARM64v8_9,
+		ARM64v9_0, ARM64v9_1, ARM64v9_2, ARM64v9_3, ARM64v9_4, ARM64v9_5,
 	}
 	for _, lvl := range armLevels {
 		if Rank(ArchARM64, lvl) <= 0 {
 			t.Errorf("expected positive rank for arm64 level %s", lvl)
 		}
+	}
+	if Rank(ArchARM64, ARM64v8_8) != 88 || Rank(ArchARM64, ARM64v8_9) != 89 {
+		t.Errorf("unexpected arm64 ranks for v8.8 (%d) or v8.9 (%d)",
+			Rank(ArchARM64, ARM64v8_8), Rank(ArchARM64, ARM64v8_9))
+	}
+	if Compare(ArchARM64, ARM64v8_9, ARM64v8_8) <= 0 || Compare(ArchARM64, ARM64v8_8, ARM64v8_7) <= 0 {
+		t.Errorf("expected monotonic ARM64 ordering v8.7 < v8.8 < v8.9")
 	}
 
 	if Rank("other", "v1") != 1 {
@@ -760,9 +810,14 @@ func TestExtractFeatureLists(t *testing.T) {
 		HasASIMDFHM: true,
 		HasWFxT:     true,
 		HasASIMDRDM: true,
+		HasMOPS:     true,
+		HasNMI:      true,
+		HasHBC:      true,
+		HasGCS:      true,
+		HasTHE:      true,
 	}
 	armList := extractARM64FeatureList(allARM64)
-	const expectedARM64Count = 29
+	const expectedARM64Count = 34
 	if len(armList) != expectedARM64Count {
 		t.Errorf("expected %d arm64 features, got %d", expectedARM64Count, len(armList))
 	}
