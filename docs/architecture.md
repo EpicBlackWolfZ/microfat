@@ -196,11 +196,20 @@ Microfat supports ARM64 microarchitecture levels aligned with the Go compiler `G
 | `v8.4` | `GOARM64=v8.4` | `v8.3` + Dot Product (`asimddp`), `dcpop` | Apple M1 Max/Pro, Neoverse N2 |
 | `v8.5` | `GOARM64=v8.5` | `v8.4` + Data Independent Timing (`dit`), `flagm` | Apple M2/M3, modern server cores |
 | `v8.6` | `GOARM64=v8.6` | `v8.5` + Matrix Multiplication (`i8mm`), BFloat16 (`bf16`) | Apple M3/M4 |
-| `v8.7` | `GOARM64=v8.7` | `v8.6` + Enhanced WFIT/WFIS acceleration | Latest enterprise ARM silicon |
+| `v8.7` | `GOARM64=v8.7` | `v8.6` + Enhanced WFIT/WFIS acceleration (`wfxt`) | Modern enterprise ARM silicon |
+| `v8.8` | `GOARM64=v8.8` | `v8.7` + Memory Operations (`mops`), `nmi`, `hbc` | Next-gen server cores |
+| `v8.9` | `GOARM64=v8.9` | `v8.8` + Guarded Control Stack (`gcs`), `the` | Next-gen hardened server silicon |
 | `v9.0` | `GOARM64=v9.0` | Scalable Vector Extension (`sve`), SVE BitPerm | AWS Graviton 4, Neoverse V2 |
 | `v9.1` | `GOARM64=v9.1` | `v9.0` + SVE2 baseline extensions | Enterprise HPC nodes |
 | `v9.2` | `GOARM64=v9.2` | `v9.0` + SVE2 + `i8mm` + `bf16` | AI & HPC cloud instances |
 | `v9.3`–`v9.5` | `GOARM64=v9.3..9.5` | Scalable Matrix Extension (`sme`, `sme2`) | Next-generation server processors |
+
+### Architectural Layering: Compiler Semantics vs Runtime Probing vs ISA
+
+Microfat strictly separates three concepts:
+1. **Go Toolchain Semantics (`GOARM64`)**: The compiler emits instruction subsets gated by compile-time flags (`GOARM64=v8.0`..`v9.5`). Build artifacts assume all prerequisite features are available.
+2. **Runtime CPU Probing (`auxv` / `CPUID`)**: The launcher stub never assumes compilation targets. It probes the host kernel via Linux Auxiliary Vectors (`AT_HWCAP`, `AT_HWCAP2`) or CPUID registers to dynamically match the highest satisfied tier.
+3. **ARM Architecture Reference Manual ISA**: Feature dependencies form a directed acyclic graph (DAG). Missing any intermediate prerequisite safely degrades execution to the highest compatible parent tier.
 
 ### Dual-Tier CPU Feature Probing Architecture
 
