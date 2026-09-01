@@ -49,7 +49,7 @@ A `microfat` fat binary consists of contiguous segments:
 ## 3. Go Toolchain & Quality Invariants
 
 - **Go Version & Toolchain Integrity**:
-  - Always target and strictly operate on **Go 1.27** (`go 1.27.0` in `go.mod`).
+  - Always target and strictly operate on **Go 1.27** (`go 1.27.1` in `go.mod`).
   - **NEVER downgrade `go.mod` or test toolchain directives** (e.g., to Go 1.26) to bypass local sandbox network restrictions or proxy 403 fetch errors.
   - If the Go toolchain needs to be fetched or updated, run the command with `BypassSandbox: true` instead of altering project version definitions.
 - **Module Path**: `github.com/EpicBlackWolfZ/microfat`

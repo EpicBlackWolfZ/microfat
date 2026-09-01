@@ -391,7 +391,7 @@ func main() {
 	if err := os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(goSource), 0o644); err != nil {
 		t.Fatalf("failed to write main.go: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module testpkg\ngo 1.27.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module testpkg\ngo 1.27.1\n"), 0o644); err != nil {
 		t.Fatalf("failed to write go.mod: %v", err)
 	}
 
@@ -495,7 +495,7 @@ func main() {}
 	if err := os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(goSource), 0o644); err != nil {
 		t.Fatalf("failed to write main.go: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module testpkg2\ngo 1.27.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module testpkg2\ngo 1.27.1\n"), 0o644); err != nil {
 		t.Fatalf("failed to write go.mod: %v", err)
 	}
 	// Place default.pgo in the package dir
@@ -547,7 +547,7 @@ func TestBuildAndPack_CompilationFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc invalid syntax"), 0o644); err != nil {
 		t.Fatalf("failed to write main.go: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module badpkg\ngo 1.27.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module badpkg\ngo 1.27.1\n"), 0o644); err != nil {
 		t.Fatalf("failed to write go.mod: %v", err)
 	}
 
@@ -587,7 +587,7 @@ func TestBuildAndPack_RelativePathsAndDistinctDirs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(mainCode), 0o644); err != nil {
 		t.Fatalf("failed to write main.go: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module pkgapp\ngo 1.27.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module pkgapp\ngo 1.27.1\n"), 0o644); err != nil {
 		t.Fatalf("failed to write go.mod: %v", err)
 	}
 
@@ -699,7 +699,7 @@ func TestBuildAndPack_CompressionProfiles(t *testing.T) {
 	}
 	mainCode := "package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"comp test\") }\n"
 	_ = os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(mainCode), 0o644)
-	_ = os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module compapp\ngo 1.27.0\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module compapp\ngo 1.27.1\n"), 0o644)
 
 	m := &builder.Manifest{
 		AppName:    "compfat",
