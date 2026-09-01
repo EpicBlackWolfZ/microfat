@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
+	"github.com/EpicBlackWolfZ/microfat/internal/testutil"
 )
 
 const (
@@ -601,6 +603,71 @@ func TestDecompressionBombRejection(t *testing.T) {
 	})
 }
 
+const (
+	propPayloadMin    = 64
+	propPayloadMax    = 16 * 1024
+	propPropertyIters = 25
+	propMutationCount = 2
+	propSafetyLimit   = 8 * 1024
+)
+
+func TestCodec_PropertyInvariants(t *testing.T) {
+	t.Parallel()
+
+	codecs := codec.List()
+	for _, codecName := range codecs {
+		codecName := codecName
+		c, err := codec.Get(codecName)
+		if err != nil {
+			t.Fatalf("resolving registered codec %q: %v", codecName, err)
+		}
+
+		t.Run("Invariants_"+codecName, func(t *testing.T) {
+			t.Parallel()
+
+			testutil.RunPropertyTest(t, "roundtrip_and_bounds", propPropertyIters, 0, func(subT *testing.T, iter int, rng *rand.Rand) {
+				length := rng.IntN(propPayloadMax-propPayloadMin) + propPayloadMin
+				payload := testutil.RandomPayload(rng, length)
+
+				var compressed bytes.Buffer
+				if err := c.Compress(&compressed, payload, ""); err != nil {
+					subT.Fatalf("codec %s failed to compress payload of size %d: %v", codecName, len(payload), err)
+				}
+
+				// Invariant 1: Exact uncompressed size roundtrip
+				var roundtrip bytes.Buffer
+				if err := c.Decompress(&roundtrip, bytes.NewReader(compressed.Bytes()), int64(len(payload))); err != nil {
+					subT.Fatalf("codec %s roundtrip failed for size %d: %v", codecName, len(payload), err)
+				}
+				if !bytes.Equal(roundtrip.Bytes(), payload) {
+					subT.Fatalf("codec %s roundtrip payload mismatch for size %d", codecName, len(payload))
+				}
+
+				// Invariant 2: Bounded decompression enforcement on truncated input
+				if compressed.Len() > 4 {
+					truncated := testutil.TruncateBytes(rng, compressed.Bytes())
+					testutil.AssertDecompressionBounds(subT, c, bytes.NewReader(truncated), int64(len(payload)))
+				}
+
+				// Invariant 3: Bounded decompression enforcement on mutated stream
+				mutated := testutil.MutateBytes(rng, compressed.Bytes(), propMutationCount)
+				testutil.AssertDecompressionBounds(subT, c, bytes.NewReader(mutated), int64(len(payload)))
+
+				// Invariant 4: Declared uncompressed limit ceiling enforcement
+				if len(payload) > propSafetyLimit {
+					var cappedOut bytes.Buffer
+					err := c.Decompress(&cappedOut, bytes.NewReader(compressed.Bytes()), propSafetyLimit)
+					if err == nil && int64(len(payload)) > propSafetyLimit {
+						subT.Fatalf("expected error for payload size %d exceeding limit %d", len(payload), propSafetyLimit)
+					}
+					if int64(cappedOut.Len()) > propSafetyLimit {
+						subT.Fatalf("codec %s wrote %d bytes exceeding safety limit %d", codecName, cappedOut.Len(), propSafetyLimit)
+					}
+				}
+			})
+		})
+	}
+}
 
 func BenchmarkCodecs(b *testing.B) {
 	data := generateTestData(1024 * 1024) // 1 MB payload

@@ -21,6 +21,7 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+	"github.com/EpicBlackWolfZ/microfat/internal/testutil"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -2319,5 +2320,116 @@ func TestExplicitMemfdModeEnforcement(t *testing.T) {
 		}
 	})
 }
+
+func TestStub_SecurityInvariants(t *testing.T) {
+	origExecve := execveFunc
+	origCreate := memfdCreateFunc
+	origSeal := memfdSealFunc
+	t.Cleanup(func() {
+		execveFunc = origExecve
+		memfdCreateFunc = origCreate
+		memfdSealFunc = origSeal
+	})
+
+	t.Run("Cache isolation invariant enforces 0700 permissions", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheDir := filepath.Join(tmpDir, "secure_cache")
+		t.Setenv(format.EnvCacheDir, cacheDir)
+		t.Setenv(format.EnvExecMode, format.ExecModeCache)
+		t.Setenv(format.EnvVerifyCache, "1")
+
+		payload := []byte("SECURITY_INVARIANT_TEST_PAYLOAD")
+		entry, rawFile := createDummyVariantFile(t, tmpDir, payload)
+		defer rawFile.Close()
+		entry.Compression = "zstd"
+
+		hostInfo := microarch.Info{
+			OS:    testOSLinux,
+			Arch:  testArchAMD64,
+			Level: "v1",
+		}
+		policyRes := microarch.PolicyResult{
+			SelectedVariant: "v1",
+		}
+
+		var execCalled bool
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			execCalled = true
+			return nil
+		}
+
+		err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		if err != nil {
+			t.Fatalf("executeVariant failed: %v", err)
+		}
+		if !execCalled {
+			t.Fatal("expected execve to be called")
+		}
+
+		// Security Invariant: Cache dir and cached files must strictly maintain 0700 private permissions
+		testutil.AssertCacheIsolation(t, cacheDir)
+
+		// Pre-execution SHA-256 verification: tampering with binary on disk must trigger re-extraction
+		cachedFile := filepath.Join(cacheDir, entry.SHA256)
+		tamperedBytes := make([]byte, len(payload))
+		copy(tamperedBytes, []byte("TAMPERED_BYTES_"))
+		if err := os.WriteFile(cachedFile, tamperedBytes, testutil.PrivatePermissionMode); err != nil {
+			t.Fatalf("writing tampered file: %v", err)
+		}
+
+		err = executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		if err != nil {
+			t.Fatalf("executeVariant failed on re-extraction: %v", err)
+		}
+
+		// Verify that tampered file was overwritten with valid payload matching expectedHash
+		restoredBytes, err := os.ReadFile(cachedFile)
+		if err != nil {
+			t.Fatalf("reading restored cached file: %v", err)
+		}
+		if !bytes.Equal(restoredBytes, payload) {
+			t.Fatal("expected tampered file to be re-extracted and restored to original payload")
+		}
+	})
+
+	t.Run("Memfd sealing invariant requires all four immutable seals", func(t *testing.T) {
+		t.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+
+		tmpDir := t.TempDir()
+		payload := []byte("MEMFD_SEAL_TEST_PAYLOAD")
+		entry, rawFile := createDummyVariantFile(t, tmpDir, payload)
+		defer rawFile.Close()
+		entry.Compression = "zstd"
+
+		hostInfo := microarch.Info{
+			OS:    testOSLinux,
+			Arch:  testArchAMD64,
+			Level: "v1",
+		}
+		policyRes := microarch.PolicyResult{
+			SelectedVariant: "v1",
+		}
+
+		var appliedSeals int
+		memfdSealFunc = func(fd int, seals int) error {
+			appliedSeals = seals
+			return nil
+		}
+
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			return nil
+		}
+
+		err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		if err != nil {
+			t.Fatalf("executeVariant failed: %v", err)
+		}
+
+		if appliedSeals != memfdTargetSeals {
+			t.Fatalf("memfd seals invariant violation: expected %x, got %x", memfdTargetSeals, appliedSeals)
+		}
+	})
+}
+
 
 
