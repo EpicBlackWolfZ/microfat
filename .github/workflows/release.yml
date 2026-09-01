@@ -30,7 +30,7 @@ jobs:
         uses: sigstore/cosign-installer@v4.1.2
 
       - name: Install Syft (SBOM Generation)
-        uses: anchore/sbom-action/download-syft@v0.24.0
+        uses: anchore/sbom-action/download-syft@v0.24.2
 
       - name: Run GoReleaser (Compile Variants, Self-Bundle Fat Binary, Syft SBOMs, Cosign Signatures & Publish)
         uses: goreleaser/goreleaser-action@v7.2.3
