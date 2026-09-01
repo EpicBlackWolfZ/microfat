@@ -22,7 +22,7 @@ All participants in the `microfat` community are expected to adhere to the [Code
 - **Go Toolchain**: Go **1.27** or newer.
 - **Git**: Working copy cloned from `https://github.com/EpicBlackWolfZ/microfat`.
 - **Optional Local Linters / Tools**:
-  - `golangci-lint` (v2.13.1+)
+  - `golangci-lint` (v2.13.2+)
   - `gotestsum`
   - `goreleaser` (v2+)
   - `govulncheck`
