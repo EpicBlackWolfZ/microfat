@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"math"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -129,3 +131,114 @@ func TestRunPropertyTest(t *testing.T) {
 		executed.Add(1)
 	})
 }
+
+type mockTB struct {
+	testing.TB
+	failed  bool
+	lastMsg string
+}
+
+func (m *mockTB) Helper() {}
+
+func (m *mockTB) Fatalf(format string, args ...any) {
+	m.failed = true
+	m.lastMsg = fmt.Sprintf(format, args...)
+}
+
+func TestAssertPayloadIntegrity_HostileInputs(t *testing.T) {
+	t.Parallel()
+
+	binaryData := make([]byte, 100)
+
+	tests := []struct {
+		name  string
+		entry format.VariantEntry
+	}{
+		{
+			name: "NegativeOffset",
+			entry: format.VariantEntry{
+				Offset:           -1,
+				CompressedSize:   10,
+				UncompressedSize: 10,
+			},
+		},
+		{
+			name: "ZeroCompressedSize",
+			entry: format.VariantEntry{
+				Offset:           0,
+				CompressedSize:   0,
+				UncompressedSize: 10,
+			},
+		},
+		{
+			name: "ZeroUncompressedSize",
+			entry: format.VariantEntry{
+				Offset:           0,
+				CompressedSize:   10,
+				UncompressedSize: 0,
+			},
+		},
+		{
+			name: "MaxInt64Offset_OverflowWraparound",
+			entry: format.VariantEntry{
+				Offset:           math.MaxInt64,
+				CompressedSize:   100,
+				UncompressedSize: 100,
+			},
+		},
+		{
+			name: "MaxInt64CompressedSize_OverflowWraparound",
+			entry: format.VariantEntry{
+				Offset:           10,
+				CompressedSize:   math.MaxInt64,
+				UncompressedSize: 100,
+			},
+		},
+		{
+			name: "ExtendsOutOfBounds",
+			entry: format.VariantEntry{
+				Offset:           50,
+				CompressedSize:   60,
+				UncompressedSize: 60,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			mock := &mockTB{}
+			testutil.AssertPayloadIntegrity(mock, binaryData, tc.entry)
+			if !mock.failed {
+				t.Fatalf("expected AssertPayloadIntegrity to fail for %s, but it passed", tc.name)
+			}
+		})
+	}
+}
+
+func TestAssertDecompressionBounds_HostileInputs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("NilCodec", func(t *testing.T) {
+		t.Parallel()
+		mock := &mockTB{}
+		testutil.AssertDecompressionBounds(mock, nil, bytes.NewReader([]byte("test")), 100)
+		if !mock.failed {
+			t.Fatalf("expected failure on nil codec")
+		}
+	})
+
+	t.Run("NilReader", func(t *testing.T) {
+		t.Parallel()
+		c, err := codec.Get(codec.AlgorithmNone)
+		if err != nil {
+			t.Fatalf("getting codec: %v", err)
+		}
+		mock := &mockTB{}
+		testutil.AssertDecompressionBounds(mock, c, nil, 100)
+		if !mock.failed {
+			t.Fatalf("expected failure on nil reader")
+		}
+	})
+}
+

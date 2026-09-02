@@ -39,21 +39,25 @@ const (
 func AssertPayloadIntegrity(t testing.TB, binary []byte, entry format.VariantEntry) {
 	t.Helper()
 
-	if entry.Offset < 0 || entry.CompressedSize < 0 || entry.UncompressedSize < 0 {
-		t.Fatalf("invalid negative bounds in entry: offset=%d compressed=%d uncompressed=%d",
+	if entry.Offset < 0 || entry.CompressedSize <= 0 || entry.UncompressedSize <= 0 {
+		t.Fatalf("invalid negative/zero bounds in entry: offset=%d compressed=%d uncompressed=%d",
 			entry.Offset, entry.CompressedSize, entry.UncompressedSize)
+		return
+	}
+
+	binLen := int64(len(binary))
+	if entry.Offset > binLen || entry.CompressedSize > binLen-entry.Offset {
+		t.Fatalf("variant entry payload extends out of bounds: offset=%d size=%d binary_len=%d",
+			entry.Offset, entry.CompressedSize, binLen)
+		return
 	}
 
 	totalEnd := entry.Offset + entry.CompressedSize
-	if totalEnd > int64(len(binary)) {
-		t.Fatalf("variant entry payload extends out of bounds: offset=%d size=%d binary_len=%d",
-			entry.Offset, entry.CompressedSize, len(binary))
-	}
-
 	payloadBytes := binary[entry.Offset:totalEnd]
 	c, err := codec.Get(entry.Compression)
 	if err != nil {
 		t.Fatalf("resolving codec %q: %v", entry.Compression, err)
+		return
 	}
 
 	var decompressed bytes.Buffer
@@ -64,11 +68,13 @@ func AssertPayloadIntegrity(t testing.TB, binary []byte, entry format.VariantEnt
 	if err != nil {
 		t.Fatalf("decompression failed for variant %s (compression %s): %v",
 			entry.Level, entry.Compression, err)
+		return
 	}
 
 	if int64(decompressed.Len()) != entry.UncompressedSize {
 		t.Fatalf("decompressed size mismatch: expected %d bytes, got %d bytes",
 			entry.UncompressedSize, decompressed.Len())
+		return
 	}
 
 	if entry.SHA256 != "" {
@@ -76,6 +82,7 @@ func AssertPayloadIntegrity(t testing.TB, binary []byte, entry format.VariantEnt
 		if computedHash != entry.SHA256 {
 			t.Fatalf("SHA-256 mismatch for variant %s: expected %s, got %s",
 				entry.Level, entry.SHA256, computedHash)
+			return
 		}
 	}
 }
@@ -85,6 +92,15 @@ func AssertPayloadIntegrity(t testing.TB, binary []byte, entry format.VariantEnt
 // even when processing corrupted, malformed, or hostile streams.
 func AssertDecompressionBounds(t testing.TB, c codec.Codec, r io.Reader, limit int64) {
 	t.Helper()
+
+	if c == nil {
+		t.Fatalf("nil codec provided to AssertDecompressionBounds")
+		return
+	}
+	if r == nil {
+		t.Fatalf("nil reader provided to AssertDecompressionBounds")
+		return
+	}
 
 	if limit <= 0 {
 		limit = DefaultSafetyCeiling
