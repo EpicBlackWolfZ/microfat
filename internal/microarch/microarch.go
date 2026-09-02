@@ -1103,6 +1103,9 @@ func parseLinuxCPUInfoX86(r io.Reader) x86CPUModelInfo {
 			break
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return info
+	}
 	return info
 }
 

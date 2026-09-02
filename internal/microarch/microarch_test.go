@@ -1178,7 +1178,7 @@ func BenchmarkSelectVariantWithPolicy(b *testing.B) {
 
 	b.Run("AMD64_Default", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, _ = SelectVariantWithPolicy(ArchAMD64, AMD64v3, amd64Variants, Policy{})
 		}
 	})
@@ -1189,14 +1189,14 @@ func BenchmarkSelectVariantWithPolicy(b *testing.B) {
 			MaxLevel:         "v2",
 			DisabledVariants: []string{"v3"},
 		}
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, _ = SelectVariantWithPolicy(ArchAMD64, AMD64v4, amd64Variants, p)
 		}
 	})
 
 	b.Run("ARM64_Default", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, _ = SelectVariantWithPolicy(ArchARM64, ARM64v9_2, arm64Variants, Policy{})
 		}
 	})
@@ -1206,14 +1206,14 @@ func BenchmarkNormalize(b *testing.B) {
 	inputs := []string{"amd64_v3", "arm64-v8.2", "linux_v1", "V4"}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		_ = Normalize(inputs[i%len(inputs)])
 	}
 }
 
 func BenchmarkDetect(b *testing.B) {
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = Detect()
 	}
 }
