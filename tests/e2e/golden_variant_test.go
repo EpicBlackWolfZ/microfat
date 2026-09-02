@@ -176,8 +176,13 @@ func TestGoldenVariantSelection_Deterministic(t *testing.T) {
 }
 
 // hostSupportsAtLeastTier2 returns true if the host CPU microarchitecture meets or exceeds
-// the second capability tier (e.g. >= v2 on amd64 or >= v8.2 on arm64). Hosts with only baseline
-// v1/v8.0 are skipped for tier-2 cap and fallback tests.
+// the second capability tier (>= v2 on amd64 or >= v8.2 on arm64). Hosts with only baseline
+// tiers (v1 / v8.0) cannot test tier-2 capping or fallback and are skipped.
+//
+// Invariant Note: This check avoids duplicating the internal architecture ranking model
+// in the test harness by testing whether the detected host level is strictly beyond the
+// baseline tier. If new architecture families or baseline levels are introduced, ensure their
+// baseline identifiers are reflected here.
 func hostSupportsAtLeastTier2() bool {
 	return currentHostLevel != "v1" && currentHostLevel != "v8.0"
 }
