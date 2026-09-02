@@ -242,3 +242,30 @@ func TestAssertDecompressionBounds_HostileInputs(t *testing.T) {
 	})
 }
 
+func TestRunPropertyTestConcurrent(t *testing.T) {
+	t.Parallel()
+
+	var executed atomic.Int64
+	testutil.RunPropertyTestConcurrent(t, "concurrent_property", 20, 4, 12345, func(subT *testing.T, iter int, rng *rand.Rand) {
+		val := rng.IntN(100)
+		if val < 0 || val >= 100 {
+			subT.Fatalf("invalid random val: %d", val)
+		}
+		executed.Add(1)
+	})
+
+	// Also test default arguments fallback (iterations <= 0, maxWorkers <= 0, seed == 0)
+	var defaultExecuted atomic.Int64
+	testutil.RunPropertyTest(t, "default_args_property", 0, 0, func(subT *testing.T, iter int, rng *rand.Rand) {
+		if iter < 3 {
+			defaultExecuted.Add(1)
+		}
+	})
+
+	var defaultConcurrentExecuted atomic.Int64
+	testutil.RunPropertyTestConcurrent(t, "default_concurrent_args", 5, 0, 0, func(subT *testing.T, iter int, rng *rand.Rand) {
+		defaultConcurrentExecuted.Add(1)
+	})
+}
+
+

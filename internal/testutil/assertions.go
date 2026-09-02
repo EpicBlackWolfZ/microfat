@@ -12,6 +12,9 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -190,7 +193,7 @@ func AssertCacheIsolation(t testing.TB, cachePath string) {
 	}
 }
 
-// RunPropertyTest executes a property-based testing function for the specified iterations
+// RunPropertyTest executes a property-based testing function sequentially for the specified iterations
 // with deterministic per-iteration PRNG instances. If seed is 0, a timestamp seed is selected and logged on error.
 func RunPropertyTest(t *testing.T, name string, iterations int, seed uint64, fn func(t *testing.T, iter int, rng *rand.Rand)) {
 	t.Helper()
@@ -210,18 +213,97 @@ func RunPropertyTest(t *testing.T, name string, iterations int, seed uint64, fn 
 			iterSeed1 := seed ^ (uint64(i) * prngMultiplier)
 			iterSeed2 := (uint64(i) + 1) * prngMultiplier + prngAddend
 
+			// #nosec G404 -- pseudo-random generator used exclusively for reproducible property testing seeds
+			rng := rand.New(rand.NewPCG(iterSeed1, iterSeed2))
+
+			var failed bool
 			success := t.Run(fmt.Sprintf("iter_%03d", i), func(subT *testing.T) {
-				subT.Parallel()
-				// #nosec G404 -- pseudo-random generator used exclusively for reproducible property testing seeds
-				rng := rand.New(rand.NewPCG(iterSeed1, iterSeed2))
 				fn(subT, i, rng)
+				if subT.Failed() {
+					failed = true
+				}
 			})
-			if !success {
+			if !success || failed {
 				t.Logf("[property-test-failure] seed=%d iteration=%d/%d test=%s",
 					seed, i, iterations, name)
 				break
 			}
 		}
+	})
+}
+
+// RunPropertyTestConcurrent executes property iterations using a bounded worker pool.
+// maxWorkers is capped between 1 and runtime.GOMAXPROCS(0) if <= 0.
+func RunPropertyTestConcurrent(
+	t *testing.T,
+	name string,
+	iterations int,
+	maxWorkers int,
+	seed uint64,
+	fn func(t *testing.T, iter int, rng *rand.Rand),
+) {
+	t.Helper()
+
+	if iterations <= 0 {
+		iterations = DefaultPropertyIters
+	}
+	if seed == 0 {
+		seed = uint64(time.Now().UnixNano())
+	}
+	if maxWorkers <= 0 {
+		maxWorkers = runtime.GOMAXPROCS(0)
+	}
+	if maxWorkers > iterations {
+		maxWorkers = iterations
+	}
+
+	t.Run(name, func(t *testing.T) {
+		t.Parallel()
+
+		sem := make(chan struct{}, maxWorkers)
+		var wg sync.WaitGroup
+		var failed atomic.Bool
+
+		for i := range iterations {
+			if failed.Load() {
+				break
+			}
+
+			iterSeed1 := seed ^ (uint64(i) * prngMultiplier)
+			iterSeed2 := (uint64(i) + 1) * prngMultiplier + prngAddend
+
+			sem <- struct{}{}
+			wg.Add(1)
+
+			go func(iter int, s1, s2 uint64) {
+				defer func() {
+					<-sem
+					wg.Done()
+				}()
+
+				if failed.Load() {
+					return
+				}
+
+				// #nosec G404 -- pseudo-random generator used exclusively for reproducible property testing seeds
+				rng := rand.New(rand.NewPCG(s1, s2))
+
+				var iterFailed bool
+				subSuccess := t.Run(fmt.Sprintf("iter_%03d", iter), func(subT *testing.T) {
+					fn(subT, iter, rng)
+					if subT.Failed() {
+						iterFailed = true
+					}
+				})
+				if !subSuccess || iterFailed {
+					if failed.CompareAndSwap(false, true) {
+						t.Logf("[property-test-failure] seed=%d iteration=%d/%d test=%s",
+							seed, iter, iterations, name)
+					}
+				}
+			}(i, iterSeed1, iterSeed2)
+		}
+		wg.Wait()
 	})
 }
 
