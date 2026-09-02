@@ -7,7 +7,17 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 )
 
-// arm64LevelFixture defines an authoritative test fixture representing a Go GOARM64 compiler target.
+// arm64LevelFixture defines a test fixture representing Microfat's ARM64 ISA compatibility model
+// aligned with the Go GOARM64 target level hierarchy.
+//
+// Source of Truth & Compatibility Model:
+// Microfat models ARM64 capabilities based on the Arm Architecture Reference Manual (ARM DDI 0487)
+// ISA specifications and Linux auxiliary vector feature bits (AT_HWCAP / AT_HWCAP2), aligned with
+// the Go toolchain's GOARM64 level hierarchy (v8.0 through v9.5).
+// While the Go compiler (src/internal/buildcfg/cfg.go) accepts GOARM64 target levels and emits specific
+// instructions (such as mandatory LSE atomics starting at v8.1), Microfat establishes a granular, forward-compatible
+// hardware capability contract for every ISA milestone (including v8.8 MOPS/NMI/HBC and v8.9 GCS/THE)
+// to guarantee that binaries built or specialized for these levels execute only on CPUs with verified hardware support.
 type arm64LevelFixture struct {
 	Level            string
 	CompilerTarget   string
@@ -17,7 +27,7 @@ type arm64LevelFixture struct {
 	SourceDoc        string
 }
 
-func getAuthoritativeARM64Fixtures() []arm64LevelFixture {
+func getARM64CompatibilityFixtures() []arm64LevelFixture {
 	return []arm64LevelFixture{
 		{
 			Level:            microarch.ARM64v8_0,
@@ -284,7 +294,7 @@ func getAuthoritativeARM64Fixtures() []arm64LevelFixture {
 func TestARM64Fixtures_EvaluationMatches(t *testing.T) {
 	t.Parallel()
 
-	fixtures := getAuthoritativeARM64Fixtures()
+	fixtures := getARM64CompatibilityFixtures()
 	const expectedCount = 16
 	if len(fixtures) != expectedCount {
 		t.Fatalf("expected %d authoritative fixtures, got %d", expectedCount, len(fixtures))
@@ -329,7 +339,7 @@ func TestARM64Fixtures_EvaluationMatches(t *testing.T) {
 func TestARM64Fixtures_PrerequisiteDegradation(t *testing.T) {
 	t.Parallel()
 
-	fixtures := getAuthoritativeARM64Fixtures()
+	fixtures := getARM64CompatibilityFixtures()
 	for _, fix := range fixtures {
 		if len(fix.RequiredFeatures) == 0 {
 			continue
@@ -405,7 +415,7 @@ func TestARM64Fixtures_PrerequisiteDegradation(t *testing.T) {
 func TestARM64Fixtures_Monotonicity(t *testing.T) {
 	t.Parallel()
 
-	fixtures := getAuthoritativeARM64Fixtures()
+	fixtures := getARM64CompatibilityFixtures()
 	for i := 1; i < len(fixtures); i++ {
 		prev := fixtures[i-1]
 		curr := fixtures[i]

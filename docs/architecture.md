@@ -209,7 +209,7 @@ If `memfd_create` or memory sealing is restricted by a locked-down seccomp polic
 
 ## 8. ARM64 (aarch64) Microarchitecture Matrix
 
-Microfat supports ARM64 microarchitecture levels aligned with the Go compiler `GOARM64` specification (`v8.0` through `v9.5`):
+Microfat provides an ARM64 compatibility model based on the Arm Architecture Reference Manual (ARM DDI 0487) ISA specifications and aligned with the Go compiler `GOARM64` level hierarchy (`v8.0` through `v9.5`):
 
 | Level | Compiler Flag | Key Instruction Set Extensions | Target Cloud Silicon & Hardware |
 | :--- | :--- | :--- | :--- |
@@ -230,10 +230,10 @@ Microfat supports ARM64 microarchitecture levels aligned with the Go compiler `G
 
 ### Architectural Layering: Compiler Semantics vs Runtime Probing vs ISA
 
-Microfat strictly separates three concepts:
-1. **Go Toolchain Semantics (`GOARM64`)**: The compiler emits instruction subsets gated by compile-time flags (`GOARM64=v8.0`..`v9.5`). Build artifacts assume all prerequisite features are available.
-2. **Runtime CPU Probing (`auxv` / `CPUID`)**: The launcher stub never assumes compilation targets. It probes the host kernel via Linux Auxiliary Vectors (`AT_HWCAP`, `AT_HWCAP2`) or CPUID registers to dynamically match the highest satisfied tier.
-3. **ARM Architecture Reference Manual ISA**: Feature dependencies form a directed acyclic graph (DAG). Missing any intermediate prerequisite safely degrades execution to the highest compatible parent tier.
+Microfat strictly distinguishes between three complementary layers:
+1. **Go Toolchain Target Levels (`GOARM64`)**: The Go toolchain (`src/internal/buildcfg/cfg.go`) defines accepted compilation targets (`GOARM64=v8.0`..`v9.5`). The compiler emits instruction subsets gated by compile-time flags (e.g., mandatory LSE atomics starting at `v8.1`).
+2. **Microfat ARM ISA Compatibility Model**: Microfat defines a granular, forward-compatible hardware capability contract derived from Arm Architecture Reference Manual Armv8-A / Armv9-A specifications for each milestone (including `v8.8` MOPS/NMI/HBC and `v8.9` GCS/THE).
+3. **Runtime CPU Probing (`auxv` / `AT_HWCAP`)**: The launcher stub never assumes compilation targets. It probes the host kernel via Linux Auxiliary Vectors (`AT_HWCAP`, `AT_HWCAP2`) or Darwin `sysctl` to dynamically match the highest satisfied tier, safely degrading execution if any prerequisite is missing.
 
 ### Dual-Tier CPU Feature Probing Architecture
 
