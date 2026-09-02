@@ -107,7 +107,7 @@ func TestConcurrentCacheRacingStress(t *testing.T) {
 		mu.Unlock()
 		target := argv0
 		if link, err := os.Readlink(argv0); err == nil {
-			target = link
+			target = strings.TrimSuffix(link, " (deleted)")
 		}
 		if target != expectedTarget {
 			t.Errorf("execve target mismatch: got %q, want %q", target, expectedTarget)
@@ -263,7 +263,7 @@ func TestSimulatedSeccompMemfdFallback(t *testing.T) {
 	execveFunc = func(argv0 string, argv []string, envv []string) error {
 		target := argv0
 		if link, err := os.Readlink(argv0); err == nil {
-			target = link
+			target = strings.TrimSuffix(link, " (deleted)")
 		}
 		if target == expectedTarget {
 			cacheExecuted = true
@@ -744,7 +744,7 @@ func TestMemfdSealingGracefulFallback(t *testing.T) {
 			execveFunc = func(argv0 string, argv []string, envv []string) error {
 				target := argv0
 				if link, err := os.Readlink(argv0); err == nil {
-					target = link
+					target = strings.TrimSuffix(link, " (deleted)")
 				}
 				if target == expectedTarget {
 					cacheExecuted = true

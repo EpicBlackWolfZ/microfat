@@ -27,7 +27,13 @@ const (
 	privateExecMode     = 0o700
 	extraEnvCapacity    = 16
 	verifyBufferSize    = 32768
-	memfdTargetSeals    = unix.F_SEAL_WRITE | unix.F_SEAL_SHRINK | unix.F_SEAL_GROW | unix.F_SEAL_SEAL
+	// memfdTargetSeals defines the mandatory Linux kernel memory file descriptor seals applied to
+	// anonymous RAM payloads prior to execution via /proc/self/fd/<fd>.
+	// - F_SEAL_WRITE: prevents any modification of the decompressed binary code in memory.
+	// - F_SEAL_SHRINK & F_SEAL_GROW: prevents truncation or expansion of the memory region.
+	// - F_SEAL_SEAL: permanently locks the seal set, preventing any further seals or unsealing.
+	// This ensures cryptographic integrity and memory safety against runtime tampering or write races.
+	memfdTargetSeals = unix.F_SEAL_WRITE | unix.F_SEAL_SHRINK | unix.F_SEAL_GROW | unix.F_SEAL_SEAL
 )
 
 var (
@@ -361,6 +367,12 @@ func logErrorDiagnostics(
 	}
 }
 
+// executeViaMemfd creates an anonymous, in-memory ELF file descriptor using memfd_create with MFD_ALLOW_SEALING,
+// decompresses the selected variant payload into RAM, verifies its cryptographic digest, applies mandatory
+// descriptor seals (F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) to guarantee immutability,
+// and replaces the process image via execve on /proc/self/fd/<fd>.
+// If memfd creation or sealing fails (e.g. due to restrictive seccomp profiles or unsupported kernel versions),
+// it returns an error allowing auto-dispatch to fall back to hardened descriptor-bound cache execution.
 func executeViaMemfd(
 	selfFile *os.File,
 	entry *format.VariantEntry,

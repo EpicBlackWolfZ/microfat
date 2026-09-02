@@ -1318,7 +1318,7 @@ func TestStubPrewarmAndCacheDispatch(t *testing.T) {
 	defer func() { execveFunc = oldExec }()
 	execveFunc = func(argv0 string, argv []string, envv []string) error {
 		if link, err := os.Readlink(argv0); err == nil {
-			executedPath = link
+			executedPath = strings.TrimSuffix(link, " (deleted)")
 		} else {
 			executedPath = argv0
 		}
@@ -1395,7 +1395,7 @@ func TestExecuteVariant_SyscallMocking(t *testing.T) {
 			var executedBinary string
 			execveFunc = func(argv0 string, argv []string, envv []string) error {
 				if link, err := os.Readlink(argv0); err == nil {
-					executedBinary = link
+					executedBinary = strings.TrimSuffix(link, " (deleted)")
 				} else {
 					executedBinary = argv0
 				}
@@ -1435,7 +1435,7 @@ func TestExecuteVariant_TruncatedCacheRecovery(t *testing.T) {
 	var executedPath string
 	execveFunc = func(argv0 string, argv []string, envv []string) error {
 		if link, err := os.Readlink(argv0); err == nil {
-			executedPath = link
+			executedPath = strings.TrimSuffix(link, " (deleted)")
 		} else {
 			executedPath = argv0
 		}
@@ -2388,7 +2388,7 @@ func TestExplicitMemfdModeEnforcement(t *testing.T) {
 		execveFunc = func(argv0 string, argv []string, envv []string) error {
 			target := argv0
 			if link, err := os.Readlink(argv0); err == nil {
-				target = link
+				target = strings.TrimSuffix(link, " (deleted)")
 			}
 			if target == expectedTarget {
 				cacheExecuted = true
