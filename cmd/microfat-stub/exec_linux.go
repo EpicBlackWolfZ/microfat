@@ -131,6 +131,16 @@ func executeVariant(
 	return executeViaCache(selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, err, startTime)
 }
 
+func upsertEnv(env []string, keyIndex map[string]int, key, val string) []string {
+	entry := key + "=" + val
+	if idx, exists := keyIndex[key]; exists {
+		env[idx] = entry
+		return env
+	}
+	keyIndex[key] = len(env)
+	return append(env, entry)
+}
+
 func buildAutoTunedEnviron(
 	baseEnv []string,
 	entry *format.VariantEntry,
@@ -138,24 +148,34 @@ func buildAutoTunedEnviron(
 	hostInfo microarch.Info,
 	policyRes microarch.PolicyResult,
 ) ([]string, *cgroup.Limits) {
-	env := make([]string, len(baseEnv), len(baseEnv)+extraEnvCapacity)
-	copy(env, baseEnv)
+	env := make([]string, 0, len(baseEnv)+extraEnvCapacity)
+	keyIndex := make(map[string]int, len(baseEnv)+extraEnvCapacity)
 
-	env = append(env,
-		fmt.Sprintf("%s=%s", format.EnvSelectedVariant, entry.Level),
-		fmt.Sprintf("%s=%s", format.EnvHostArch, hostInfo.Arch),
-		fmt.Sprintf("%s=%s", format.EnvHostLevel, hostInfo.Level),
-		fmt.Sprintf("%s=%s", format.EnvExecMode, execMode),
-		fmt.Sprintf("%s=%s", format.EnvDispatchMode, execMode),
-		fmt.Sprintf("%s=%s", format.EnvSelectedSHA256, entry.SHA256),
-		fmt.Sprintf("%s=%d", format.EnvSelectedSize, entry.UncompressedSize),
-	)
+	for _, e := range baseEnv {
+		k, _, found := strings.Cut(e, "=")
+		if !found || k == "" {
+			env = append(env, e)
+			continue
+		}
+		if idx, exists := keyIndex[k]; exists {
+			env[idx] = e
+		} else {
+			keyIndex[k] = len(env)
+			env = append(env, e)
+		}
+	}
+
+	env = upsertEnv(env, keyIndex, format.EnvSelectedVariant, entry.Level)
+	env = upsertEnv(env, keyIndex, format.EnvHostArch, hostInfo.Arch)
+	env = upsertEnv(env, keyIndex, format.EnvHostLevel, hostInfo.Level)
+	env = upsertEnv(env, keyIndex, format.EnvExecMode, execMode)
+	env = upsertEnv(env, keyIndex, format.EnvDispatchMode, execMode)
+	env = upsertEnv(env, keyIndex, format.EnvSelectedSHA256, entry.SHA256)
+	env = upsertEnv(env, keyIndex, format.EnvSelectedSize, strconv.FormatInt(entry.UncompressedSize, 10))
 
 	if policyRes.PolicyApplied != "" {
-		env = append(env,
-			fmt.Sprintf("%s=%s", format.EnvPolicyApplied, policyRes.PolicyApplied),
-			fmt.Sprintf("%s=%s", format.EnvOverrideReason, policyRes.OverrideReason),
-		)
+		env = upsertEnv(env, keyIndex, format.EnvPolicyApplied, policyRes.PolicyApplied)
+		env = upsertEnv(env, keyIndex, format.EnvOverrideReason, policyRes.OverrideReason)
 	}
 
 	limits, err := readCgroupLimitsFunc()
@@ -170,11 +190,9 @@ func buildAutoTunedEnviron(
 		return env, nil
 	}
 
-	env = append(env,
-		fmt.Sprintf("%s=%d", format.EnvCgroupVersion, limits.CgroupVersion),
-		fmt.Sprintf("%s=%d", format.EnvCgroupLimitBytes, limits.MemoryLimitBytes),
-		fmt.Sprintf("%s=%.2f", format.EnvCgroupCPUs, limits.CPUQuota),
-	)
+	env = upsertEnv(env, keyIndex, format.EnvCgroupVersion, strconv.Itoa(limits.CgroupVersion))
+	env = upsertEnv(env, keyIndex, format.EnvCgroupLimitBytes, strconv.FormatInt(limits.MemoryLimitBytes, 10))
+	env = upsertEnv(env, keyIndex, format.EnvCgroupCPUs, fmt.Sprintf("%.2f", limits.CPUQuota))
 
 	gcProfile, _ := cgroup.ParseGCProfile(os.Getenv(format.EnvGCProfile))
 	liveHeap, _ := cgroup.ParseByteSize(os.Getenv(format.EnvLiveHeapEstimate))
@@ -188,16 +206,16 @@ func buildAutoTunedEnviron(
 		liveHeap,
 	)
 	if plan.GOMEMLIMITStr != "" {
-		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGOMEMLIMIT, plan.GOMEMLIMITStr))
+		env = upsertEnv(env, keyIndex, format.EnvCgroupGOMEMLIMIT, plan.GOMEMLIMITStr)
 	}
 	if plan.GOMAXPROCSStr != "" {
-		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGOMAXPROCS, plan.GOMAXPROCSStr))
+		env = upsertEnv(env, keyIndex, format.EnvCgroupGOMAXPROCS, plan.GOMAXPROCSStr)
 	}
 	if plan.GOGCStr != "" {
-		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGOGC, plan.GOGCStr))
+		env = upsertEnv(env, keyIndex, format.EnvCgroupGOGC, plan.GOGCStr)
 	}
 	if plan.GCProfile != cgroup.GCProfileDefault {
-		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGCProfile, string(plan.GCProfile)))
+		env = upsertEnv(env, keyIndex, format.EnvCgroupGCProfile, string(plan.GCProfile))
 	}
 
 	// Check if user opted out of auto-tuning
@@ -206,31 +224,14 @@ func buildAutoTunedEnviron(
 		return env, &limits
 	}
 
-	hasMemLimit := false
-	hasMaxProcs := false
-	hasGOGC := false
-	for _, e := range baseEnv {
-		if strings.HasPrefix(e, "GOMEMLIMIT=") {
-			hasMemLimit = true
-		}
-		if strings.HasPrefix(e, "GOMAXPROCS=") {
-			hasMaxProcs = true
-		}
-		if strings.HasPrefix(e, "GOGC=") {
-			hasGOGC = true
-		}
+	if _, hasMem := keyIndex["GOMEMLIMIT"]; !hasMem && plan.GOMEMLIMITStr != "" {
+		env = upsertEnv(env, keyIndex, "GOMEMLIMIT", plan.GOMEMLIMITStr)
 	}
-
-	if !hasMemLimit && plan.GOMEMLIMITStr != "" {
-		env = append(env, fmt.Sprintf("GOMEMLIMIT=%s", plan.GOMEMLIMITStr))
+	if _, hasProcs := keyIndex["GOMAXPROCS"]; !hasProcs && plan.GOMAXPROCSStr != "" {
+		env = upsertEnv(env, keyIndex, "GOMAXPROCS", plan.GOMAXPROCSStr)
 	}
-
-	if !hasMaxProcs && plan.GOMAXPROCSStr != "" {
-		env = append(env, fmt.Sprintf("GOMAXPROCS=%s", plan.GOMAXPROCSStr))
-	}
-
-	if !hasGOGC && plan.GOGCApplied && plan.GOGCStr != "" {
-		env = append(env, fmt.Sprintf("GOGC=%s", plan.GOGCStr))
+	if _, hasGC := keyIndex["GOGC"]; !hasGC && plan.GOGCApplied && plan.GOGCStr != "" {
+		env = upsertEnv(env, keyIndex, "GOGC", plan.GOGCStr)
 	}
 
 	return env, &limits

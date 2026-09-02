@@ -31,6 +31,7 @@ const (
 	testPolicyForceLevel = "force_level"
 	testPathEnv          = "PATH=/bin"
 	testAppArg           = "app"
+	testForceLevelV3     = "MICROFAT_FORCE_LEVEL=v3"
 )
 
 func TestPrintHelpAndInfo(t *testing.T) {
@@ -95,7 +96,7 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 	testPolicyRes := microarch.PolicyResult{
 		SelectedVariant: "v3",
 		PolicyApplied:   testPolicyForceLevel,
-		OverrideReason:  "MICROFAT_FORCE_LEVEL=v3",
+		OverrideReason:  testForceLevelV3,
 	}
 
 	// 1. Standard auto-tune with metadata injection
@@ -282,6 +283,80 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 	_ = printInfo(idx, hostInfo, &idx.Variants[0], microarch.PolicyResult{}, 1000, true)
 }
 
+func TestBuildAutoTunedEnviron_DeduplicationAndReplacement(t *testing.T) {
+	entry := &format.VariantEntry{
+		Level:            "v3",
+		SHA256:           "abcdef123456",
+		UncompressedSize: 1000,
+	}
+	hostInfo := microarch.Info{
+		OS:       testOSLinux,
+		Arch:     testArchAMD64,
+		Level:    "v3",
+		Features: []string{"avx", "avx2"},
+	}
+	testPolicyRes := microarch.PolicyResult{
+		SelectedVariant: "v3",
+		PolicyApplied:   testPolicyForceLevel,
+		OverrideReason:  testForceLevelV3,
+	}
+
+	base := []string{
+		"PATH=/usr/bin",
+		"USER=test",
+		"NO_EQUALS_ENTRY",
+		"=LEADING_EQUALS",
+		"MICROFAT_EXEC_MODE=cache",
+		"MICROFAT_SELECTED_VARIANT=v1",
+		"MICROFAT_HOST_ARCH=arm64",
+		"MICROFAT_HOST_LEVEL=v8.0",
+		"MICROFAT_CGROUP_VERSION=1",
+		"GOMEMLIMIT=256MiB",
+		"GOMEMLIMIT=1GiB",
+		"GOMAXPROCS=2",
+		"GOMAXPROCS=4",
+	}
+
+	env, _ := buildAutoTunedEnviron(base, entry, format.ExecModeMemfd, hostInfo, testPolicyRes)
+
+	// Verify all keys are strictly unique
+	seenKeys := make(map[string]int)
+	for _, e := range env {
+		key, _, found := strings.Cut(e, "=")
+		if found && key != "" {
+			seenKeys[key]++
+			if seenKeys[key] > 1 {
+				t.Errorf("duplicate key %q found %d times in environment: %v", key, seenKeys[key], env)
+			}
+		}
+	}
+
+	// Verify launcher-owned keys replaced stale values from baseEnv
+	expectedValues := map[string]string{
+		format.EnvSelectedVariant: "v3",
+		format.EnvHostArch:        testArchAMD64,
+		format.EnvHostLevel:       "v3",
+		format.EnvExecMode:        format.ExecModeMemfd,
+		format.EnvDispatchMode:    format.ExecModeMemfd,
+		"GOMEMLIMIT":              "1GiB", // User-specified override preserved from later base entry
+		"GOMAXPROCS":              "4",    // User-specified override preserved from later base entry
+	}
+
+	for k, expectedVal := range expectedValues {
+		expectedEntry := fmt.Sprintf("%s=%s", k, expectedVal)
+		var found bool
+		for _, e := range env {
+			if e == expectedEntry {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected %q in environment, but not found or value mismatch. env: %v", expectedEntry, env)
+		}
+	}
+}
+
 func TestLogDiagnostics(t *testing.T) {
 	entry := &format.VariantEntry{Level: "v3", SHA256: "abc123hash", UncompressedSize: 2048}
 	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
@@ -293,7 +368,7 @@ func TestLogDiagnostics(t *testing.T) {
 		CPUs:             4,
 	}
 
-	policyRes := microarch.PolicyResult{PolicyApplied: testPolicyForceLevel, OverrideReason: "MICROFAT_FORCE_LEVEL=v3"}
+	policyRes := microarch.PolicyResult{PolicyApplied: testPolicyForceLevel, OverrideReason: testForceLevelV3}
 
 	// Text debug output
 	t.Setenv("MICROFAT_DEBUG", "1")
@@ -1525,7 +1600,7 @@ func TestExecuteVariant_StrictEnvironmentMatrix(t *testing.T) {
 		policyRes := microarch.PolicyResult{
 			SelectedVariant: "v3",
 			PolicyApplied:   testPolicyForceLevel,
-			OverrideReason:  "MICROFAT_FORCE_LEVEL=v3",
+			OverrideReason:  testForceLevelV3,
 		}
 		base := []string{"USER=deployer", "LANG=en_US.UTF-8"}
 
@@ -1553,7 +1628,7 @@ func TestExecuteVariant_StrictEnvironmentMatrix(t *testing.T) {
 			format.EnvSelectedSHA256:  entry.SHA256,
 			format.EnvSelectedSize:    fmt.Sprintf("%d", entry.UncompressedSize),
 			format.EnvPolicyApplied:   testPolicyForceLevel,
-			format.EnvOverrideReason:  "MICROFAT_FORCE_LEVEL=v3",
+			format.EnvOverrideReason:  testForceLevelV3,
 		}
 
 		for k, expVal := range expected {
