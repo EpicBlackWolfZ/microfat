@@ -2636,6 +2636,46 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 			t.Fatalf("expected cache execve failed error without primary memfd error, got %v", err)
 		}
 	})
+
+	t.Run("OpenCachedBinaryFailure_CleansUpDestinationBinary", func(t *testing.T) {
+		cacheHome := filepath.Join(tmpDir, "cache_open_fail")
+		microfatCache := filepath.Join(cacheHome, "microfat")
+		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		t.Setenv("XDG_CACHE_HOME", cacheHome)
+
+		origOpen := openCachedBinaryFunc
+		defer func() { openCachedBinaryFunc = origOpen }()
+
+		callCount := 0
+		openCachedBinaryFunc = func(path string) (int, error) {
+			callCount++
+			if callCount == 1 {
+				// Initial check before extraction: report not existing
+				return -1, os.ErrNotExist
+			}
+			// Second call after extraction and rename: simulate failure to open
+			return -1, errors.New("simulated open error after rename")
+		}
+
+		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		if err == nil {
+			t.Fatalf("expected error when openCachedBinary fails after rename, got nil")
+		}
+
+		// Verify that cachedBinary was removed so no defective file lingers
+		cachedBinary := filepath.Join(microfatCache, entry.SHA256)
+		if _, statErr := os.Stat(cachedBinary); !os.IsNotExist(statErr) {
+			t.Errorf("expected cached binary %s to be removed on open failure, stat err: %v", cachedBinary, statErr)
+		}
+
+		// Verify no temporary files remain
+		tmpMatches, _ := filepath.Glob(filepath.Join(microfatCache, ".exec-*.tmp"))
+		if len(tmpMatches) > 0 {
+			t.Errorf("expected no temporary files remaining in cache, found: %v", tmpMatches)
+		}
+	})
 }
 
 func TestCacheExecution_SymlinkRefusalAndTOCTOUDefense(t *testing.T) {
