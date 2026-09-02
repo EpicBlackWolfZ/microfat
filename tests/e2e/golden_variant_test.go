@@ -87,12 +87,13 @@ func TestGoldenVariantSelection_Deterministic(t *testing.T) {
 
 	t.Run("Scenario6_MaxLevelCapV2", func(t *testing.T) {
 		t.Parallel()
+		if !hostSupportsAtLeastTier2() {
+			t.Skipf("host level %s is baseline tier, skipping max level v2 test", currentHostLevel)
+		}
+
 		targetCap := "v2"
 		if currentHostArch == archARM64 {
 			targetCap = "v8.2"
-		}
-		if !isLevelSupported(currentHostArch, currentHostLevel, targetCap) {
-			t.Skipf("host level %s does not support >= %s, skipping max level test", currentHostLevel, targetCap)
 		}
 
 		env := []string{
@@ -108,14 +109,15 @@ func TestGoldenVariantSelection_Deterministic(t *testing.T) {
 
 	t.Run("Scenario7_DisabledVariantsFallbackToV2", func(t *testing.T) {
 		t.Parallel()
+		if !hostSupportsAtLeastTier2() {
+			t.Skipf("host level %s is baseline tier, skipping fallback v2 test", currentHostLevel)
+		}
+
 		targetFallback := "v2"
 		disabledVal := "v3,v4"
 		if currentHostArch == archARM64 {
 			targetFallback = "v8.2"
 			disabledVal = "v9.0"
-		}
-		if !isLevelSupported(currentHostArch, currentHostLevel, targetFallback) {
-			t.Skipf("host level %s does not support >= %s, skipping fallback test", currentHostLevel, targetFallback)
 		}
 
 		env := []string{
@@ -171,4 +173,11 @@ func TestGoldenVariantSelection_Deterministic(t *testing.T) {
 			t.Fatalf("expected 'no compatible microarchitecture variant found' in stderr, got:\n%s", stderr)
 		}
 	})
+}
+
+// hostSupportsAtLeastTier2 returns true if the host CPU microarchitecture meets or exceeds
+// the second capability tier (e.g. >= v2 on amd64 or >= v8.2 on arm64). Hosts with only baseline
+// v1/v8.0 are skipped for tier-2 cap and fallback tests.
+func hostSupportsAtLeastTier2() bool {
+	return currentHostLevel != "v1" && currentHostLevel != "v8.0"
 }

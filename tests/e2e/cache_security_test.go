@@ -109,9 +109,7 @@ func TestCacheSecurityAndFilesystemInvariants(t *testing.T) {
 		cachedPath := filepath.Join(cacheDir, entries[0].Name())
 
 		// Truncate cached binary to 128 bytes
-		if err := os.Truncate(cachedPath, truncatedSizeBytes); err != nil {
-			t.Fatalf("truncating %s: %v", cachedPath, err)
-		}
+		truncateFile(t, cachedPath, truncatedSizeBytes)
 
 		// Execution must detect size mismatch, purge truncated binary, re-extract and succeed
 		stdout, stderr, exitCode, err := executeFatBinary(t, goldenFatBin, env)

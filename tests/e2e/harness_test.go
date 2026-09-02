@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -124,6 +125,13 @@ func runSetupAndExecute(m *testing.M) int {
 	}
 
 	// 5. Compile golden application variants
+	//
+	// Architecture Note on Variant Fixtures:
+	// TestMain intentionally compiles and packs only native-executable golden variants for the host
+	// architecture (e.g. amd64 v1..v4 or arm64 v8.0..v9.0) to ensure every dispatch scenario can be executed
+	// directly on the host kernel without requiring cross-architecture emulation.
+	// Cross-architecture ELF handling (Scenario 36) isolates foreign cross-compilation strictly to that
+	// single negative packaging rejection test.
 	variantsDir := filepath.Join(e2eRootDir, "variants")
 	if err := os.MkdirAll(variantsDir, defaultFilePerm); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create variants directory: %v\n", err)
@@ -280,19 +288,6 @@ func assertSelectedMatchesExecuted(t testing.TB, stdout, stderr, expectedVariant
 	}
 }
 
-// isLevelSupported returns true if the host microarchitecture level meets or exceeds the required level.
-func isLevelSupported(arch, currentLevel, requiredLevel string) bool {
-	if arch == archAMD64 {
-		ranks := map[string]int{"v1": 1, "v2": 2, "v3": 3, "v4": 4}
-		return ranks[currentLevel] >= ranks[requiredLevel]
-	}
-	if arch == archARM64 {
-		ranks := map[string]int{"v8.0": 1, "v8.2": 2, "v9.0": 3}
-		return ranks[currentLevel] >= ranks[requiredLevel]
-	}
-	return currentLevel == requiredLevel
-}
-
 func copyFile(t testing.TB, src, dst string) int64 {
 	t.Helper()
 	srcFile, err := os.Open(src)
@@ -330,7 +325,22 @@ func copyFile(t testing.TB, src, dst string) int64 {
 
 func mutateFileBytes(t testing.TB, path string, offset int64, patch []byte) {
 	t.Helper()
-	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	var f *os.File
+	var err error
+
+	// If the file was recently executed by a preceding test step, Linux kernel VM_DENYWRITE
+	// cleanup may briefly defer clearing write denial. Retry open(O_WRONLY) if busy.
+	const maxOpenAttempts = 5
+	const openRetryDelay = 10 * time.Millisecond
+
+	for attempt := 0; attempt < maxOpenAttempts; attempt++ {
+		f, err = os.OpenFile(path, os.O_WRONLY, 0)
+		if err != nil && errors.Is(err, syscall.ETXTBSY) {
+			time.Sleep(openRetryDelay)
+			continue
+		}
+		break
+	}
 	if err != nil {
 		t.Fatalf("opening %s for mutation: %v", path, err)
 	}
@@ -350,6 +360,23 @@ func mutateFileBytes(t testing.TB, path string, offset int64, patch []byte) {
 
 	// Yield briefly during fixture construction to let kernel delayed_fput drain writecount
 	time.Sleep(10 * time.Millisecond)
+}
+
+func truncateFile(t testing.TB, path string, size int64) {
+	t.Helper()
+	const maxAttempts = 5
+	const retryDelay = 10 * time.Millisecond
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		err := os.Truncate(path, size)
+		if err != nil && errors.Is(err, syscall.ETXTBSY) {
+			time.Sleep(retryDelay)
+			continue
+		}
+		if err != nil {
+			t.Fatalf("truncating %s: %v", path, err)
+		}
+		return
+	}
 }
 
 func readTrailerAndIndex(t testing.TB, binPath string) (BinaryTrailer, *format.Index) {
