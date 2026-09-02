@@ -2431,5 +2431,120 @@ func TestStub_SecurityInvariants(t *testing.T) {
 	})
 }
 
+func TestExecuteViaCache_InstallationFailures(t *testing.T) {
+	tmpDir := t.TempDir()
+	payload := []byte("hello cache installation failure test payload")
+	entry, rawFile := createDummyVariantFile(t, tmpDir, payload)
+	defer rawFile.Close()
+	entry.Compression = "zstd"
+
+	hostInfo := microarch.Info{
+		OS:    testOSLinux,
+		Arch:  testArchAMD64,
+		Level: "v1",
+	}
+	policyRes := microarch.PolicyResult{
+		SelectedVariant: "v1",
+	}
+
+	t.Run("RenameFailure_WhenTargetIsDirectory", func(t *testing.T) {
+		cacheHome := filepath.Join(tmpDir, "cache_rename_fail")
+		microfatCache := filepath.Join(cacheHome, "microfat")
+		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		t.Setenv("XDG_CACHE_HOME", cacheHome)
+
+		// Create target destination as a directory so os.Rename fails with EISDIR
+		targetPath := filepath.Join(microfatCache, entry.SHA256)
+		if err := os.MkdirAll(targetPath, 0o700); err != nil {
+			t.Fatalf("mkdir targetPath failed: %v", err)
+		}
+
+		primaryErr := errors.New("simulated primary memfd exhaustion")
+		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, primaryErr, time.Now())
+		if err == nil {
+			t.Fatalf("expected error when rename fails, got nil")
+		}
+		if !errors.Is(err, format.ErrCacheWrite) {
+			t.Fatalf("expected ErrCacheWrite, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "primary memfd error: simulated primary memfd exhaustion") {
+			t.Fatalf("expected primaryErr preserved in error string, got %v", err)
+		}
+	})
+
+	t.Run("VerifyCache_CorruptedFileReextracted", func(t *testing.T) {
+		cacheHome := filepath.Join(tmpDir, "cache_verify_corrupt")
+		microfatCache := filepath.Join(cacheHome, "microfat")
+		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		t.Setenv("XDG_CACHE_HOME", cacheHome)
+		t.Setenv(format.EnvVerifyCache, "1")
+		t.Setenv(format.EnvDebug, "1")
+
+		// Create corrupted file with matching size but invalid content
+		targetPath := filepath.Join(microfatCache, entry.SHA256)
+		corruptedData := bytes.Repeat([]byte{0x42}, int(entry.UncompressedSize))
+		if err := os.WriteFile(targetPath, corruptedData, 0o700); err != nil {
+			t.Fatalf("writing corrupted file: %v", err)
+		}
+
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			return nil
+		}
+
+		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		if err != nil {
+			t.Fatalf("expected re-extraction and successful execution, got %v", err)
+		}
+	})
+
+	t.Run("TruncatedCacheFile_DebugLogging", func(t *testing.T) {
+		cacheHome := filepath.Join(tmpDir, "cache_truncated")
+		microfatCache := filepath.Join(cacheHome, "microfat")
+		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		t.Setenv("XDG_CACHE_HOME", cacheHome)
+		t.Setenv(format.EnvDebug, "1")
+
+		// Write file with wrong size
+		targetPath := filepath.Join(microfatCache, entry.SHA256)
+		if err := os.WriteFile(targetPath, []byte("short"), 0o700); err != nil {
+			t.Fatalf("writing short file: %v", err)
+		}
+
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			return nil
+		}
+
+		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		if err != nil {
+			t.Fatalf("expected re-extraction on truncated cache file, got %v", err)
+		}
+	})
+
+	t.Run("ExecveFailure_WithoutPrimaryErr", func(t *testing.T) {
+		cacheHome := filepath.Join(tmpDir, "cache_exec_fail_no_primary")
+		t.Setenv("XDG_CACHE_HOME", cacheHome)
+
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			return errors.New("execve simulated failure")
+		}
+
+		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		if err == nil {
+			t.Fatalf("expected execve failure, got nil")
+		}
+		if !strings.Contains(err.Error(), "cache execve failed") {
+			t.Fatalf("expected cache execve failed error without primary memfd error, got %v", err)
+		}
+	})
+}
+
+
+
 
 

@@ -268,4 +268,111 @@ func TestRunPropertyTestConcurrent(t *testing.T) {
 	})
 }
 
+func TestAssertCacheIsolation_InsecurePermissions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("NonExistentPath", func(t *testing.T) {
+		t.Parallel()
+		mock := &mockTB{}
+		testutil.AssertCacheIsolation(mock, "/nonexistent/path/for/isolation/test")
+		if !mock.failed {
+			t.Fatalf("expected failure for nonexistent path")
+		}
+	})
+
+	t.Run("InsecureDirPath", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		insecureDir := filepath.Join(tmpDir, "insecure_dir")
+		if err := os.MkdirAll(insecureDir, 0o777); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		mock := &mockTB{}
+		testutil.AssertCacheIsolation(mock, insecureDir)
+		if !mock.failed {
+			t.Fatalf("expected failure for 0777 directory")
+		}
+	})
+
+	t.Run("InsecureChildPath", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		cacheDir := filepath.Join(tmpDir, "cache_secure")
+		if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		insecureChild := filepath.Join(cacheDir, "insecure_file")
+		if err := os.WriteFile(insecureChild, []byte("test"), 0o666); err != nil {
+			t.Fatalf("write file failed: %v", err)
+		}
+		mock := &mockTB{}
+		testutil.AssertCacheIsolation(mock, cacheDir)
+		if !mock.failed {
+			t.Fatalf("expected failure for 0666 child file")
+		}
+	})
+}
+
+func TestAssertLevelRequirements_Failures(t *testing.T) {
+	t.Parallel()
+
+	t.Run("UnsupportedArch", func(t *testing.T) {
+		t.Parallel()
+		mock := &mockTB{}
+		testutil.AssertLevelRequirements(mock, "riscv64", "v1", nil)
+		if !mock.failed {
+			t.Fatalf("expected failure for unsupported architecture")
+		}
+	})
+
+	t.Run("AMD64Mismatch", func(t *testing.T) {
+		t.Parallel()
+		mock := &mockTB{}
+		// v3 features expected to match v1 should fail
+		testutil.AssertLevelRequirements(mock, microarch.ArchAMD64, microarch.AMD64v4, []string{"cx16"})
+		if !mock.failed {
+			t.Fatalf("expected failure for AMD64 level mismatch")
+		}
+	})
+
+	t.Run("ARM64Mismatch", func(t *testing.T) {
+		t.Parallel()
+		mock := &mockTB{}
+		testutil.AssertLevelRequirements(mock, microarch.ArchARM64, microarch.ARM64v9_5, []string{"fp", "asimd"})
+		if !mock.failed {
+			t.Fatalf("expected failure for ARM64 level mismatch")
+		}
+	})
+}
+
+func TestHelperUtilities_EdgeCases(t *testing.T) {
+	t.Parallel()
+	rng := rand.New(rand.NewPCG(42, 42))
+
+	// MutateBytes with empty slice
+	emptyMutated := testutil.MutateBytes(rng, nil, 3)
+	if len(emptyMutated) != 1 || emptyMutated[0] != 0xFF {
+		t.Fatalf("expected [0xFF] on empty MutateBytes, got %v", emptyMutated)
+	}
+
+	// MutateBytes with count <= 0
+	mutatedDef := testutil.MutateBytes(rng, []byte("abc"), 0)
+	if len(mutatedDef) != 3 {
+		t.Fatalf("expected 3 bytes mutated with count 0, got %d", len(mutatedDef))
+	}
+
+	// TruncateBytes with empty slice
+	emptyTruncated := testutil.TruncateBytes(rng, nil)
+	if len(emptyTruncated) != 0 {
+		t.Fatalf("expected empty slice from empty TruncateBytes, got %v", emptyTruncated)
+	}
+
+	// RandomPayload with length <= 0
+	emptyPayload := testutil.RandomPayload(rng, 0)
+	if len(emptyPayload) != 0 {
+		t.Fatalf("expected empty slice from RandomPayload(0), got %v", emptyPayload)
+	}
+}
+
+
 

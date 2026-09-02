@@ -139,6 +139,7 @@ func AssertLevelRequirements(t testing.TB, arch string, level string, features [
 		if detectedLevel != level {
 			t.Fatalf("AMD64 level evaluation mismatch: expected %s, got %s for features %v",
 				level, detectedLevel, features)
+			return
 		}
 	case microarch.ArchARM64:
 		arm := arm64FeaturesFromMap(featMap)
@@ -146,14 +147,17 @@ func AssertLevelRequirements(t testing.TB, arch string, level string, features [
 		if detectedLevel != level {
 			t.Fatalf("ARM64 level evaluation mismatch: expected %s, got %s for features %v",
 				level, detectedLevel, features)
+			return
 		}
 		for _, s := range statuses {
 			if s.Level == level && !s.Satisfied {
 				t.Fatalf("ARM64 status for %s reported not satisfied despite detection match", level)
+				return
 			}
 		}
 	default:
 		t.Fatalf("unsupported architecture for level requirement assertion: %s", arch)
+		return
 	}
 }
 
@@ -165,29 +169,34 @@ func AssertCacheIsolation(t testing.TB, cachePath string) {
 	info, err := os.Stat(cachePath)
 	if err != nil {
 		t.Fatalf("stat cache path %s: %v", cachePath, err)
+		return
 	}
 
 	perm := info.Mode().Perm()
 	if perm&PermMaskOtherGroup != 0 {
 		t.Fatalf("cache isolation violation: path %s has insecure permissions %04o (group/other bits set)",
 			cachePath, perm)
+		return
 	}
 
 	if info.IsDir() {
 		entries, err := os.ReadDir(cachePath)
 		if err != nil {
 			t.Fatalf("reading cache directory %s: %v", cachePath, err)
+			return
 		}
 		for _, entry := range entries {
 			childPath := filepath.Join(cachePath, entry.Name())
 			childInfo, err := entry.Info()
 			if err != nil {
 				t.Fatalf("stat cache child %s: %v", childPath, err)
+				return
 			}
 			childPerm := childInfo.Mode().Perm()
 			if childPerm&PermMaskOtherGroup != 0 {
 				t.Fatalf("cache child isolation violation: path %s has insecure permissions %04o",
 					childPath, childPerm)
+				return
 			}
 		}
 	}

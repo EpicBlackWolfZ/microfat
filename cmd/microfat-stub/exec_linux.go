@@ -476,19 +476,34 @@ func executeViaCache(
 		decompStart := time.Now()
 		if err := extractVariantToWriter(selfFile, entry, idx, tmpFile); err != nil {
 			logErrorDiagnostics(format.StageCacheExtract, err, hostInfo, entry, policyRes, "decompressing payload to cache failed")
-			return fmt.Errorf("%w: extracting to cache fallback: %w", format.ErrCacheExtract, err)
+			return fmt.Errorf("%w: extracting to cache fallback: %w (primary memfd error: %v)", format.ErrCacheExtract, err, primaryErr)
 		}
 		decompDuration = time.Since(decompStart)
 
-		_ = tmpFile.Chmod(format.PrivateExecMode)
+		if err := tmpFile.Chmod(format.PrivateExecMode); err != nil {
+			errOut := fmt.Errorf("%w: setting permissions on temp cache file %s: %w (primary memfd error: %v)",
+				format.ErrCacheWrite, tmpPath, err, primaryErr)
+			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "chmod temp cache file failed")
+			return errOut
+		}
 		if err := tmpFile.Sync(); err != nil {
-			errOut := fmt.Errorf("%w: syncing temp cache file %s: %w", format.ErrCacheWrite, tmpPath, err)
+			errOut := fmt.Errorf("%w: syncing temp cache file %s: %w (primary memfd error: %v)",
+				format.ErrCacheWrite, tmpPath, err, primaryErr)
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "syncing temp cache file failed")
 			return errOut
 		}
-		_ = tmpFile.Close()
-		// #nosec G703 -- atomic move to cache location
-		_ = os.Rename(tmpPath, cachedBinary)
+		if err := tmpFile.Close(); err != nil {
+			errOut := fmt.Errorf("%w: closing temp cache file %s: %w (primary memfd error: %v)",
+				format.ErrCacheWrite, tmpPath, err, primaryErr)
+			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "closing temp cache file failed")
+			return errOut
+		}
+		if err := os.Rename(tmpPath, cachedBinary); err != nil {
+			errOut := fmt.Errorf("%w: renaming temp cache file %s to %s: %w (primary memfd error: %v)",
+				format.ErrCacheWrite, tmpPath, cachedBinary, err, primaryErr)
+			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "renaming temp cache file failed")
+			return errOut
+		}
 	}
 
 	logDiagnostics(entry, format.ExecModeCache, hostInfo, policyRes, env, limits, decompDuration, time.Since(startTime))
