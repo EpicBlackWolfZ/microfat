@@ -74,8 +74,8 @@ fi
 
 # 2. ARM64 Fat Binary Assembly
 ARM_V80=$(resolve_variant_with_wait "dist/microfat-arm64-v8.0_linux_arm64_v8.0/microfat" "dist/microfat-arm64-v8.0_linux_arm64/microfat")
-ARM_V82=$(resolve_variant_with_wait "dist/microfat-arm64-v8.2_linux_arm64_v8.0/microfat" "dist/microfat-arm64-v8.2_linux_arm64/microfat")
-ARM_V90=$(resolve_variant_with_wait "dist/microfat-arm64-v9.0_linux_arm64_v8.0/microfat" "dist/microfat-arm64-v9.0_linux_arm64/microfat")
+ARM_V82=$(resolve_variant_with_wait "dist/microfat-arm64-v8.2_linux_arm64_v8.2/microfat" "dist/microfat-arm64-v8.2_linux_arm64/microfat")
+ARM_V90=$(resolve_variant_with_wait "dist/microfat-arm64-v9.0_linux_arm64_v9.0/microfat" "dist/microfat-arm64-v9.0_linux_arm64/microfat")
 STUB_ARM64=$(resolve_variant_with_wait "dist/microfat-stub-arm64_linux_arm64_v8.0/microfat-stub" "dist/microfat-stub-arm64_linux_arm64/microfat-stub")
 OUT_ARM64="dist/microfat_linux_arm64_fat"
 
