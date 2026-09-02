@@ -354,9 +354,6 @@ func (idx *Index) validateVariantBounds(indexOffset int64, lastEnd int64) error 
 		}
 		seenLevels[normLevel] = struct{}{}
 
-		if v.SHA256 != "" && !ValidateChecksum(v.SHA256) {
-			return fmt.Errorf("%w: invalid sha256 checksum format for variant %s: %q", ErrInvalidChecksum, v.Level, v.SHA256)
-		}
 		if v.Offset < 0 || v.CompressedSize <= 0 || v.UncompressedSize <= 0 {
 			return fmt.Errorf("%w: invalid dimensions for variant %s", ErrOutOfBounds, v.Level)
 		}
@@ -371,6 +368,14 @@ func (idx *Index) validateVariantBounds(indexOffset int64, lastEnd int64) error 
 				ErrOverlappingVariant, v.Level, v.Offset, lastEnd)
 		}
 		lastEnd = v.Offset + v.CompressedSize
+
+		if idx.Version >= FormatVersion2 {
+			if v.SHA256 == "" || !ValidateChecksum(v.SHA256) {
+				return fmt.Errorf("%w: variant %s missing or invalid sha256 checksum in Format v2", ErrInvalidChecksum, v.Level)
+			}
+		} else if v.SHA256 != "" && !ValidateChecksum(v.SHA256) {
+			return fmt.Errorf("%w: invalid sha256 checksum format for variant %s: %q", ErrInvalidChecksum, v.Level, v.SHA256)
+		}
 	}
 	return nil
 }
@@ -418,6 +423,9 @@ func MarshalBinaryIndex(idx *Index) ([]byte, error) {
 		comp := v.Compression
 		if comp == "" {
 			comp = defaultCompressionAlgorithm
+		}
+		if v.SHA256 == "" || !ValidateChecksum(v.SHA256) {
+			return nil, fmt.Errorf("%w: variant %s missing required SHA-256 digest in Format v2", ErrInvalidChecksum, v.Level)
 		}
 		if len(v.Level) > 255 || len(v.SHA256) > 255 || len(comp) > 255 {
 			return nil, fmt.Errorf("variant %s field length exceeds binary format limits", v.Level)
@@ -616,6 +624,9 @@ func UnmarshalBinaryIndex(data []byte) (*Index, error) {
 		}
 		shaStr := string(data[offset : offset+shaLen])
 		offset += shaLen
+		if shaStr == "" || !ValidateChecksum(shaStr) {
+			return nil, fmt.Errorf("%w: variant %d missing or invalid sha256 checksum in Format v2", ErrInvalidChecksum, i)
+		}
 
 		if offset >= len(data) {
 			return nil, fmt.Errorf("%w: truncated variant %d compression length", ErrTruncatedIndex, i)

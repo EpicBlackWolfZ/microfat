@@ -422,7 +422,7 @@ func TestTrimBinaryEdgeCases(t *testing.T) {
 		TargetArch:  testArchAMD64,
 		CreatedUnix: 1000,
 		Variants: []format.VariantEntry{
-			{Level: "v1", Offset: 0, CompressedSize: 10, UncompressedSize: 10},
+			{Level: "v1", Offset: 0, CompressedSize: 10, UncompressedSize: 10, SHA256: testValidSHA256},
 		},
 	}
 	var bufInvalidStub bytes.Buffer
@@ -440,7 +440,7 @@ func TestTrimBinaryEdgeCases(t *testing.T) {
 		TargetArch:  testArchAMD64,
 		CreatedUnix: 1000,
 		Variants: []format.VariantEntry{
-			{Level: "v1", Offset: 5, CompressedSize: 5, UncompressedSize: 5},
+			{Level: "v1", Offset: 5, CompressedSize: 5, UncompressedSize: 5, SHA256: testValidSHA256},
 		},
 	}
 	var bufValid bytes.Buffer
@@ -835,9 +835,10 @@ func TestPrewarmVariantAndBinary(t *testing.T) {
 	}
 	var v1Res, v3Res format.PrewarmResult
 	for _, r := range resultsAll {
-		if r.Level == "v1" {
+		switch r.Level {
+		case "v1":
 			v1Res = r
-		} else if r.Level == "v3" {
+		case "v3":
 			v3Res = r
 		}
 	}
@@ -988,11 +989,12 @@ func TestVerifyCacheVariantAndBinary(t *testing.T) {
 		t.Fatalf("VerifyCacheBinary failed on mixed cache: %v", err)
 	}
 	for _, r := range mixedResults {
-		if r.Level == "v1" {
+		switch r.Level {
+		case "v1":
 			if !r.Valid || r.Status != format.PrewarmStatusValid {
 				t.Errorf("expected v1 to be valid, got %+v", r)
 			}
-		} else if r.Level == "v3" {
+		case "v3":
 			if r.Valid || r.Status != format.PrewarmStatusMissing {
 				t.Errorf("expected v3 to be missing, got %+v", r)
 			}
@@ -1316,8 +1318,8 @@ func BenchmarkPack(b *testing.B) {
 		b.Run(strconv.Itoa(count)+"Variants", func(b *testing.B) {
 			stubPath, variants, tempDir := createBenchmarkFixture(b, count)
 			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			var i int
+			for b.Loop() {
 				outPath := filepath.Join(tempDir, "out-"+strconv.Itoa(i))
 				opts := Options{
 					StubPath:          stubPath,
@@ -1333,6 +1335,7 @@ func BenchmarkPack(b *testing.B) {
 					b.Fatalf("Pack failed: %v", err)
 				}
 				_ = os.Remove(outPath)
+				i++
 			}
 		})
 	}
@@ -1363,8 +1366,7 @@ func BenchmarkVerifyBinary(b *testing.B) {
 	totalSize := int64(len(data))
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, results, err := VerifyBinary(reader, totalSize)
 		if err != nil || len(results) != 4 {
 			b.Fatalf("VerifyBinary failed: %v", err)
@@ -1397,8 +1399,7 @@ func BenchmarkTrimBinary(b *testing.B) {
 	totalSize := int64(len(data))
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := TrimBinary(reader, totalSize, "v3", io.Discard)
 		if err != nil {
 			b.Fatalf("TrimBinary failed: %v", err)
@@ -1438,8 +1439,7 @@ func BenchmarkPrewarmBinary(b *testing.B) {
 
 	b.Run("CachedHit", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, results, err := PrewarmBinary(reader, totalSize, nil, cacheDir)
 			if err != nil || len(results) != 4 {
 				b.Fatalf("PrewarmBinary failed: %v", err)
@@ -1449,8 +1449,7 @@ func BenchmarkPrewarmBinary(b *testing.B) {
 
 	b.Run("VerifyCacheBinary", func(b *testing.B) {
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, results, err := VerifyCacheBinary(reader, totalSize, nil, cacheDir)
 			if err != nil || len(results) != 4 {
 				b.Fatalf("VerifyCacheBinary failed: %v", err)
@@ -1876,6 +1875,7 @@ func TestPack_OversizedDictionaryGuard(t *testing.T) {
 				Offset:           format.MaxDictionarySize + 2048,
 				CompressedSize:   100,
 				UncompressedSize: 100,
+				SHA256:           testValidSHA256,
 			},
 		},
 	}
@@ -2412,6 +2412,3 @@ func TestValidateOptions_ELFValidationErrors(t *testing.T) {
 		}
 	})
 }
-
-
-

@@ -123,7 +123,14 @@ func TestReadTrailerErrors(t *testing.T) {
 		TargetOS:   testOSLinux,
 		TargetArch: testArchAMD64,
 		Variants: []VariantEntry{
-			{Level: "v1", Offset: 100, CompressedSize: 200, UncompressedSize: 400, Compression: testCompression},
+			{
+				Level:            "v1",
+				Offset:           100,
+				CompressedSize:   200,
+				UncompressedSize: 400,
+				SHA256:           testSHA256Sample,
+				Compression:      testCompression,
+			},
 		},
 	}
 	_, err = WriteIndexAndTrailer(buf, idx, 500)
@@ -213,6 +220,7 @@ func TestValidateBoundsErrors(t *testing.T) {
 				Offset:           100,
 				CompressedSize:   300,
 				UncompressedSize: 500,
+				SHA256:           testSHA256Sample,
 				Compression:      testCompression,
 			},
 			{
@@ -220,6 +228,7 @@ func TestValidateBoundsErrors(t *testing.T) {
 				Offset:           250, // Overlaps with v1 (ends at 400)
 				CompressedSize:   200,
 				UncompressedSize: 500,
+				SHA256:           testSHA256Sample,
 				Compression:      testCompression,
 			},
 		},
@@ -896,9 +905,8 @@ func BenchmarkUnmarshalJSONIndex(b *testing.B) {
 		b.Fatalf("json.Marshal failed: %v", err)
 	}
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := unmarshalJSONIndex(jsonBytes)
 		if err != nil {
 			b.Fatalf("unmarshalJSONIndex failed: %v", err)
@@ -937,9 +945,8 @@ func BenchmarkUnmarshalBinaryIndex(b *testing.B) {
 		b.Fatalf("MarshalBinaryIndex failed: %v", err)
 	}
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := UnmarshalBinaryIndex(binBytes)
 		if err != nil {
 			b.Fatalf("UnmarshalBinaryIndex failed: %v", err)
@@ -1126,8 +1133,8 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 			DictionaryOffset: 1000,
 			DictionarySize:   500,
 			Variants: []VariantEntry{
-				{Level: "v1", Offset: 1500, CompressedSize: 500, UncompressedSize: 1000},
-				{Level: "v2", Offset: 2000, CompressedSize: 500, UncompressedSize: 1000},
+				{Level: "v1", Offset: 1500, CompressedSize: 500, UncompressedSize: 1000, SHA256: testSHA256Sample},
+				{Level: "v2", Offset: 2000, CompressedSize: 500, UncompressedSize: 1000, SHA256: testSHA256Sample},
 			},
 		}
 		if err := idx.ValidateBounds(3000); err != nil {
@@ -1207,7 +1214,7 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 			DictionaryOffset: 1000,
 			DictionarySize:   MaxDictionarySize,
 			Variants: []VariantEntry{
-				{Level: "v1", Offset: 1000 + MaxDictionarySize, CompressedSize: 500, UncompressedSize: 1000},
+				{Level: "v1", Offset: 1000 + MaxDictionarySize, CompressedSize: 500, UncompressedSize: 1000, SHA256: testSHA256Sample},
 			},
 		}
 		if err := idx.ValidateBounds(1000 + MaxDictionarySize + 1000); err != nil {
@@ -1664,8 +1671,8 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 			Version:    FormatVersionCurrent,
 			TargetArch: testArchAMD64,
 			Variants: []VariantEntry{
-				{Level: "v1", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
-				{Level: "v1", Offset: 200, CompressedSize: 100, UncompressedSize: 200},
+				{Level: "v1", Offset: 100, CompressedSize: 100, UncompressedSize: 200, SHA256: testSHA256Sample},
+				{Level: "v1", Offset: 200, CompressedSize: 100, UncompressedSize: 200, SHA256: testSHA256Sample},
 			},
 		}
 		err := idx.ValidateBounds(1000)
@@ -1680,8 +1687,8 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 			Version:    FormatVersionCurrent,
 			TargetArch: testArchAMD64,
 			Variants: []VariantEntry{
-				{Level: "v3", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
-				{Level: "amd64_v3", Offset: 200, CompressedSize: 100, UncompressedSize: 200},
+				{Level: "v3", Offset: 100, CompressedSize: 100, UncompressedSize: 200, SHA256: testSHA256Sample},
+				{Level: "amd64_v3", Offset: 200, CompressedSize: 100, UncompressedSize: 200, SHA256: testSHA256Sample},
 			},
 		}
 		err := idx.ValidateBounds(1000)
@@ -1696,8 +1703,8 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 			Version:    FormatVersionCurrent,
 			TargetArch: testArchAMD64,
 			Variants: []VariantEntry{
-				{Level: "v3", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
-				{Level: "V3", Offset: 200, CompressedSize: 100, UncompressedSize: 200},
+				{Level: "v3", Offset: 100, CompressedSize: 100, UncompressedSize: 200, SHA256: testSHA256Sample},
+				{Level: "V3", Offset: 200, CompressedSize: 100, UncompressedSize: 200, SHA256: testSHA256Sample},
 			},
 		}
 		err := idx.ValidateBounds(1000)
@@ -1787,13 +1794,87 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 			Version:    FormatVersionCurrent,
 			TargetArch: "arm64",
 			Variants: []VariantEntry{
-				{Level: "v8.0", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
-				{Level: "v8.8", Offset: 300, CompressedSize: 100, UncompressedSize: 200},
-				{Level: "v9.5", Offset: 500, CompressedSize: 100, UncompressedSize: 200},
+				{Level: "v8.0", Offset: 100, CompressedSize: 100, UncompressedSize: 200, SHA256: testSHA256Sample},
+				{Level: "v8.8", Offset: 300, CompressedSize: 100, UncompressedSize: 200, SHA256: testSHA256Sample},
+				{Level: "v9.5", Offset: 500, CompressedSize: 100, UncompressedSize: 200, SHA256: testSHA256Sample},
 			},
 		}
 		if err := idx.ValidateBounds(1000); err != nil {
 			t.Fatalf("expected valid bounds for arm64 variants, got %v", err)
+		}
+	})
+
+	t.Run("Format v2 rejects empty variant SHA256 in ValidateBounds", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:    FormatVersion2,
+			TargetArch: testArchAMD64,
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 100, CompressedSize: 100, UncompressedSize: 200, SHA256: ""},
+			},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum for empty SHA256 in Format v2, got %v", err)
+		}
+	})
+
+	t.Run("Format v2 rejects malformed variant SHA256 in ValidateBounds", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:    FormatVersion2,
+			TargetArch: testArchAMD64,
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 100, CompressedSize: 100, UncompressedSize: 200, SHA256: "not-a-valid-sha256"},
+			},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum for malformed SHA256 in Format v2, got %v", err)
+		}
+	})
+
+	t.Run("Format v1 allows variant with empty SHA256 in ValidateBounds", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:    FormatVersion1,
+			TargetArch: testArchAMD64,
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 100, CompressedSize: 100, UncompressedSize: 200, SHA256: ""},
+			},
+		}
+		if err := idx.ValidateBounds(1000); err != nil {
+			t.Fatalf("expected valid bounds for Format v1 with empty SHA256, got %v", err)
+		}
+	})
+
+	t.Run("Format v2 MarshalBinaryIndex rejects missing SHA256", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:    FormatVersion2,
+			TargetArch: testArchAMD64,
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 100, CompressedSize: 100, UncompressedSize: 200, SHA256: ""},
+			},
+		}
+		_, err := MarshalBinaryIndex(idx)
+		if !errors.Is(err, ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum from MarshalBinaryIndex with empty SHA256, got %v", err)
+		}
+	})
+
+	t.Run("Format v2 MarshalBinaryIndex rejects malformed SHA256", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:    FormatVersion2,
+			TargetArch: testArchAMD64,
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 100, CompressedSize: 100, UncompressedSize: 200, SHA256: "invalid-hex"},
+			},
+		}
+		_, err := MarshalBinaryIndex(idx)
+		if !errors.Is(err, ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum from MarshalBinaryIndex with invalid SHA256, got %v", err)
 		}
 	})
 }
