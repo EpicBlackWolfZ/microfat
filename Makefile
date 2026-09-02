@@ -159,7 +159,7 @@ tidy: ## Run go mod tidy and verify module dependencies
 snapshot: ## Test GoReleaser local snapshot build
 	@echo "\033[34m==>\033[0m Testing GoReleaser snapshot build..."
 ifdef GORELEASER
-	@goreleaser release --snapshot --clean --skip=publish,sign,announce,validate,sbom
+	@GOTOOLCHAIN=local goreleaser release --snapshot --clean --skip=publish,sign,announce,validate,sbom
 else
 	@echo "\033[31m✖ goreleaser not found in PATH. Please install goreleaser to test snapshot builds.\033[0m"
 	@exit 1
