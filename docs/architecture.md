@@ -4,7 +4,7 @@
 
 ---
 
-This document provides a technical specification of the **Microfat** binary format, cryptographic trailer structure, Format v2 compact binary index table, shared dictionary mechanics, in-memory execution pipeline, and ARM64/AMD64 hardware detection engine.
+This document provides a technical specification of the **Microfat** binary format, fixed 56-byte trailer structure, Format v2 compact binary index table, shared dictionary mechanics, in-memory execution pipeline, and ARM64/AMD64 hardware detection engine.
 
 ---
 
@@ -26,7 +26,7 @@ A Microfat fat executable is a composite single-file binary composed of sequenti
 +-------------------------------------------------------------------+
 | Region 4: Metadata Index Table (Format v2 Binary / Format v1 JSON)|
 +-------------------------------------------------------------------+
-| Region 5: Fixed 56-Byte Cryptographic Trailer (at EOF)            |
+| Region 5: Fixed 56-Byte Trailer & Payload Integrity (at EOF)      |
 |   - 8 Bytes uint64 LE : Index Offset                              |
 |   - 8 Bytes uint64 LE : Index Size                                |
 |   - 32 Bytes Raw      : Index SHA-256 Checksum                    |
@@ -36,7 +36,7 @@ A Microfat fat executable is a composite single-file binary composed of sequenti
 
 ---
 
-## 2. Fixed 56-Byte Cryptographic Trailer
+## 2. Fixed 56-Byte Trailer & Payload Integrity
 
 The last 56 bytes of every Microfat fat binary contain fixed-width binary fields in Little Endian encoding:
 
@@ -44,7 +44,7 @@ The last 56 bytes of every Microfat fat binary contain fixed-width binary fields
 | :--- | :--- | :--- | :--- |
 | `IndexOffset` | `uint64` (LE) | 8 bytes | Absolute byte offset from start of file where the Metadata Index begins. |
 | `IndexSize` | `uint64` (LE) | 8 bytes | Byte length of the Metadata Index payload. |
-| `IndexSHA256` | `[32]byte` | 32 bytes | Cryptographic SHA-256 checksum of the uncompressed Index bytes. |
+| `IndexSHA256` | `[32]byte` | 32 bytes | SHA-256 checksum of the uncompressed Index bytes. |
 | `Magic` | `[8]byte` | 8 bytes | Fixed magic constant: `\x00\xFA\x7FMICRO`. |
 
 ### Trailer Integrity Verification Sequence
@@ -53,6 +53,9 @@ The last 56 bytes of every Microfat fat binary contain fixed-width binary fields
 3. Validates boundary safety: verifies `IndexOffset + IndexSize == file_size - 56`.
 4. Reads the Index bytes from `IndexOffset` for `IndexSize` bytes.
 5. Computes `sha256(index_bytes)` and verifies it matches `IndexSHA256`. If mismatched, execution immediately aborts with `ErrIndexCorrupted`.
+
+> [!NOTE]
+> **Integrity vs Authenticity**: The 56-byte trailer and metadata index record SHA-256 digests to guarantee payload integrity against storage corruption, network bit-flips, and partial binary modification. They do not provide digital signatures or publisher authenticity against an adversary who rewrites the entire executable. For end-to-end supply-chain provenance, sign the resulting fat binary with Sigstore Cosign or GPG.
 
 ---
 
@@ -202,7 +205,7 @@ If `memfd_create` or memory sealing is restricted by a locked-down seccomp polic
    - Size and integrity validation operate directly on the opened file descriptor (`fstat` and `pread`).
 5. **TOCTOU Immunity via `/proc/self/fd/<fd>`**:
    - The verified file descriptor is executed directly via `/proc/self/fd/<fd>`.
-   - Validation and execution are cryptographically bound to the exact same VFS inode, completely eliminating Time-of-Check to Time-of-Use (TOCTOU) file replacement races.
+   - Validation and execution are descriptor-bound to the exact same VFS inode via `/proc/self/fd/<fd>`, completely eliminating Time-of-Check to Time-of-Use (TOCTOU) file replacement races.
 6. **Zero-Overhead Re-execution**: Subsequent launches directly invoke the cached binary descriptor with **0.0ms decompression overhead**.
 
 ---

@@ -38,7 +38,7 @@ const (
 )
 
 // AssertPayloadIntegrity verifies that a variant payload within binary satisfies
-// uncompressed size boundaries and cryptographic SHA-256 integrity.
+// uncompressed size boundaries and SHA-256 payload integrity.
 func AssertPayloadIntegrity(t testing.TB, binary []byte, entry format.VariantEntry) {
 	t.Helper()
 
