@@ -352,6 +352,7 @@ func TestVerifyCorruptedVariant(t *testing.T) {
 	payloadBytes := zstdPayload.Bytes()
 	idxSizeMismatch := &format.Index{
 		Version:     format.FormatVersionCurrent,
+		TargetArch:  testArchAMD64,
 		CreatedUnix: 1000,
 		Variants: []format.VariantEntry{
 			{
@@ -373,6 +374,7 @@ func TestVerifyCorruptedVariant(t *testing.T) {
 
 	idxHashMismatch := &format.Index{
 		Version:     format.FormatVersionCurrent,
+		TargetArch:  testArchAMD64,
 		CreatedUnix: 1000,
 		Variants: []format.VariantEntry{
 			{
@@ -417,6 +419,7 @@ func TestTrimBinaryEdgeCases(t *testing.T) {
 	// Index with invalid stub offset (stubSize <= 0)
 	idxInvalidStub := &format.Index{
 		Version:     format.FormatVersionCurrent,
+		TargetArch:  testArchAMD64,
 		CreatedUnix: 1000,
 		Variants: []format.VariantEntry{
 			{Level: "v1", Offset: 0, CompressedSize: 10, UncompressedSize: 10},
@@ -434,6 +437,7 @@ func TestTrimBinaryEdgeCases(t *testing.T) {
 	// Error copying stub / variant / trailer when writer fails
 	idxValid := &format.Index{
 		Version:     format.FormatVersionCurrent,
+		TargetArch:  testArchAMD64,
 		CreatedUnix: 1000,
 		Variants: []format.VariantEntry{
 			{Level: "v1", Offset: 5, CompressedSize: 5, UncompressedSize: 5},
@@ -629,6 +633,7 @@ func TestPackEdgeCasesAndValidation(t *testing.T) {
 	corruptPayload := []byte("INVALID_ZSTD_STREAM_CONTENT_1234567890")
 	idxCorrupt := &format.Index{
 		Version:     format.FormatVersionCurrent,
+		TargetArch:  testArchAMD64,
 		CreatedUnix: 1000,
 		Variants: []format.VariantEntry{
 			{
@@ -1211,6 +1216,7 @@ func TestMultiCodecPackagingAndVerification(t *testing.T) {
 	// Test VerifyBinary with unknown compression algorithm
 	idxUnknownCodec := &format.Index{
 		Version:     format.FormatVersionCurrent,
+		TargetArch:  testArchAMD64,
 		CreatedUnix: 1000,
 		Variants: []format.VariantEntry{
 			{

@@ -5,8 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-
-	"github.com/EpicBlackWolfZ/microfat/internal/format"
 )
 
 const testArchAMD64 = "amd64"
@@ -997,11 +995,11 @@ func TestCurrentARM64FeaturesAuxv(t *testing.T) {
 }
 
 func TestReadPolicyFromEnv(t *testing.T) {
-	t.Setenv(format.EnvForceLevel, "v3")
-	t.Setenv(format.EnvMaxLevel, "v4")
-	t.Setenv(format.EnvDisableVariants, "v2, v1")
-	t.Setenv(format.EnvPolicy, "safe_avx512")
-	t.Setenv(format.EnvAVX512DownclockProtection, "1")
+	t.Setenv(EnvForceLevel, "v3")
+	t.Setenv(EnvMaxLevel, "v4")
+	t.Setenv(EnvDisableVariants, "v2, v1")
+	t.Setenv(EnvPolicy, "safe_avx512")
+	t.Setenv(EnvAVX512DownclockProtection, "1")
 
 	p := ReadPolicyFromEnv()
 	if p.ForceLevel != "v3" {

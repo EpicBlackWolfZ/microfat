@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 )
 
 // Constants for binary layout and verification.
@@ -265,24 +267,7 @@ type CgroupInfo struct {
 // NormalizeVariant cleans up and standardizes variant level strings
 // (e.g. "amd64_v3" -> "v3", "V3" -> "v3", "v8.0" -> "v8.0", "arm64-v8.2" -> "v8.2").
 func NormalizeVariant(level string) string {
-	l := strings.ToLower(strings.TrimSpace(level))
-	l = strings.TrimPrefix(l, "linux_")
-	l = strings.TrimPrefix(l, "darwin_")
-	l = strings.TrimPrefix(l, "windows_")
-	l = strings.TrimPrefix(l, "amd64_")
-	l = strings.TrimPrefix(l, "arm64_")
-	l = strings.TrimPrefix(l, "x86_64_")
-	l = strings.TrimPrefix(l, "aarch64_")
-	l = strings.TrimPrefix(l, "arm64-")
-	l = strings.TrimPrefix(l, "aarch64-")
-
-	if l == "" {
-		return "v1"
-	}
-	if !strings.HasPrefix(l, "v") {
-		l = "v" + l
-	}
-	return l
+	return microarch.Normalize(level)
 }
 
 // VariantLevels returns a slice of all variant level strings present in the index.
@@ -317,6 +302,11 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 
 	if len(idx.Variants) == 0 {
 		return ErrNoVariantsSpecified
+	}
+
+	targetArch := strings.ToLower(strings.TrimSpace(idx.TargetArch))
+	if targetArch != microarch.ArchAMD64 && targetArch != microarch.ArchARM64 {
+		return fmt.Errorf("%w: unrecognized target architecture %q", ErrInvalidVariant, idx.TargetArch)
 	}
 
 	lastEnd, err := idx.validateDictionaryBounds(indexOffset)
@@ -356,6 +346,9 @@ func (idx *Index) validateVariantBounds(indexOffset int64, lastEnd int64) error 
 			return fmt.Errorf("%w: variant at index %d has empty level", ErrInvalidVariant, i)
 		}
 		normLevel := NormalizeVariant(v.Level)
+		if microarch.Rank(idx.TargetArch, normLevel) <= 0 {
+			return fmt.Errorf("%w: variant %q is not a valid tier for target arch %q", ErrInvalidVariant, v.Level, idx.TargetArch)
+		}
 		if _, exists := seenLevels[normLevel]; exists {
 			return fmt.Errorf("%w: duplicate normalized variant level %q", ErrDuplicateVariant, normLevel)
 		}

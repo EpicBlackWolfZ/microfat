@@ -1007,7 +1007,7 @@ func TestDictionaryBinaryIndexSerialization(t *testing.T) {
 		Version:          FormatVersion2,
 		AppName:          "dict-test-app",
 		TargetOS:         "linux",
-		TargetArch:       "amd64",
+		TargetArch:       testArchAMD64,
 		CreatedUnix:      1700000000,
 		DictionaryOffset: 4096,
 		DictionarySize:   110592,
@@ -1122,6 +1122,7 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
 			Version:          FormatVersion2,
+			TargetArch:       testArchAMD64,
 			DictionaryOffset: 1000,
 			DictionarySize:   500,
 			Variants: []VariantEntry{
@@ -1138,6 +1139,7 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
 			Version:          FormatVersion2,
+			TargetArch:       testArchAMD64,
 			DictionaryOffset: -10,
 			DictionarySize:   500,
 			Variants: []VariantEntry{
@@ -1153,6 +1155,7 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
 			Version:          FormatVersion2,
+			TargetArch:       testArchAMD64,
 			DictionaryOffset: 2500,
 			DictionarySize:   1000,
 			Variants: []VariantEntry{
@@ -1168,6 +1171,7 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
 			Version:          FormatVersion2,
+			TargetArch:       testArchAMD64,
 			DictionaryOffset: 1000,
 			DictionarySize:   1000,
 			Variants: []VariantEntry{
@@ -1183,6 +1187,7 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
 			Version:          FormatVersion2,
+			TargetArch:       testArchAMD64,
 			DictionaryOffset: 1000,
 			DictionarySize:   -1,
 			Variants: []VariantEntry{
@@ -1198,6 +1203,7 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
 			Version:          FormatVersion2,
+			TargetArch:       testArchAMD64,
 			DictionaryOffset: 1000,
 			DictionarySize:   MaxDictionarySize,
 			Variants: []VariantEntry{
@@ -1213,6 +1219,7 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
 			Version:          FormatVersion2,
+			TargetArch:       testArchAMD64,
 			DictionaryOffset: 1000,
 			DictionarySize:   MaxDictionarySize + 1,
 			Variants: []VariantEntry{
@@ -1228,6 +1235,7 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
 			Version:          FormatVersion2,
+			TargetArch:       testArchAMD64,
 			DictionaryOffset: 1000,
 			DictionarySize:   500 * 1024 * 1024,
 			Variants: []VariantEntry{
@@ -1258,7 +1266,8 @@ func TestValidateBounds_IntegerOverflow(t *testing.T) {
 	t.Run("Variant offset near MaxInt64 overflowing addition", func(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
-			Version: FormatVersion2,
+			Version:    FormatVersion2,
+			TargetArch: testArchAMD64,
 			Variants: []VariantEntry{
 				{
 					Level:            "v1",
@@ -1277,7 +1286,8 @@ func TestValidateBounds_IntegerOverflow(t *testing.T) {
 	t.Run("Variant compressed size near MaxInt64 overflowing addition", func(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
-			Version: FormatVersion2,
+			Version:    FormatVersion2,
+			TargetArch: testArchAMD64,
 			Variants: []VariantEntry{
 				{
 					Level:            "v1",
@@ -1297,6 +1307,7 @@ func TestValidateBounds_IntegerOverflow(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
 			Version:          FormatVersion2,
+			TargetArch:       testArchAMD64,
 			DictionaryOffset: math.MaxInt64 - 50,
 			DictionarySize:   100,
 			Variants: []VariantEntry{
@@ -1317,7 +1328,8 @@ func TestValidateBounds_IntegerOverflow(t *testing.T) {
 	t.Run("Negative index offset", func(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
-			Version: FormatVersion2,
+			Version:    FormatVersion2,
+			TargetArch: testArchAMD64,
 			Variants: []VariantEntry{
 				{
 					Level:            "v1",
@@ -1634,7 +1646,8 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 	t.Run("Variant with empty level returns ErrInvalidVariant", func(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
-			Version: FormatVersionCurrent,
+			Version:    FormatVersionCurrent,
+			TargetArch: testArchAMD64,
 			Variants: []VariantEntry{
 				{Level: "   ", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
 			},
@@ -1648,7 +1661,8 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 	t.Run("Duplicate exact variant level returns ErrDuplicateVariant", func(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
-			Version: FormatVersionCurrent,
+			Version:    FormatVersionCurrent,
+			TargetArch: testArchAMD64,
 			Variants: []VariantEntry{
 				{Level: "v1", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
 				{Level: "v1", Offset: 200, CompressedSize: 100, UncompressedSize: 200},
@@ -1663,7 +1677,8 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 	t.Run("Duplicate normalized variant aliases return ErrDuplicateVariant", func(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
-			Version: FormatVersionCurrent,
+			Version:    FormatVersionCurrent,
+			TargetArch: testArchAMD64,
 			Variants: []VariantEntry{
 				{Level: "v3", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
 				{Level: "amd64_v3", Offset: 200, CompressedSize: 100, UncompressedSize: 200},
@@ -1678,7 +1693,8 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 	t.Run("Duplicate case-insensitive variant levels return ErrDuplicateVariant", func(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
-			Version: FormatVersionCurrent,
+			Version:    FormatVersionCurrent,
+			TargetArch: testArchAMD64,
 			Variants: []VariantEntry{
 				{Level: "v3", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
 				{Level: "V3", Offset: 200, CompressedSize: 100, UncompressedSize: 200},
@@ -1687,6 +1703,97 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 		err := idx.ValidateBounds(1000)
 		if !errors.Is(err, ErrDuplicateVariant) {
 			t.Fatalf("expected ErrDuplicateVariant for case mismatch, got %v", err)
+		}
+	})
+
+	t.Run("Unrecognized target architecture returns ErrInvalidVariant", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:    FormatVersionCurrent,
+			TargetArch: "mips64",
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
+			},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrInvalidVariant) {
+			t.Fatalf("expected ErrInvalidVariant for unrecognized arch, got %v", err)
+		}
+	})
+
+	t.Run("Empty target architecture returns ErrInvalidVariant", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:    FormatVersionCurrent,
+			TargetArch: "",
+			Variants: []VariantEntry{
+				{Level: "v1", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
+			},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrInvalidVariant) {
+			t.Fatalf("expected ErrInvalidVariant for empty target arch, got %v", err)
+		}
+	})
+
+	t.Run("AMD64 binary rejects ARM64 level", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:    FormatVersionCurrent,
+			TargetArch: testArchAMD64,
+			Variants: []VariantEntry{
+				{Level: "v8.2", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
+			},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrInvalidVariant) {
+			t.Fatalf("expected ErrInvalidVariant for arm64 tier in amd64 index, got %v", err)
+		}
+	})
+
+	t.Run("ARM64 binary rejects AMD64 level", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:    FormatVersionCurrent,
+			TargetArch: "arm64",
+			Variants: []VariantEntry{
+				{Level: "v3", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
+			},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrInvalidVariant) {
+			t.Fatalf("expected ErrInvalidVariant for amd64 tier in arm64 index, got %v", err)
+		}
+	})
+
+	t.Run("Unknown tier level returns ErrInvalidVariant", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:    FormatVersionCurrent,
+			TargetArch: testArchAMD64,
+			Variants: []VariantEntry{
+				{Level: "v999", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
+			},
+		}
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrInvalidVariant) {
+			t.Fatalf("expected ErrInvalidVariant for unknown tier v999, got %v", err)
+		}
+	})
+
+	t.Run("Valid ARM64 variants pass ValidateBounds", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:    FormatVersionCurrent,
+			TargetArch: "arm64",
+			Variants: []VariantEntry{
+				{Level: "v8.0", Offset: 100, CompressedSize: 100, UncompressedSize: 200},
+				{Level: "v8.8", Offset: 300, CompressedSize: 100, UncompressedSize: 200},
+				{Level: "v9.5", Offset: 500, CompressedSize: 100, UncompressedSize: 200},
+			},
+		}
+		if err := idx.ValidateBounds(1000); err != nil {
+			t.Fatalf("expected valid bounds for arm64 variants, got %v", err)
 		}
 	})
 }
