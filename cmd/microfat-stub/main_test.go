@@ -31,6 +31,7 @@ const (
 	testPolicyForceLevel = "force_level"
 	testPathEnv          = "PATH=/bin"
 	testAppArg           = "app"
+	testForceLevelV3     = "MICROFAT_FORCE_LEVEL=v3"
 )
 
 func TestPrintHelpAndInfo(t *testing.T) {
@@ -95,7 +96,7 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 	testPolicyRes := microarch.PolicyResult{
 		SelectedVariant: "v3",
 		PolicyApplied:   testPolicyForceLevel,
-		OverrideReason:  "MICROFAT_FORCE_LEVEL=v3",
+		OverrideReason:  testForceLevelV3,
 	}
 
 	// 1. Standard auto-tune with metadata injection
@@ -282,6 +283,80 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 	_ = printInfo(idx, hostInfo, &idx.Variants[0], microarch.PolicyResult{}, 1000, true)
 }
 
+func TestBuildAutoTunedEnviron_DeduplicationAndReplacement(t *testing.T) {
+	entry := &format.VariantEntry{
+		Level:            "v3",
+		SHA256:           "abcdef123456",
+		UncompressedSize: 1000,
+	}
+	hostInfo := microarch.Info{
+		OS:       testOSLinux,
+		Arch:     testArchAMD64,
+		Level:    "v3",
+		Features: []string{"avx", "avx2"},
+	}
+	testPolicyRes := microarch.PolicyResult{
+		SelectedVariant: "v3",
+		PolicyApplied:   testPolicyForceLevel,
+		OverrideReason:  testForceLevelV3,
+	}
+
+	base := []string{
+		"PATH=/usr/bin",
+		"USER=test",
+		"NO_EQUALS_ENTRY",
+		"=LEADING_EQUALS",
+		"MICROFAT_EXEC_MODE=cache",
+		"MICROFAT_SELECTED_VARIANT=v1",
+		"MICROFAT_HOST_ARCH=arm64",
+		"MICROFAT_HOST_LEVEL=v8.0",
+		"MICROFAT_CGROUP_VERSION=1",
+		"GOMEMLIMIT=256MiB",
+		"GOMEMLIMIT=1GiB",
+		"GOMAXPROCS=2",
+		"GOMAXPROCS=4",
+	}
+
+	env, _ := buildAutoTunedEnviron(base, entry, format.ExecModeMemfd, hostInfo, testPolicyRes)
+
+	// Verify all keys are strictly unique
+	seenKeys := make(map[string]int)
+	for _, e := range env {
+		key, _, found := strings.Cut(e, "=")
+		if found && key != "" {
+			seenKeys[key]++
+			if seenKeys[key] > 1 {
+				t.Errorf("duplicate key %q found %d times in environment: %v", key, seenKeys[key], env)
+			}
+		}
+	}
+
+	// Verify launcher-owned keys replaced stale values from baseEnv
+	expectedValues := map[string]string{
+		format.EnvSelectedVariant: "v3",
+		format.EnvHostArch:        testArchAMD64,
+		format.EnvHostLevel:       "v3",
+		format.EnvExecMode:        format.ExecModeMemfd,
+		format.EnvDispatchMode:    format.ExecModeMemfd,
+		"GOMEMLIMIT":              "1GiB", // User-specified override preserved from later base entry
+		"GOMAXPROCS":              "4",    // User-specified override preserved from later base entry
+	}
+
+	for k, expectedVal := range expectedValues {
+		expectedEntry := fmt.Sprintf("%s=%s", k, expectedVal)
+		var found bool
+		for _, e := range env {
+			if e == expectedEntry {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected %q in environment, but not found or value mismatch. env: %v", expectedEntry, env)
+		}
+	}
+}
+
 func TestLogDiagnostics(t *testing.T) {
 	entry := &format.VariantEntry{Level: "v3", SHA256: "abc123hash", UncompressedSize: 2048}
 	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
@@ -293,7 +368,7 @@ func TestLogDiagnostics(t *testing.T) {
 		CPUs:             4,
 	}
 
-	policyRes := microarch.PolicyResult{PolicyApplied: testPolicyForceLevel, OverrideReason: "MICROFAT_FORCE_LEVEL=v3"}
+	policyRes := microarch.PolicyResult{PolicyApplied: testPolicyForceLevel, OverrideReason: testForceLevelV3}
 
 	// Text debug output
 	t.Setenv("MICROFAT_DEBUG", "1")
@@ -1242,7 +1317,11 @@ func TestStubPrewarmAndCacheDispatch(t *testing.T) {
 	oldExec := execveFunc
 	defer func() { execveFunc = oldExec }()
 	execveFunc = func(argv0 string, argv []string, envv []string) error {
-		executedPath = argv0
+		if link, err := os.Readlink(argv0); err == nil {
+			executedPath = strings.TrimSuffix(link, " (deleted)")
+		} else {
+			executedPath = argv0
+		}
 		return nil
 	}
 
@@ -1315,7 +1394,11 @@ func TestExecuteVariant_SyscallMocking(t *testing.T) {
 
 			var executedBinary string
 			execveFunc = func(argv0 string, argv []string, envv []string) error {
-				executedBinary = argv0
+				if link, err := os.Readlink(argv0); err == nil {
+					executedBinary = strings.TrimSuffix(link, " (deleted)")
+				} else {
+					executedBinary = argv0
+				}
 				return nil
 			}
 
@@ -1351,7 +1434,11 @@ func TestExecuteVariant_TruncatedCacheRecovery(t *testing.T) {
 
 	var executedPath string
 	execveFunc = func(argv0 string, argv []string, envv []string) error {
-		executedPath = argv0
+		if link, err := os.Readlink(argv0); err == nil {
+			executedPath = strings.TrimSuffix(link, " (deleted)")
+		} else {
+			executedPath = argv0
+		}
 		return nil
 	}
 
@@ -1513,7 +1600,7 @@ func TestExecuteVariant_StrictEnvironmentMatrix(t *testing.T) {
 		policyRes := microarch.PolicyResult{
 			SelectedVariant: "v3",
 			PolicyApplied:   testPolicyForceLevel,
-			OverrideReason:  "MICROFAT_FORCE_LEVEL=v3",
+			OverrideReason:  testForceLevelV3,
 		}
 		base := []string{"USER=deployer", "LANG=en_US.UTF-8"}
 
@@ -1541,7 +1628,7 @@ func TestExecuteVariant_StrictEnvironmentMatrix(t *testing.T) {
 			format.EnvSelectedSHA256:  entry.SHA256,
 			format.EnvSelectedSize:    fmt.Sprintf("%d", entry.UncompressedSize),
 			format.EnvPolicyApplied:   testPolicyForceLevel,
-			format.EnvOverrideReason:  "MICROFAT_FORCE_LEVEL=v3",
+			format.EnvOverrideReason:  testForceLevelV3,
 		}
 
 		for k, expVal := range expected {
@@ -2299,7 +2386,11 @@ func TestExplicitMemfdModeEnforcement(t *testing.T) {
 		var cacheExecuted bool
 		expectedTarget := filepath.Join(cacheDir, entry.SHA256)
 		execveFunc = func(argv0 string, argv []string, envv []string) error {
-			if argv0 == expectedTarget {
+			target := argv0
+			if link, err := os.Readlink(argv0); err == nil {
+				target = strings.TrimSuffix(link, " (deleted)")
+			}
+			if target == expectedTarget {
 				cacheExecuted = true
 				return nil
 			}
@@ -2430,6 +2521,235 @@ func TestStub_SecurityInvariants(t *testing.T) {
 		}
 	})
 }
+
+func TestExecuteViaCache_InstallationFailures(t *testing.T) {
+	tmpDir := t.TempDir()
+	payload := []byte("hello cache installation failure test payload")
+	entry, rawFile := createDummyVariantFile(t, tmpDir, payload)
+	defer rawFile.Close()
+	entry.Compression = "zstd"
+
+	hostInfo := microarch.Info{
+		OS:    testOSLinux,
+		Arch:  testArchAMD64,
+		Level: "v1",
+	}
+	policyRes := microarch.PolicyResult{
+		SelectedVariant: "v1",
+	}
+
+	t.Run("RenameFailure_WhenTargetIsDirectory", func(t *testing.T) {
+		cacheHome := filepath.Join(tmpDir, "cache_rename_fail")
+		microfatCache := filepath.Join(cacheHome, "microfat")
+		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		t.Setenv("XDG_CACHE_HOME", cacheHome)
+
+		// Create non-empty target destination as a directory so os.Remove and os.Rename fail with ENOTEMPTY/EISDIR
+		targetPath := filepath.Join(microfatCache, entry.SHA256)
+		if err := os.MkdirAll(targetPath, 0o700); err != nil {
+			t.Fatalf("mkdir targetPath failed: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(targetPath, "blocking_child"), []byte("blocker"), 0o600); err != nil {
+			t.Fatalf("write child file failed: %v", err)
+		}
+
+		primaryErr := errors.New("simulated primary memfd exhaustion")
+		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, primaryErr, time.Now())
+		if err == nil {
+			t.Fatalf("expected error when rename fails, got nil")
+		}
+		if !errors.Is(err, format.ErrCacheWrite) {
+			t.Fatalf("expected ErrCacheWrite, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "primary memfd error: simulated primary memfd exhaustion") {
+			t.Fatalf("expected primaryErr preserved in error string, got %v", err)
+		}
+	})
+
+	t.Run("VerifyCache_CorruptedFileReextracted", func(t *testing.T) {
+		cacheHome := filepath.Join(tmpDir, "cache_verify_corrupt")
+		microfatCache := filepath.Join(cacheHome, "microfat")
+		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		t.Setenv("XDG_CACHE_HOME", cacheHome)
+		t.Setenv(format.EnvVerifyCache, "1")
+		t.Setenv(format.EnvDebug, "1")
+
+		// Create corrupted file with matching size but invalid content
+		targetPath := filepath.Join(microfatCache, entry.SHA256)
+		corruptedData := bytes.Repeat([]byte{0x42}, int(entry.UncompressedSize))
+		if err := os.WriteFile(targetPath, corruptedData, 0o700); err != nil {
+			t.Fatalf("writing corrupted file: %v", err)
+		}
+
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			return nil
+		}
+
+		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		if err != nil {
+			t.Fatalf("expected re-extraction and successful execution, got %v", err)
+		}
+	})
+
+	t.Run("TruncatedCacheFile_DebugLogging", func(t *testing.T) {
+		cacheHome := filepath.Join(tmpDir, "cache_truncated")
+		microfatCache := filepath.Join(cacheHome, "microfat")
+		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		t.Setenv("XDG_CACHE_HOME", cacheHome)
+		t.Setenv(format.EnvDebug, "1")
+
+		// Write file with wrong size
+		targetPath := filepath.Join(microfatCache, entry.SHA256)
+		if err := os.WriteFile(targetPath, []byte("short"), 0o700); err != nil {
+			t.Fatalf("writing short file: %v", err)
+		}
+
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			return nil
+		}
+
+		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		if err != nil {
+			t.Fatalf("expected re-extraction on truncated cache file, got %v", err)
+		}
+	})
+
+	t.Run("ExecveFailure_WithoutPrimaryErr", func(t *testing.T) {
+		cacheHome := filepath.Join(tmpDir, "cache_exec_fail_no_primary")
+		t.Setenv("XDG_CACHE_HOME", cacheHome)
+
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			return errors.New("execve simulated failure")
+		}
+
+		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		if err == nil {
+			t.Fatalf("expected execve failure, got nil")
+		}
+		if !strings.Contains(err.Error(), "cache execve failed") {
+			t.Fatalf("expected cache execve failed error without primary memfd error, got %v", err)
+		}
+	})
+}
+
+func TestCacheExecution_SymlinkRefusalAndTOCTOUDefense(t *testing.T) {
+	tmpDir := t.TempDir()
+	payload := []byte("hello toctou defense test payload 12345")
+	entry, rawFile := createDummyVariantFile(t, tmpDir, payload)
+	defer rawFile.Close()
+	entry.Compression = "zstd"
+
+	hostInfo := microarch.Info{
+		OS:    testOSLinux,
+		Arch:  testArchAMD64,
+		Level: "v1",
+	}
+	policyRes := microarch.PolicyResult{
+		SelectedVariant: "v1",
+	}
+
+	t.Run("SymlinkRefusal_WhenCacheTargetIsSymlink", func(t *testing.T) {
+		cacheHome := filepath.Join(tmpDir, "symlink_refusal_cache")
+		microfatCache := filepath.Join(cacheHome, "microfat")
+		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		t.Setenv("XDG_CACHE_HOME", cacheHome)
+
+		// Create a symlink at the target binary path
+		targetPath := filepath.Join(microfatCache, entry.SHA256)
+		targetTrap := filepath.Join(tmpDir, "trap_binary")
+		if err := os.WriteFile(targetTrap, []byte("trap"), 0o755); err != nil {
+			t.Fatalf("write trap failed: %v", err)
+		}
+		if err := os.Symlink(targetTrap, targetPath); err != nil {
+			t.Fatalf("symlink creation failed: %v", err)
+		}
+
+		var execveCalled bool
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			execveCalled = true
+			return nil
+		}
+
+		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		if err == nil {
+			t.Fatalf("expected error refusing symlink execution, got nil")
+		}
+		if !errors.Is(err, format.ErrCacheWrite) {
+			t.Fatalf("expected ErrCacheWrite, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "refusal to execute symlink") {
+			t.Fatalf("expected refusal to execute symlink message, got: %v", err)
+		}
+		if execveCalled {
+			t.Fatalf("execve must NOT be called when cache entry is a symlink")
+		}
+	})
+
+	t.Run("ConcurrentPathReplacement_InodeBindingDefense", func(t *testing.T) {
+		cacheHome := filepath.Join(tmpDir, "toctou_inode_cache")
+		microfatCache := filepath.Join(cacheHome, "microfat")
+		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		t.Setenv("XDG_CACHE_HOME", cacheHome)
+
+		targetPath := filepath.Join(microfatCache, entry.SHA256)
+		originalBytes := payload
+		if err := os.WriteFile(targetPath, originalBytes, 0o700); err != nil {
+			t.Fatalf("write original cache file failed: %v", err)
+		}
+
+		// Intercept openCachedBinaryFunc to replace the file on disk immediately AFTER open
+		oldOpen := openCachedBinaryFunc
+		defer func() { openCachedBinaryFunc = oldOpen }()
+
+		openCachedBinaryFunc = func(path string) (int, error) {
+			fd, err := oldOpen(path)
+			if err != nil {
+				return fd, err
+			}
+			// Replace file on disk with a new inode (atomic rename) concurrently
+			hostilePath := filepath.Join(tmpDir, "hostile_replacement")
+			hostileBytes := []byte("HOSTILE_REPLACED_PAYLOAD_DATA_OVERWRITTEN")
+			_ = os.WriteFile(hostilePath, hostileBytes, 0o700)
+			_ = os.Rename(hostilePath, path)
+			return fd, nil
+		}
+
+		var descriptorContent []byte
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			// Read the descriptor directly via /proc/self/fd/<fd>
+			var err error
+			descriptorContent, err = os.ReadFile(argv0)
+			if err != nil {
+				return fmt.Errorf("reading /proc/self/fd descriptor: %w", err)
+			}
+			return nil
+		}
+
+		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		if err != nil {
+			t.Fatalf("executeViaCache failed: %v", err)
+		}
+
+		// Verify descriptor content is the ORIGINAL inode content, immune to concurrent disk replacement
+		if !bytes.Equal(descriptorContent, originalBytes) {
+			t.Fatalf("TOCTOU vulnerability detected: descriptor read %q, expected original %q",
+				string(descriptorContent), string(originalBytes))
+		}
+	})
+}
+
+
+
 
 
 

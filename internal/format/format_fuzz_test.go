@@ -83,7 +83,7 @@ func FuzzUnmarshalBinaryIndex(f *testing.F) {
 		Version:          FormatVersion2,
 		AppName:          "fuzz-oversized-dict",
 		TargetOS:         testOSLinux,
-		TargetArch:       "amd64",
+		TargetArch:       testArchAMD64,
 		DictionaryOffset: 50,
 		DictionarySize:   MaxDictionarySize + 1024,
 	}

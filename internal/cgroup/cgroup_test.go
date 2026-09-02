@@ -1276,3 +1276,141 @@ func TestCgroupV1FlatLayoutAndEdgeCases(t *testing.T) {
 		}
 	})
 }
+
+func TestRootCgroupVsUnresolvedControllers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("CgroupV2_ExplicitRoot", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		requireNoError(t, os.WriteFile(procFile, []byte("0::/\n"), 0o600))
+		requireNoError(t, os.WriteFile(filepath.Join(tempDir, "memory.max"), []byte("max\n"), 0o600))
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		requireNoError(t, err)
+		if limits.CgroupVersion != VersionV2 {
+			t.Errorf("expected VersionV2, got %d", limits.CgroupVersion)
+		}
+		if limits.MemoryLimitBytes != 0 {
+			t.Errorf("expected 0 for max memory limit, got %d", limits.MemoryLimitBytes)
+		}
+	})
+
+	t.Run("CgroupV2_MissingV2EntryInProcfs", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		// Procfs has v1 entries only, no 0:: line
+		requireNoError(t, os.WriteFile(procFile, []byte("1:net_cls:/\n"), 0o600))
+		requireNoError(t, os.WriteFile(filepath.Join(tempDir, "memory.max"), []byte("1073741824\n"), 0o600))
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		requireNoError(t, err)
+		if limits.CgroupVersion != VersionUnknown {
+			t.Errorf("expected VersionUnknown when 0:: entry is missing, got %d", limits.CgroupVersion)
+		}
+		if limits.MemoryLimitBytes != 0 {
+			t.Errorf("expected 0 memory limit when v2 entry is missing, got %d", limits.MemoryLimitBytes)
+		}
+	})
+
+	t.Run("ResolveTargetDirectory_EmptyPathRejected", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		_, err := resolveTargetDirectory(tempDir, "")
+		if !errors.Is(err, ErrCgroupHierarchyNotFound) {
+			t.Errorf("expected ErrCgroupHierarchyNotFound on empty relPath, got %v", err)
+		}
+
+		resolved, err := resolveTargetDirectory(tempDir, "/")
+		requireNoError(t, err)
+		if resolved != tempDir {
+			t.Errorf("expected %s on root relPath, got %s", tempDir, resolved)
+		}
+	})
+
+	t.Run("CgroupV1_MissingMemoryController", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		// Only CPU controller in procfs
+		requireNoError(t, os.WriteFile(procFile, []byte("2:cpu:/\n"), 0o600))
+
+		memDir := filepath.Join(tempDir, "memory")
+		cpuDir := filepath.Join(tempDir, "cpu")
+		requireNoError(t, os.MkdirAll(memDir, 0o755))
+		requireNoError(t, os.MkdirAll(cpuDir, 0o755))
+		requireNoError(t, os.WriteFile(filepath.Join(memDir, "memory.limit_in_bytes"), []byte("1073741824\n"), 0o600))
+		requireNoError(t, os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_quota_us"), []byte("200000\n"), 0o600))
+		requireNoError(t, os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_period_us"), []byte("100000\n"), 0o600))
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		requireNoError(t, err)
+		if limits.CgroupVersion != VersionV1 {
+			t.Errorf("expected VersionV1, got %d", limits.CgroupVersion)
+		}
+		// Memory must NOT be resolved to root because memory entry is absent in procfs
+		if limits.MemoryLimitBytes != 0 {
+			t.Errorf("expected 0 memory limit when memory controller is absent, got %d", limits.MemoryLimitBytes)
+		}
+		if limits.CPUs != 2 {
+			t.Errorf("expected 2 CPUs, got %d", limits.CPUs)
+		}
+	})
+
+	t.Run("CgroupV1_MissingCPUController", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		// Only memory controller in procfs
+		requireNoError(t, os.WriteFile(procFile, []byte("1:memory:/\n"), 0o600))
+
+		memDir := filepath.Join(tempDir, "memory")
+		cpuDir := filepath.Join(tempDir, "cpu")
+		requireNoError(t, os.MkdirAll(memDir, 0o755))
+		requireNoError(t, os.MkdirAll(cpuDir, 0o755))
+		requireNoError(t, os.WriteFile(filepath.Join(memDir, "memory.limit_in_bytes"), []byte("1073741824\n"), 0o600))
+		requireNoError(t, os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_quota_us"), []byte("200000\n"), 0o600))
+		requireNoError(t, os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_period_us"), []byte("100000\n"), 0o600))
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		requireNoError(t, err)
+		if limits.CgroupVersion != VersionV1 {
+			t.Errorf("expected VersionV1, got %d", limits.CgroupVersion)
+		}
+		if limits.MemoryLimitBytes != 1073741824 {
+			t.Errorf("expected 1GB memory limit, got %d", limits.MemoryLimitBytes)
+		}
+		// CPU must NOT be resolved to root because cpu entry is absent in procfs
+		if limits.CPUQuota != 0 || limits.CPUs != 0 {
+			t.Errorf("expected 0 CPUs when cpu controller is absent, got quota=%f, cpus=%d", limits.CPUQuota, limits.CPUs)
+		}
+	})
+
+	t.Run("CgroupV1_MissingAllControllers", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		// Only net_cls controller
+		requireNoError(t, os.WriteFile(procFile, []byte("5:net_cls:/\n"), 0o600))
+
+		memDir := filepath.Join(tempDir, "memory")
+		requireNoError(t, os.MkdirAll(memDir, 0o755))
+		requireNoError(t, os.WriteFile(filepath.Join(memDir, "memory.limit_in_bytes"), []byte("1073741824\n"), 0o600))
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		requireNoError(t, err)
+		if limits.CgroupVersion != VersionUnknown {
+			t.Errorf("expected VersionUnknown when neither memory nor cpu is in procfs, got %d", limits.CgroupVersion)
+		}
+	})
+}
+
+func requireNoError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+

@@ -148,9 +148,9 @@ For backward compatibility, Microfat can read and produce Format v1 JSON manifes
 
 ---
 
-## 6. In-Memory Execution Pipeline (`memfd_create`)
+## 6. In-Memory Execution Pipeline & Kernel Memory Sealing (`memfd_create`)
 
-To provide zero-disk-I/O execution while preserving container PID 1 and signal forwarding:
+To provide zero-disk-I/O execution while preserving container PID 1, signal forwarding, and complete immunity against in-memory tampering:
 
 ```mermaid
 sequenceDiagram
@@ -163,23 +163,47 @@ sequenceDiagram
     Stub->>Stub: Read Trailer & Zero-Alloc Decode Index Table (< 800ns)
     Stub->>Stub: Detect Host CPUID / AT_HWCAP (< 100ns)
     Stub->>Stub: Probe Cgroups (Auto GOMEMLIMIT, GOMAXPROCS)
-    Stub->>OS: memfd_create("microfat_payload", MFD_CLOEXEC)
+    Stub->>OS: memfd_create("microfat_payload", MFD_CLOEXEC | MFD_ALLOW_SEALING)
     OS-->>Stub: fd=3
     Stub->>RAM: Stream & Decompress Optimal Payload into fd=3 (~1.5ms)
+    Stub->>OS: fcntl(fd=3, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL)
+    OS-->>Stub: 0 (sealed read-only and immutable)
     Stub->>OS: syscall.Exec("/proc/self/fd/3", args, env)
     Note over OS,App: Kernel replaces process image in-place (same PID 100)
     OS->>App: Native Execution of optimal machine code
 ```
 
+### Memory Sealing Lifecycle & Threat Model
+
+Microfat enforces kernel-level memory descriptor sealing to protect decompressed ELF executables in RAM:
+
+1. **Seal-Permissive Creation**: The anonymous file descriptor is created with `MFD_CLOEXEC | MFD_ALLOW_SEALING`.
+2. **Payload Extraction & Digest Verification**: The target variant is streamed and decompressed directly into anonymous RAM while verifying the SHA-256 digest.
+3. **Mandatory Kernel Sealing**: Before execution, `fcntl(fd, F_ADD_SEALS, ...)` applies four mandatory seals:
+   - `F_SEAL_WRITE`: Prevents any write operations, `mmap` writes, or local `/proc/self/mem` modifications to the binary code in RAM.
+   - `F_SEAL_SHRINK` & `F_SEAL_GROW`: Prevents truncating or expanding the memory file bounds.
+   - `F_SEAL_SEAL`: Permanently freezes the seal bitmask, preventing any subsequent seal additions or alterations.
+4. **Direct Descriptor Execution**: The process image is replaced in-place via `/proc/self/fd/<fd>`.
+5. **Sealing Failure Guarantees**: Microfat strictly treats unsealed memory as unsafe. If sealing fails (e.g., `ENOSYS`, `EINVAL`, or `EPERM` due to seccomp filters or kernel restrictions):
+   - Under auto-dispatch (`MICROFAT_EXEC_MODE=auto`), the launcher immediately closes the unsealed descriptor and cleanly falls back to the hardened cache execution path.
+   - Under explicit memfd mode (`MICROFAT_EXEC_MODE=memfd`), execution halts immediately with `ErrMemfdSealingFailed` without attempting fallback.
+
 ---
 
-## 7. Resilient Disk Cache Fallback & Security Model
+## 7. Resilient Disk Cache Fallback & TOCTOU Defense
 
-If `memfd_create` is restricted by a locked-down seccomp policy or older kernel:
+If `memfd_create` or memory sealing is restricted by a locked-down seccomp policy or older kernel:
 1. The stub falls back to `$XDG_CACHE_HOME/microfat/<sha256>` (or `~/.cache/microfat/<sha256>`). If `$HOME` is unavailable, it resolves to `/tmp/.microfat-<uid>/<sha256>`.
 2. **Private Permission Isolation**: All cache directories and variant binaries are created with strict `0o700` (`rwx------`) permissions, isolating cached binaries per-user on multi-tenant systems.
-3. Variants are extracted atomically (using a temporary file and atomic rename) and checksummed.
-4. Subsequent launches directly invoke the cached binary with **0.0ms decompression overhead**.
+3. **Atomic Installation**: Missing variants are extracted to a private temporary file (`.exec-*.tmp`), verified, synchronized to disk, and atomically moved via `os.Rename`.
+4. **Descriptor-Bound Validation (`O_NOFOLLOW`)**:
+   - The launcher opens cached binaries exclusively with `unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW`.
+   - `O_NOFOLLOW` ensures the kernel immediately refuses symlink traversal with `ELOOP`, defeating same-UID symlink hijacking attacks.
+   - Size and integrity validation operate directly on the opened file descriptor (`fstat` and `pread`).
+5. **TOCTOU Immunity via `/proc/self/fd/<fd>`**:
+   - The verified file descriptor is executed directly via `/proc/self/fd/<fd>`.
+   - Validation and execution are cryptographically bound to the exact same VFS inode, completely eliminating Time-of-Check to Time-of-Use (TOCTOU) file replacement races.
+6. **Zero-Overhead Re-execution**: Subsequent launches directly invoke the cached binary descriptor with **0.0ms decompression overhead**.
 
 ---
 
@@ -196,11 +220,20 @@ Microfat supports ARM64 microarchitecture levels aligned with the Go compiler `G
 | `v8.4` | `GOARM64=v8.4` | `v8.3` + Dot Product (`asimddp`), `dcpop` | Apple M1 Max/Pro, Neoverse N2 |
 | `v8.5` | `GOARM64=v8.5` | `v8.4` + Data Independent Timing (`dit`), `flagm` | Apple M2/M3, modern server cores |
 | `v8.6` | `GOARM64=v8.6` | `v8.5` + Matrix Multiplication (`i8mm`), BFloat16 (`bf16`) | Apple M3/M4 |
-| `v8.7` | `GOARM64=v8.7` | `v8.6` + Enhanced WFIT/WFIS acceleration | Latest enterprise ARM silicon |
+| `v8.7` | `GOARM64=v8.7` | `v8.6` + Enhanced WFIT/WFIS acceleration (`wfxt`) | Modern enterprise ARM silicon |
+| `v8.8` | `GOARM64=v8.8` | `v8.7` + Memory Operations (`mops`), `nmi`, `hbc` | Next-gen server cores |
+| `v8.9` | `GOARM64=v8.9` | `v8.8` + Guarded Control Stack (`gcs`), `the` | Next-gen hardened server silicon |
 | `v9.0` | `GOARM64=v9.0` | Scalable Vector Extension (`sve`), SVE BitPerm | AWS Graviton 4, Neoverse V2 |
 | `v9.1` | `GOARM64=v9.1` | `v9.0` + SVE2 baseline extensions | Enterprise HPC nodes |
 | `v9.2` | `GOARM64=v9.2` | `v9.0` + SVE2 + `i8mm` + `bf16` | AI & HPC cloud instances |
 | `v9.3`–`v9.5` | `GOARM64=v9.3..9.5` | Scalable Matrix Extension (`sme`, `sme2`) | Next-generation server processors |
+
+### Architectural Layering: Compiler Semantics vs Runtime Probing vs ISA
+
+Microfat strictly separates three concepts:
+1. **Go Toolchain Semantics (`GOARM64`)**: The compiler emits instruction subsets gated by compile-time flags (`GOARM64=v8.0`..`v9.5`). Build artifacts assume all prerequisite features are available.
+2. **Runtime CPU Probing (`auxv` / `CPUID`)**: The launcher stub never assumes compilation targets. It probes the host kernel via Linux Auxiliary Vectors (`AT_HWCAP`, `AT_HWCAP2`) or CPUID registers to dynamically match the highest satisfied tier.
+3. **ARM Architecture Reference Manual ISA**: Feature dependencies form a directed acyclic graph (DAG). Missing any intermediate prerequisite safely degrades execution to the highest compatible parent tier.
 
 ### Dual-Tier CPU Feature Probing Architecture
 

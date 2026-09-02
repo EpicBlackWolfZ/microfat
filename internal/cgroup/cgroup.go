@@ -146,7 +146,7 @@ func ReadLimitsCustom(root string, procCgroupPath string) (Limits, error) {
 		return Limits{CgroupVersion: VersionUnknown}, fmt.Errorf("%w: %s: %w", ErrCgroupMountInaccessible, cleanRoot, err)
 	}
 
-	v2RelPath, v1RelPaths, procErr := parseProcCgroup(procCgroupPath)
+	v2RelPath, hasV2, v1RelPaths, procErr := parseProcCgroup(procCgroupPath)
 	if procErr != nil {
 		return Limits{CgroupVersion: VersionUnknown}, fmt.Errorf("%w: %w", ErrCgroupProcUnreadable, procErr)
 	}
@@ -155,9 +155,15 @@ func ReadLimitsCustom(root string, procCgroupPath string) (Limits, error) {
 	v2MemMax := filepath.Join(cleanRoot, "memory.max")
 	v2Controllers := filepath.Join(cleanRoot, "cgroup.controllers")
 	if _, err := os.Stat(v2MemMax); err == nil {
+		if !hasV2 {
+			return Limits{CgroupVersion: VersionUnknown}, nil
+		}
 		return readCgroupV2(cleanRoot, v2RelPath)
 	}
 	if _, err := os.Stat(v2Controllers); err == nil {
+		if !hasV2 {
+			return Limits{CgroupVersion: VersionUnknown}, nil
+		}
 		return readCgroupV2(cleanRoot, v2RelPath)
 	}
 
@@ -173,9 +179,10 @@ func ReadLimitsCustom(root string, procCgroupPath string) (Limits, error) {
 	return Limits{CgroupVersion: VersionUnknown}, nil
 }
 
-func parseProcCgroup(procPath string) (string, map[string]string, error) {
+func parseProcCgroup(procPath string) (string, bool, map[string]string, error) {
 	v1Paths := make(map[string]string)
 	v2Path := ""
+	hasV2 := false
 
 	targetPath := procPath
 	if targetPath == "" {
@@ -185,7 +192,7 @@ func parseProcCgroup(procPath string) (string, map[string]string, error) {
 	// #nosec G304 -- reading procfs cgroup file
 	f, err := os.Open(filepath.Clean(targetPath))
 	if err != nil {
-		return "", v1Paths, err
+		return "", false, v1Paths, err
 	}
 	defer func() { _ = f.Close() }()
 
@@ -207,6 +214,7 @@ func parseProcCgroup(procPath string) (string, map[string]string, error) {
 		hasEntries = true
 		if hierarchyID == cgroupV2HierarchyID && controllers == "" {
 			v2Path = relPath
+			hasV2 = true
 		} else {
 			for _, ctrl := range strings.Split(controllers, ",") {
 				trimmedCtrl := strings.TrimSpace(ctrl)
@@ -218,12 +226,12 @@ func parseProcCgroup(procPath string) (string, map[string]string, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return v2Path, v1Paths, err
+		return v2Path, hasV2, v1Paths, err
 	}
 	if !hasEntries {
-		return "", v1Paths, errors.New("empty or invalid proc cgroup file")
+		return "", false, v1Paths, errors.New("empty or invalid proc cgroup file")
 	}
-	return v2Path, v1Paths, nil
+	return v2Path, hasV2, v1Paths, nil
 }
 
 func isSubpath(root, path string) bool {
@@ -234,7 +242,10 @@ func isSubpath(root, path string) bool {
 }
 
 func resolveTargetDirectory(baseDir, relPath string) (string, error) {
-	if relPath == "" || relPath == "/" || relPath == "." {
+	if relPath == "" {
+		return "", fmt.Errorf("%w: relative path is empty or unresolved", ErrCgroupHierarchyNotFound)
+	}
+	if relPath == "/" || relPath == "." {
 		return baseDir, nil
 	}
 	candidate := filepath.Join(baseDir, filepath.Clean("/"+relPath))
@@ -524,46 +535,55 @@ func traverseCgroupV1CPU(cpuBaseDir, targetCPUDir string) (float64, bool, error)
 }
 
 func readCgroupV1(root string, v1RelPaths map[string]string) (Limits, error) {
-	limits := Limits{CgroupVersion: VersionV1}
-
-	memBaseDir := resolveCgroupV1MemBase(root)
-	memRelPath := ""
-	if v1RelPaths != nil {
-		memRelPath = v1RelPaths["memory"]
-	}
-	targetMemDir, err := resolveTargetDirectory(memBaseDir, memRelPath)
-	if err != nil {
-		return Limits{CgroupVersion: VersionUnknown}, err
-	}
-	minMem, hasMem, memErr := traverseCgroupV1Memory(memBaseDir, targetMemDir)
-	if memErr != nil {
-		return Limits{CgroupVersion: VersionUnknown}, memErr
-	}
-	if hasMem {
-		limits.MemoryLimitBytes = minMem
-	}
-
-	cpuBaseDir := resolveCgroupV1CPUBase(root)
+	memRelPath, hasMemPath := v1RelPaths["memory"]
 	cpuRelPath := ""
+	hasCPUPath := false
 	if v1RelPaths != nil {
-		if path, ok := v1RelPaths["cpu"]; ok && path != "" {
+		if path, ok := v1RelPaths["cpu"]; ok {
 			cpuRelPath = path
-		} else if path, ok := v1RelPaths["cpu,cpuacct"]; ok && path != "" {
+			hasCPUPath = true
+		} else if path, ok := v1RelPaths["cpu,cpuacct"]; ok {
 			cpuRelPath = path
+			hasCPUPath = true
 		}
 	}
-	targetCPUDir, err := resolveTargetDirectory(cpuBaseDir, cpuRelPath)
-	if err != nil {
-		return Limits{CgroupVersion: VersionUnknown}, err
+
+	if !hasMemPath && !hasCPUPath {
+		return Limits{CgroupVersion: VersionUnknown}, nil
 	}
-	minQuota, hasCPU, cpuErr := traverseCgroupV1CPU(cpuBaseDir, targetCPUDir)
-	if cpuErr != nil {
-		return Limits{CgroupVersion: VersionUnknown}, cpuErr
+
+	limits := Limits{CgroupVersion: VersionV1}
+
+	if hasMemPath && memRelPath != "" {
+		memBaseDir := resolveCgroupV1MemBase(root)
+		targetMemDir, err := resolveTargetDirectory(memBaseDir, memRelPath)
+		if err != nil {
+			return Limits{CgroupVersion: VersionUnknown}, err
+		}
+		minMem, hasMem, memErr := traverseCgroupV1Memory(memBaseDir, targetMemDir)
+		if memErr != nil {
+			return Limits{CgroupVersion: VersionUnknown}, memErr
+		}
+		if hasMem {
+			limits.MemoryLimitBytes = minMem
+		}
 	}
-	if hasCPU && minQuota > 0 {
-		limits.CPUQuota = minQuota
-		if cpus, ok := CalculateGOMAXPROCS(limits.CPUQuota); ok {
-			limits.CPUs = cpus
+
+	if hasCPUPath && cpuRelPath != "" {
+		cpuBaseDir := resolveCgroupV1CPUBase(root)
+		targetCPUDir, err := resolveTargetDirectory(cpuBaseDir, cpuRelPath)
+		if err != nil {
+			return Limits{CgroupVersion: VersionUnknown}, err
+		}
+		minQuota, hasCPU, cpuErr := traverseCgroupV1CPU(cpuBaseDir, targetCPUDir)
+		if cpuErr != nil {
+			return Limits{CgroupVersion: VersionUnknown}, cpuErr
+		}
+		if hasCPU && minQuota > 0 {
+			limits.CPUQuota = minQuota
+			if cpus, ok := CalculateGOMAXPROCS(limits.CPUQuota); ok {
+				limits.CPUs = cpus
+			}
 		}
 	}
 

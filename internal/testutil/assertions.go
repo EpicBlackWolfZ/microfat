@@ -12,6 +12,9 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,21 +42,25 @@ const (
 func AssertPayloadIntegrity(t testing.TB, binary []byte, entry format.VariantEntry) {
 	t.Helper()
 
-	if entry.Offset < 0 || entry.CompressedSize < 0 || entry.UncompressedSize < 0 {
-		t.Fatalf("invalid negative bounds in entry: offset=%d compressed=%d uncompressed=%d",
+	if entry.Offset < 0 || entry.CompressedSize <= 0 || entry.UncompressedSize <= 0 {
+		t.Fatalf("invalid negative/zero bounds in entry: offset=%d compressed=%d uncompressed=%d",
 			entry.Offset, entry.CompressedSize, entry.UncompressedSize)
+		return
+	}
+
+	binLen := int64(len(binary))
+	if entry.Offset > binLen || entry.CompressedSize > binLen-entry.Offset {
+		t.Fatalf("variant entry payload extends out of bounds: offset=%d size=%d binary_len=%d",
+			entry.Offset, entry.CompressedSize, binLen)
+		return
 	}
 
 	totalEnd := entry.Offset + entry.CompressedSize
-	if totalEnd > int64(len(binary)) {
-		t.Fatalf("variant entry payload extends out of bounds: offset=%d size=%d binary_len=%d",
-			entry.Offset, entry.CompressedSize, len(binary))
-	}
-
 	payloadBytes := binary[entry.Offset:totalEnd]
 	c, err := codec.Get(entry.Compression)
 	if err != nil {
 		t.Fatalf("resolving codec %q: %v", entry.Compression, err)
+		return
 	}
 
 	var decompressed bytes.Buffer
@@ -64,11 +71,13 @@ func AssertPayloadIntegrity(t testing.TB, binary []byte, entry format.VariantEnt
 	if err != nil {
 		t.Fatalf("decompression failed for variant %s (compression %s): %v",
 			entry.Level, entry.Compression, err)
+		return
 	}
 
 	if int64(decompressed.Len()) != entry.UncompressedSize {
 		t.Fatalf("decompressed size mismatch: expected %d bytes, got %d bytes",
 			entry.UncompressedSize, decompressed.Len())
+		return
 	}
 
 	if entry.SHA256 != "" {
@@ -76,6 +85,7 @@ func AssertPayloadIntegrity(t testing.TB, binary []byte, entry format.VariantEnt
 		if computedHash != entry.SHA256 {
 			t.Fatalf("SHA-256 mismatch for variant %s: expected %s, got %s",
 				entry.Level, entry.SHA256, computedHash)
+			return
 		}
 	}
 }
@@ -85,6 +95,15 @@ func AssertPayloadIntegrity(t testing.TB, binary []byte, entry format.VariantEnt
 // even when processing corrupted, malformed, or hostile streams.
 func AssertDecompressionBounds(t testing.TB, c codec.Codec, r io.Reader, limit int64) {
 	t.Helper()
+
+	if c == nil {
+		t.Fatalf("nil codec provided to AssertDecompressionBounds")
+		return
+	}
+	if r == nil {
+		t.Fatalf("nil reader provided to AssertDecompressionBounds")
+		return
+	}
 
 	if limit <= 0 {
 		limit = DefaultSafetyCeiling
@@ -120,6 +139,7 @@ func AssertLevelRequirements(t testing.TB, arch string, level string, features [
 		if detectedLevel != level {
 			t.Fatalf("AMD64 level evaluation mismatch: expected %s, got %s for features %v",
 				level, detectedLevel, features)
+			return
 		}
 	case microarch.ArchARM64:
 		arm := arm64FeaturesFromMap(featMap)
@@ -127,14 +147,17 @@ func AssertLevelRequirements(t testing.TB, arch string, level string, features [
 		if detectedLevel != level {
 			t.Fatalf("ARM64 level evaluation mismatch: expected %s, got %s for features %v",
 				level, detectedLevel, features)
+			return
 		}
 		for _, s := range statuses {
 			if s.Level == level && !s.Satisfied {
 				t.Fatalf("ARM64 status for %s reported not satisfied despite detection match", level)
+				return
 			}
 		}
 	default:
 		t.Fatalf("unsupported architecture for level requirement assertion: %s", arch)
+		return
 	}
 }
 
@@ -146,35 +169,40 @@ func AssertCacheIsolation(t testing.TB, cachePath string) {
 	info, err := os.Stat(cachePath)
 	if err != nil {
 		t.Fatalf("stat cache path %s: %v", cachePath, err)
+		return
 	}
 
 	perm := info.Mode().Perm()
 	if perm&PermMaskOtherGroup != 0 {
 		t.Fatalf("cache isolation violation: path %s has insecure permissions %04o (group/other bits set)",
 			cachePath, perm)
+		return
 	}
 
 	if info.IsDir() {
 		entries, err := os.ReadDir(cachePath)
 		if err != nil {
 			t.Fatalf("reading cache directory %s: %v", cachePath, err)
+			return
 		}
 		for _, entry := range entries {
 			childPath := filepath.Join(cachePath, entry.Name())
 			childInfo, err := entry.Info()
 			if err != nil {
 				t.Fatalf("stat cache child %s: %v", childPath, err)
+				return
 			}
 			childPerm := childInfo.Mode().Perm()
 			if childPerm&PermMaskOtherGroup != 0 {
 				t.Fatalf("cache child isolation violation: path %s has insecure permissions %04o",
 					childPath, childPerm)
+				return
 			}
 		}
 	}
 }
 
-// RunPropertyTest executes a property-based testing function for the specified iterations
+// RunPropertyTest executes a property-based testing function sequentially for the specified iterations
 // with deterministic per-iteration PRNG instances. If seed is 0, a timestamp seed is selected and logged on error.
 func RunPropertyTest(t *testing.T, name string, iterations int, seed uint64, fn func(t *testing.T, iter int, rng *rand.Rand)) {
 	t.Helper()
@@ -194,18 +222,97 @@ func RunPropertyTest(t *testing.T, name string, iterations int, seed uint64, fn 
 			iterSeed1 := seed ^ (uint64(i) * prngMultiplier)
 			iterSeed2 := (uint64(i) + 1) * prngMultiplier + prngAddend
 
+			// #nosec G404 -- pseudo-random generator used exclusively for reproducible property testing seeds
+			rng := rand.New(rand.NewPCG(iterSeed1, iterSeed2))
+
+			var failed bool
 			success := t.Run(fmt.Sprintf("iter_%03d", i), func(subT *testing.T) {
-				subT.Parallel()
-				// #nosec G404 -- pseudo-random generator used exclusively for reproducible property testing seeds
-				rng := rand.New(rand.NewPCG(iterSeed1, iterSeed2))
 				fn(subT, i, rng)
+				if subT.Failed() {
+					failed = true
+				}
 			})
-			if !success {
+			if !success || failed {
 				t.Logf("[property-test-failure] seed=%d iteration=%d/%d test=%s",
 					seed, i, iterations, name)
 				break
 			}
 		}
+	})
+}
+
+// RunPropertyTestConcurrent executes property iterations using a bounded worker pool.
+// maxWorkers is capped between 1 and runtime.GOMAXPROCS(0) if <= 0.
+func RunPropertyTestConcurrent(
+	t *testing.T,
+	name string,
+	iterations int,
+	maxWorkers int,
+	seed uint64,
+	fn func(t *testing.T, iter int, rng *rand.Rand),
+) {
+	t.Helper()
+
+	if iterations <= 0 {
+		iterations = DefaultPropertyIters
+	}
+	if seed == 0 {
+		seed = uint64(time.Now().UnixNano())
+	}
+	if maxWorkers <= 0 {
+		maxWorkers = runtime.GOMAXPROCS(0)
+	}
+	if maxWorkers > iterations {
+		maxWorkers = iterations
+	}
+
+	t.Run(name, func(t *testing.T) {
+		t.Parallel()
+
+		sem := make(chan struct{}, maxWorkers)
+		var wg sync.WaitGroup
+		var failed atomic.Bool
+
+		for i := range iterations {
+			if failed.Load() {
+				break
+			}
+
+			iterSeed1 := seed ^ (uint64(i) * prngMultiplier)
+			iterSeed2 := (uint64(i) + 1) * prngMultiplier + prngAddend
+
+			sem <- struct{}{}
+			wg.Add(1)
+
+			go func(iter int, s1, s2 uint64) {
+				defer func() {
+					<-sem
+					wg.Done()
+				}()
+
+				if failed.Load() {
+					return
+				}
+
+				// #nosec G404 -- pseudo-random generator used exclusively for reproducible property testing seeds
+				rng := rand.New(rand.NewPCG(s1, s2))
+
+				var iterFailed bool
+				subSuccess := t.Run(fmt.Sprintf("iter_%03d", iter), func(subT *testing.T) {
+					fn(subT, iter, rng)
+					if subT.Failed() {
+						iterFailed = true
+					}
+				})
+				if !subSuccess || iterFailed {
+					if failed.CompareAndSwap(false, true) {
+						t.Logf("[property-test-failure] seed=%d iteration=%d/%d test=%s",
+							seed, iter, iterations, name)
+					}
+				}
+			}(i, iterSeed1, iterSeed2)
+		}
+		wg.Wait()
 	})
 }
 
@@ -300,6 +407,11 @@ func arm64FeaturesFromMap(m map[string]bool) microarch.ARM64Features {
 		HasWFxT:     m["wfxt"],
 		HasSME:      m["sme"],
 		HasSME2:     m["sme2"],
+		HasMOPS:     m["mops"],
+		HasNMI:      m["nmi"],
+		HasHBC:      m["hbc"],
+		HasGCS:      m["gcs"],
+		HasTHE:      m["the"],
 		HasAES:      m["aes"],
 		HasPMULL:    m["pmull"],
 		HasSHA1:     m["sha1"],

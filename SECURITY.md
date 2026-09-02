@@ -10,7 +10,8 @@ Only the latest release stream of `microfat` receives active security updates, b
 
 | Version | Supported | Notes |
 | :--- | :--- | :--- |
-| `v0.1.x` | :white_check_mark: | Current active release stream |
+| `v0.2.x` | :white_check_mark: | Current active release stream |
+| `v0.1.x` | :white_check_mark: | Supported maintenance release stream |
 | `< v0.1.0` | :x: | End of life |
 
 ---
@@ -62,5 +63,16 @@ Every contribution and release in `microfat` undergoes automated multi-layer sec
 `microfat` enforces strict runtime defense-in-depth:
 
 - **Cryptographic Trailer Verification**: Fixed 56-byte cryptographic trailers (`\x00\xFA\x7FMICRO` magic) require valid SHA-256 payload checksums prior to decompression or execution.
-- **Restricted Memory Execution**: In-memory ELF execution via `memfd_create` and fallback binaries in `$XDG_CACHE_HOME/microfat` are created with strictly private `0700` file modes restricted to the executing UID.
+- **Mandatory Kernel Memory Sealing (`memfd_create`)**:
+  - In-memory execution creates an anonymous RAM descriptor via `memfd_create("microfat_payload", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)`.
+  - Once variant payloads are extracted and validated against their embedded SHA-256 digests, the descriptor is sealed using `F_ADD_SEALS` with `F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL`.
+  - `F_SEAL_WRITE` prevents any modification of the decompressed ELF binary in memory.
+  - `F_SEAL_SHRINK` and `F_SEAL_GROW` prevent resizing or truncation of the executable memory region.
+  - `F_SEAL_SEAL` permanently locks the seal set, forbidding any further seals or unsealing.
+  - This mitigates local code injection, `/proc/self/mem` write races, and tampering prior to executing the process image via `/proc/self/fd/<fd>`.
+  - The launcher strictly treats unsealed descriptors as unsafe. If sealing is unsupported (`ENOSYS`, `EINVAL`) or blocked (`EPERM`), auto mode falls back cleanly to disk cache execution, while explicit memfd mode aborts immediately.
+- **Descriptor-Bound Cache Fallback & TOCTOU Defense**:
+  - Fallback binaries in `$XDG_CACHE_HOME/microfat` (or `/tmp/.microfat-<uid>`) are isolated with strict `0700` (`rwx------`) permissions per-user.
+  - Binaries are opened exclusively using `unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW` to guarantee refusal of symlink traversal with `ELOOP`.
+  - Execution operates directly on the verified file descriptor via `/proc/self/fd/<fd>`, ensuring validation and execution bind to the exact same VFS inode and completely eliminating Time-of-Check to Time-of-Use (TOCTOU) file replacement races.
 - **Resource Boundary Defense**: Automated cgroup v1 and v2 parsers enforce `GOMEMLIMIT` at a 90% container memory ceiling and bind `GOMAXPROCS` to CFS quotas to prevent noisy-neighbor Denial of Service (DoS).

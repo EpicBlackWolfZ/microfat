@@ -26,7 +26,14 @@ const (
 	privateCacheDirMode = 0o700
 	privateExecMode     = 0o700
 	extraEnvCapacity    = 16
-	memfdTargetSeals    = unix.F_SEAL_WRITE | unix.F_SEAL_SHRINK | unix.F_SEAL_GROW | unix.F_SEAL_SEAL
+	verifyBufferSize    = 32768
+	// memfdTargetSeals defines the mandatory Linux kernel memory file descriptor seals applied to
+	// anonymous RAM payloads prior to execution via /proc/self/fd/<fd>.
+	// - F_SEAL_WRITE: prevents any modification of the decompressed binary code in memory.
+	// - F_SEAL_SHRINK & F_SEAL_GROW: prevents truncation or expansion of the memory region.
+	// - F_SEAL_SEAL: permanently locks the seal set, preventing any further seals or unsealing.
+	// This ensures cryptographic integrity and memory safety against runtime tampering or write races.
+	memfdTargetSeals = unix.F_SEAL_WRITE | unix.F_SEAL_SHRINK | unix.F_SEAL_GROW | unix.F_SEAL_SEAL
 )
 
 var (
@@ -39,6 +46,9 @@ var (
 	readCgroupLimitsFunc = cgroup.ReadLimits
 	resolveCacheDirFunc  = format.ResolveCacheDir
 	userHomeDirFunc      = os.UserHomeDir
+	openCachedBinaryFunc = func(path string) (int, error) {
+		return unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	}
 )
 
 // extractVariantToWriter seeks to the variant offset and streams decompressed bytes to w,
@@ -127,6 +137,16 @@ func executeVariant(
 	return executeViaCache(selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, err, startTime)
 }
 
+func upsertEnv(env []string, keyIndex map[string]int, key, val string) []string {
+	entry := key + "=" + val
+	if idx, exists := keyIndex[key]; exists {
+		env[idx] = entry
+		return env
+	}
+	keyIndex[key] = len(env)
+	return append(env, entry)
+}
+
 func buildAutoTunedEnviron(
 	baseEnv []string,
 	entry *format.VariantEntry,
@@ -134,24 +154,34 @@ func buildAutoTunedEnviron(
 	hostInfo microarch.Info,
 	policyRes microarch.PolicyResult,
 ) ([]string, *cgroup.Limits) {
-	env := make([]string, len(baseEnv), len(baseEnv)+extraEnvCapacity)
-	copy(env, baseEnv)
+	env := make([]string, 0, len(baseEnv)+extraEnvCapacity)
+	keyIndex := make(map[string]int, len(baseEnv)+extraEnvCapacity)
 
-	env = append(env,
-		fmt.Sprintf("%s=%s", format.EnvSelectedVariant, entry.Level),
-		fmt.Sprintf("%s=%s", format.EnvHostArch, hostInfo.Arch),
-		fmt.Sprintf("%s=%s", format.EnvHostLevel, hostInfo.Level),
-		fmt.Sprintf("%s=%s", format.EnvExecMode, execMode),
-		fmt.Sprintf("%s=%s", format.EnvDispatchMode, execMode),
-		fmt.Sprintf("%s=%s", format.EnvSelectedSHA256, entry.SHA256),
-		fmt.Sprintf("%s=%d", format.EnvSelectedSize, entry.UncompressedSize),
-	)
+	for _, e := range baseEnv {
+		k, _, found := strings.Cut(e, "=")
+		if !found || k == "" {
+			env = append(env, e)
+			continue
+		}
+		if idx, exists := keyIndex[k]; exists {
+			env[idx] = e
+		} else {
+			keyIndex[k] = len(env)
+			env = append(env, e)
+		}
+	}
+
+	env = upsertEnv(env, keyIndex, format.EnvSelectedVariant, entry.Level)
+	env = upsertEnv(env, keyIndex, format.EnvHostArch, hostInfo.Arch)
+	env = upsertEnv(env, keyIndex, format.EnvHostLevel, hostInfo.Level)
+	env = upsertEnv(env, keyIndex, format.EnvExecMode, execMode)
+	env = upsertEnv(env, keyIndex, format.EnvDispatchMode, execMode)
+	env = upsertEnv(env, keyIndex, format.EnvSelectedSHA256, entry.SHA256)
+	env = upsertEnv(env, keyIndex, format.EnvSelectedSize, strconv.FormatInt(entry.UncompressedSize, 10))
 
 	if policyRes.PolicyApplied != "" {
-		env = append(env,
-			fmt.Sprintf("%s=%s", format.EnvPolicyApplied, policyRes.PolicyApplied),
-			fmt.Sprintf("%s=%s", format.EnvOverrideReason, policyRes.OverrideReason),
-		)
+		env = upsertEnv(env, keyIndex, format.EnvPolicyApplied, policyRes.PolicyApplied)
+		env = upsertEnv(env, keyIndex, format.EnvOverrideReason, policyRes.OverrideReason)
 	}
 
 	limits, err := readCgroupLimitsFunc()
@@ -166,11 +196,9 @@ func buildAutoTunedEnviron(
 		return env, nil
 	}
 
-	env = append(env,
-		fmt.Sprintf("%s=%d", format.EnvCgroupVersion, limits.CgroupVersion),
-		fmt.Sprintf("%s=%d", format.EnvCgroupLimitBytes, limits.MemoryLimitBytes),
-		fmt.Sprintf("%s=%.2f", format.EnvCgroupCPUs, limits.CPUQuota),
-	)
+	env = upsertEnv(env, keyIndex, format.EnvCgroupVersion, strconv.Itoa(limits.CgroupVersion))
+	env = upsertEnv(env, keyIndex, format.EnvCgroupLimitBytes, strconv.FormatInt(limits.MemoryLimitBytes, 10))
+	env = upsertEnv(env, keyIndex, format.EnvCgroupCPUs, fmt.Sprintf("%.2f", limits.CPUQuota))
 
 	gcProfile, _ := cgroup.ParseGCProfile(os.Getenv(format.EnvGCProfile))
 	liveHeap, _ := cgroup.ParseByteSize(os.Getenv(format.EnvLiveHeapEstimate))
@@ -184,16 +212,16 @@ func buildAutoTunedEnviron(
 		liveHeap,
 	)
 	if plan.GOMEMLIMITStr != "" {
-		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGOMEMLIMIT, plan.GOMEMLIMITStr))
+		env = upsertEnv(env, keyIndex, format.EnvCgroupGOMEMLIMIT, plan.GOMEMLIMITStr)
 	}
 	if plan.GOMAXPROCSStr != "" {
-		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGOMAXPROCS, plan.GOMAXPROCSStr))
+		env = upsertEnv(env, keyIndex, format.EnvCgroupGOMAXPROCS, plan.GOMAXPROCSStr)
 	}
 	if plan.GOGCStr != "" {
-		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGOGC, plan.GOGCStr))
+		env = upsertEnv(env, keyIndex, format.EnvCgroupGOGC, plan.GOGCStr)
 	}
 	if plan.GCProfile != cgroup.GCProfileDefault {
-		env = append(env, fmt.Sprintf("%s=%s", format.EnvCgroupGCProfile, string(plan.GCProfile)))
+		env = upsertEnv(env, keyIndex, format.EnvCgroupGCProfile, string(plan.GCProfile))
 	}
 
 	// Check if user opted out of auto-tuning
@@ -202,31 +230,14 @@ func buildAutoTunedEnviron(
 		return env, &limits
 	}
 
-	hasMemLimit := false
-	hasMaxProcs := false
-	hasGOGC := false
-	for _, e := range baseEnv {
-		if strings.HasPrefix(e, "GOMEMLIMIT=") {
-			hasMemLimit = true
-		}
-		if strings.HasPrefix(e, "GOMAXPROCS=") {
-			hasMaxProcs = true
-		}
-		if strings.HasPrefix(e, "GOGC=") {
-			hasGOGC = true
-		}
+	if _, hasMem := keyIndex["GOMEMLIMIT"]; !hasMem && plan.GOMEMLIMITStr != "" {
+		env = upsertEnv(env, keyIndex, "GOMEMLIMIT", plan.GOMEMLIMITStr)
 	}
-
-	if !hasMemLimit && plan.GOMEMLIMITStr != "" {
-		env = append(env, fmt.Sprintf("GOMEMLIMIT=%s", plan.GOMEMLIMITStr))
+	if _, hasProcs := keyIndex["GOMAXPROCS"]; !hasProcs && plan.GOMAXPROCSStr != "" {
+		env = upsertEnv(env, keyIndex, "GOMAXPROCS", plan.GOMAXPROCSStr)
 	}
-
-	if !hasMaxProcs && plan.GOMAXPROCSStr != "" {
-		env = append(env, fmt.Sprintf("GOMAXPROCS=%s", plan.GOMAXPROCSStr))
-	}
-
-	if !hasGOGC && plan.GOGCApplied && plan.GOGCStr != "" {
-		env = append(env, fmt.Sprintf("GOGC=%s", plan.GOGCStr))
+	if _, hasGC := keyIndex["GOGC"]; !hasGC && plan.GOGCApplied && plan.GOGCStr != "" {
+		env = upsertEnv(env, keyIndex, "GOGC", plan.GOGCStr)
 	}
 
 	return env, &limits
@@ -356,6 +367,12 @@ func logErrorDiagnostics(
 	}
 }
 
+// executeViaMemfd creates an anonymous, in-memory ELF file descriptor using memfd_create with MFD_ALLOW_SEALING,
+// decompresses the selected variant payload into RAM, verifies its cryptographic digest, applies mandatory
+// descriptor seals (F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) to guarantee immutability,
+// and replaces the process image via execve on /proc/self/fd/<fd>.
+// If memfd creation or sealing fails (e.g. due to restrictive seccomp profiles or unsupported kernel versions),
+// it returns an error allowing auto-dispatch to fall back to hardened descriptor-bound cache execution.
 func executeViaMemfd(
 	selfFile *os.File,
 	entry *format.VariantEntry,
@@ -432,34 +449,20 @@ func executeViaCache(
 
 	cachedBinary := filepath.Join(cacheDir, filepath.Clean(entry.SHA256))
 	var decompDuration time.Duration
-	stat, statErr := os.Stat(cachedBinary)
-	needExtract := statErr != nil || stat.Size() != entry.UncompressedSize
 
-	if !needExtract && isVerifyCacheEnabled() {
-		if !verifyCachedFileSHA256(cachedBinary, entry.SHA256) {
-			if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
-				fmt.Fprintf(
-					os.Stderr,
-					"[microfat:debug] corrupted cache file detected (checksum mismatch in %s), re-extracting\n",
-					cachedBinary,
-				)
-			}
-			_ = os.Remove(cachedBinary)
-			needExtract = true
-		}
+	fd, openErr := openCachedBinaryFunc(cachedBinary)
+	if openErr != nil && (errors.Is(openErr, syscall.ELOOP) || errors.Is(openErr, unix.ELOOP)) {
+		errOut := fmt.Errorf("%w: refusal to execute symlink at %s: %w", format.ErrCacheWrite, cachedBinary, openErr)
+		logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "symlink detected in cache")
+		return errOut
 	}
 
-	// #nosec G703 -- cache entry existence and size verification
+	needExtract := true
+	if openErr == nil {
+		needExtract = !validateExistingCacheFD(fd, entry, cachedBinary)
+	}
+
 	if needExtract {
-		if statErr == nil && stat.Size() != entry.UncompressedSize {
-			if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
-				fmt.Fprintf(
-					os.Stderr,
-					"[microfat:debug] truncated cache file detected (%s, expected %d B, got %d B), re-extracting\n",
-					cachedBinary, entry.UncompressedSize, stat.Size(),
-				)
-			}
-		}
 		tmpFile, err := os.CreateTemp(cacheDir, ".exec-*.tmp")
 		if err != nil {
 			errOut := fmt.Errorf("%w: launcher execution failed: cannot create temp file in %s: %w (primary memfd error: %v)",
@@ -476,34 +479,60 @@ func executeViaCache(
 		decompStart := time.Now()
 		if err := extractVariantToWriter(selfFile, entry, idx, tmpFile); err != nil {
 			logErrorDiagnostics(format.StageCacheExtract, err, hostInfo, entry, policyRes, "decompressing payload to cache failed")
-			return fmt.Errorf("%w: extracting to cache fallback: %w", format.ErrCacheExtract, err)
+			return fmt.Errorf("%w: extracting to cache fallback: %w (primary memfd error: %v)", format.ErrCacheExtract, err, primaryErr)
 		}
 		decompDuration = time.Since(decompStart)
 
-		_ = tmpFile.Chmod(format.PrivateExecMode)
+		if err := tmpFile.Chmod(format.PrivateExecMode); err != nil {
+			errOut := fmt.Errorf("%w: setting permissions on temp cache file %s: %w (primary memfd error: %v)",
+				format.ErrCacheWrite, tmpPath, err, primaryErr)
+			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "chmod temp cache file failed")
+			return errOut
+		}
 		if err := tmpFile.Sync(); err != nil {
-			errOut := fmt.Errorf("%w: syncing temp cache file %s: %w", format.ErrCacheWrite, tmpPath, err)
+			errOut := fmt.Errorf("%w: syncing temp cache file %s: %w (primary memfd error: %v)",
+				format.ErrCacheWrite, tmpPath, err, primaryErr)
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "syncing temp cache file failed")
 			return errOut
 		}
-		_ = tmpFile.Close()
-		// #nosec G703 -- atomic move to cache location
-		_ = os.Rename(tmpPath, cachedBinary)
+		if err := tmpFile.Close(); err != nil {
+			errOut := fmt.Errorf("%w: closing temp cache file %s: %w (primary memfd error: %v)",
+				format.ErrCacheWrite, tmpPath, err, primaryErr)
+			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "closing temp cache file failed")
+			return errOut
+		}
+		if err := os.Rename(tmpPath, cachedBinary); err != nil {
+			errOut := fmt.Errorf("%w: renaming temp cache file %s to %s: %w (primary memfd error: %v)",
+				format.ErrCacheWrite, tmpPath, cachedBinary, err, primaryErr)
+			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "renaming temp cache file failed")
+			return errOut
+		}
+
+		// Re-open with O_NOFOLLOW to bind descriptor securely
+		fd, openErr = openCachedBinaryFunc(cachedBinary)
+		if openErr != nil {
+			errOut := fmt.Errorf("%w: opening verified cache file %s: %w (primary memfd error: %v)",
+				format.ErrCacheWrite, cachedBinary, openErr, primaryErr)
+			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "opening verified cache file failed")
+			return errOut
+		}
 	}
+
+	defer func() { _ = unix.Close(fd) }()
 
 	logDiagnostics(entry, format.ExecModeCache, hostInfo, policyRes, env, limits, decompDuration, time.Since(startTime))
 
-	// #nosec G204, G702 -- launcher fallback execution
-	execErr := execveFunc(cachedBinary, args, env)
+	procPath := "/proc/self/fd/" + strconv.Itoa(fd)
+	execErr := execveFunc(procPath, args, env)
 	if execErr == nil {
 		return nil
 	}
-	logErrorDiagnostics(format.StageCacheExec, execErr, hostInfo, entry, policyRes, "execve failed on cached binary "+cachedBinary)
+	logErrorDiagnostics(format.StageCacheExec, execErr, hostInfo, entry, policyRes, "execve failed on cached binary "+procPath)
 	if primaryErr != nil {
 		return fmt.Errorf("%w: cache fallback execve failed (%s): %w (primary memfd error: %v)",
-			format.ErrExecve, cachedBinary, execErr, primaryErr)
+			format.ErrExecve, procPath, execErr, primaryErr)
 	}
-	return fmt.Errorf("%w: cache execve failed (%s): %w", format.ErrExecve, cachedBinary, execErr)
+	return fmt.Errorf("%w: cache execve failed (%s): %w", format.ErrExecve, procPath, execErr)
 }
 
 func isVerifyCacheEnabled() bool {
@@ -511,17 +540,58 @@ func isVerifyCacheEnabled() bool {
 	return val == "1" || strings.EqualFold(val, "true")
 }
 
-func verifyCachedFileSHA256(path, expectedHex string) bool {
-	// #nosec G304 -- opening resolved cached binary for hash verification
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
+func validateExistingCacheFD(fd int, entry *format.VariantEntry, cachedBinary string) bool {
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		_ = unix.Close(fd)
 		return false
 	}
-	defer func() { _ = f.Close() }()
-
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, f); err != nil {
+	isRegular := (stat.Mode & unix.S_IFMT) == unix.S_IFREG
+	if !isRegular || stat.Size != entry.UncompressedSize {
+		if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
+			fmt.Fprintf(
+				os.Stderr,
+				"[microfat:debug] truncated cache file detected (%s, expected %d B, got %d B), re-extracting\n",
+				cachedBinary, entry.UncompressedSize, stat.Size,
+			)
+		}
+		_ = unix.Close(fd)
+		_ = os.Remove(cachedBinary)
 		return false
+	}
+	if isVerifyCacheEnabled() {
+		if !verifyCachedFD(fd, entry.SHA256) {
+			if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
+				fmt.Fprintf(
+					os.Stderr,
+					"[microfat:debug] corrupted cache file detected (checksum mismatch in %s), re-extracting\n",
+					cachedBinary,
+				)
+			}
+			_ = unix.Close(fd)
+			_ = os.Remove(cachedBinary)
+			return false
+		}
+	}
+	return true
+}
+
+func verifyCachedFD(fd int, expectedHex string) bool {
+	hasher := sha256.New()
+	buf := make([]byte, verifyBufferSize)
+	offset := int64(0)
+	for {
+		n, err := unix.Pread(fd, buf, offset)
+		if n > 0 {
+			hasher.Write(buf[:n])
+			offset += int64(n)
+		}
+		if err != nil {
+			return false
+		}
+		if n == 0 {
+			break
+		}
 	}
 	return hex.EncodeToString(hasher.Sum(nil)) == expectedHex
 }
