@@ -141,9 +141,9 @@ microfat doctor --cache-dir /var/cache/microfat
     • Auto GOMAXPROCS: 4
 
 [✔] Toolchain & Version Metadata
-    • Version:        1.4.0
-    • Commit:         7a8b9c0
-    • Build Date:     2026-08-28T02:00:00Z
+    • Version:        v0.2.1
+    • Commit:         7cba82c
+    • Build Date:     2026-09-02T20:00:00Z
 
 Summary: Environment is fully ready for high-performance Microfat dispatch!
 ```
@@ -187,7 +187,7 @@ Embedded Variants (3 total):
 
 ### `microfat verify <binary>`
 
-Cryptographically validate the 56-byte trailer magic, index SHA-256 hash, and payload integrity checksums of all embedded variants.
+Validate the 56-byte trailer magic, index SHA-256 hash, and payload integrity checksums of all embedded variants.
 
 ```bash
 # Verify binary integrity
@@ -203,8 +203,11 @@ microfat verify bin/myapp --json
 | `--json` | *(none)* | `bool` | `false` | Output verification results in structured JSON format. |
 
 #### Exit Code Behavior:
-- `0`: All embedded payloads and trailers matched their cryptographic SHA-256 checksums.
+- `0`: All embedded payloads and trailers matched their SHA-256 payload integrity checksums.
 - `1`: One or more variants failed verification or trailer was corrupted.
+
+> [!NOTE]
+> `microfat verify` performs payload and index integrity validation (detecting bit-rot, transmission corruption, and tampering). It does not authenticate the producer of the fat binary; publisher authenticity requires digital signatures via tools like Sigstore Cosign or GPG. See [SECURITY.md](../SECURITY.md#payload-integrity-vs-producer-authenticity-hashing-vs-signing).
 
 ---
 

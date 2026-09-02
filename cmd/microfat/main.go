@@ -41,7 +41,7 @@ func newRootCmd() *cobra.Command {
 		Use:   "microfat",
 		Short: "Microfat - Dynamic CPU Microarchitecture Optimization and Packaging Tool",
 		Long: `Microfat combines multiple microarchitecture-specific Go ELF binaries into a single,
-self-dispatching fat executable with zero persistent process overhead and cryptographically verified integrity.`,
+self-dispatching fat executable with zero persistent process overhead and payload integrity verification.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if showVersion {
 				fmt.Println(version.Info())

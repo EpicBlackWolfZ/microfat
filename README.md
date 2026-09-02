@@ -6,7 +6,7 @@
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/EpicBlackWolfZ/microfat/codeql.yml?branch=main&logo=github&label=CodeQL)](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/codeql.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Microfat** combines multiple CPU microarchitecture-specific ELF binaries (`v1`, `v2`, `v3`, `v4` or `v8.0`..`v9.5`) into a single, self-dispatching Linux executable with zero persistent process overhead, automatic container resource auto-tuning (`GOMEMLIMIT` & `GOMAXPROCS`), and cryptographic integrity validation.
+**Microfat** combines multiple CPU microarchitecture-specific ELF binaries (`v1`, `v2`, `v3`, `v4` or `v8.0`..`v9.5`) into a single, self-dispatching Linux executable with zero persistent process overhead, automatic container resource auto-tuning (`GOMEMLIMIT` & `GOMAXPROCS`), and payload integrity verification.
 
 ---
 
@@ -19,8 +19,11 @@
   - **Universal Fat Binary**: Distribute a single executable that runs everywhere (`v1`–`v4` or `v8.0`–`v9.5`).
   - **Trimmed Fat Binary (`--microfat:trim` / `microfat trim`)**: Discard unneeded variants on disk (~50% size reduction) while retaining launcher auto-tuning and RAM execution.
   - **Raw Native ELF (`--microfat:optimize`)**: Permanently specialize to raw uncompressed ELF machine code with 0.0ms launch overhead.
-- 🔒 **Cryptographic Verification**: 56-byte cryptographic trailer with SHA-256 index hashing and variant checksum validation.
+- 🔒 **Payload Integrity Verification**: 56-byte trailer with SHA-256 index hashing and variant checksum validation.
 - 📦 **Shared Inter-Variant Dictionary**: Multi-variant compression with trained Zstandard dictionaries achieving up to **~75%** binary size reduction.
+
+> [!NOTE]
+> **Payload Integrity vs Producer Authenticity**: Embedded SHA-256 digests provide payload integrity verification; they do not authenticate the producer of the fat binary. To establish provenance and origin authenticity in production pipelines, sign fat executables with external tools such as Sigstore Cosign or GPG. See [SECURITY.md](SECURITY.md#payload-integrity-vs-producer-authenticity-hashing-vs-signing) for security architecture details.
 
 ---
 
@@ -68,7 +71,7 @@ microfat doctor --json
 [✔] Host CPU Microarchitecture
     • OS/Arch:        linux/amd64
     • Detected Level: v3
-    • Key Features:   cx16, popcnt, sse3, ssse3, sse4.1, sse4.2, avx, avx2, bmi1, bmi2, fma, osxsave
+    • Key Features:   cx16, popcnt, sse3, ssse3, sse4.1, sse4.2, avx, avx2, bmi1, bmi2, fma, osxsave, f16c, lzcnt, movbe
     • AVX-512 Status: not present (no downclock risk)
 
 [✔] In-Memory Execution (memfd_create)
@@ -86,9 +89,9 @@ microfat doctor --json
     • Auto GOMAXPROCS: 4
 
 [✔] Toolchain & Version Metadata
-    • Version:        1.4.0
-    • Commit:         7a8b9c0
-    • Build Date:     2026-08-28T02:00:00Z
+    • Version:        v0.2.1
+    • Commit:         7cba82c
+    • Build Date:     2026-09-02T20:00:00Z
 
 Summary: Environment is fully ready for high-performance Microfat dispatch!
 ```

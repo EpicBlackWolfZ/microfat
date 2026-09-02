@@ -234,7 +234,10 @@ export MICROFAT_LIVE_HEAP_ESTIMATE=150MB
 
 ---
 
-## 7. Tampering & Cryptographic Verification Failures
+## 7. Tampering & Payload Integrity Verification Failures
+
+> [!NOTE]
+> Microfat's verification mechanism detects in-transit corruption, storage degradation, and partial tampering when the trailer/index remains intact. It does not replace public-key publisher signing (e.g. Cosign/GPG) for proving producer authenticity against an adversary who rewrites the entire executable. See [SECURITY.md](../SECURITY.md#payload-integrity-vs-producer-authenticity-hashing-vs-signing).
 
 ### Common Verification Error Sentinels:
 

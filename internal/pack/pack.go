@@ -697,7 +697,7 @@ func PrewarmVariantWithDict(
 }
 
 // verifyCachedBinary validates that a cached binary exists, matches the expected size,
-// and strictly matches the expected cryptographic SHA-256 checksum.
+// and strictly matches the expected SHA-256 checksum.
 func verifyCachedBinary(path string, expectedSize int64, expectedSHA256 string) bool {
 	stat, err := os.Stat(path)
 	if err != nil || stat.Size() != expectedSize {
@@ -808,7 +808,7 @@ func PrewarmBinary(
 }
 
 // VerifyCacheVariant inspects the cache directory for an existing variant binary, validating
-// its existence, uncompressed size, and cryptographic SHA-256 checksum without modifying disk state.
+// its existence, uncompressed size, and SHA-256 checksum without modifying disk state.
 func VerifyCacheVariant(
 	entry *format.VariantEntry,
 	cacheDir string,
