@@ -27,7 +27,7 @@ GORELEASER := $(shell command -v goreleaser 2> /dev/null)
 
 FUZZTIME ?= 5s
 
-.PHONY: all help build build-amd64 build-arm64 build-all test fuzz chaos coverage lint vuln tidy snapshot demo demo-arm64 bench bench-heavy bench-ultra bench-simd bench-startup bench-matrix test-all clean
+.PHONY: all help build build-amd64 build-arm64 build-all test e2e fuzz chaos coverage lint vuln tidy snapshot demo demo-arm64 bench bench-heavy bench-ultra bench-simd bench-startup bench-matrix test-all clean
 
 all: tidy lint vuln test coverage build ## Run complete verification pipeline (tidy, lint, vuln, test, coverage gate, build)
 
@@ -83,6 +83,15 @@ else
 endif
 	@echo "\033[32m✔\033[0m Tests passed successfully"
 
+e2e: build ## Run end-to-end black-box integration test suite
+	@echo "\033[34m==>\033[0m Running end-to-end test suite..."
+ifdef GOTESTSUM
+	@gotestsum -- -race -v ./tests/e2e/...
+else
+	@$(GO) test -race -v ./tests/e2e/...
+endif
+	@echo "\033[32m✔\033[0m E2E tests passed successfully"
+
 fuzz: ## Run Go native fuzz testing targets across format, codec, cgroup, and pack
 	@echo "\033[34m==>\033[0m Running Go native fuzz targets ($(FUZZTIME) per target)..."
 	@$(GO) test -fuzz=^FuzzUnmarshalBinaryIndex$$ -fuzztime=$(FUZZTIME) ./internal/format
@@ -108,7 +117,7 @@ chaos: ## Run chaos and fault injection test suite
 	@$(GO) test -race -run=TestDictionaryTampering ./internal/pack/...
 	@echo "\033[32m✔\033[0m Chaos tests passed"
 
-test-all: tidy lint vuln test chaos coverage build ## Run complete test suite including chaos and coverage gate
+test-all: tidy lint vuln test e2e chaos coverage build ## Run complete test suite including e2e, chaos and coverage gate
 
 COVERAGE_PKGS ?= ./cmd/... ./internal/... ./runtimeinit/...
 
