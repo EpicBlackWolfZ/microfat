@@ -105,8 +105,12 @@ func TestConcurrentCacheRacingStress(t *testing.T) {
 		mu.Lock()
 		execCount++
 		mu.Unlock()
-		if argv0 != expectedTarget {
-			t.Errorf("execve target mismatch: got %q, want %q", argv0, expectedTarget)
+		target := argv0
+		if link, err := os.Readlink(argv0); err == nil {
+			target = link
+		}
+		if target != expectedTarget {
+			t.Errorf("execve target mismatch: got %q, want %q", target, expectedTarget)
 		}
 		return nil
 	}
@@ -257,7 +261,11 @@ func TestSimulatedSeccompMemfdFallback(t *testing.T) {
 	var cacheExecuted bool
 	expectedTarget := filepath.Join(cacheDir, entry.SHA256)
 	execveFunc = func(argv0 string, argv []string, envv []string) error {
-		if argv0 == expectedTarget {
+		target := argv0
+		if link, err := os.Readlink(argv0); err == nil {
+			target = link
+		}
+		if target == expectedTarget {
 			cacheExecuted = true
 			return nil
 		}
@@ -502,7 +510,11 @@ func TestWarmCacheVerifyOption(t *testing.T) {
 
 	var executedPath string
 	execveFunc = func(argv0 string, argv []string, envv []string) error {
-		executedPath = argv0
+		if link, err := os.Readlink(argv0); err == nil {
+			executedPath = link
+		} else {
+			executedPath = argv0
+		}
 		return nil
 	}
 
@@ -730,7 +742,11 @@ func TestMemfdSealingGracefulFallback(t *testing.T) {
 			var cacheExecuted bool
 			expectedTarget := filepath.Join(cacheDir, entry.SHA256)
 			execveFunc = func(argv0 string, argv []string, envv []string) error {
-				if argv0 == expectedTarget {
+				target := argv0
+				if link, err := os.Readlink(argv0); err == nil {
+					target = link
+				}
+				if target == expectedTarget {
 					cacheExecuted = true
 					return nil
 				}

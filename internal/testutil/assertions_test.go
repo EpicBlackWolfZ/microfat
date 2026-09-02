@@ -202,6 +202,43 @@ func TestAssertPayloadIntegrity_HostileInputs(t *testing.T) {
 				UncompressedSize: 60,
 			},
 		},
+		{
+			name: "UnknownCodec",
+			entry: format.VariantEntry{
+				Offset:           0,
+				CompressedSize:   10,
+				UncompressedSize: 10,
+				Compression:      "unknown_codec_xyz",
+			},
+		},
+		{
+			name: "DecompressionFailure",
+			entry: format.VariantEntry{
+				Offset:           0,
+				CompressedSize:   10,
+				UncompressedSize: 10,
+				Compression:      "zstd",
+			},
+		},
+		{
+			name: "SizeMismatch",
+			entry: format.VariantEntry{
+				Offset:           0,
+				CompressedSize:   10,
+				UncompressedSize: 20,
+				Compression:      "none",
+			},
+		},
+		{
+			name: "HashMismatch",
+			entry: format.VariantEntry{
+				Offset:           0,
+				CompressedSize:   10,
+				UncompressedSize: 10,
+				Compression:      "none",
+				SHA256:           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -239,6 +276,15 @@ func TestAssertDecompressionBounds_HostileInputs(t *testing.T) {
 		if !mock.failed {
 			t.Fatalf("expected failure on nil reader")
 		}
+	})
+
+	t.Run("DefaultLimitSafetyCeiling", func(t *testing.T) {
+		t.Parallel()
+		c, err := codec.Get(codec.AlgorithmNone)
+		if err != nil {
+			t.Fatalf("getting codec: %v", err)
+		}
+		testutil.AssertDecompressionBounds(t, c, bytes.NewReader([]byte("safe")), 0)
 	})
 }
 

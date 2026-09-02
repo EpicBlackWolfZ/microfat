@@ -26,6 +26,7 @@ const (
 	privateCacheDirMode = 0o700
 	privateExecMode     = 0o700
 	extraEnvCapacity    = 16
+	verifyBufferSize    = 32768
 	memfdTargetSeals    = unix.F_SEAL_WRITE | unix.F_SEAL_SHRINK | unix.F_SEAL_GROW | unix.F_SEAL_SEAL
 )
 
@@ -39,6 +40,9 @@ var (
 	readCgroupLimitsFunc = cgroup.ReadLimits
 	resolveCacheDirFunc  = format.ResolveCacheDir
 	userHomeDirFunc      = os.UserHomeDir
+	openCachedBinaryFunc = func(path string) (int, error) {
+		return unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	}
 )
 
 // extractVariantToWriter seeks to the variant offset and streams decompressed bytes to w,
@@ -432,34 +436,20 @@ func executeViaCache(
 
 	cachedBinary := filepath.Join(cacheDir, filepath.Clean(entry.SHA256))
 	var decompDuration time.Duration
-	stat, statErr := os.Stat(cachedBinary)
-	needExtract := statErr != nil || stat.Size() != entry.UncompressedSize
 
-	if !needExtract && isVerifyCacheEnabled() {
-		if !verifyCachedFileSHA256(cachedBinary, entry.SHA256) {
-			if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
-				fmt.Fprintf(
-					os.Stderr,
-					"[microfat:debug] corrupted cache file detected (checksum mismatch in %s), re-extracting\n",
-					cachedBinary,
-				)
-			}
-			_ = os.Remove(cachedBinary)
-			needExtract = true
-		}
+	fd, openErr := openCachedBinaryFunc(cachedBinary)
+	if openErr != nil && (errors.Is(openErr, syscall.ELOOP) || errors.Is(openErr, unix.ELOOP)) {
+		errOut := fmt.Errorf("%w: refusal to execute symlink at %s: %w", format.ErrCacheWrite, cachedBinary, openErr)
+		logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "symlink detected in cache")
+		return errOut
 	}
 
-	// #nosec G703 -- cache entry existence and size verification
+	needExtract := true
+	if openErr == nil {
+		needExtract = !validateExistingCacheFD(fd, entry, cachedBinary)
+	}
+
 	if needExtract {
-		if statErr == nil && stat.Size() != entry.UncompressedSize {
-			if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
-				fmt.Fprintf(
-					os.Stderr,
-					"[microfat:debug] truncated cache file detected (%s, expected %d B, got %d B), re-extracting\n",
-					cachedBinary, entry.UncompressedSize, stat.Size(),
-				)
-			}
-		}
 		tmpFile, err := os.CreateTemp(cacheDir, ".exec-*.tmp")
 		if err != nil {
 			errOut := fmt.Errorf("%w: launcher execution failed: cannot create temp file in %s: %w (primary memfd error: %v)",
@@ -504,21 +494,32 @@ func executeViaCache(
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "renaming temp cache file failed")
 			return errOut
 		}
+
+		// Re-open with O_NOFOLLOW to bind descriptor securely
+		fd, openErr = openCachedBinaryFunc(cachedBinary)
+		if openErr != nil {
+			errOut := fmt.Errorf("%w: opening verified cache file %s: %w (primary memfd error: %v)",
+				format.ErrCacheWrite, cachedBinary, openErr, primaryErr)
+			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "opening verified cache file failed")
+			return errOut
+		}
 	}
+
+	defer func() { _ = unix.Close(fd) }()
 
 	logDiagnostics(entry, format.ExecModeCache, hostInfo, policyRes, env, limits, decompDuration, time.Since(startTime))
 
-	// #nosec G204, G702 -- launcher fallback execution
-	execErr := execveFunc(cachedBinary, args, env)
+	procPath := "/proc/self/fd/" + strconv.Itoa(fd)
+	execErr := execveFunc(procPath, args, env)
 	if execErr == nil {
 		return nil
 	}
-	logErrorDiagnostics(format.StageCacheExec, execErr, hostInfo, entry, policyRes, "execve failed on cached binary "+cachedBinary)
+	logErrorDiagnostics(format.StageCacheExec, execErr, hostInfo, entry, policyRes, "execve failed on cached binary "+procPath)
 	if primaryErr != nil {
 		return fmt.Errorf("%w: cache fallback execve failed (%s): %w (primary memfd error: %v)",
-			format.ErrExecve, cachedBinary, execErr, primaryErr)
+			format.ErrExecve, procPath, execErr, primaryErr)
 	}
-	return fmt.Errorf("%w: cache execve failed (%s): %w", format.ErrExecve, cachedBinary, execErr)
+	return fmt.Errorf("%w: cache execve failed (%s): %w", format.ErrExecve, procPath, execErr)
 }
 
 func isVerifyCacheEnabled() bool {
@@ -526,17 +527,58 @@ func isVerifyCacheEnabled() bool {
 	return val == "1" || strings.EqualFold(val, "true")
 }
 
-func verifyCachedFileSHA256(path, expectedHex string) bool {
-	// #nosec G304 -- opening resolved cached binary for hash verification
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
+func validateExistingCacheFD(fd int, entry *format.VariantEntry, cachedBinary string) bool {
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		_ = unix.Close(fd)
 		return false
 	}
-	defer func() { _ = f.Close() }()
-
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, f); err != nil {
+	isRegular := (stat.Mode & unix.S_IFMT) == unix.S_IFREG
+	if !isRegular || stat.Size != entry.UncompressedSize {
+		if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
+			fmt.Fprintf(
+				os.Stderr,
+				"[microfat:debug] truncated cache file detected (%s, expected %d B, got %d B), re-extracting\n",
+				cachedBinary, entry.UncompressedSize, stat.Size,
+			)
+		}
+		_ = unix.Close(fd)
+		_ = os.Remove(cachedBinary)
 		return false
+	}
+	if isVerifyCacheEnabled() {
+		if !verifyCachedFD(fd, entry.SHA256) {
+			if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
+				fmt.Fprintf(
+					os.Stderr,
+					"[microfat:debug] corrupted cache file detected (checksum mismatch in %s), re-extracting\n",
+					cachedBinary,
+				)
+			}
+			_ = unix.Close(fd)
+			_ = os.Remove(cachedBinary)
+			return false
+		}
+	}
+	return true
+}
+
+func verifyCachedFD(fd int, expectedHex string) bool {
+	hasher := sha256.New()
+	buf := make([]byte, verifyBufferSize)
+	offset := int64(0)
+	for {
+		n, err := unix.Pread(fd, buf, offset)
+		if n > 0 {
+			hasher.Write(buf[:n])
+			offset += int64(n)
+		}
+		if err != nil {
+			return false
+		}
+		if n == 0 {
+			break
+		}
 	}
 	return hex.EncodeToString(hasher.Sum(nil)) == expectedHex
 }

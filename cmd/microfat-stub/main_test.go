@@ -1242,7 +1242,11 @@ func TestStubPrewarmAndCacheDispatch(t *testing.T) {
 	oldExec := execveFunc
 	defer func() { execveFunc = oldExec }()
 	execveFunc = func(argv0 string, argv []string, envv []string) error {
-		executedPath = argv0
+		if link, err := os.Readlink(argv0); err == nil {
+			executedPath = link
+		} else {
+			executedPath = argv0
+		}
 		return nil
 	}
 
@@ -1315,7 +1319,11 @@ func TestExecuteVariant_SyscallMocking(t *testing.T) {
 
 			var executedBinary string
 			execveFunc = func(argv0 string, argv []string, envv []string) error {
-				executedBinary = argv0
+				if link, err := os.Readlink(argv0); err == nil {
+					executedBinary = link
+				} else {
+					executedBinary = argv0
+				}
 				return nil
 			}
 
@@ -1351,7 +1359,11 @@ func TestExecuteVariant_TruncatedCacheRecovery(t *testing.T) {
 
 	var executedPath string
 	execveFunc = func(argv0 string, argv []string, envv []string) error {
-		executedPath = argv0
+		if link, err := os.Readlink(argv0); err == nil {
+			executedPath = link
+		} else {
+			executedPath = argv0
+		}
 		return nil
 	}
 
@@ -2299,7 +2311,11 @@ func TestExplicitMemfdModeEnforcement(t *testing.T) {
 		var cacheExecuted bool
 		expectedTarget := filepath.Join(cacheDir, entry.SHA256)
 		execveFunc = func(argv0 string, argv []string, envv []string) error {
-			if argv0 == expectedTarget {
+			target := argv0
+			if link, err := os.Readlink(argv0); err == nil {
+				target = link
+			}
+			if target == expectedTarget {
 				cacheExecuted = true
 				return nil
 			}
@@ -2455,10 +2471,13 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 		}
 		t.Setenv("XDG_CACHE_HOME", cacheHome)
 
-		// Create target destination as a directory so os.Rename fails with EISDIR
+		// Create non-empty target destination as a directory so os.Remove and os.Rename fail with ENOTEMPTY/EISDIR
 		targetPath := filepath.Join(microfatCache, entry.SHA256)
 		if err := os.MkdirAll(targetPath, 0o700); err != nil {
 			t.Fatalf("mkdir targetPath failed: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(targetPath, "blocking_child"), []byte("blocker"), 0o600); err != nil {
+			t.Fatalf("write child file failed: %v", err)
 		}
 
 		primaryErr := errors.New("simulated primary memfd exhaustion")
@@ -2543,6 +2562,117 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 		}
 	})
 }
+
+func TestCacheExecution_SymlinkRefusalAndTOCTOUDefense(t *testing.T) {
+	tmpDir := t.TempDir()
+	payload := []byte("hello toctou defense test payload 12345")
+	entry, rawFile := createDummyVariantFile(t, tmpDir, payload)
+	defer rawFile.Close()
+	entry.Compression = "zstd"
+
+	hostInfo := microarch.Info{
+		OS:    testOSLinux,
+		Arch:  testArchAMD64,
+		Level: "v1",
+	}
+	policyRes := microarch.PolicyResult{
+		SelectedVariant: "v1",
+	}
+
+	t.Run("SymlinkRefusal_WhenCacheTargetIsSymlink", func(t *testing.T) {
+		cacheHome := filepath.Join(tmpDir, "symlink_refusal_cache")
+		microfatCache := filepath.Join(cacheHome, "microfat")
+		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		t.Setenv("XDG_CACHE_HOME", cacheHome)
+
+		// Create a symlink at the target binary path
+		targetPath := filepath.Join(microfatCache, entry.SHA256)
+		targetTrap := filepath.Join(tmpDir, "trap_binary")
+		if err := os.WriteFile(targetTrap, []byte("trap"), 0o755); err != nil {
+			t.Fatalf("write trap failed: %v", err)
+		}
+		if err := os.Symlink(targetTrap, targetPath); err != nil {
+			t.Fatalf("symlink creation failed: %v", err)
+		}
+
+		var execveCalled bool
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			execveCalled = true
+			return nil
+		}
+
+		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		if err == nil {
+			t.Fatalf("expected error refusing symlink execution, got nil")
+		}
+		if !errors.Is(err, format.ErrCacheWrite) {
+			t.Fatalf("expected ErrCacheWrite, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "refusal to execute symlink") {
+			t.Fatalf("expected refusal to execute symlink message, got: %v", err)
+		}
+		if execveCalled {
+			t.Fatalf("execve must NOT be called when cache entry is a symlink")
+		}
+	})
+
+	t.Run("ConcurrentPathReplacement_InodeBindingDefense", func(t *testing.T) {
+		cacheHome := filepath.Join(tmpDir, "toctou_inode_cache")
+		microfatCache := filepath.Join(cacheHome, "microfat")
+		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		t.Setenv("XDG_CACHE_HOME", cacheHome)
+
+		targetPath := filepath.Join(microfatCache, entry.SHA256)
+		originalBytes := payload
+		if err := os.WriteFile(targetPath, originalBytes, 0o700); err != nil {
+			t.Fatalf("write original cache file failed: %v", err)
+		}
+
+		// Intercept openCachedBinaryFunc to replace the file on disk immediately AFTER open
+		oldOpen := openCachedBinaryFunc
+		defer func() { openCachedBinaryFunc = oldOpen }()
+
+		openCachedBinaryFunc = func(path string) (int, error) {
+			fd, err := oldOpen(path)
+			if err != nil {
+				return fd, err
+			}
+			// Replace file on disk with a new inode (atomic rename) concurrently
+			hostilePath := filepath.Join(tmpDir, "hostile_replacement")
+			hostileBytes := []byte("HOSTILE_REPLACED_PAYLOAD_DATA_OVERWRITTEN")
+			_ = os.WriteFile(hostilePath, hostileBytes, 0o700)
+			_ = os.Rename(hostilePath, path)
+			return fd, nil
+		}
+
+		var descriptorContent []byte
+		execveFunc = func(argv0 string, argv []string, envv []string) error {
+			// Read the descriptor directly via /proc/self/fd/<fd>
+			var err error
+			descriptorContent, err = os.ReadFile(argv0)
+			if err != nil {
+				return fmt.Errorf("reading /proc/self/fd descriptor: %w", err)
+			}
+			return nil
+		}
+
+		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		if err != nil {
+			t.Fatalf("executeViaCache failed: %v", err)
+		}
+
+		// Verify descriptor content is the ORIGINAL inode content, immune to concurrent disk replacement
+		if !bytes.Equal(descriptorContent, originalBytes) {
+			t.Fatalf("TOCTOU vulnerability detected: descriptor read %q, expected original %q",
+				string(descriptorContent), string(originalBytes))
+		}
+	})
+}
+
 
 
 
