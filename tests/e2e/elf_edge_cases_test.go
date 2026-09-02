@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 )
 
 func TestELFEdgeCases(t *testing.T) {
@@ -83,9 +81,9 @@ func TestELFEdgeCases(t *testing.T) {
 	t.Run("Scenario36_ArchitectureMismatchRejection", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
-		foreignArch := microarch.ArchARM64
-		if currentHostArch == microarch.ArchARM64 {
-			foreignArch = microarch.ArchAMD64
+		foreignArch := archARM64
+		if currentHostArch == archARM64 {
+			foreignArch = archAMD64
 		}
 
 		foreignBinPath := filepath.Join(tempDir, "foreign_bin")
@@ -101,7 +99,7 @@ func TestELFEdgeCases(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected microfat pack to reject foreign architecture ELF, but succeeded")
 		}
-		if !strings.Contains(err.Error(), "architecture") && !strings.Contains(err.Error(), "ELF") {
+		if !strings.Contains(err.Error(), "architecture") && !strings.Contains(err.Error(), "match") {
 			t.Fatalf("expected architecture mismatch error, got: %v", err)
 		}
 	})

@@ -6,15 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 )
 
 const (
 	bogusMagicString             = "\x00\xFA\x7FBOGUS"
-	trailerOffsetIndexOffset     = format.TrailerSize
-	trailerOffsetIndexSize       = format.TrailerSize - 8
-	trailerOffsetIndexSHA        = format.TrailerSize - 16
+	trailerOffsetIndexOffset     = 56
+	trailerOffsetIndexSize       = 48
 	invalidOffsetBeyondEOF       = 999999999
 	invalidSmallSize             = 1
 	tamperedPayloadOffsetPadding = 100
@@ -34,9 +34,12 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 		magicOffset := fileSize - trailerMagicSizeBytes
 		mutateFileBytes(t, corruptPath, magicOffset, []byte(bogusMagicString))
 
-		_, stderr, exitCode, err := executeFatBinary(t, corruptPath, nil)
+		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, nil)
 		if err == nil && exitCode == defaultExitCode {
 			t.Fatalf("expected failure for corrupted trailer magic, but execution succeeded")
+		}
+		if strings.Contains(stdout, "golden:variant=") {
+			t.Fatalf("expected child application to not execute with invalid magic, got:\n%s", stdout)
 		}
 		if !strings.Contains(stderr, "missing magic trailer") && !strings.Contains(stderr, "not a valid microfat fat binary") {
 			t.Fatalf("expected missing magic trailer error in stderr (exitCode %d, err: %v), got:\n%s", exitCode, err, stderr)
@@ -53,11 +56,14 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 		binary.LittleEndian.PutUint64(buf, uint64(fileSize+invalidOffsetBeyondEOF))
 		mutateFileBytes(t, corruptPath, fileSize-trailerOffsetIndexOffset, buf)
 
-		_, stderr, exitCode, err := executeFatBinary(t, corruptPath, nil)
+		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, nil)
 		if err == nil && exitCode == defaultExitCode {
 			t.Fatalf("expected failure for out-of-bounds index offset, but execution succeeded")
 		}
-		if !strings.Contains(stderr, "reading binary manifest") && !strings.Contains(stderr, "out of bounds") && exitCode == 0 {
+		if strings.Contains(stdout, "golden:variant=") {
+			t.Fatalf("expected child application to not execute with invalid index offset, got:\n%s", stdout)
+		}
+		if !strings.Contains(stderr, "beyond trailer") && !strings.Contains(stderr, "reading binary manifest") {
 			t.Fatalf("expected index offset error diagnostics, got:\n%s", stderr)
 		}
 	})
@@ -72,12 +78,15 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 		binary.LittleEndian.PutUint64(buf, invalidSmallSize)
 		mutateFileBytes(t, corruptPath, fileSize-trailerOffsetIndexSize, buf)
 
-		_, stderr, exitCode, err := executeFatBinary(t, corruptPath, nil)
+		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, nil)
 		if err == nil && exitCode == defaultExitCode {
 			t.Fatalf("expected failure for truncated index size, but execution succeeded")
 		}
-		if exitCode == 0 {
-			t.Fatalf("expected non-zero exit code, stderr: %s", stderr)
+		if strings.Contains(stdout, "golden:variant=") {
+			t.Fatalf("expected child application to not execute with invalid index size, got:\n%s", stdout)
+		}
+		if !strings.Contains(stderr, "does not match trailer boundary") && !strings.Contains(stderr, "reading binary manifest") {
+			t.Fatalf("expected index size boundary error diagnostics, got:\n%s", stderr)
 		}
 	})
 
@@ -91,11 +100,14 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 		// Flip a byte in the middle of the serialized index table
 		mutateFileBytes(t, corruptPath, trailer.IndexOffset+8, []byte{0xFF})
 
-		_, stderr, exitCode, err := executeFatBinary(t, corruptPath, nil)
+		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, nil)
 		if err == nil && exitCode == defaultExitCode {
 			t.Fatalf("expected failure for tampered index bytes, but execution succeeded")
 		}
-		if !strings.Contains(stderr, "index checksum mismatch") && !strings.Contains(stderr, "reading binary manifest") {
+		if strings.Contains(stdout, "golden:variant=") {
+			t.Fatalf("expected child application to not execute with tampered index, got:\n%s", stdout)
+		}
+		if !strings.Contains(stderr, "index SHA-256 checksum mismatch") {
 			t.Fatalf("expected index checksum error diagnostics, got:\n%s", stderr)
 		}
 	})
@@ -115,17 +127,19 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 		payloadTarget := entry.Offset + tamperedPayloadOffsetPadding
 		mutateFileBytes(t, corruptPath, payloadTarget, []byte{0xEE})
 
-		_, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue})
+		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue})
 		if err == nil && exitCode == defaultExitCode {
 			t.Fatalf("expected failure for corrupted payload stream, but execution succeeded")
 		}
-		if !strings.Contains(stderr, "corrupted") && !strings.Contains(stderr, "checksum") &&
-			!strings.Contains(stderr, "error") && !strings.Contains(stderr, "decompress") {
-			t.Fatalf("expected payload corruption error diagnostics (exitCode %d, err %v), got:\n%s", exitCode, err, stderr)
+		if strings.Contains(stdout, "golden:variant=") {
+			t.Fatalf("expected child application to not execute with corrupted payload, got:\n%s", stdout)
+		}
+		if !strings.Contains(stderr, "decompressing variant payload") && !strings.Contains(stderr, "checksum mismatch") {
+			t.Fatalf("expected payload decompression/checksum error diagnostics (exitCode %d, err %v), got:\n%s", exitCode, err, stderr)
 		}
 	})
 
-	t.Run("Scenario15_MutatedMetadataWithRecomputedTrailerChecksum", func(t *testing.T) {
+	t.Run("Scenario15_TamperedPayloadMetadataWithValidOuterChecksum", func(t *testing.T) {
 		t.Parallel()
 		corruptPath := filepath.Join(t.TempDir(), "tampered_meta_recomputed.fat")
 		_ = copyFile(t, goldenFatBin, corruptPath)
@@ -165,15 +179,19 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 		if err := f.Close(); err != nil {
 			t.Fatalf("closing %s: %v", corruptPath, err)
 		}
+		// Yield briefly during fixture construction to let Linux kernel delayed_fput drain writecount
+		time.Sleep(10 * time.Millisecond)
 
 		// Outer trailer checksum is valid, but internal execution boundary must reject decompression/size mismatch
-		_, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue})
+		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue})
 		if err == nil && exitCode == defaultExitCode {
 			t.Fatalf("expected failure for tampered metadata with valid outer checksum, but succeeded")
 		}
-		if !strings.Contains(stderr, "decompression") && !strings.Contains(stderr, "size") &&
-			!strings.Contains(stderr, "corrupted") && !strings.Contains(stderr, "error") {
-			t.Fatalf("expected inner validation error, got:\n%s", stderr)
+		if strings.Contains(stdout, "golden:variant=") {
+			t.Fatalf("expected child application to not execute with tampered metadata, got:\n%s", stdout)
+		}
+		if !strings.Contains(stderr, "decompressing variant payload") && !strings.Contains(stderr, "uncompressed payload exceeds maximum") {
+			t.Fatalf("expected payload decompression boundary error, got:\n%s", stderr)
 		}
 	})
 
@@ -191,12 +209,15 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 		dictTarget := idx.DictionaryOffset + tamperedDictOffsetPadding
 		mutateFileBytes(t, corruptPath, dictTarget, []byte{0xCC})
 
-		_, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue})
+		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue})
 		if err == nil && exitCode == defaultExitCode {
 			t.Fatalf("expected failure for tampered shared dictionary, but execution succeeded")
 		}
-		if !strings.Contains(stderr, "dictionary") && !strings.Contains(stderr, "corrupted") && !strings.Contains(stderr, "error") {
-			t.Fatalf("expected dictionary corruption error diagnostics, got:\n%s", stderr)
+		if strings.Contains(stdout, "golden:variant=") {
+			t.Fatalf("expected child application to not execute with corrupted dictionary, got:\n%s", stdout)
+		}
+		if !strings.Contains(stderr, "shared dictionary SHA-256 checksum mismatch") {
+			t.Fatalf("expected dictionary checksum error diagnostics, got:\n%s", stderr)
 		}
 	})
 
@@ -237,14 +258,18 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 		if err := f.Close(); err != nil {
 			t.Fatalf("closing %s: %v", corruptPath, err)
 		}
+		// Yield briefly during fixture construction to let Linux kernel delayed_fput drain writecount
+		time.Sleep(10 * time.Millisecond)
 
 		// Outer checksum matches, but semantic validation must reject overlapping payloads
-		_, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue})
+		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue})
 		if err == nil && exitCode == defaultExitCode {
 			t.Fatalf("expected failure for overlapping variant payload index, but execution succeeded")
 		}
-		if !strings.Contains(stderr, "invalid") && !strings.Contains(stderr, "overlap") &&
-			!strings.Contains(stderr, "bounds") && !strings.Contains(stderr, "error") {
+		if strings.Contains(stdout, "golden:variant=") {
+			t.Fatalf("expected child application to not execute with overlapping index payloads, got:\n%s", stdout)
+		}
+		if !strings.Contains(stderr, "variant payloads overlap or are unsorted") && !strings.Contains(stderr, "validating variant boundaries") {
 			t.Fatalf("expected semantic validation error diagnostics (exitCode %d, err %v), got:\n%s", exitCode, err, stderr)
 		}
 	})

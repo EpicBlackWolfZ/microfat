@@ -1,6 +1,9 @@
 package e2e_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -230,6 +233,40 @@ func TestCacheSecurityAndFilesystemInvariants(t *testing.T) {
 			if err != nil {
 				t.Fatalf("concurrent process failed under cache contention: %v", err)
 			}
+		}
+
+		// Assert that exactly one canonical cache artifact exists and is verified
+		entries, err := os.ReadDir(cacheDir)
+		if err != nil {
+			t.Fatalf("reading cache directory: %v", err)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("expected exactly 1 canonical cached payload in %s, found %d", cacheDir, len(entries))
+		}
+
+		cachedPath := filepath.Join(cacheDir, entries[0].Name())
+		cachedStat, err := os.Stat(cachedPath)
+		if err != nil {
+			t.Fatalf("stat cached artifact: %v", err)
+		}
+		if cachedStat.Size() == 0 {
+			t.Fatalf("cached artifact is empty")
+		}
+
+		// Verify cached file SHA-256 matches its filename (launcher naming contract)
+		f, err := os.Open(cachedPath)
+		if err != nil {
+			t.Fatalf("open cached artifact: %v", err)
+		}
+		defer func() { _ = f.Close() }()
+
+		hasher := sha256.New()
+		if _, err := io.Copy(hasher, f); err != nil {
+			t.Fatalf("hashing cached artifact: %v", err)
+		}
+		actualSHA256 := hex.EncodeToString(hasher.Sum(nil))
+		if entries[0].Name() != actualSHA256 {
+			t.Fatalf("cached filename %q does not match artifact SHA-256 %q", entries[0].Name(), actualSHA256)
 		}
 	})
 }

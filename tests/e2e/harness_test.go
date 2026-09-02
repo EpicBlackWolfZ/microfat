@@ -1,9 +1,16 @@
 // Package e2e_test implements black-box end-to-end integration tests for microfat.
+//
+// Test Architecture Invariant:
+// The E2E test suite treats microfat and microfat-stub strictly as black-box external executables.
+// Tests interact exclusively through CLI commands and external process invocation.
+// The internal/format package is imported solely in corruption tests for fixture construction
+// and structural tamper injection, never to perform or drive runtime behavior under test.
 package e2e_test
 
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,10 +23,11 @@ import (
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
-	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 )
 
 const (
+	archAMD64             = "amd64"
+	archARM64             = "arm64"
 	envDebugTrue          = "MICROFAT_DEBUG=1"
 	envExecCache          = "MICROFAT_EXEC_MODE=cache"
 	defaultFilePerm       os.FileMode = 0o755
@@ -75,9 +83,6 @@ func TestMain(m *testing.M) {
 }
 
 func runSetupAndExecute(m *testing.M) int {
-	currentHostArch = runtime.GOARCH
-	currentHostLevel = microarch.CurrentLevel()
-
 	// 1. Compile microfat CLI
 	cliPath = filepath.Join(e2eRootDir, "microfat-cli")
 	if err := compileBinary(cliPackagePath, cliPath, nil); err != nil {
@@ -85,7 +90,25 @@ func runSetupAndExecute(m *testing.M) int {
 		return 1
 	}
 
-	// 2. Compile microfat-stub
+	// 2. Discover host architecture and microarchitecture level purely via the compiled CLI
+	detectCmd := exec.Command(cliPath, "detect", "--json")
+	detectBytes, err := detectCmd.Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to detect host capabilities via CLI: %v\n", err)
+		return 1
+	}
+	var detect struct {
+		Arch  string `json:"arch"`
+		Level string `json:"level"`
+	}
+	if err := json.Unmarshal(detectBytes, &detect); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to parse CLI detect output: %v\n", err)
+		return 1
+	}
+	currentHostArch = detect.Arch
+	currentHostLevel = detect.Level
+
+	// 3. Compile microfat-stub
 	stubPath = filepath.Join(e2eRootDir, "microfat-stub")
 	stubEnv := []string{"GOAMD64=v1", "GOARM64=v8.0"}
 	if err := compileBinary(stubPackagePath, stubPath, stubEnv); err != nil {
@@ -93,14 +116,14 @@ func runSetupAndExecute(m *testing.M) int {
 		return 1
 	}
 
-	// 3. Compile seccomp runner helper
+	// 4. Compile seccomp runner helper
 	seccompRunnerPath = filepath.Join(e2eRootDir, "seccomp-runner")
 	if err := compileBinary(seccompRunnerPkg, seccompRunnerPath, nil); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to compile seccomp-runner: %v\n", err)
 		return 1
 	}
 
-	// 4. Compile golden application variants
+	// 5. Compile golden application variants
 	variantsDir := filepath.Join(e2eRootDir, "variants")
 	if err := os.MkdirAll(variantsDir, defaultFilePerm); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create variants directory: %v\n", err)
@@ -109,9 +132,9 @@ func runSetupAndExecute(m *testing.M) int {
 
 	var levelsToBuild []string
 	switch currentHostArch {
-	case microarch.ArchAMD64:
+	case archAMD64:
 		levelsToBuild = []string{"v1", "v2", "v3", "v4"}
-	case microarch.ArchARM64:
+	case archARM64:
 		levelsToBuild = []string{"v8.0", "v8.2", "v9.0"}
 	default:
 		levelsToBuild = []string{"v1"}
@@ -121,7 +144,7 @@ func runSetupAndExecute(m *testing.M) int {
 		binName := "golden_" + lvl
 		binPath := filepath.Join(variantsDir, binName)
 		envKV := []string{}
-		if currentHostArch == microarch.ArchAMD64 {
+		if currentHostArch == archAMD64 {
 			envKV = append(envKV, "GOAMD64="+lvl)
 		}
 		ldflags := fmt.Sprintf("-ldflags=-s -w -X main.Variant=%s", lvl)
@@ -132,7 +155,7 @@ func runSetupAndExecute(m *testing.M) int {
 		goldenVariantBins[lvl] = binPath
 	}
 
-	// 5. Pack baseline golden fat binary
+	// 6. Pack baseline golden fat binary
 	goldenFatBin = filepath.Join(e2eRootDir, "app-golden.fat")
 	if err := packBinary(cliPath, stubPath, "golden-app", goldenFatBin, goldenVariantBins); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to pack baseline golden fat binary: %v\n", err)
@@ -198,30 +221,15 @@ func packBinaryCustom(cli, stub, name, outPath string, variants map[string]strin
 
 func executeFatBinary(t testing.TB, binPath string, env []string, args ...string) (string, string, int, error) {
 	t.Helper()
-	var stdoutBuf, stderrBuf bytes.Buffer
-	var err error
-
-	const maxAttempts = 10
-	const retryBackoff = 10 * time.Millisecond
-
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		cmd := exec.Command(binPath, args...)
-		if len(env) > 0 {
-			cmd.Env = append(os.Environ(), env...)
-		}
-		stdoutBuf.Reset()
-		stderrBuf.Reset()
-		cmd.Stdout = &stdoutBuf
-		cmd.Stderr = &stderrBuf
-
-		err = cmd.Run()
-		if err != nil && strings.Contains(err.Error(), "text file busy") {
-			time.Sleep(retryBackoff)
-			continue
-		}
-		break
+	cmd := exec.Command(binPath, args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
 	}
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
 
+	err := cmd.Run()
 	exitCode := defaultExitCode
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -238,30 +246,15 @@ func executeFatBinary(t testing.TB, binPath string, env []string, args ...string
 func executeWithSeccompBlockedMemfd(t testing.TB, binPath string, env []string, args ...string) (string, string, int, error) {
 	t.Helper()
 	runnerArgs := append([]string{binPath}, args...)
-	var stdoutBuf, stderrBuf bytes.Buffer
-	var err error
-
-	const maxAttempts = 10
-	const retryBackoff = 10 * time.Millisecond
-
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		cmd := exec.Command(seccompRunnerPath, runnerArgs...)
-		if len(env) > 0 {
-			cmd.Env = append(os.Environ(), env...)
-		}
-		stdoutBuf.Reset()
-		stderrBuf.Reset()
-		cmd.Stdout = &stdoutBuf
-		cmd.Stderr = &stderrBuf
-
-		err = cmd.Run()
-		if err != nil && strings.Contains(err.Error(), "text file busy") {
-			time.Sleep(retryBackoff)
-			continue
-		}
-		break
+	cmd := exec.Command(seccompRunnerPath, runnerArgs...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
 	}
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
 
+	err := cmd.Run()
 	exitCode := defaultExitCode
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -282,9 +275,22 @@ func assertSelectedMatchesExecuted(t testing.TB, stdout, stderr, expectedVariant
 		t.Fatalf("expected application executed variant %q in stdout, got:\n%s", expectedOutput, stdout)
 	}
 	expectedLog := "selected_variant=" + expectedVariant
-	if !strings.Contains(stderr, expectedLog) && !strings.Contains(stderr, "selected variant: "+expectedVariant) {
+	if !strings.Contains(stderr, expectedLog) {
 		t.Fatalf("expected launcher selected variant %q in stderr telemetry, got:\n%s", expectedLog, stderr)
 	}
+}
+
+// isLevelSupported returns true if the host microarchitecture level meets or exceeds the required level.
+func isLevelSupported(arch, currentLevel, requiredLevel string) bool {
+	if arch == archAMD64 {
+		ranks := map[string]int{"v1": 1, "v2": 2, "v3": 3, "v4": 4}
+		return ranks[currentLevel] >= ranks[requiredLevel]
+	}
+	if arch == archARM64 {
+		ranks := map[string]int{"v8.0": 1, "v8.2": 2, "v9.0": 3}
+		return ranks[currentLevel] >= ranks[requiredLevel]
+	}
+	return currentLevel == requiredLevel
 }
 
 func copyFile(t testing.TB, src, dst string) int64 {
@@ -314,6 +320,11 @@ func copyFile(t testing.TB, src, dst string) int64 {
 		t.Fatalf("closing destination file %s: %v", dst, err)
 	}
 
+	// On Linux, closing a write descriptor defers inode writecount decrement to kernel
+	// delayed_fput. Yield briefly during fixture creation to ensure writecount reaches 0
+	// before any subsequent process executes the binary.
+	time.Sleep(10 * time.Millisecond)
+
 	return n
 }
 
@@ -336,6 +347,9 @@ func mutateFileBytes(t testing.TB, path string, offset int64, patch []byte) {
 	if err := f.Close(); err != nil {
 		t.Fatalf("closing %s: %v", path, err)
 	}
+
+	// Yield briefly during fixture construction to let kernel delayed_fput drain writecount
+	time.Sleep(10 * time.Millisecond)
 }
 
 func readTrailerAndIndex(t testing.TB, binPath string) (BinaryTrailer, *format.Index) {

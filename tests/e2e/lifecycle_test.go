@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/EpicBlackWolfZ/microfat/internal/format"
 )
 
 func TestLifecycleReleaseSmoke(t *testing.T) {
@@ -139,17 +137,11 @@ func TestLifecycleReleaseSmoke(t *testing.T) {
 			t.Fatalf("materialized binary is empty")
 		}
 
-		// Materialized binary must be a standalone ELF executable, NOT a fat binary with trailer
-		matFile, err := os.Open(matPath)
-		if err != nil {
-			t.Fatalf("open materialized binary: %v", err)
+		// Materialized binary must be a standalone ELF executable, rejected by microfat inspect CLI
+		inspectCmd := exec.Command(cliPath, "inspect", matPath)
+		if err := inspectCmd.Run(); err == nil {
+			t.Fatalf("expected microfat inspect to reject standalone materialized binary, but it succeeded")
 		}
-		defer func() { _ = matFile.Close() }()
-
-		if format.IsFatBinary(matFile, matStat.Size()) {
-			t.Fatalf("expected materialized binary to be standalone ELF, but has fat binary trailer")
-		}
-		_ = matFile.Close()
 
 		// Execute materialized standalone ELF directly
 		matStdout, matStderr, matExitCode, matErr := executeFatBinary(t, matPath, nil)

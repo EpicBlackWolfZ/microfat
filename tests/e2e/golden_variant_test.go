@@ -3,8 +3,6 @@ package e2e_test
 import (
 	"strings"
 	"testing"
-
-	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 )
 
 func TestGoldenVariantSelection_HostDependent(t *testing.T) {
@@ -29,7 +27,7 @@ func TestGoldenVariantSelection_HostDependent(t *testing.T) {
 		if err != nil || exitCode != defaultExitCode {
 			t.Fatalf("execution failed (code %d): %v\nstderr: %s", exitCode, err, stderr)
 		}
-		if currentHostArch == microarch.ArchAMD64 && currentHostLevel == "v4" {
+		if currentHostArch == archAMD64 && currentHostLevel == "v4" {
 			if strings.Contains(stderr, "avx512_downclock_protection") {
 				assertSelectedMatchesExecuted(t, stdout, stderr, "v3")
 				return
@@ -66,7 +64,10 @@ func TestGoldenVariantSelection_Deterministic(t *testing.T) {
 		if err == nil && exitCode == defaultExitCode {
 			t.Fatalf("expected failure for forced level v99, but succeeded\nstdout: %s\nstderr: %s", stdout, stderr)
 		}
-		if !strings.Contains(stderr, "incompatible") && !strings.Contains(stderr, "unknown") && !strings.Contains(stderr, "error") {
+		if strings.Contains(stdout, "golden:variant=") {
+			t.Fatalf("expected child application to not execute for incompatible forced level, got:\n%s", stdout)
+		}
+		if !strings.Contains(stderr, "incompatible") && !strings.Contains(stderr, "unknown forced level") {
 			t.Fatalf("expected error diagnostics for forced level v99, got: %s", stderr)
 		}
 	})
@@ -87,10 +88,10 @@ func TestGoldenVariantSelection_Deterministic(t *testing.T) {
 	t.Run("Scenario6_MaxLevelCapV2", func(t *testing.T) {
 		t.Parallel()
 		targetCap := "v2"
-		if currentHostArch == microarch.ArchARM64 {
+		if currentHostArch == archARM64 {
 			targetCap = "v8.2"
 		}
-		if microarch.Compare(currentHostArch, currentHostLevel, targetCap) < 0 {
+		if !isLevelSupported(currentHostArch, currentHostLevel, targetCap) {
 			t.Skipf("host level %s does not support >= %s, skipping max level test", currentHostLevel, targetCap)
 		}
 
@@ -109,11 +110,11 @@ func TestGoldenVariantSelection_Deterministic(t *testing.T) {
 		t.Parallel()
 		targetFallback := "v2"
 		disabledVal := "v3,v4"
-		if currentHostArch == microarch.ArchARM64 {
+		if currentHostArch == archARM64 {
 			targetFallback = "v8.2"
 			disabledVal = "v9.0"
 		}
-		if microarch.Compare(currentHostArch, currentHostLevel, targetFallback) < 0 {
+		if !isLevelSupported(currentHostArch, currentHostLevel, targetFallback) {
 			t.Skipf("host level %s does not support >= %s, skipping fallback test", currentHostLevel, targetFallback)
 		}
 
@@ -132,7 +133,7 @@ func TestGoldenVariantSelection_Deterministic(t *testing.T) {
 		t.Parallel()
 		targetFallback := "v1"
 		disabledVal := "v2,v3,v4"
-		if currentHostArch == microarch.ArchARM64 {
+		if currentHostArch == archARM64 {
 			targetFallback = "v8.0"
 			disabledVal = "v8.2,v9.0"
 		}
@@ -151,7 +152,7 @@ func TestGoldenVariantSelection_Deterministic(t *testing.T) {
 	t.Run("Scenario9_AllVariantsDisabled", func(t *testing.T) {
 		t.Parallel()
 		disabledVal := "v1,v2,v3,v4"
-		if currentHostArch == microarch.ArchARM64 {
+		if currentHostArch == archARM64 {
 			disabledVal = "v8.0,v8.2,v9.0"
 		}
 
@@ -163,8 +164,11 @@ func TestGoldenVariantSelection_Deterministic(t *testing.T) {
 		if err == nil && exitCode == defaultExitCode {
 			t.Fatalf("expected error when all variants are disabled, got success\nstdout: %s", stdout)
 		}
-		if !strings.Contains(stderr, "no compatible") && !strings.Contains(stderr, "error") {
-			t.Fatalf("expected error message indicating no compatible variant, got:\n%s", stderr)
+		if strings.Contains(stdout, "golden:variant=") {
+			t.Fatalf("expected child application to not execute when all variants are disabled, got:\n%s", stdout)
+		}
+		if !strings.Contains(stderr, "no compatible microarchitecture variant found") {
+			t.Fatalf("expected 'no compatible microarchitecture variant found' in stderr, got:\n%s", stderr)
 		}
 	})
 }
