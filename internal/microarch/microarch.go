@@ -576,6 +576,16 @@ func EvaluateAMD64(f X86Features) string {
 	return AMD64v4
 }
 
+// arm64LevelRequirements declares the feature requirements and prerequisite hierarchy for ARM64 levels.
+//
+// Source of Truth & Compatibility Model:
+// Microfat models ARM64 capabilities based on the Arm Architecture Reference Manual (ARM DDI 0487)
+// ISA specifications and Linux auxiliary vector feature bits (AT_HWCAP / AT_HWCAP2), aligned with
+// the Go toolchain's GOARM64 level hierarchy (v8.0 through v9.5).
+// While the Go compiler (src/internal/buildcfg/cfg.go) accepts GOARM64 target levels and emits specific
+// instructions (such as mandatory LSE atomics starting at v8.1), Microfat establishes a granular, forward-compatible
+// hardware capability contract for every ISA milestone (including v8.8 MOPS/NMI/HBC and v8.9 GCS/THE)
+// to guarantee that binaries built or specialized for these levels execute only on CPUs with verified hardware support.
 var arm64LevelRequirements = []LevelRequirement{
 	{
 		Level:            ARM64v8_0,
@@ -1092,6 +1102,9 @@ func parseLinuxCPUInfoX86(r io.Reader) x86CPUModelInfo {
 		if info.Vendor != "" && info.Family != 0 && info.Model != 0 && info.Stepping != 0 {
 			break
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return info
 	}
 	return info
 }

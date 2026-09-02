@@ -478,30 +478,38 @@ func executeViaCache(
 
 		decompStart := time.Now()
 		if err := extractVariantToWriter(selfFile, entry, idx, tmpFile); err != nil {
+			_ = tmpFile.Close()
+			_ = os.Remove(tmpPath)
 			logErrorDiagnostics(format.StageCacheExtract, err, hostInfo, entry, policyRes, "decompressing payload to cache failed")
 			return fmt.Errorf("%w: extracting to cache fallback: %w (primary memfd error: %v)", format.ErrCacheExtract, err, primaryErr)
 		}
 		decompDuration = time.Since(decompStart)
 
 		if err := tmpFile.Chmod(format.PrivateExecMode); err != nil {
+			_ = tmpFile.Close()
+			_ = os.Remove(tmpPath)
 			errOut := fmt.Errorf("%w: setting permissions on temp cache file %s: %w (primary memfd error: %v)",
 				format.ErrCacheWrite, tmpPath, err, primaryErr)
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "chmod temp cache file failed")
 			return errOut
 		}
 		if err := tmpFile.Sync(); err != nil {
+			_ = tmpFile.Close()
+			_ = os.Remove(tmpPath)
 			errOut := fmt.Errorf("%w: syncing temp cache file %s: %w (primary memfd error: %v)",
 				format.ErrCacheWrite, tmpPath, err, primaryErr)
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "syncing temp cache file failed")
 			return errOut
 		}
 		if err := tmpFile.Close(); err != nil {
+			_ = os.Remove(tmpPath)
 			errOut := fmt.Errorf("%w: closing temp cache file %s: %w (primary memfd error: %v)",
 				format.ErrCacheWrite, tmpPath, err, primaryErr)
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "closing temp cache file failed")
 			return errOut
 		}
 		if err := os.Rename(tmpPath, cachedBinary); err != nil {
+			_ = os.Remove(tmpPath)
 			errOut := fmt.Errorf("%w: renaming temp cache file %s to %s: %w (primary memfd error: %v)",
 				format.ErrCacheWrite, tmpPath, cachedBinary, err, primaryErr)
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "renaming temp cache file failed")
@@ -511,6 +519,7 @@ func executeViaCache(
 		// Re-open with O_NOFOLLOW to bind descriptor securely
 		fd, openErr = openCachedBinaryFunc(cachedBinary)
 		if openErr != nil {
+			_ = os.Remove(cachedBinary)
 			errOut := fmt.Errorf("%w: opening verified cache file %s: %w (primary memfd error: %v)",
 				format.ErrCacheWrite, cachedBinary, openErr, primaryErr)
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "opening verified cache file failed")

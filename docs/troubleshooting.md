@@ -33,15 +33,39 @@ microfat doctor --json
 
 ---
 
-## 2. In-Memory Execution Issues (`memfd_create`)
+## 2. In-Memory Execution Issues (`memfd_create` and Kernel Memory Sealing)
 
-### Symptom: `memfd_create failed: operation not permitted` or `permission denied`
+### Symptom A: `memfd_create failed: operation not permitted` or `permission denied`
 
 #### Root Cause:
-Linux `memfd_create` (syscall 319 on x86_64, syscall 279 on arm64) is restricted by a custom Docker/Kubernetes seccomp profile, or older Linux kernels (< 3.17).
+Linux `memfd_create` (syscall 319 on x86_64, syscall 279 on arm64) is restricted by a custom Docker/Kubernetes seccomp profile or an older Linux kernel (< 3.17).
 
-#### Remediation 1: Update Seccomp Profile (Recommended)
-Allow `memfd_create` in your Kubernetes or Docker seccomp security profile:
+---
+
+### Symptom B: `failed to seal memfd descriptor: operation not permitted` (`ErrMemfdSealingFailed`)
+
+#### Root Cause:
+The `memfd_create()` syscall succeeded, but `fcntl(fd, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL)` was blocked or restricted by the container runtime's seccomp filter, preventing Microfat from sealing the anonymous memory file.
+
+#### Mandatory Memory Sealing Security Contract:
+Microfat strictly **prohibits executing unsealed anonymous memory descriptors**. Allowing unsealed descriptors to be passed to `execve` creates an in-memory Time-of-Check to Time-of-Use (TOCTOU) vulnerability where other threads or processes with access to `/proc/self/mem` or the open descriptor could modify the decompressed ELF payload prior to execution. If sealing fails:
+- Under **`MICROFAT_EXEC_MODE=auto` (default)**: The launcher immediately closes the unsealed file descriptor and cleanly falls back to hardened, descriptor-bound disk cache execution (`~/.cache/microfat` or `/tmp/.microfat-<uid>`).
+- Under **`MICROFAT_EXEC_MODE=memfd`**: The launcher strictly enforces in-memory execution and fails fast, terminating the process with an explicit `ErrMemfdSealingFailed` error and full diagnostic context without attempting fallback.
+
+---
+
+### Execution Modes Overview (`MICROFAT_EXEC_MODE`)
+
+| Mode | In-Memory (`memfd`) | Kernel Sealing (`F_ADD_SEALS`) | Disk Cache Fallback | Error Behavior |
+| :--- | :--- | :--- | :--- | :--- |
+| **`auto`** *(default)* | Preferred (0 disk I/O) | Enforced | Enabled (Descriptor-bound) | Falls back transparently on `memfd` or sealing denial. |
+| **`memfd`** | Mandatory | Mandatory | Disabled | Fails fast with `ErrMemfdCreate` or `ErrMemfdSealingFailed`. |
+| **`cache`** | Skipped | Skipped | Mandatory | Bypasses in-memory execution directly to disk cache. |
+
+---
+
+### Remediation 1: Update Seccomp Profile (Recommended)
+Permit both `memfd_create` and `fcntl` (specifically without restricting `F_ADD_SEALS`) in your Kubernetes or Docker seccomp security profile:
 
 ```json
 {
@@ -49,7 +73,7 @@ Allow `memfd_create` in your Kubernetes or Docker seccomp security profile:
   "architectures": ["SCMP_ARCH_X86_64", "SCMP_ARCH_AARCH64"],
   "syscalls": [
     {
-      "names": ["memfd_create"],
+      "names": ["memfd_create", "fcntl"],
       "action": "SCMP_ACT_ALLOW"
     }
   ]
@@ -60,11 +84,15 @@ In Kubernetes Pod Security Context:
 ```yaml
 securityContext:
   seccompProfile:
-    type: RuntimeDefault  # RuntimeDefault permits memfd_create on modern runtimes
+    type: RuntimeDefault  # RuntimeDefault permits memfd_create and fcntl sealing on modern runtimes
 ```
 
-#### Remediation 2: Enable Prewarmed Disk Cache
-If seccomp cannot be modified, configure Microfat to execute from disk cache:
+---
+
+### Remediation 2: Configure Cache Mode or Auto Fallback
+If container security policies restrict in-memory sealing and cannot be modified:
+1. Ensure the default `MICROFAT_EXEC_MODE=auto` is active so Microfat falls back automatically to disk cache execution.
+2. Or explicitly set `MICROFAT_EXEC_MODE=cache` to bypass in-memory probing altogether:
 
 ```yaml
 env:

@@ -33,11 +33,12 @@ builds:
     binary: microfat
     env:
       - CGO_ENABLED=0
-      - GOARM64=v8.0
     goos:
       - linux
     goarch:
       - arm64
+    goarm64:
+      - v8.0
     flags:
       - -trimpath
     ldflags:
@@ -53,11 +54,12 @@ builds:
     binary: microfat
     env:
       - CGO_ENABLED=0
-      - GOARM64=v8.2
     goos:
       - linux
     goarch:
       - arm64
+    goarm64:
+      - v8.2
     flags:
       - -trimpath
     ldflags:
@@ -73,11 +75,12 @@ builds:
     binary: microfat
     env:
       - CGO_ENABLED=0
-      - GOARM64=v9.0
     goos:
       - linux
     goarch:
       - arm64
+    goarm64:
+      - v9.0
     flags:
       - -trimpath
     ldflags:
@@ -136,11 +139,12 @@ builds:
     binary: microfat-stub
     env:
       - CGO_ENABLED=0
-      - GOARM64=v8.0
     goos:
       - linux
     goarch:
       - arm64
+    goarm64:
+      - v8.0
     flags:
       - -trimpath
     ldflags:
@@ -159,11 +163,12 @@ builds:
     binary: microfat-stub-minimal
     env:
       - CGO_ENABLED=0
-      - GOARM64=v8.0
     goos:
       - linux
     goarch:
       - arm64
+    goarm64:
+      - v8.0
     flags:
       - -trimpath
       - -tags=minimal
