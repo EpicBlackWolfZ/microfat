@@ -86,6 +86,7 @@ func FuzzUnmarshalBinaryIndex(f *testing.F) {
 		TargetArch:       testArchAMD64,
 		DictionaryOffset: 50,
 		DictionarySize:   MaxDictionarySize + 1024,
+		DictionarySHA256: testSHA256Sample,
 	}
 	if seedOversizedBytes, err := MarshalBinaryIndex(seedOversizedDictIdx); err == nil {
 		f.Add(seedOversizedBytes)

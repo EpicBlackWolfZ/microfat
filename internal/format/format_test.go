@@ -1125,13 +1125,14 @@ func TestDictionaryJSONIndexSerialization(t *testing.T) {
 func TestDictionaryBoundsValidation(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Valid with dictionary", func(t *testing.T) {
+	t.Run("Valid dictionary bounds", func(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
 			Version:          FormatVersion2,
 			TargetArch:       testArchAMD64,
 			DictionaryOffset: 1000,
 			DictionarySize:   500,
+			DictionarySHA256: testSHA256Sample,
 			Variants: []VariantEntry{
 				{Level: "v1", Offset: 1500, CompressedSize: 500, UncompressedSize: 1000, SHA256: testSHA256Sample},
 				{Level: "v2", Offset: 2000, CompressedSize: 500, UncompressedSize: 1000, SHA256: testSHA256Sample},
@@ -1165,8 +1166,9 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 			TargetArch:       testArchAMD64,
 			DictionaryOffset: 2500,
 			DictionarySize:   1000,
+			DictionarySHA256: testSHA256Sample,
 			Variants: []VariantEntry{
-				{Level: "v1", Offset: 1500, CompressedSize: 500, UncompressedSize: 1000},
+				{Level: "v1", Offset: 1500, CompressedSize: 500, UncompressedSize: 1000, SHA256: testSHA256Sample},
 			},
 		}
 		if err := idx.ValidateBounds(3000); !errors.Is(err, ErrOutOfBounds) {
@@ -1181,8 +1183,9 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 			TargetArch:       testArchAMD64,
 			DictionaryOffset: 1000,
 			DictionarySize:   1000,
+			DictionarySHA256: testSHA256Sample,
 			Variants: []VariantEntry{
-				{Level: "v1", Offset: 1500, CompressedSize: 500, UncompressedSize: 1000},
+				{Level: "v1", Offset: 1500, CompressedSize: 500, UncompressedSize: 1000, SHA256: testSHA256Sample},
 			},
 		}
 		if err := idx.ValidateBounds(3000); !errors.Is(err, ErrOverlappingVariant) {
@@ -1213,6 +1216,7 @@ func TestDictionaryBoundsValidation(t *testing.T) {
 			TargetArch:       testArchAMD64,
 			DictionaryOffset: 1000,
 			DictionarySize:   MaxDictionarySize,
+			DictionarySHA256: testSHA256Sample,
 			Variants: []VariantEntry{
 				{Level: "v1", Offset: 1000 + MaxDictionarySize, CompressedSize: 500, UncompressedSize: 1000, SHA256: testSHA256Sample},
 			},
@@ -1317,12 +1321,14 @@ func TestValidateBounds_IntegerOverflow(t *testing.T) {
 			TargetArch:       testArchAMD64,
 			DictionaryOffset: math.MaxInt64 - 50,
 			DictionarySize:   100,
+			DictionarySHA256: testSHA256Sample,
 			Variants: []VariantEntry{
 				{
 					Level:            "v1",
 					Offset:           200,
 					CompressedSize:   300,
 					UncompressedSize: 1000,
+					SHA256:           testSHA256Sample,
 				},
 			},
 		}
@@ -2248,6 +2254,315 @@ func TestReadTrailerAndIndex_IndexBoundsBoundaryEnforcement(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
+	t.Parallel()
+
+	const (
+		baseOffset   = 1000
+		dictOffset   = 1000
+		dictSize     = 500
+		variantOff   = 1500
+		variantComp  = 500
+		variantUncmp = 1000
+		boundaryMax  = 3000
+	)
+
+	validVariant := VariantEntry{
+		Level:            "v1",
+		Offset:           variantOff,
+		CompressedSize:   variantComp,
+		UncompressedSize: variantUncmp,
+		SHA256:           testSHA256Sample,
+		Compression:      testCompression,
+	}
+
+	t.Run("Format v2 rejects empty dictionary SHA256 in ValidateBounds", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion2,
+			TargetArch:       testArchAMD64,
+			DictionaryOffset: dictOffset,
+			DictionarySize:   dictSize,
+			DictionarySHA256: "",
+			Variants:         []VariantEntry{validVariant},
+		}
+		err := idx.ValidateBounds(boundaryMax)
+		if !errors.Is(err, ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum for empty dict SHA256 in Format v2, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "dictionary missing or invalid sha256 checksum in Format v2") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("Format v2 rejects malformed dictionary SHA256 in ValidateBounds", func(t *testing.T) {
+		t.Parallel()
+		malformedCases := []struct {
+			name   string
+			sha256 string
+		}{
+			{name: "too short", sha256: "0123456789abcdef"},
+			{name: "too long", sha256: testSHA256Sample + "0"},
+			{name: "invalid characters", sha256: strings.Repeat("z", maxSHA256HexLen)},
+		}
+
+		for _, tc := range malformedCases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				idx := &Index{
+					Version:          FormatVersion2,
+					TargetArch:       testArchAMD64,
+					DictionaryOffset: dictOffset,
+					DictionarySize:   dictSize,
+					DictionarySHA256: tc.sha256,
+					Variants:         []VariantEntry{validVariant},
+				}
+				err := idx.ValidateBounds(boundaryMax)
+				if !errors.Is(err, ErrInvalidChecksum) {
+					t.Fatalf("expected ErrInvalidChecksum for %s, got %v", tc.name, err)
+				}
+			})
+		}
+	})
+
+	t.Run("Format v2 accepts valid dictionary SHA256 in ValidateBounds", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion2,
+			TargetArch:       testArchAMD64,
+			DictionaryOffset: dictOffset,
+			DictionarySize:   dictSize,
+			DictionarySHA256: testSHA256Sample,
+			Variants:         []VariantEntry{validVariant},
+		}
+		if err := idx.ValidateBounds(boundaryMax); err != nil {
+			t.Fatalf("expected valid bounds, got %v", err)
+		}
+	})
+
+	t.Run("Format v2 allows empty dictionary SHA256 when DictionarySize is zero", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion2,
+			TargetArch:       testArchAMD64,
+			DictionaryOffset: 0,
+			DictionarySize:   0,
+			DictionarySHA256: "",
+			Variants:         []VariantEntry{validVariant},
+		}
+		if err := idx.ValidateBounds(boundaryMax); err != nil {
+			t.Fatalf("expected valid bounds with zero-size dictionary, got %v", err)
+		}
+	})
+
+	t.Run("Format v1 allows empty dictionary SHA256 when DictionarySize is non-zero", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion1,
+			TargetArch:       testArchAMD64,
+			DictionaryOffset: dictOffset,
+			DictionarySize:   dictSize,
+			DictionarySHA256: "",
+			Variants:         []VariantEntry{validVariant},
+		}
+		if err := idx.ValidateBounds(boundaryMax); err != nil {
+			t.Fatalf("expected valid bounds for Format v1 with empty dict SHA256, got %v", err)
+		}
+	})
+
+	t.Run("Format v1 rejects malformed dictionary SHA256 when non-empty", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion1,
+			TargetArch:       testArchAMD64,
+			DictionaryOffset: dictOffset,
+			DictionarySize:   dictSize,
+			DictionarySHA256: "invalid-hash",
+			Variants:         []VariantEntry{validVariant},
+		}
+		err := idx.ValidateBounds(boundaryMax)
+		if !errors.Is(err, ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum for malformed dict SHA in Format v1, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "invalid dictionary sha256 checksum format") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("Format v2 MarshalBinaryIndex rejects non-zero dictionary with empty SHA256", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion2,
+			AppName:          testAppName,
+			TargetOS:         testOSLinux,
+			TargetArch:       testArchAMD64,
+			DictionaryOffset: dictOffset,
+			DictionarySize:   dictSize,
+			DictionarySHA256: "",
+			Variants:         []VariantEntry{validVariant},
+		}
+		_, err := MarshalBinaryIndex(idx)
+		if !errors.Is(err, ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum from MarshalBinaryIndex, got %v", err)
+		}
+	})
+
+	t.Run("Format v2 MarshalBinaryIndex rejects non-zero dictionary with malformed SHA256", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:          FormatVersion2,
+			AppName:          testAppName,
+			TargetOS:         testOSLinux,
+			TargetArch:       testArchAMD64,
+			DictionaryOffset: dictOffset,
+			DictionarySize:   dictSize,
+			DictionarySHA256: "malformed-sha",
+			Variants:         []VariantEntry{validVariant},
+		}
+		_, err := MarshalBinaryIndex(idx)
+		if !errors.Is(err, ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum from MarshalBinaryIndex, got %v", err)
+		}
+	})
+
+	t.Run("Format v2 UnmarshalBinaryIndex rejects crafted non-zero dictionary with empty SHA256", func(t *testing.T) {
+		t.Parallel()
+		goodIdx := &Index{
+			Version:          FormatVersion2,
+			AppName:          testAppName,
+			TargetOS:         testOSLinux,
+			TargetArch:       testArchAMD64,
+			DictionaryOffset: dictOffset,
+			DictionarySize:   dictSize,
+			DictionarySHA256: testSHA256Sample,
+			Variants:         []VariantEntry{validVariant},
+		}
+		goodBytes, err := MarshalBinaryIndex(goodIdx)
+		if err != nil {
+			t.Fatalf("MarshalBinaryIndex failed: %v", err)
+		}
+
+		// In goodBytes: offset 34 is dictSHALen (64).
+		// Splice out the 64 SHA bytes and set length prefix to 0.
+		const dictSHALenOffset = 34
+		crafted := make([]byte, 0, len(goodBytes)-maxSHA256HexLen)
+		crafted = append(crafted, goodBytes[:dictSHALenOffset]...)
+		crafted = append(crafted, 0)
+		crafted = append(crafted, goodBytes[dictSHALenOffset+1+maxSHA256HexLen:]...)
+
+		_, err = UnmarshalBinaryIndex(crafted)
+		if !errors.Is(err, ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum from UnmarshalBinaryIndex on crafted empty dict SHA, got %v", err)
+		}
+	})
+
+	t.Run("Format v2 UnmarshalBinaryIndex rejects crafted non-zero dictionary with malformed SHA256", func(t *testing.T) {
+		t.Parallel()
+		goodIdx := &Index{
+			Version:          FormatVersion2,
+			AppName:          testAppName,
+			TargetOS:         testOSLinux,
+			TargetArch:       testArchAMD64,
+			DictionaryOffset: dictOffset,
+			DictionarySize:   dictSize,
+			DictionarySHA256: testSHA256Sample,
+			Variants:         []VariantEntry{validVariant},
+		}
+		goodBytes, err := MarshalBinaryIndex(goodIdx)
+		if err != nil {
+			t.Fatalf("MarshalBinaryIndex failed: %v", err)
+		}
+
+		// Mutate SHA256 bytes to non-hex
+		const dictSHAStart = 35
+		crafted := make([]byte, len(goodBytes))
+		copy(crafted, goodBytes)
+		copy(crafted[dictSHAStart:dictSHAStart+maxSHA256HexLen], []byte(strings.Repeat("?", maxSHA256HexLen)))
+
+		_, err = UnmarshalBinaryIndex(crafted)
+		if !errors.Is(err, ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum from UnmarshalBinaryIndex on malformed dict SHA, got %v", err)
+		}
+	})
+
+	t.Run("ReadTrailerAndIndex rejects crafted Format v2 binary with non-zero dictionary and empty SHA256", func(t *testing.T) {
+		t.Parallel()
+		goodIdx := &Index{
+			Version:          FormatVersion2,
+			AppName:          testAppName,
+			TargetOS:         testOSLinux,
+			TargetArch:       testArchAMD64,
+			DictionaryOffset: dictOffset,
+			DictionarySize:   dictSize,
+			DictionarySHA256: testSHA256Sample,
+			Variants:         []VariantEntry{validVariant},
+		}
+		goodBytes, err := MarshalBinaryIndex(goodIdx)
+		if err != nil {
+			t.Fatalf("MarshalBinaryIndex failed: %v", err)
+		}
+
+		const dictSHALenOffset = 34
+		craftedIndex := make([]byte, 0, len(goodBytes)-maxSHA256HexLen)
+		craftedIndex = append(craftedIndex, goodBytes[:dictSHALenOffset]...)
+		craftedIndex = append(craftedIndex, 0)
+		craftedIndex = append(craftedIndex, goodBytes[dictSHALenOffset+1+maxSHA256HexLen:]...)
+
+		buf := bytes.NewBuffer(make([]byte, boundaryMax))
+		idxOffset := int64(buf.Len())
+		buf.Write(craftedIndex)
+		idxSize := int64(len(craftedIndex))
+
+		trailer := make([]byte, TrailerSize)
+		binary.LittleEndian.PutUint64(trailer[0:8], uint64(idxOffset))
+		binary.LittleEndian.PutUint64(trailer[8:16], uint64(idxSize))
+		h := sha256.Sum256(craftedIndex)
+		copy(trailer[16:48], h[:])
+		copy(trailer[48:56], []byte(MagicString))
+		buf.Write(trailer)
+
+		totalSize := int64(buf.Len())
+		_, err = ReadTrailerAndIndex(bytes.NewReader(buf.Bytes()), totalSize)
+		if !errors.Is(err, ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum from ReadTrailerAndIndex, got %v", err)
+		}
+	})
+
+	t.Run("ReadTrailerAndIndex accepts Format v1 binary with non-zero dictionary and empty SHA256", func(t *testing.T) {
+		t.Parallel()
+		idxV1 := &Index{
+			Version:          FormatVersion1,
+			AppName:          testAppName,
+			TargetOS:         testOSLinux,
+			TargetArch:       testArchAMD64,
+			CreatedUnix:      1724540000,
+			DictionaryOffset: dictOffset,
+			DictionarySize:   dictSize,
+			DictionarySHA256: "",
+			Variants:         []VariantEntry{validVariant},
+		}
+
+		buf := bytes.NewBuffer(make([]byte, boundaryMax))
+		written, err := WriteIndexAndTrailerWithVersion(buf, idxV1, boundaryMax, FormatVersion1)
+		if err != nil {
+			t.Fatalf("WriteIndexAndTrailerWithVersion failed: %v", err)
+		}
+
+		totalSize := boundaryMax + written
+		parsed, err := ReadTrailerAndIndex(bytes.NewReader(buf.Bytes()), totalSize)
+		if err != nil {
+			t.Fatalf("expected clean parse for Format v1 with empty dict SHA256, got %v", err)
+		}
+		if parsed.DictionarySize != dictSize {
+			t.Fatalf("expected DictionarySize %d, got %d", dictSize, parsed.DictionarySize)
+		}
+		if parsed.DictionarySHA256 != "" {
+			t.Fatalf("expected empty DictionarySHA256, got %q", parsed.DictionarySHA256)
+		}
+	})
 }
 
 

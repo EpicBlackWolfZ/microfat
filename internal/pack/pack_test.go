@@ -1868,6 +1868,7 @@ func TestPack_OversizedDictionaryGuard(t *testing.T) {
 		TargetArch:       testArchAMD64,
 		DictionaryOffset: 0,
 		DictionarySize:   format.MaxDictionarySize + 1024,
+		DictionarySHA256: testValidSHA256,
 		Variants: []format.VariantEntry{
 			{
 				Level:            "v1",
