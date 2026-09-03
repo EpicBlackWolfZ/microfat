@@ -2906,6 +2906,47 @@ func TestOpenAndValidateCacheFD_SecurityContract(t *testing.T) {
 			t.Fatalf("stat size %d does not match uncompressed size %d", stat.Size, entry.UncompressedSize)
 		}
 	})
+
+	t.Run("ValidFile_DescriptorPinningSurvivesTamperingAndUnlink", func(t *testing.T) {
+		pinPath := filepath.Join(tmpDir, "stub_pinning_test")
+		if err := os.WriteFile(pinPath, payload, 0o700); err != nil {
+			t.Fatalf("write pin file: %v", err)
+		}
+
+		fd, err := openAndValidateCacheFD(pinPath, entry)
+		if err != nil {
+			t.Fatalf("expected success for valid file, got: %v", err)
+		}
+		defer func() { _ = unix.Close(fd) }()
+
+		// Attacker replaces pathname by renaming a tampered file over it
+		tampered := bytes.Repeat([]byte{0x55}, len(payload))
+		tamperedPath := pinPath + ".tampered"
+		if err := os.WriteFile(tamperedPath, tampered, 0o700); err != nil {
+			t.Fatalf("write tampered file: %v", err)
+		}
+		if err := os.Rename(tamperedPath, pinPath); err != nil {
+			t.Fatalf("rename over pinPath: %v", err)
+		}
+
+		// Read from pinned fd
+		buf := make([]byte, len(payload))
+		n, preadErr := unix.Pread(fd, buf, 0)
+		if preadErr != nil || n != len(payload) || !bytes.Equal(buf, payload) {
+			t.Fatalf("pinned fd read mismatch after rename replacement: err=%v, n=%d", preadErr, n)
+		}
+
+		// Unlink file completely
+		if err := os.Remove(pinPath); err != nil {
+			t.Fatalf("unlink pinPath: %v", err)
+		}
+
+		// Pinned fd remains valid after unlinking
+		n, preadErr = unix.Pread(fd, buf, 0)
+		if preadErr != nil || n != len(payload) || !bytes.Equal(buf, payload) {
+			t.Fatalf("pinned fd read mismatch after unlink: err=%v, n=%d", preadErr, n)
+		}
+	})
 }
 
 func TestCacheExecution_PostExtractionValidationFailure(t *testing.T) {

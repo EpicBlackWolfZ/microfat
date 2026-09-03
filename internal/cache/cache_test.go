@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"golang.org/x/sys/unix"
 )
 
 func TestVerifyBinary(t *testing.T) {
@@ -309,6 +310,59 @@ func TestOpenAndValidateFD_LifecycleAndPurge(t *testing.T) {
 		defer func() { _ = closeFD(fd) }()
 		if fd < 0 {
 			t.Fatalf("expected valid non-negative fd, got %d", fd)
+		}
+	})
+
+	t.Run("ValidFile_DescriptorPinningSurvivesUnlinkAndReplace", func(t *testing.T) {
+		path := filepath.Join(tempDir, "pinning_unlink_test")
+		if err := os.WriteFile(path, payload, 0o700); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+
+		entry := &format.VariantEntry{
+			Level:            "v1",
+			SHA256:           validSHA,
+			UncompressedSize: validSize,
+		}
+
+		fd, err := OpenAndValidateVariantFD(path, entry, true)
+		if err != nil {
+			t.Fatalf("expected success, got: %v", err)
+		}
+		defer func() { _ = closeFD(fd) }()
+
+		// Attacker replaces pathname by renaming a tampered file over it
+		tamperedBytes := bytes.Repeat([]byte{0xBA, 0xAD}, int(validSize))
+		tamperedPath := path + ".tampered"
+		if err := os.WriteFile(tamperedPath, tamperedBytes, 0o700); err != nil {
+			t.Fatalf("write tampered replacement: %v", err)
+		}
+		if err := os.Rename(tamperedPath, path); err != nil {
+			t.Fatalf("rename over path: %v", err)
+		}
+
+		// Verify that reading from the pinned FD still yields the EXACT original validated bytes
+		readBuf := make([]byte, validSize)
+		n, preadErr := unix.Pread(fd, readBuf, 0)
+		if preadErr != nil {
+			t.Fatalf("pread from pinned descriptor failed: %v", preadErr)
+		}
+		if int64(n) != validSize {
+			t.Fatalf("expected %d bytes from pinned descriptor, got %d", validSize, n)
+		}
+		if !bytes.Equal(readBuf, payload) {
+			t.Fatalf("pinned descriptor leaked tampered content: expected %q, got %q", payload, readBuf)
+		}
+
+		// Also test unlinking completely
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("unlink path: %v", err)
+		}
+
+		// The unlinked descriptor remains completely readable and valid
+		n2, preadErr2 := unix.Pread(fd, readBuf, 0)
+		if preadErr2 != nil || int64(n2) != validSize || !bytes.Equal(readBuf, payload) {
+			t.Fatalf("pinned descriptor failed after unlink: err=%v, n=%d", preadErr2, n2)
 		}
 	})
 }
