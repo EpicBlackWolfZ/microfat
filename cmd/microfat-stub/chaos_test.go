@@ -521,7 +521,7 @@ func TestWarmCacheVerifyOption(t *testing.T) {
 	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
 	policyRes := microarch.PolicyResult{}
 
-	t.Run("Warm cache hit without verification uses existing disk file", func(t *testing.T) {
+	t.Run("Warm cache hit unconditionally verifies checksum and rejects tampered file even if MICROFAT_VERIFY_CACHE=0", func(t *testing.T) {
 		t.Setenv(format.EnvVerifyCache, "0")
 		executedPath = ""
 		err := executeViaCache(fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now())
@@ -531,15 +531,21 @@ func TestWarmCacheVerifyOption(t *testing.T) {
 		if executedPath != cachedBinary {
 			t.Fatalf("expected execution of %q, got %q", cachedBinary, executedPath)
 		}
-		diskBytes, _ := os.ReadFile(cachedBinary)
-		if !bytes.Equal(diskBytes, tamperedContent) {
-			t.Fatalf("expected tampered file to remain untouched when verification is disabled")
+		diskBytes, err := os.ReadFile(cachedBinary)
+		if err != nil {
+			t.Fatalf("failed to read cached binary after re-extraction: %v", err)
+		}
+		if !bytes.Equal(diskBytes, payload) {
+			t.Fatalf("expected tampered file to be purged and re-extracted with authentic payload even when MICROFAT_VERIFY_CACHE=0")
 		}
 	})
 
-	t.Run("Warm cache hit with MICROFAT_VERIFY_CACHE=1 invalidates and re-extracts", func(t *testing.T) {
-		t.Setenv(format.EnvVerifyCache, "1")
+	t.Run("Warm cache hit without environment variables invalidates and re-extracts", func(t *testing.T) {
 		t.Setenv(format.EnvDebug, "1")
+		// Explicitly re-tamper the cache to test default verification
+		if err := os.WriteFile(cachedBinary, tamperedContent, 0o700); err != nil {
+			t.Fatalf("failed to re-write tampered cache file: %v", err)
+		}
 		executedPath = ""
 
 		err := executeViaCache(fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now())

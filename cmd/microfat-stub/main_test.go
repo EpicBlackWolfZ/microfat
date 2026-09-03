@@ -23,6 +23,7 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"github.com/EpicBlackWolfZ/microfat/internal/testutil"
 	"github.com/klauspost/compress/zstd"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -32,6 +33,7 @@ const (
 	testPathEnv          = "PATH=/bin"
 	testAppArg           = "app"
 	testForceLevelV3     = "MICROFAT_FORCE_LEVEL=v3"
+	testCompressionZstd  = "zstd"
 )
 
 func TestPrintHelpAndInfo(t *testing.T) {
@@ -2432,7 +2434,7 @@ func TestStub_SecurityInvariants(t *testing.T) {
 		payload := []byte("SECURITY_INVARIANT_TEST_PAYLOAD")
 		entry, rawFile := createDummyVariantFile(t, tmpDir, payload)
 		defer rawFile.Close()
-		entry.Compression = "zstd"
+		entry.Compression = testCompressionZstd
 
 		hostInfo := microarch.Info{
 			OS:    testOSLinux,
@@ -2490,7 +2492,7 @@ func TestStub_SecurityInvariants(t *testing.T) {
 		payload := []byte("MEMFD_SEAL_TEST_PAYLOAD")
 		entry, rawFile := createDummyVariantFile(t, tmpDir, payload)
 		defer rawFile.Close()
-		entry.Compression = "zstd"
+		entry.Compression = testCompressionZstd
 
 		hostInfo := microarch.Info{
 			OS:    testOSLinux,
@@ -2527,7 +2529,7 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 	payload := []byte("hello cache installation failure test payload")
 	entry, rawFile := createDummyVariantFile(t, tmpDir, payload)
 	defer rawFile.Close()
-	entry.Compression = "zstd"
+	entry.Compression = testCompressionZstd
 
 	hostInfo := microarch.Info{
 		OS:    testOSLinux,
@@ -2568,15 +2570,15 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 		}
 	})
 
-	t.Run("VerifyCache_CorruptedFileReextracted", func(t *testing.T) {
+	t.Run("VerifyCache_CorruptedFileReextracted_Unconditional", func(t *testing.T) {
 		cacheHome := filepath.Join(tmpDir, "cache_verify_corrupt")
 		microfatCache := filepath.Join(cacheHome, "microfat")
 		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
 			t.Fatalf("mkdir failed: %v", err)
 		}
 		t.Setenv("XDG_CACHE_HOME", cacheHome)
-		t.Setenv(format.EnvVerifyCache, "1")
 		t.Setenv(format.EnvDebug, "1")
+		t.Setenv(format.EnvVerifyCache, "0") // Even when explicitly set to 0, verification is unconditional
 
 		// Create corrupted file with matching size but invalid content
 		targetPath := filepath.Join(microfatCache, entry.SHA256)
@@ -2683,7 +2685,7 @@ func TestCacheExecution_SymlinkRefusalAndTOCTOUDefense(t *testing.T) {
 	payload := []byte("hello toctou defense test payload 12345")
 	entry, rawFile := createDummyVariantFile(t, tmpDir, payload)
 	defer rawFile.Close()
-	entry.Compression = "zstd"
+	entry.Compression = testCompressionZstd
 
 	hostInfo := microarch.Info{
 		OS:    testOSLinux,
@@ -2786,6 +2788,213 @@ func TestCacheExecution_SymlinkRefusalAndTOCTOUDefense(t *testing.T) {
 				string(descriptorContent), string(originalBytes))
 		}
 	})
+}
+
+func TestOpenAndValidateCacheFD_SecurityContract(t *testing.T) {
+	tmpDir := t.TempDir()
+	payload := []byte("canonical descriptor-bound cache validation payload test 98765")
+	entry, rawFile := createDummyVariantFile(t, tmpDir, payload)
+	defer rawFile.Close()
+
+	t.Run("NonexistentFile_ReturnsError", func(t *testing.T) {
+		fd, err := openAndValidateCacheFD(filepath.Join(tmpDir, "does_not_exist"), entry)
+		if err == nil {
+			_ = unix.Close(fd)
+			t.Fatalf("expected error for nonexistent file, got nil")
+		}
+		if fd != -1 {
+			t.Errorf("expected fd -1 on error, got %d", fd)
+		}
+	})
+
+	t.Run("SymlinkTarget_ReturnsErrorAndNoFollow", func(t *testing.T) {
+		validPath := filepath.Join(tmpDir, "valid_for_symlink")
+		if err := os.WriteFile(validPath, payload, 0o700); err != nil {
+			t.Fatalf("write valid file: %v", err)
+		}
+		symlinkPath := filepath.Join(tmpDir, "symlink_test")
+		if err := os.Symlink(validPath, symlinkPath); err != nil {
+			t.Fatalf("create symlink: %v", err)
+		}
+
+		fd, err := openAndValidateCacheFD(symlinkPath, entry)
+		if err == nil {
+			_ = unix.Close(fd)
+			t.Fatalf("expected error on symlink open, got nil")
+		}
+		if !errors.Is(err, unix.ELOOP) && !errors.Is(err, syscall.ELOOP) {
+			t.Fatalf("expected ELOOP error on symlink, got: %v", err)
+		}
+	})
+
+	t.Run("NonRegularFile_Directory_RejectedAndClosed", func(t *testing.T) {
+		dirPath := filepath.Join(tmpDir, "dir_as_cache")
+		if err := os.MkdirAll(dirPath, 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+
+		fd, err := openAndValidateCacheFD(dirPath, entry)
+		if err == nil {
+			_ = unix.Close(fd)
+			t.Fatalf("expected error on directory cache target, got nil")
+		}
+		if _, statErr := os.Stat(dirPath); statErr != nil {
+			t.Fatalf("non-regular directory should not be removed from disk: %v", statErr)
+		}
+	})
+
+	t.Run("SizeMismatch_PurgesFileAndReturnsError", func(t *testing.T) {
+		sizeMismatchPath := filepath.Join(tmpDir, "size_mismatch_test")
+		if err := os.WriteFile(sizeMismatchPath, []byte("short"), 0o700); err != nil {
+			t.Fatalf("write short file: %v", err)
+		}
+
+		fd, err := openAndValidateCacheFD(sizeMismatchPath, entry)
+		if err == nil {
+			_ = unix.Close(fd)
+			t.Fatalf("expected error on size mismatch, got nil")
+		}
+		if fd != -1 {
+			t.Errorf("expected fd -1, got %d", fd)
+		}
+		if _, statErr := os.Stat(sizeMismatchPath); !os.IsNotExist(statErr) {
+			t.Fatalf("expected truncated file to be removed from disk, stat err: %v", statErr)
+		}
+	})
+
+	t.Run("ChecksumMismatch_PurgesFileAndReturnsError", func(t *testing.T) {
+		corruptPath := filepath.Join(tmpDir, "corrupt_checksum_test")
+		tampered := bytes.Repeat([]byte{0x77}, len(payload))
+		if err := os.WriteFile(corruptPath, tampered, 0o700); err != nil {
+			t.Fatalf("write corrupt file: %v", err)
+		}
+
+		fd, err := openAndValidateCacheFD(corruptPath, entry)
+		if err == nil {
+			_ = unix.Close(fd)
+			t.Fatalf("expected error on checksum mismatch, got nil")
+		}
+		if !errors.Is(err, format.ErrPayloadCorrupted) {
+			t.Fatalf("expected ErrPayloadCorrupted, got: %v", err)
+		}
+		if _, statErr := os.Stat(corruptPath); !os.IsNotExist(statErr) {
+			t.Fatalf("expected corrupted file to be removed from disk, stat err: %v", statErr)
+		}
+	})
+
+	t.Run("ValidFile_ReturnsOpenPinnedDescriptor", func(t *testing.T) {
+		validPath := filepath.Join(tmpDir, "valid_cache_test")
+		if err := os.WriteFile(validPath, payload, 0o700); err != nil {
+			t.Fatalf("write valid file: %v", err)
+		}
+
+		fd, err := openAndValidateCacheFD(validPath, entry)
+		if err != nil {
+			t.Fatalf("expected success for valid file, got: %v", err)
+		}
+		defer func() { _ = unix.Close(fd) }()
+
+		if fd < 0 {
+			t.Fatalf("expected valid non-negative fd, got %d", fd)
+		}
+
+		var stat unix.Stat_t
+		if statErr := unix.Fstat(fd, &stat); statErr != nil {
+			t.Fatalf("fstat on returned fd failed: %v", statErr)
+		}
+		if stat.Size != entry.UncompressedSize {
+			t.Fatalf("stat size %d does not match uncompressed size %d", stat.Size, entry.UncompressedSize)
+		}
+	})
+
+	t.Run("ValidFile_DescriptorPinningSurvivesTamperingAndUnlink", func(t *testing.T) {
+		pinPath := filepath.Join(tmpDir, "stub_pinning_test")
+		if err := os.WriteFile(pinPath, payload, 0o700); err != nil {
+			t.Fatalf("write pin file: %v", err)
+		}
+
+		fd, err := openAndValidateCacheFD(pinPath, entry)
+		if err != nil {
+			t.Fatalf("expected success for valid file, got: %v", err)
+		}
+		defer func() { _ = unix.Close(fd) }()
+
+		// Attacker replaces pathname by renaming a tampered file over it
+		tampered := bytes.Repeat([]byte{0x55}, len(payload))
+		tamperedPath := pinPath + ".tampered"
+		if err := os.WriteFile(tamperedPath, tampered, 0o700); err != nil {
+			t.Fatalf("write tampered file: %v", err)
+		}
+		if err := os.Rename(tamperedPath, pinPath); err != nil {
+			t.Fatalf("rename over pinPath: %v", err)
+		}
+
+		// Read from pinned fd
+		buf := make([]byte, len(payload))
+		n, preadErr := unix.Pread(fd, buf, 0)
+		if preadErr != nil || n != len(payload) || !bytes.Equal(buf, payload) {
+			t.Fatalf("pinned fd read mismatch after rename replacement: err=%v, n=%d", preadErr, n)
+		}
+
+		// Unlink file completely
+		if err := os.Remove(pinPath); err != nil {
+			t.Fatalf("unlink pinPath: %v", err)
+		}
+
+		// Pinned fd remains valid after unlinking
+		n, preadErr = unix.Pread(fd, buf, 0)
+		if preadErr != nil || n != len(payload) || !bytes.Equal(buf, payload) {
+			t.Fatalf("pinned fd read mismatch after unlink: err=%v, n=%d", preadErr, n)
+		}
+	})
+}
+
+func TestCacheExecution_PostExtractionValidationFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	payload := []byte("post-extraction validation failure scenario")
+	entry, rawFile := createDummyVariantFile(t, tmpDir, payload)
+	defer rawFile.Close()
+	entry.Compression = testCompressionZstd
+
+	hostInfo := microarch.Info{OS: testOSLinux, Arch: testArchAMD64, Level: "v1"}
+	policyRes := microarch.PolicyResult{SelectedVariant: "v1"}
+
+	cacheHome := filepath.Join(tmpDir, "cache_post_extract_fail")
+	microfatCache := filepath.Join(cacheHome, "microfat")
+	if err := os.MkdirAll(microfatCache, 0o700); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+
+	origOpen := openCachedBinaryFunc
+	defer func() { openCachedBinaryFunc = origOpen }()
+
+	callCount := 0
+	openCachedBinaryFunc = func(path string) (int, error) {
+		callCount++
+		if callCount == 1 {
+			// First call before extraction: report not existing to trigger extraction
+			return -1, os.ErrNotExist
+		}
+		// Second call after extraction and rename: open a corrupted file instead to simulate tamper/corruption
+		corruptedPath := filepath.Join(tmpDir, "post_extract_corrupted")
+		_ = os.WriteFile(corruptedPath, bytes.Repeat([]byte{0xFF}, len(payload)), 0o700)
+		return origOpen(corruptedPath)
+	}
+
+	err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+	if err == nil {
+		t.Fatalf("expected error when post-extraction validation fails, got nil")
+	}
+	if !errors.Is(err, format.ErrCacheWrite) {
+		t.Fatalf("expected ErrCacheWrite on post-extraction validation failure, got: %v", err)
+	}
+
+	// Verify that destination cache file was removed
+	cachedBinary := filepath.Join(microfatCache, entry.SHA256)
+	if _, statErr := os.Stat(cachedBinary); !os.IsNotExist(statErr) {
+		t.Errorf("expected cached binary %s to be unlinked after post-extraction validation failure", cachedBinary)
+	}
 }
 
 

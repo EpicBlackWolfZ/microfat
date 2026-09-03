@@ -1960,6 +1960,16 @@ func TestVerifyCachedBinary(t *testing.T) {
 			t.Errorf("expected verifyCachedBinary to return false for unreadable file")
 		}
 	})
+
+	t.Run("SymlinkRefused", func(t *testing.T) {
+		symlinkPath := filepath.Join(tempDir, "symlink_to_valid")
+		if err := os.Symlink(validPath, symlinkPath); err != nil {
+			t.Fatalf("creating test symlink: %v", err)
+		}
+		if verifyCachedBinary(symlinkPath, validSize, validSHA) {
+			t.Errorf("expected verifyCachedBinary to return false for symlink (O_NOFOLLOW defense)")
+		}
+	})
 }
 
 func TestPrewarmVariantWithDict_IntegrityAndAtomicReplacement(t *testing.T) {

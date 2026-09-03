@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/cache"
 	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
@@ -26,7 +27,6 @@ const (
 	privateCacheDirMode = 0o700
 	privateExecMode     = 0o700
 	extraEnvCapacity    = 16
-	verifyBufferSize    = 32768
 	// memfdTargetSeals defines the mandatory Linux kernel memory file descriptor seals applied to
 	// anonymous RAM payloads prior to execution via /proc/self/fd/<fd>.
 	// - F_SEAL_WRITE: prevents any modification of the decompressed binary code in memory.
@@ -47,7 +47,7 @@ var (
 	resolveCacheDirFunc  = format.ResolveCacheDir
 	userHomeDirFunc      = os.UserHomeDir
 	openCachedBinaryFunc = func(path string) (int, error) {
-		return unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+		return cache.OpenFileFunc(path)
 	}
 )
 
@@ -450,19 +450,14 @@ func executeViaCache(
 	cachedBinary := filepath.Join(cacheDir, filepath.Clean(entry.SHA256))
 	var decompDuration time.Duration
 
-	fd, openErr := openCachedBinaryFunc(cachedBinary)
+	fd, openErr := openAndValidateCacheFD(cachedBinary, entry)
 	if openErr != nil && (errors.Is(openErr, syscall.ELOOP) || errors.Is(openErr, unix.ELOOP)) {
 		errOut := fmt.Errorf("%w: refusal to execute symlink at %s: %w", format.ErrCacheWrite, cachedBinary, openErr)
 		logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "symlink detected in cache")
 		return errOut
 	}
 
-	needExtract := true
-	if openErr == nil {
-		needExtract = !validateExistingCacheFD(fd, entry, cachedBinary)
-	}
-
-	if needExtract {
+	if openErr != nil {
 		tmpFile, err := os.CreateTemp(cacheDir, ".exec-*.tmp")
 		if err != nil {
 			errOut := fmt.Errorf("%w: launcher execution failed: cannot create temp file in %s: %w (primary memfd error: %v)",
@@ -516,8 +511,8 @@ func executeViaCache(
 			return errOut
 		}
 
-		// Re-open with O_NOFOLLOW to bind descriptor securely
-		fd, openErr = openCachedBinaryFunc(cachedBinary)
+		// Re-open with canonical descriptor-bound primitive and validate before execve
+		fd, openErr = openAndValidateCacheFD(cachedBinary, entry)
 		if openErr != nil {
 			_ = os.Remove(cachedBinary)
 			errOut := fmt.Errorf("%w: opening verified cache file %s: %w (primary memfd error: %v)",
@@ -544,64 +539,30 @@ func executeViaCache(
 	return fmt.Errorf("%w: cache execve failed (%s): %w", format.ErrExecve, procPath, execErr)
 }
 
-func isVerifyCacheEnabled() bool {
-	val := os.Getenv(format.EnvVerifyCache)
-	return val == "1" || strings.EqualFold(val, "true")
-}
-
-func validateExistingCacheFD(fd int, entry *format.VariantEntry, cachedBinary string) bool {
-	var stat unix.Stat_t
-	if err := unix.Fstat(fd, &stat); err != nil {
-		_ = unix.Close(fd)
-		return false
-	}
-	isRegular := (stat.Mode & unix.S_IFMT) == unix.S_IFREG
-	if !isRegular || stat.Size != entry.UncompressedSize {
-		if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
+// openAndValidateCacheFD opens the cached binary path and delegates to the canonical descriptor-bound
+// security primitive in internal/cache, ensuring identical invariants across launcher and pack subsystems:
+// 1. Opens with O_RDONLY | O_CLOEXEC | O_NOFOLLOW to prevent symlink traversal.
+// 2. Asserts via Fstat that the descriptor points to a regular file (S_IFREG) and matches entry.UncompressedSize.
+// 3. Streams SHA-256 verification via Pread directly on the open descriptor, matching entry.SHA256.
+// 4. On failure: closes descriptor, removes corrupted file from disk, and returns an explicit error.
+// 5. On success: returns the pinned, validated descriptor ready for direct execve("/proc/self/fd/<fd>").
+func openAndValidateCacheFD(path string, entry *format.VariantEntry) (int, error) {
+	fd, err := cache.OpenAndValidateVariantFDWithOpener(path, entry, true, openCachedBinaryFunc)
+	if err != nil && (os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true")) {
+		if errors.Is(err, cache.ErrSizeMismatch) {
 			fmt.Fprintf(
 				os.Stderr,
-				"[microfat:debug] truncated cache file detected (%s, expected %d B, got %d B), re-extracting\n",
-				cachedBinary, entry.UncompressedSize, stat.Size,
+				"[microfat:debug] truncated cache file detected (%s), re-extracting\n",
+				path,
+			)
+		} else if errors.Is(err, format.ErrPayloadCorrupted) {
+			fmt.Fprintf(
+				os.Stderr,
+				"[microfat:debug] corrupted cache file detected (checksum mismatch in %s), re-extracting\n",
+				path,
 			)
 		}
-		_ = unix.Close(fd)
-		_ = os.Remove(cachedBinary)
-		return false
 	}
-	if isVerifyCacheEnabled() {
-		if !verifyCachedFD(fd, entry.SHA256) {
-			if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
-				fmt.Fprintf(
-					os.Stderr,
-					"[microfat:debug] corrupted cache file detected (checksum mismatch in %s), re-extracting\n",
-					cachedBinary,
-				)
-			}
-			_ = unix.Close(fd)
-			_ = os.Remove(cachedBinary)
-			return false
-		}
-	}
-	return true
-}
-
-func verifyCachedFD(fd int, expectedHex string) bool {
-	hasher := sha256.New()
-	buf := make([]byte, verifyBufferSize)
-	offset := int64(0)
-	for {
-		n, err := unix.Pread(fd, buf, offset)
-		if n > 0 {
-			hasher.Write(buf[:n])
-			offset += int64(n)
-		}
-		if err != nil {
-			return false
-		}
-		if n == 0 {
-			break
-		}
-	}
-	return hex.EncodeToString(hasher.Sum(nil)) == expectedHex
+	return fd, err
 }
 
