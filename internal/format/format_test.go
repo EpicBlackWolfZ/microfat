@@ -1991,4 +1991,263 @@ func TestUnmarshalJSONIndex_IntegerOverflow(t *testing.T) {
 	}
 }
 
+func TestReadTrailerAndIndex_IndexBoundsBoundaryEnforcement(t *testing.T) {
+	t.Parallel()
+
+	const (
+		baseIndexOffset        = int64(1000)
+		payloadStartOffset     = int64(700)
+		exactBoundaryLength    = int64(300) // 700 + 300 = 1000 == baseIndexOffset (terminates exactly at index)
+		overrunByOneLength     = int64(301) // 700 + 301 = 1001 == baseIndexOffset + 1 (overruns index by 1 byte)
+		uncompressedTestSize   = int64(800)
+		testDictOffset         = int64(100)
+		testDictValidLength    = int64(200)
+		testDictOverrunByOne   = int64(901) // 100 + 901 = 1001 == baseIndexOffset + 1 (overruns index by 1 byte)
+		testVariantPostDict    = int64(300)
+		testVariantPostDictLen = int64(700) // 300 + 700 = 1000 == baseIndexOffset (terminates exactly at index)
+		dummyFutureOffset      = int64(1100)
+		dummyVariantLength     = int64(50)
+	)
+
+	tests := []struct {
+		name              string
+		version           int
+		buildIndex        func() *Index
+		expectError       error
+		expectErrorSubstr string
+	}{
+		{
+			name:    "Format v2 rejects variant extending past indexOffset by 1 byte",
+			version: FormatVersion2,
+			buildIndex: func() *Index {
+				return &Index{
+					AppName:    testAppName,
+					TargetOS:   testOSLinux,
+					TargetArch: testArchAMD64,
+					Variants: []VariantEntry{
+						{
+							Level:            "v1",
+							Offset:           payloadStartOffset,
+							CompressedSize:   overrunByOneLength,
+							UncompressedSize: uncompressedTestSize,
+							SHA256:           testSHA256Sample,
+							Compression:      testCompression,
+						},
+					},
+				}
+			},
+			expectError:       ErrOutOfBounds,
+			expectErrorSubstr: "variant v1 payload extends past index offset 1000",
+		},
+		{
+			name:    "Format v1 rejects variant extending past indexOffset by 1 byte",
+			version: FormatVersion1,
+			buildIndex: func() *Index {
+				return &Index{
+					AppName:    testAppName,
+					TargetOS:   testOSLinux,
+					TargetArch: testArchAMD64,
+					Variants: []VariantEntry{
+						{
+							Level:            "v1",
+							Offset:           payloadStartOffset,
+							CompressedSize:   overrunByOneLength,
+							UncompressedSize: uncompressedTestSize,
+							SHA256:           testSHA256Sample,
+							Compression:      testCompression,
+						},
+					},
+				}
+			},
+			expectError:       ErrOutOfBounds,
+			expectErrorSubstr: "variant v1 payload extends past index offset 1000",
+		},
+		{
+			name:    "Format v2 rejects dictionary extending past indexOffset by 1 byte",
+			version: FormatVersion2,
+			buildIndex: func() *Index {
+				return &Index{
+					AppName:          testAppName,
+					TargetOS:         testOSLinux,
+					TargetArch:       testArchAMD64,
+					DictionaryOffset: testDictOffset,
+					DictionarySize:   testDictOverrunByOne,
+					DictionarySHA256: testSHA256Sample,
+					Variants: []VariantEntry{
+						{
+							Level:            "v1",
+							Offset:           dummyFutureOffset,
+							CompressedSize:   dummyVariantLength,
+							UncompressedSize: uncompressedTestSize,
+							SHA256:           testSHA256Sample,
+							Compression:      testCompression,
+						},
+					},
+				}
+			},
+			expectError:       ErrOutOfBounds,
+			expectErrorSubstr: "dictionary payload extends past index offset 1000",
+		},
+		{
+			name:    "Format v1 rejects dictionary extending past indexOffset by 1 byte",
+			version: FormatVersion1,
+			buildIndex: func() *Index {
+				return &Index{
+					AppName:          testAppName,
+					TargetOS:         testOSLinux,
+					TargetArch:       testArchAMD64,
+					DictionaryOffset: testDictOffset,
+					DictionarySize:   testDictOverrunByOne,
+					DictionarySHA256: testSHA256Sample,
+					Variants: []VariantEntry{
+						{
+							Level:            "v1",
+							Offset:           dummyFutureOffset,
+							CompressedSize:   dummyVariantLength,
+							UncompressedSize: uncompressedTestSize,
+							SHA256:           testSHA256Sample,
+							Compression:      testCompression,
+						},
+					},
+				}
+			},
+			expectError:       ErrOutOfBounds,
+			expectErrorSubstr: "dictionary payload extends past index offset 1000",
+		},
+		{
+			name:    "Format v2 accepts variant payload terminating exactly at indexOffset",
+			version: FormatVersion2,
+			buildIndex: func() *Index {
+				return &Index{
+					AppName:    testAppName,
+					TargetOS:   testOSLinux,
+					TargetArch: testArchAMD64,
+					Variants: []VariantEntry{
+						{
+							Level:            "v1",
+							Offset:           payloadStartOffset,
+							CompressedSize:   exactBoundaryLength,
+							UncompressedSize: uncompressedTestSize,
+							SHA256:           testSHA256Sample,
+							Compression:      testCompression,
+						},
+					},
+				}
+			},
+			expectError: nil,
+		},
+		{
+			name:    "Format v1 accepts variant payload terminating exactly at indexOffset",
+			version: FormatVersion1,
+			buildIndex: func() *Index {
+				return &Index{
+					AppName:    testAppName,
+					TargetOS:   testOSLinux,
+					TargetArch: testArchAMD64,
+					Variants: []VariantEntry{
+						{
+							Level:            "v1",
+							Offset:           payloadStartOffset,
+							CompressedSize:   exactBoundaryLength,
+							UncompressedSize: uncompressedTestSize,
+							SHA256:           testSHA256Sample,
+							Compression:      testCompression,
+						},
+					},
+				}
+			},
+			expectError: nil,
+		},
+		{
+			name:    "Format v2 accepts dictionary and variant terminating exactly at indexOffset",
+			version: FormatVersion2,
+			buildIndex: func() *Index {
+				return &Index{
+					AppName:          testAppName,
+					TargetOS:         testOSLinux,
+					TargetArch:       testArchAMD64,
+					DictionaryOffset: testDictOffset,
+					DictionarySize:   testDictValidLength,
+					DictionarySHA256: testSHA256Sample,
+					Variants: []VariantEntry{
+						{
+							Level:            "v1",
+							Offset:           testVariantPostDict,
+							CompressedSize:   testVariantPostDictLen,
+							UncompressedSize: uncompressedTestSize,
+							SHA256:           testSHA256Sample,
+							Compression:      testCompression,
+						},
+					},
+				}
+			},
+			expectError: nil,
+		},
+		{
+			name:    "Format v1 accepts dictionary and variant terminating exactly at indexOffset",
+			version: FormatVersion1,
+			buildIndex: func() *Index {
+				return &Index{
+					AppName:          testAppName,
+					TargetOS:         testOSLinux,
+					TargetArch:       testArchAMD64,
+					DictionaryOffset: testDictOffset,
+					DictionarySize:   testDictValidLength,
+					DictionarySHA256: testSHA256Sample,
+					Variants: []VariantEntry{
+						{
+							Level:            "v1",
+							Offset:           testVariantPostDict,
+							CompressedSize:   testVariantPostDictLen,
+							UncompressedSize: uncompressedTestSize,
+							SHA256:           testSHA256Sample,
+							Compression:      testCompression,
+						},
+					},
+				}
+			},
+			expectError: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			idx := tt.buildIndex()
+			buf := bytes.NewBuffer(make([]byte, baseIndexOffset))
+			writtenBytes, err := WriteIndexAndTrailerWithVersion(buf, idx, baseIndexOffset, tt.version)
+			if err != nil {
+				t.Fatalf("WriteIndexAndTrailerWithVersion failed: %v", err)
+			}
+
+			data := buf.Bytes()
+			totalSize := baseIndexOffset + writtenBytes
+			if int64(len(data)) != totalSize {
+				t.Fatalf("expected totalSize %d, got %d", totalSize, len(data))
+			}
+
+			readIdx, err := ReadTrailerAndIndex(bytes.NewReader(data), totalSize)
+			if tt.expectError != nil {
+				if !errors.Is(err, tt.expectError) {
+					t.Fatalf("expected error wrapping %v, got %v", tt.expectError, err)
+				}
+				if tt.expectErrorSubstr != "" && !strings.Contains(err.Error(), tt.expectErrorSubstr) {
+					t.Fatalf("expected error message to contain %q, got %q", tt.expectErrorSubstr, err.Error())
+				}
+				if readIdx != nil {
+					t.Fatalf("expected nil index on error, got %+v", readIdx)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("expected clean deserialization, got %v", err)
+				}
+				if readIdx == nil {
+					t.Fatal("expected non-nil index on success")
+				}
+			}
+		})
+	}
+}
+
 

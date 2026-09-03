@@ -1173,7 +1173,7 @@ func ReadTrailerAndIndex(r io.ReaderAt, totalSize int64) (*Index, error) {
 		}
 	}
 
-	if err := idx.ValidateBounds(totalSize); err != nil {
+	if err := idx.ValidateBounds(indexOffset); err != nil {
 		return nil, fmt.Errorf("validating variant boundaries: %w", err)
 	}
 
