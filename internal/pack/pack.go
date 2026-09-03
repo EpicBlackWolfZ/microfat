@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
@@ -693,23 +694,28 @@ func PrewarmVariantWithDict(
 		return "", false, 0, fmt.Errorf("atomically renaming cached variant to %s: %w", cachedBinary, err)
 	}
 
+	if !verifyCachedBinary(cachedBinary, entry.UncompressedSize, entry.SHA256) {
+		_ = os.Remove(cachedBinary)
+		return "", false, 0, fmt.Errorf("%w: failed to verify cached binary %s post-extraction", format.ErrCacheWrite, cachedBinary)
+	}
+
 	return cachedBinary, false, decompDuration, nil
 }
 
-// verifyCachedBinary validates that a cached binary exists, matches the expected size,
-// and strictly matches the expected SHA-256 checksum.
+// verifyCachedBinary validates that a cached binary exists, is a regular file (not a symlink),
+// matches the expected size, and strictly matches the expected SHA-256 checksum over the open descriptor.
 func verifyCachedBinary(path string, expectedSize int64, expectedSHA256 string) bool {
-	stat, err := os.Stat(path)
-	if err != nil || stat.Size() != expectedSize {
-		return false
-	}
-
-	// #nosec G304 -- opening resolved cached binary for hash verification
-	f, err := os.Open(path)
+	// #nosec G304 -- opening resolved cached binary with O_NOFOLLOW to avoid symlink traversal
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return false
 	}
 	defer func() { _ = f.Close() }()
+
+	stat, err := f.Stat()
+	if err != nil || !stat.Mode().IsRegular() || stat.Size() != expectedSize {
+		return false
+	}
 
 	hasher := sha256.New()
 	if _, err := io.Copy(hasher, f); err != nil {

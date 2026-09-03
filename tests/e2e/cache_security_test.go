@@ -127,13 +127,12 @@ func TestCacheSecurityAndFilesystemInvariants(t *testing.T) {
 		}
 	})
 
-	t.Run("Scenario24_CorruptedCacheFileWithChecksumVerification", func(t *testing.T) {
+	t.Run("Scenario24_CorruptedCacheFileDefaultAutoRecovery", func(t *testing.T) {
 		t.Parallel()
 		cacheDir := filepath.Join(t.TempDir(), "corrupt_cache")
 		env := []string{
 			envExecCache,
 			"MICROFAT_CACHE_DIR=" + cacheDir,
-			"MICROFAT_VERIFY_CACHE=1",
 			envDebugTrue,
 		}
 
@@ -152,10 +151,43 @@ func TestCacheSecurityAndFilesystemInvariants(t *testing.T) {
 		// Flip bytes in the middle of cached file while preserving file size
 		mutateFileBytes(t, cachedPath, 512, []byte{0xDE, 0xAD, 0xBE, 0xEF})
 
-		// Run with MICROFAT_VERIFY_CACHE=1: launcher detects checksum mismatch, re-extracts and succeeds
+		// Run without any verify flags: launcher unconditionally detects checksum mismatch, re-extracts and succeeds
 		stdout, stderr, exitCode, err := executeFatBinary(t, goldenFatBin, env)
 		if err != nil || exitCode != defaultExitCode {
-			t.Fatalf("execution with verify cache failed (code %d): %v\nstderr: %s", exitCode, err, stderr)
+			t.Fatalf("execution with default auto-recovery failed (code %d): %v\nstderr: %s", exitCode, err, stderr)
+		}
+		assertSelectedMatchesExecuted(t, stdout, stderr, currentHostLevel)
+	})
+
+	t.Run("Scenario24b_CorruptedCacheFileAutoRecoveryEvenWithBypassAttempt", func(t *testing.T) {
+		t.Parallel()
+		cacheDir := filepath.Join(t.TempDir(), "corrupt_cache_bypass_attempt")
+		env := []string{
+			envExecCache,
+			"MICROFAT_CACHE_DIR=" + cacheDir,
+			"MICROFAT_VERIFY_CACHE=0",
+			envDebugTrue,
+		}
+
+		// Pre-populate cache
+		_, _, exitCode, err := executeFatBinary(t, goldenFatBin, env)
+		if err != nil || exitCode != defaultExitCode {
+			t.Fatalf("initial execution failed (code %d): %v", exitCode, err)
+		}
+
+		entries, _ := os.ReadDir(cacheDir)
+		if len(entries) != 1 {
+			t.Fatalf("expected 1 cached file, found %d", len(entries))
+		}
+		cachedPath := filepath.Join(cacheDir, entries[0].Name())
+
+		// Flip bytes in the middle of cached file while preserving file size
+		mutateFileBytes(t, cachedPath, 512, []byte{0xDE, 0xAD, 0xBE, 0xEF})
+
+		// Run with MICROFAT_VERIFY_CACHE=0: verification cannot be bypassed; launcher detects corruption and re-extracts
+		stdout, stderr, exitCode, err := executeFatBinary(t, goldenFatBin, env)
+		if err != nil || exitCode != defaultExitCode {
+			t.Fatalf("execution with MICROFAT_VERIFY_CACHE=0 failed to recover (code %d): %v\nstderr: %s", exitCode, err, stderr)
 		}
 		assertSelectedMatchesExecuted(t, stdout, stderr, currentHostLevel)
 	})
