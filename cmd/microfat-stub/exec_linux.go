@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/cache"
 	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
@@ -26,7 +27,6 @@ const (
 	privateCacheDirMode = 0o700
 	privateExecMode     = 0o700
 	extraEnvCapacity    = 16
-	verifyBufferSize    = 32768
 	// memfdTargetSeals defines the mandatory Linux kernel memory file descriptor seals applied to
 	// anonymous RAM payloads prior to execution via /proc/self/fd/<fd>.
 	// - F_SEAL_WRITE: prevents any modification of the decompressed binary code in memory.
@@ -47,7 +47,7 @@ var (
 	resolveCacheDirFunc  = format.ResolveCacheDir
 	userHomeDirFunc      = os.UserHomeDir
 	openCachedBinaryFunc = func(path string) (int, error) {
-		return unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+		return cache.OpenFileFunc(path)
 	}
 )
 
@@ -539,78 +539,30 @@ func executeViaCache(
 	return fmt.Errorf("%w: cache execve failed (%s): %w", format.ErrExecve, procPath, execErr)
 }
 
-// openAndValidateCacheFD opens the cached binary path and enforces the complete descriptor-bound
-// security contract:
+// openAndValidateCacheFD opens the cached binary path and delegates to the canonical descriptor-bound
+// security primitive in internal/cache, ensuring identical invariants across launcher and pack subsystems:
 // 1. Opens with O_RDONLY | O_CLOEXEC | O_NOFOLLOW to prevent symlink traversal.
 // 2. Asserts via Fstat that the descriptor points to a regular file (S_IFREG) and matches entry.UncompressedSize.
 // 3. Streams SHA-256 verification via Pread directly on the open descriptor, matching entry.SHA256.
 // 4. On failure: closes descriptor, removes corrupted file from disk, and returns an explicit error.
 // 5. On success: returns the pinned, validated descriptor ready for direct execve("/proc/self/fd/<fd>").
 func openAndValidateCacheFD(path string, entry *format.VariantEntry) (int, error) {
-	fd, err := openCachedBinaryFunc(path)
-	if err != nil {
-		return -1, err
-	}
-
-	var stat unix.Stat_t
-	if statErr := unix.Fstat(fd, &stat); statErr != nil {
-		_ = unix.Close(fd)
-		return -1, fmt.Errorf("fstat cache descriptor: %w", statErr)
-	}
-
-	isRegular := (stat.Mode & unix.S_IFMT) == unix.S_IFREG
-	if !isRegular {
-		_ = unix.Close(fd)
-		_ = os.Remove(path)
-		return -1, fmt.Errorf("cached binary %s is not a regular file (mode 0o%o)", path, stat.Mode)
-	}
-
-	if stat.Size != entry.UncompressedSize {
-		if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
+	fd, err := cache.OpenAndValidateVariantFDWithOpener(path, entry, true, openCachedBinaryFunc)
+	if err != nil && (os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true")) {
+		if errors.Is(err, cache.ErrSizeMismatch) {
 			fmt.Fprintf(
 				os.Stderr,
-				"[microfat:debug] truncated cache file detected (%s, expected %d B, got %d B), re-extracting\n",
-				path, entry.UncompressedSize, stat.Size,
+				"[microfat:debug] truncated cache file detected (%s), re-extracting\n",
+				path,
 			)
-		}
-		_ = unix.Close(fd)
-		_ = os.Remove(path)
-		return -1, fmt.Errorf("cached binary %s size mismatch: expected %d bytes, got %d bytes", path, entry.UncompressedSize, stat.Size)
-	}
-
-	if !verifyCachedFD(fd, entry.SHA256) {
-		if os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true") {
+		} else if errors.Is(err, format.ErrPayloadCorrupted) {
 			fmt.Fprintf(
 				os.Stderr,
 				"[microfat:debug] corrupted cache file detected (checksum mismatch in %s), re-extracting\n",
 				path,
 			)
 		}
-		_ = unix.Close(fd)
-		_ = os.Remove(path)
-		return -1, fmt.Errorf("%w: cache file %s checksum mismatch", format.ErrPayloadCorrupted, path)
 	}
-
-	return fd, nil
-}
-
-func verifyCachedFD(fd int, expectedHex string) bool {
-	hasher := sha256.New()
-	buf := make([]byte, verifyBufferSize)
-	offset := int64(0)
-	for {
-		n, err := unix.Pread(fd, buf, offset)
-		if n > 0 {
-			hasher.Write(buf[:n])
-			offset += int64(n)
-		}
-		if err != nil {
-			return false
-		}
-		if n == 0 {
-			break
-		}
-	}
-	return hex.EncodeToString(hasher.Sum(nil)) == expectedHex
+	return fd, err
 }
 

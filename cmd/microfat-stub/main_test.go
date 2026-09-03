@@ -2838,6 +2838,9 @@ func TestOpenAndValidateCacheFD_SecurityContract(t *testing.T) {
 			_ = unix.Close(fd)
 			t.Fatalf("expected error on directory cache target, got nil")
 		}
+		if _, statErr := os.Stat(dirPath); statErr != nil {
+			t.Fatalf("non-regular directory should not be removed from disk: %v", statErr)
+		}
 	})
 
 	t.Run("SizeMismatch_PurgesFileAndReturnsError", func(t *testing.T) {

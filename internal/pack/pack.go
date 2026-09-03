@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/cache"
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
@@ -705,24 +705,7 @@ func PrewarmVariantWithDict(
 // verifyCachedBinary validates that a cached binary exists, is a regular file (not a symlink),
 // matches the expected size, and strictly matches the expected SHA-256 checksum over the open descriptor.
 func verifyCachedBinary(path string, expectedSize int64, expectedSHA256 string) bool {
-	// #nosec G304 -- opening resolved cached binary with O_NOFOLLOW to avoid symlink traversal
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = f.Close() }()
-
-	stat, err := f.Stat()
-	if err != nil || !stat.Mode().IsRegular() || stat.Size() != expectedSize {
-		return false
-	}
-
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, f); err != nil {
-		return false
-	}
-
-	return hex.EncodeToString(hasher.Sum(nil)) == expectedSHA256
+	return cache.VerifyBinary(path, expectedSize, expectedSHA256)
 }
 
 // PrewarmBinary extracts the specified variant levels (or all variants if targetLevels is empty)
@@ -819,74 +802,7 @@ func VerifyCacheVariant(
 	entry *format.VariantEntry,
 	cacheDir string,
 ) format.PrewarmResult {
-	res := format.PrewarmResult{
-		Level:            entry.Level,
-		SHA256:           entry.SHA256,
-		UncompressedSize: entry.UncompressedSize,
-	}
-
-	if cacheDir == "" {
-		resolved, err := format.ResolveCacheDir("")
-		if err != nil {
-			res.Status = format.PrewarmStatusMissing
-			res.Error = fmt.Sprintf("resolving cache directory: %v", err)
-			return res
-		}
-		cacheDir = resolved
-	}
-
-	if entry.SHA256 == "" || !format.ValidateChecksum(entry.SHA256) {
-		res.Status = format.PrewarmStatusCorrupted
-		res.Error = fmt.Sprintf("invalid checksum format %q", entry.SHA256)
-		return res
-	}
-
-	cleanDir := filepath.Clean(cacheDir)
-	cachedBinary := filepath.Join(cleanDir, filepath.Clean(entry.SHA256))
-	res.CachedPath = cachedBinary
-
-	stat, err := os.Stat(cachedBinary)
-	if err != nil {
-		res.Status = format.PrewarmStatusMissing
-		res.Error = fmt.Sprintf("cached binary not found: %v", err)
-		return res
-	}
-
-	res.AlreadyCached = true
-
-	if stat.Size() != entry.UncompressedSize {
-		res.Status = format.PrewarmStatusCorrupted
-		res.Error = fmt.Sprintf("size mismatch: expected %d bytes, got %d bytes", entry.UncompressedSize, stat.Size())
-		return res
-	}
-
-	// Compute full SHA-256 hash
-	// #nosec G304 -- opening resolved cached binary for hash verification
-	f, err := os.Open(cachedBinary)
-	if err != nil {
-		res.Status = format.PrewarmStatusCorrupted
-		res.Error = fmt.Sprintf("opening cached file for hashing: %v", err)
-		return res
-	}
-	defer func() { _ = f.Close() }()
-
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, f); err != nil {
-		res.Status = format.PrewarmStatusCorrupted
-		res.Error = fmt.Sprintf("hashing cached binary: %v", err)
-		return res
-	}
-
-	actualHash := hex.EncodeToString(hasher.Sum(nil))
-	if entry.SHA256 != "" && actualHash != entry.SHA256 {
-		res.Status = format.PrewarmStatusCorrupted
-		res.Error = fmt.Sprintf("checksum mismatch: expected %s, got %s", entry.SHA256, actualHash)
-		return res
-	}
-
-	res.Valid = true
-	res.Status = format.PrewarmStatusValid
-	return res
+	return cache.VerifyVariant(entry, cacheDir)
 }
 
 // VerifyCacheBinary inspects the cache directory for the specified variant levels (or all variants if targetLevels is empty)
