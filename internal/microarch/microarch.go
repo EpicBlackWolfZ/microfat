@@ -460,10 +460,14 @@ func Normalize(level string) string {
 	l = strings.TrimPrefix(l, "darwin_")
 	l = strings.TrimPrefix(l, "windows_")
 	l = strings.TrimPrefix(l, "amd64_")
+	l = strings.TrimPrefix(l, "amd64-")
 	l = strings.TrimPrefix(l, "arm64_")
-	l = strings.TrimPrefix(l, "x86_64_")
-	l = strings.TrimPrefix(l, "aarch64_")
 	l = strings.TrimPrefix(l, "arm64-")
+	l = strings.TrimPrefix(l, "x86_64_")
+	l = strings.TrimPrefix(l, "x86_64-")
+	l = strings.TrimPrefix(l, "x86-64_")
+	l = strings.TrimPrefix(l, "x86-64-")
+	l = strings.TrimPrefix(l, "aarch64_")
 	l = strings.TrimPrefix(l, "aarch64-")
 
 	if l == "" {

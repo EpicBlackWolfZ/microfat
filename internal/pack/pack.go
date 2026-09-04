@@ -751,15 +751,16 @@ func PrewarmBinary(
 	targetCap := len(idx.Variants)
 	var targetSet map[string]struct{}
 	if len(targetLevels) > 0 {
-		if len(targetLevels) < targetCap {
-			targetCap = len(targetLevels)
-		}
 		targetSet = make(map[string]struct{}, len(targetLevels))
 		for _, lvl := range targetLevels {
-			if _, found := idx.FindVariant(lvl); !found {
+			entry, found := idx.FindVariant(lvl)
+			if !found {
 				return nil, nil, fmt.Errorf("variant level %q not found in binary manifest", lvl)
 			}
-			targetSet[lvl] = struct{}{}
+			targetSet[entry.Level] = struct{}{}
+		}
+		if len(targetSet) < targetCap {
+			targetCap = len(targetSet)
 		}
 	}
 
@@ -829,15 +830,16 @@ func VerifyCacheBinary(
 	targetCap := len(idx.Variants)
 	var targetSet map[string]struct{}
 	if len(targetLevels) > 0 {
-		if len(targetLevels) < targetCap {
-			targetCap = len(targetLevels)
-		}
 		targetSet = make(map[string]struct{}, len(targetLevels))
 		for _, lvl := range targetLevels {
-			if _, found := idx.FindVariant(lvl); !found {
+			entry, found := idx.FindVariant(lvl)
+			if !found {
 				return nil, nil, fmt.Errorf("variant level %q not found in binary manifest", lvl)
 			}
-			targetSet[lvl] = struct{}{}
+			targetSet[entry.Level] = struct{}{}
+		}
+		if len(targetSet) < targetCap {
+			targetCap = len(targetSet)
 		}
 	}
 
