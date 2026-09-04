@@ -675,22 +675,29 @@ func TestBestMatchingVariantFor(t *testing.T) {
 
 func TestNormalizeAndRank(t *testing.T) {
 	t.Parallel()
-	prefixes := []string{
-		"linux_amd64_v3",
-		"darwin_arm64_v8.2",
-		"windows_amd64_v2",
-		"amd64_v4",
-		"arm64_v8.0",
-		"x86_64_v1",
-		"aarch64_v9.0",
-		"arm64-v8.2",
-		"aarch64-v9.2",
-		"",
+	prefixes := []struct {
+		input    string
+		expected string
+	}{
+		{"linux_amd64_v3", "v3"},
+		{"darwin_arm64_v8.2", "v8.2"},
+		{"windows_amd64_v2", "v2"},
+		{"amd64_v4", "v4"},
+		{"amd64-v4", "v4"},
+		{"arm64_v8.0", "v8.0"},
+		{"x86_64_v1", "v1"},
+		{"x86_64-v3", "v3"},
+		{"x86-64_v2", "v2"},
+		{"x86-64-v4", "v4"},
+		{"aarch64_v9.0", "v9.0"},
+		{"arm64-v8.2", "v8.2"},
+		{"aarch64-v9.2", "v9.2"},
+		{"", "v1"},
 	}
 	for _, p := range prefixes {
-		norm := Normalize(p)
-		if norm == "" {
-			t.Errorf("Normalize(%q) returned empty", p)
+		norm := Normalize(p.input)
+		if norm != p.expected {
+			t.Errorf("Normalize(%q) = %q, expected %q", p.input, norm, p.expected)
 		}
 	}
 

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -26,6 +27,7 @@ const (
 	testCompressionZstd    = "zstd"
 	testCompressionFastest = "fastest"
 	testValidSHA256        = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+	testAliasAMD64v3       = "amd64_v3"
 )
 
 func TestPackAndVerify(t *testing.T) {
@@ -2254,8 +2256,8 @@ func TestValidateOptions_NormalizedVariantsAndTiers(t *testing.T) {
 			TargetArch:        testArchAMD64,
 			SkipELFValidation: true,
 			Variants: map[string]string{
-				"v3":       varPath,
-				"amd64_v3": varPath,
+				"v3":             varPath,
+				testAliasAMD64v3: varPath,
 			},
 		}
 		err := validateOptions(&opts)
@@ -2362,7 +2364,7 @@ func TestPack_CanonicalLevelNormalization(t *testing.T) {
 		TargetArch:        testArchAMD64,
 		SkipELFValidation: true,
 		VariantCompression: map[string]VariantCompressionOptions{
-			"amd64_v3": {
+			testAliasAMD64v3: {
 				Profile:     "latency",
 				Compression: "none",
 				Level:       "fast",
@@ -2374,8 +2376,8 @@ func TestPack_CanonicalLevelNormalization(t *testing.T) {
 			},
 		},
 		Variants: map[string]string{
-			"amd64_v3": v3Path,
-			"AMD64_v1": v1Path,
+			testAliasAMD64v3: v3Path,
+			"AMD64_v1":       v1Path,
 		},
 	}
 
@@ -2423,3 +2425,201 @@ func TestValidateOptions_ELFValidationErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestPrewarmAndVerify_AliasNormalization(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("stub-payload-alias-test"), 0o755)
+
+	v1Path := filepath.Join(tempDir, "v1")
+	v1Content := []byte("v1-binary-content-alias-norm")
+	_ = os.WriteFile(v1Path, v1Content, 0o755)
+
+	v3Path := filepath.Join(tempDir, "v3")
+	v3Content := []byte("v3-binary-content-alias-norm-avx2")
+	_ = os.WriteFile(v3Path, v3Content, 0o755)
+
+	fatPath := filepath.Join(tempDir, "fat.bin")
+	opts := Options{
+		StubPath:          stubPath,
+		OutputPath:        fatPath,
+		AppName:           "alias-norm-app",
+		TargetOS:          testOSLinux,
+		TargetArch:        testArchAMD64,
+		SkipELFValidation: true,
+		Variants: map[string]string{
+			"v1": v1Path,
+			"v3": v3Path,
+		},
+	}
+
+	_, err := Pack(opts)
+	if err != nil {
+		t.Fatalf("Pack failed: %v", err)
+	}
+
+	f, err := os.Open(fatPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+
+	stat, err := f.Stat()
+	if err != nil {
+		t.Fatalf("Stat failed: %v", err)
+	}
+
+	t.Run("PrewarmBinary with aliases", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name           string
+			targets        []string
+			expectedLevels []string
+			wantErr        bool
+		}{
+			{
+				name:           "Single uppercase alias V3",
+				targets:        []string{"V3"},
+				expectedLevels: []string{"v3"},
+			},
+			{
+				name:           "Single architecture prefix amd64_v3",
+				targets:        []string{testAliasAMD64v3},
+				expectedLevels: []string{"v3"},
+			},
+			{
+				name:           "Single x86_64 dash alias x86_64-v1",
+				targets:        []string{"x86_64-v1"},
+				expectedLevels: []string{"v1"},
+			},
+			{
+				name:           "Multiple normalized aliases",
+				targets:        []string{"amd64_v1", "V3"},
+				expectedLevels: []string{"v1", "v3"},
+			},
+			{
+				name:           "Duplicate aliases resolving to same canonical level",
+				targets:        []string{testAliasAMD64v3, "v3", "V3"},
+				expectedLevels: []string{"v3"},
+			},
+			{
+				name:    "Non-existent alias returns error",
+				targets: []string{"amd64_v4"},
+				wantErr: true,
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+				cacheDir := filepath.Join(tempDir, "prewarm_"+strings.ReplaceAll(tt.name, " ", "_"))
+
+				_, results, err := PrewarmBinary(f, stat.Size(), tt.targets, cacheDir)
+				if tt.wantErr {
+					if err == nil {
+						t.Fatalf("expected error for targets %v, got nil", tt.targets)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("unexpected error for targets %v: %v", tt.targets, err)
+				}
+
+				if len(results) != len(tt.expectedLevels) {
+					t.Fatalf("expected %d results, got %d: %+v", len(tt.expectedLevels), len(results), results)
+				}
+
+				for i, expected := range tt.expectedLevels {
+					if results[i].Level != expected {
+						t.Errorf("result[%d] level: expected %q, got %q", i, expected, results[i].Level)
+					}
+					if !results[i].Valid {
+						t.Errorf("result[%d] expected valid=true, got false", i)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("VerifyCacheBinary with aliases", func(t *testing.T) {
+		t.Parallel()
+
+		cacheDir := filepath.Join(tempDir, "verify_cache")
+		_, _, err := PrewarmBinary(f, stat.Size(), nil, cacheDir)
+		if err != nil {
+			t.Fatalf("prewarming all variants failed: %v", err)
+		}
+
+		tests := []struct {
+			name           string
+			targets        []string
+			expectedLevels []string
+			wantErr        bool
+		}{
+			{
+				name:           "Single uppercase alias V3",
+				targets:        []string{"V3"},
+				expectedLevels: []string{"v3"},
+			},
+			{
+				name:           "Single architecture prefix amd64_v3",
+				targets:        []string{testAliasAMD64v3},
+				expectedLevels: []string{"v3"},
+			},
+			{
+				name:           "Single x86_64 dash alias x86_64-v1",
+				targets:        []string{"x86_64-v1"},
+				expectedLevels: []string{"v1"},
+			},
+			{
+				name:           "Multiple normalized aliases",
+				targets:        []string{"amd64_v1", "V3"},
+				expectedLevels: []string{"v1", "v3"},
+			},
+			{
+				name:           "Duplicate aliases resolving to same canonical level",
+				targets:        []string{testAliasAMD64v3, "v3", "V3"},
+				expectedLevels: []string{"v3"},
+			},
+			{
+				name:    "Non-existent alias returns error",
+				targets: []string{"amd64_v4"},
+				wantErr: true,
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				_, results, err := VerifyCacheBinary(f, stat.Size(), tt.targets, cacheDir)
+				if tt.wantErr {
+					if err == nil {
+						t.Fatalf("expected error for targets %v, got nil", tt.targets)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("unexpected error for targets %v: %v", tt.targets, err)
+				}
+
+				if len(results) != len(tt.expectedLevels) {
+					t.Fatalf("expected %d results, got %d: %+v", len(tt.expectedLevels), len(results), results)
+				}
+
+				for i, expected := range tt.expectedLevels {
+					if results[i].Level != expected {
+						t.Errorf("result[%d] level: expected %q, got %q", i, expected, results[i].Level)
+					}
+					if !results[i].Valid || results[i].Status != format.PrewarmStatusValid {
+						t.Errorf("result[%d] expected valid and status valid, got %+v", i, results[i])
+					}
+				}
+			})
+		}
+	})
+}
+
