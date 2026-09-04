@@ -159,6 +159,14 @@ func prewarmStub(
 func parsePrewarmArgs(arg, defaultLevel string, idx *format.Index) ([]string, bool, bool, error) {
 	var targetLevels []string
 	var jsonOutput, verifyOnly bool
+	seen := make(map[string]struct{})
+
+	addLevel := func(lvl string) {
+		if _, exists := seen[lvl]; !exists {
+			seen[lvl] = struct{}{}
+			targetLevels = append(targetLevels, lvl)
+		}
+	}
 
 	if strings.HasPrefix(arg, flagPrewarm+"=") {
 		val := strings.TrimPrefix(arg, flagPrewarm+"=")
@@ -169,19 +177,33 @@ func parsePrewarmArgs(arg, defaultLevel string, idx *format.Index) ([]string, bo
 			case strings.EqualFold(token, "verify"):
 				verifyOnly = true
 			case strings.EqualFold(token, "all"):
-				targetLevels = idx.VariantLevels()
+				if idx != nil {
+					for _, lvl := range idx.VariantLevels() {
+						addLevel(lvl)
+					}
+				}
 			case strings.EqualFold(token, "json"):
 				jsonOutput = true
 			case token != "":
-				if _, found := idx.FindVariant(token); !found {
+				if idx == nil {
 					return nil, false, false, fmt.Errorf("variant level %q not found in binary manifest", token)
 				}
-				targetLevels = []string{token}
+				entry, found := idx.FindVariant(token)
+				if !found {
+					return nil, false, false, fmt.Errorf("variant level %q not found in binary manifest", token)
+				}
+				addLevel(entry.Level)
 			}
 		}
 	}
-	if len(targetLevels) == 0 {
-		targetLevels = []string{defaultLevel}
+	if len(targetLevels) == 0 && defaultLevel != "" {
+		canonicalDefault := defaultLevel
+		if idx != nil {
+			if entry, found := idx.FindVariant(defaultLevel); found {
+				canonicalDefault = entry.Level
+			}
+		}
+		targetLevels = []string{canonicalDefault}
 	}
 	return targetLevels, jsonOutput, verifyOnly, nil
 }
