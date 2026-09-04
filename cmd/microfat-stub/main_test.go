@@ -1260,7 +1260,7 @@ func TestStubPrewarmAndCacheDispatch(t *testing.T) {
 	t.Setenv(format.EnvCacheDir, cacheDir)
 
 	// 1. Default --microfat:prewarm
-	os.Args = []string{fatPath, "--microfat:prewarm"}
+	os.Args = []string{fatPath, flagPrewarm}
 	if err := runBinary(fatPath); err != nil {
 		t.Fatalf("--microfat:prewarm failed: %v", err)
 	}
@@ -1282,14 +1282,32 @@ func TestStubPrewarmAndCacheDispatch(t *testing.T) {
 		t.Fatalf("--microfat:prewarm=v1 failed: %v", err)
 	}
 
+	// 4a. Multi-variant comma-separated --microfat:prewarm=v1,v2
+	os.Args = []string{fatPath, "--microfat:prewarm=v1,v2"}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("--microfat:prewarm=v1,v2 failed: %v", err)
+	}
+
+	// 4b. Multi-variant with all and duplicates --microfat:prewarm=all,v1
+	os.Args = []string{fatPath, "--microfat:prewarm=all,v1"}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("--microfat:prewarm=all,v1 failed: %v", err)
+	}
+
 	// 5. --microfat:prewarm=json
 	os.Args = []string{fatPath, "--microfat:prewarm=json"}
 	if err := runBinary(fatPath); err != nil {
 		t.Fatalf("--microfat:prewarm=json failed: %v", err)
 	}
 
+	// 5a. Multi-variant with json modifier --microfat:prewarm=v1,v2,json
+	os.Args = []string{fatPath, "--microfat:prewarm=v1,v2,json"}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("--microfat:prewarm=v1,v2,json failed: %v", err)
+	}
+
 	// 6. --microfat:prewarm with --json flag and MICROFAT_LOG=json
-	os.Args = []string{fatPath, "--microfat:prewarm", "--json"}
+	os.Args = []string{fatPath, flagPrewarm, "--json"}
 	t.Setenv(format.EnvLog, "json")
 	if err := runBinary(fatPath); err != nil {
 		t.Fatalf("--microfat:prewarm with MICROFAT_LOG=json failed: %v", err)
@@ -1308,7 +1326,7 @@ func TestStubPrewarmAndCacheDispatch(t *testing.T) {
 	resolveCacheDirFunc = func(string) (string, error) {
 		return "", errors.New("cache init failed")
 	}
-	os.Args = []string{fatPath, "--microfat:prewarm"}
+	os.Args = []string{fatPath, flagPrewarm}
 	if err := runBinary(fatPath); err == nil {
 		t.Errorf("expected error when cache resolution fails")
 	}
@@ -1544,6 +1562,12 @@ func TestPrewarmStub_VerifyMode(t *testing.T) {
 		t.Fatalf("--microfat:prewarm=verify,all failed on complete cache: %v", err)
 	}
 
+	// 4a. Verify multiple specific variants
+	os.Args = []string{fatPath, "--microfat:prewarm=verify,v1,v2"}
+	if err := runBinary(fatPath); err != nil {
+		t.Fatalf("--microfat:prewarm=verify,v1,v2 failed on complete cache: %v", err)
+	}
+
 	// 5. Verify mode with --json flag
 	os.Args = []string{fatPath, "--microfat:prewarm=verify,all", "--json"}
 	if err := runBinary(fatPath); err != nil {
@@ -1551,7 +1575,7 @@ func TestPrewarmStub_VerifyMode(t *testing.T) {
 	}
 
 	// 6. Verify mode with standalone --verify in args
-	os.Args = []string{fatPath, "--microfat:prewarm", "--verify"}
+	os.Args = []string{fatPath, flagPrewarm, "--verify"}
 	if err := runBinary(fatPath); err != nil {
 		t.Fatalf("--microfat:prewarm with --verify failed: %v", err)
 	}
@@ -2994,6 +3018,196 @@ func TestCacheExecution_PostExtractionValidationFailure(t *testing.T) {
 	cachedBinary := filepath.Join(microfatCache, entry.SHA256)
 	if _, statErr := os.Stat(cachedBinary); !os.IsNotExist(statErr) {
 		t.Errorf("expected cached binary %s to be unlinked after post-extraction validation failure", cachedBinary)
+	}
+}
+
+func TestParsePrewarmArgs(t *testing.T) {
+	t.Parallel()
+
+	idx := &format.Index{
+		AppName:    "testapp",
+		TargetOS:   testOSLinux,
+		TargetArch: testArchAMD64,
+		Variants: []format.VariantEntry{
+			{Level: "v1"},
+			{Level: "v2"},
+			{Level: "v3"},
+		},
+	}
+
+	tests := []struct {
+		name         string
+		arg          string
+		defaultLevel string
+		idx          *format.Index
+		wantLevels   []string
+		wantJSON     bool
+		wantVerify   bool
+		wantErr      bool
+	}{
+		{
+			name:         "BareFlag_UsesDefaultLevel",
+			arg:          flagPrewarm,
+			defaultLevel: "v1",
+			idx:          idx,
+			wantLevels:   []string{"v1"},
+		},
+		{
+			name:         "BareFlag_CanonicalizesDefaultLevel",
+			arg:          flagPrewarm,
+			defaultLevel: "AMD64_V2",
+			idx:          idx,
+			wantLevels:   []string{"v2"},
+		},
+		{
+			name:         "EmptyFlagValue_UsesDefaultLevel",
+			arg:          "--microfat:prewarm=",
+			defaultLevel: "v3",
+			idx:          idx,
+			wantLevels:   []string{"v3"},
+		},
+		{
+			name:         "SingleVariant",
+			arg:          "--microfat:prewarm=v2",
+			defaultLevel: "v1",
+			idx:          idx,
+			wantLevels:   []string{"v2"},
+		},
+		{
+			name:         "MultiVariant_CommaSeparated",
+			arg:          "--microfat:prewarm=v1,v3",
+			defaultLevel: "v2",
+			idx:          idx,
+			wantLevels:   []string{"v1", "v3"},
+		},
+		{
+			name:         "MultiVariant_AliasCanonicalization",
+			arg:          "--microfat:prewarm=amd64_v1,x86_64-v3",
+			defaultLevel: "v2",
+			idx:          idx,
+			wantLevels:   []string{"v1", "v3"},
+		},
+		{
+			name:         "MultiVariant_DeduplicationPreservesOrder",
+			arg:          "--microfat:prewarm=v3,v1,v3,amd64_v1",
+			defaultLevel: "v2",
+			idx:          idx,
+			wantLevels:   []string{"v3", "v1"},
+		},
+		{
+			name:         "AllModifier_AppendsAllVariants",
+			arg:          "--microfat:prewarm=all",
+			defaultLevel: "v1",
+			idx:          idx,
+			wantLevels:   []string{"v1", "v2", "v3"},
+		},
+		{
+			name:         "AllModifier_CombinedWithVariant_Deduplicated",
+			arg:          "--microfat:prewarm=all,v1",
+			defaultLevel: "v1",
+			idx:          idx,
+			wantLevels:   []string{"v1", "v2", "v3"},
+		},
+		{
+			name:         "Variant_CombinedWithAll_PreservesOrder",
+			arg:          "--microfat:prewarm=v3,all",
+			defaultLevel: "v1",
+			idx:          idx,
+			wantLevels:   []string{"v3", "v1", "v2"},
+		},
+		{
+			name:         "VerifyModifier_WithVariants",
+			arg:          "--microfat:prewarm=v1,v3,verify",
+			defaultLevel: "v2",
+			idx:          idx,
+			wantLevels:   []string{"v1", "v3"},
+			wantVerify:   true,
+		},
+		{
+			name:         "JSONModifier_WithVariants",
+			arg:          "--microfat:prewarm=v2,json",
+			defaultLevel: "v1",
+			idx:          idx,
+			wantLevels:   []string{"v2"},
+			wantJSON:     true,
+		},
+		{
+			name:         "VerifyAndJSONModifiers_Together",
+			arg:          "--microfat:prewarm=v1,verify,json",
+			defaultLevel: "v2",
+			idx:          idx,
+			wantLevels:   []string{"v1"},
+			wantJSON:     true,
+			wantVerify:   true,
+		},
+		{
+			name:         "BareModifiers_NoVariants_UsesDefault",
+			arg:          "--microfat:prewarm=verify,json",
+			defaultLevel: "v2",
+			idx:          idx,
+			wantLevels:   []string{"v2"},
+			wantJSON:     true,
+			wantVerify:   true,
+		},
+		{
+			name:         "WhitespaceAndEmptyTokens",
+			arg:          "--microfat:prewarm=v1, , ,v2,",
+			defaultLevel: "v3",
+			idx:          idx,
+			wantLevels:   []string{"v1", "v2"},
+		},
+		{
+			name:         "NonExistentVariant_ReturnsError",
+			arg:          "--microfat:prewarm=v1,v99",
+			defaultLevel: "v1",
+			idx:          idx,
+			wantErr:      true,
+		},
+		{
+			name:         "NilIndex_ReturnsErrorOnVariant",
+			arg:          "--microfat:prewarm=v1",
+			defaultLevel: "v1",
+			idx:          nil,
+			wantErr:      true,
+		},
+		{
+			name:         "EmptyDefaultLevel_ReturnsNil",
+			arg:          flagPrewarm,
+			defaultLevel: "",
+			idx:          idx,
+			wantLevels:   nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			levels, jsonOut, verifyOnly, err := parsePrewarmArgs(tc.arg, tc.defaultLevel, tc.idx)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parsePrewarmArgs(%q) expected error, got nil", tc.arg)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parsePrewarmArgs(%q) unexpected error: %v", tc.arg, err)
+			}
+			if jsonOut != tc.wantJSON {
+				t.Errorf("parsePrewarmArgs(%q) json = %v, want %v", tc.arg, jsonOut, tc.wantJSON)
+			}
+			if verifyOnly != tc.wantVerify {
+				t.Errorf("parsePrewarmArgs(%q) verify = %v, want %v", tc.arg, verifyOnly, tc.wantVerify)
+			}
+			if len(levels) != len(tc.wantLevels) {
+				t.Fatalf("parsePrewarmArgs(%q) levels = %v, want %v", tc.arg, levels, tc.wantLevels)
+			}
+			for i := range levels {
+				if levels[i] != tc.wantLevels[i] {
+					t.Errorf("parsePrewarmArgs(%q) level[%d] = %q, want %q", tc.arg, i, levels[i], tc.wantLevels[i])
+				}
+			}
+		})
 	}
 }
 
