@@ -133,6 +133,7 @@ var (
 	ErrMemfdSealingFailed = errors.New("memfd sealing failed")
 	ErrExecve             = errors.New("execve failed")
 	ErrCacheInit          = errors.New("cache directory initialization failed")
+	ErrInsecureCacheDir   = errors.New("cache directory has insecure permissions or invalid ownership")
 	ErrCacheWrite         = errors.New("cache file creation failed")
 	ErrCacheExtract       = errors.New("cache decompression failed")
 )
@@ -1370,11 +1371,22 @@ func IsFatBinary(r io.ReaderAt, totalSize int64) bool {
 //  2. MICROFAT_CACHE_DIR environment variable (if set)
 //  3. $XDG_CACHE_HOME/microfat (or ~/.cache/microfat)
 //  4. Fallback: /tmp/.microfat-<uid>
+//
+// Security Invariants:
+//   - Explicit paths (customDir or MICROFAT_CACHE_DIR) must be regular directories (not symlinks),
+//     owned by the current process effective UID, and without group or other write permissions (mode & 0o022 == 0).
+//     Insecure configurations fail fast with an error wrapping ErrInsecureCacheDir.
+//   - For the automatic discovery cascade (XDG_CACHE_HOME, ~/.cache, /tmp/.microfat-<uid>), candidate directories
+//     that fail mode validation are tightened via chmod to 0700 if owned by the current UID. Foreign-owned directories,
+//     symlinks, or candidates where chmod fails are rejected, falling through to the next candidate in the cascade.
 func ResolveCacheDir(customDir string) (string, error) {
 	if customDir != "" {
 		cleanDir := filepath.Clean(customDir)
 		if err := os.MkdirAll(cleanDir, PrivateCacheDirMode); err != nil {
 			return "", fmt.Errorf("creating custom cache directory %s: %w", cleanDir, err)
+		}
+		if err := validateCacheDirSecurity(cleanDir); err != nil {
+			return "", fmt.Errorf("custom cache directory %s is insecure: %w", cleanDir, err)
 		}
 		return cleanDir, nil
 	}
@@ -1384,29 +1396,67 @@ func ResolveCacheDir(customDir string) (string, error) {
 		if err := os.MkdirAll(cleanDir, PrivateCacheDirMode); err != nil {
 			return "", fmt.Errorf("creating cache directory from %s (%s): %w", EnvCacheDir, cleanDir, err)
 		}
+		if err := validateCacheDirSecurity(cleanDir); err != nil {
+			return "", fmt.Errorf("cache directory from %s (%s) is insecure: %w", EnvCacheDir, cleanDir, err)
+		}
 		return cleanDir, nil
 	}
 
-	var primaryDir string
+	var candidates []string
 	if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
-		primaryDir = filepath.Join(xdg, "microfat")
-	} else if home, err := userHomeDirFunc(); err == nil {
-		primaryDir = filepath.Join(home, ".cache", "microfat")
-	} else {
-		primaryDir = filepath.Join(os.TempDir(), "microfat")
+		candidates = append(candidates, filepath.Join(xdg, "microfat"))
+	} else if userHomeDirFunc != nil {
+		if home, err := userHomeDirFunc(); err == nil && home != "" {
+			candidates = append(candidates, filepath.Join(home, ".cache", "microfat"))
+		}
+	}
+	candidates = append(candidates, filepath.Join(os.TempDir(), fmt.Sprintf(".microfat-%d", geteuidFunc())))
+
+	var attempted []string
+	seen := make(map[string]bool, len(candidates))
+
+	for _, cand := range candidates {
+		cleanDir := filepath.Clean(cand)
+		if seen[cleanDir] {
+			continue
+		}
+		seen[cleanDir] = true
+		attempted = append(attempted, cleanDir)
+
+		// #nosec G703 -- cache directory creation with private permissions
+		if err := os.MkdirAll(cleanDir, PrivateCacheDirMode); err != nil {
+			continue
+		}
+
+		if err := validateCacheDirSecurity(cleanDir); err == nil {
+			return cleanDir, nil
+		}
+
+		// Initial security validation failed. Attempt remediation only if the path
+		// is a regular directory owned by the current process UID (not a symlink, not foreign).
+		fi, statErr := lstatFunc(cleanDir)
+		if statErr != nil || !fi.IsDir() || (fi.Mode()&os.ModeSymlink != 0) {
+			continue
+		}
+
+		if !isDirOwnedByCurrentUID(fi) {
+			continue
+		}
+
+		// Directory is owned by us, but permissions are insecure (e.g. group/world write).
+		// Attempt to tighten permissions to 0700.
+		if err := chmodFunc(cleanDir, PrivateCacheDirMode); err != nil {
+			continue
+		}
+
+		// Re-validate after chmod
+		if err := validateCacheDirSecurity(cleanDir); err == nil {
+			return cleanDir, nil
+		}
 	}
 
-	// #nosec G703 -- cache directory creation with private permissions
-	if err := os.MkdirAll(primaryDir, PrivateCacheDirMode); err == nil {
-		return primaryDir, nil
-	}
-
-	fallbackDir := filepath.Join(os.TempDir(), fmt.Sprintf(".microfat-%d", os.Getuid()))
-	// #nosec G703 -- fallback cache directory creation
-	if err := os.MkdirAll(fallbackDir, PrivateCacheDirMode); err == nil {
-		return fallbackDir, nil
-	}
-
-	return "", fmt.Errorf("unable to initialize microfat cache directories (tried %s, %s)", primaryDir, fallbackDir)
+	return "", fmt.Errorf("%w: unable to initialize microfat cache directories (tried %s)",
+		ErrCacheInit, strings.Join(attempted, ", "))
 }
+
 
