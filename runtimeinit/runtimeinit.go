@@ -76,6 +76,7 @@ type Result struct {
 	MemLimitApplied           bool    `json:"mem_limit_applied"`
 	MaxProcsApplied           bool    `json:"max_procs_applied"`
 	GOGCApplied               bool    `json:"gogc_applied"`
+	DryRun                    bool    `json:"dry_run,omitempty"`
 	SkippedReason             string  `json:"skipped_reason,omitempty"`
 }
 
@@ -96,6 +97,7 @@ type Telemetry struct {
 	MemLimitApplied     bool    `json:"mem_limit_applied"`
 	MaxProcsApplied     bool    `json:"max_procs_applied"`
 	GOGCApplied         bool    `json:"gogc_applied"`
+	DryRun              bool    `json:"dry_run,omitempty"`
 	SkippedReason       string  `json:"skipped_reason,omitempty"`
 }
 
@@ -110,6 +112,10 @@ type Telemetry struct {
 //  6. If MICROFAT_MEM_RATIO is defined (e.g. "0.85"), it overrides the default memory limit calculation ratio.
 func AutoTune(opts ...Option) Result {
 	cfg := defaultConfig()
+	dryRunEnv := strings.TrimSpace(getenvFunc(format.EnvDryRun))
+	if dryRunEnv == envValEnabledOne || strings.EqualFold(dryRunEnv, envValEnabledTrue) {
+		cfg.dryRun = true
+	}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(cfg)
@@ -117,9 +123,12 @@ func AutoTune(opts ...Option) Result {
 	}
 
 	// 1. Check if auto-tuning is explicitly disabled
-	autoTuneEnv := getenvFunc(format.EnvAutotune)
+	autoTuneEnv := strings.TrimSpace(getenvFunc(format.EnvAutotune))
 	if autoTuneEnv == envValDisabledZero || strings.EqualFold(autoTuneEnv, envValDisabledFalse) {
-		res := Result{SkippedReason: "auto-tuning disabled by " + format.EnvAutotune}
+		res := Result{
+			DryRun:        cfg.dryRun,
+			SkippedReason: "auto-tuning disabled by " + format.EnvAutotune,
+		}
 		logResult(cfg, res)
 		return res
 	}
@@ -140,6 +149,7 @@ func AutoTune(opts ...Option) Result {
 		}
 		res := Result{
 			CgroupVersion: limits.CgroupVersion,
+			DryRun:        cfg.dryRun,
 			SkippedReason: reason,
 		}
 		logResult(cfg, res)
@@ -152,6 +162,7 @@ func AutoTune(opts ...Option) Result {
 		MemoryHighBytes:           limits.MemoryHighBytes,
 		EffectiveMemoryLimitBytes: limits.EffectiveMemoryLimitBytes,
 		CPUQuota:                  limits.CPUQuota,
+		DryRun:                    cfg.dryRun,
 	}
 
 	// 3. Resolve active profile, live heap estimate, and tuning plan
@@ -177,7 +188,7 @@ func AutoTune(opts ...Option) Result {
 	}
 
 	// 4. Apply configured limits and GC settings
-	applyTuningPlan(plan, activeProfile, activeLiveHeap, &res)
+	applyTuningPlan(plan, activeProfile, activeLiveHeap, cfg.dryRun, &res)
 
 	logResult(cfg, res)
 	return res
@@ -200,7 +211,37 @@ func resolveProfileAndLiveHeap(cfg *config) (Profile, int64) {
 	return activeProfile, activeLiveHeap
 }
 
-func applyTuningPlan(plan cgroup.TuningPlan, activeProfile Profile, activeLiveHeap int64, res *Result) {
+func applyTuningPlan(plan cgroup.TuningPlan, activeProfile Profile, activeLiveHeap int64, dryRun bool, res *Result) {
+	if dryRun {
+		if plan.GOMEMLIMITBytes > 0 {
+			res.GOMEMLIMIT = plan.GOMEMLIMITBytes
+		}
+		res.MemLimitApplied = false
+
+		if plan.GOMAXPROCS > 0 {
+			res.GOMAXPROCS = plan.GOMAXPROCS
+		}
+		res.MaxProcsApplied = false
+
+		if plan.GOGCApplied {
+			res.GOGC = plan.GOGC
+			if activeProfile != ProfileDefault {
+				res.ProfileApplied = string(activeProfile)
+			}
+		} else if activeProfile == ProfileAdaptive && activeLiveHeap <= 0 {
+			res.ProfileApplied = string(activeProfile)
+			if res.SkippedReason == "" {
+				res.SkippedReason = "adaptive GOGC tuning skipped (missing live heap estimate)"
+			}
+		}
+		res.GOGCApplied = false
+
+		if res.SkippedReason == "" {
+			res.SkippedReason = "dry-run mode"
+		}
+		return
+	}
+
 	// Configure GOMEMLIMIT
 	if getenvFunc("GOMEMLIMIT") != "" {
 		res.MemLimitApplied = false
@@ -241,7 +282,7 @@ func applyTuningPlan(plan cgroup.TuningPlan, activeProfile Profile, activeLiveHe
 
 func logResult(cfg *config, res Result) {
 	var gogcStr string
-	if res.GOGCApplied {
+	if res.GOGCApplied || (res.DryRun && (res.GOGC != 0 || cfg.explicitGOGC != nil)) {
 		if res.GOGC == cgroup.DefaultBatchETLGOGC {
 			gogcStr = "off"
 		} else {
@@ -252,9 +293,10 @@ func logResult(cfg *config, res Result) {
 	if cfg.logger != nil {
 		cfg.logger(
 			"cgroup_version=%d gomemlimit=%d gomaxprocs=%d gogc=%s applied_mem=%t applied_cpu=%t applied_gogc=%t "+
-				"profile=%q constraining=%q skipped=%q",
+				"profile=%q constraining=%q skipped=%q dry_run=%t",
 			res.CgroupVersion, res.GOMEMLIMIT, res.GOMAXPROCS, gogcStr,
 			res.MemLimitApplied, res.MaxProcsApplied, res.GOGCApplied, res.ProfileApplied, res.ConstrainingLimit, res.SkippedReason,
+			res.DryRun,
 		)
 		return
 	}
@@ -286,6 +328,7 @@ func logResult(cfg *config, res Result) {
 			MemLimitApplied:     res.MemLimitApplied,
 			MaxProcsApplied:     res.MaxProcsApplied,
 			GOGCApplied:         res.GOGCApplied,
+			DryRun:              res.DryRun,
 			SkippedReason:       res.SkippedReason,
 		}
 		if b, err := json.Marshal(telem); err == nil {
@@ -297,13 +340,14 @@ func logResult(cfg *config, res Result) {
 	if debugOpt == envValEnabledOne || strings.EqualFold(debugOpt, envValEnabledTrue) {
 		_, _ = fmt.Fprintf(stderrWriter,
 			"[microfat:runtimeinit] cgroup_v=%d mem_bytes=%d mem_high=%d effective_mem=%d constraining=%s cpu_quota=%.2f "+
-				"gomemlimit=%dB (%t) gomaxprocs=%d (%t) gogc=%s (%t) profile=%s reason=%q\n",
+				"gomemlimit=%dB (%t) gomaxprocs=%d (%t) gogc=%s (%t) profile=%s dry_run=%t reason=%q\n",
 			res.CgroupVersion, res.MemoryLimitBytes, res.MemoryHighBytes, res.EffectiveMemoryLimitBytes, res.ConstrainingLimit,
 			res.CPUQuota,
 			res.GOMEMLIMIT, res.MemLimitApplied,
 			res.GOMAXPROCS, res.MaxProcsApplied,
 			gogcStr, res.GOGCApplied,
 			res.ProfileApplied,
+			res.DryRun,
 			res.SkippedReason,
 		)
 	}

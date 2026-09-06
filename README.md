@@ -215,6 +215,17 @@ func main() {
 }
 ```
 
+### Dry-Run Simulation (`WithDryRun`)
+To simulate container resource tuning and inspect computed parameters without mutating active Go runtime state (`debug.SetMemoryLimit`, `runtime.GOMAXPROCS`, `debug.SetGCPercent`):
+
+```go
+res := runtimeinit.AutoTune(
+	runtimeinit.WithDryRun(true),
+	runtimeinit.WithProfile(runtimeinit.ProfileLatencyCritical),
+)
+// res.DryRun is true, res.MemLimitApplied is false, res.GOMEMLIMIT and res.GOMAXPROCS are populated
+```
+
 ### Locating Original Executable & Sibling Assets (`runtimeinit.Executable`)
 When running packaged inside a microfat binary, child payloads execute via anonymous `memfd` in RAM where `os.Executable()` resolves to `memfd:microfat_payload (deleted)`. Use `runtimeinit.Executable()` to retrieve the path to the original fat binary for locating neighboring configuration files, assets, plugins, or sibling CLI binaries:
 

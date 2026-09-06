@@ -77,7 +77,9 @@ Microfat strictly adheres to the following precedence order:
    - If `GOMEMLIMIT` or `GOMAXPROCS` is already present in the environment (e.g. via Kubernetes deployment manifest or CLI), Microfat **never** overrides it.
 2. **Custom Memory Ratio**:
    - Set `MICROFAT_MEM_RATIO=0.85` to allocate 85% of memory instead of 90%.
-3. **Full Opt-Out**:
+3. **Dry-Run Simulation**:
+   - Set `MICROFAT_DRY_RUN=1` or `MICROFAT_DRY_RUN=true` to simulate auto-tuning and inspect calculated limits without mutating the active Go runtime.
+4. **Full Opt-Out**:
    - Set `MICROFAT_AUTOTUNE=0` or `MICROFAT_AUTOTUNE=false` to disable cgroup inspection and injection entirely.
 
 ---
@@ -259,6 +261,30 @@ func main() {
 		runtimeinit.WithProfile(runtimeinit.ProfileAdaptive),
 		runtimeinit.WithLiveHeapEstimateString("150MB"), // Dynamic formula sizing
 	)
+}
+```
+
+### Simulating Container Auto-Tuning (`WithDryRun`)
+
+Use `runtimeinit.WithDryRun(true)` (or environment variable `MICROFAT_DRY_RUN=1`) to compute and inspect the full container resource tuning plan without mutating Go runtime settings (`debug.SetMemoryLimit`, `runtime.GOMAXPROCS`, and `debug.SetGCPercent`):
+
+```go
+package main
+
+import (
+	"log"
+
+	"github.com/EpicBlackWolfZ/microfat/runtimeinit"
+)
+
+func main() {
+	res := runtimeinit.AutoTune(
+		runtimeinit.WithDryRun(true),
+		runtimeinit.WithProfile(runtimeinit.ProfileLatencyCritical),
+	)
+
+	log.Printf("dry_run=%t planned GOMEMLIMIT=%dB, planned GOMAXPROCS=%d, planned GOGC=%d (applied=%t, reason=%s)",
+		res.DryRun, res.GOMEMLIMIT, res.GOMAXPROCS, res.GOGC, res.MemLimitApplied, res.SkippedReason)
 }
 ```
 
