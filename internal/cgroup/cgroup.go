@@ -34,6 +34,20 @@ const (
 	expectedCgroupParts   = 3
 	expectedCPUFields     = 2
 	cgroupV2HierarchyID   = "0"
+	cgroupV2MemoryMax     = "memory.max"
+	cgroupV2MemoryHigh    = "memory.high"
+)
+
+// Memory limit constraining factors.
+const (
+	// LimitConstraintNone indicates no memory limit constraint is active.
+	LimitConstraintNone = ""
+
+	// LimitConstraintMax indicates memory.max (or cgroup v1 hard limit) is the active constraint.
+	LimitConstraintMax = "max"
+
+	// LimitConstraintHigh indicates memory.high (cgroup v2 throttle watermark) is the active constraint.
+	LimitConstraintHigh = "high"
 )
 
 // GCProfile represents a workload-aware Go runtime garbage collection tuning profile.
@@ -95,23 +109,27 @@ const (
 
 // Limits contains resolved container memory and CPU limits.
 type Limits struct {
-	CgroupVersion    int     `json:"cgroup_version"`
-	MemoryLimitBytes int64   `json:"memory_limit_bytes"` // 0 if unlimited
-	CPUQuota         float64 `json:"cpu_quota"`          // 0 if unlimited
-	CPUs             int     `json:"cpus"`               // Computed GOMAXPROCS (0 if unlimited)
+	CgroupVersion             int     `json:"cgroup_version"`
+	MemoryLimitBytes          int64   `json:"memory_limit_bytes"`           // Hard OOM ceiling (memory.max in v2, memory.limit_in_bytes in v1)
+	MemoryHighBytes           int64   `json:"memory_high_bytes,omitempty"`  // Throttle watermark (memory.high in v2, 0 if unset/v1)
+	EffectiveMemoryLimitBytes int64   `json:"effective_memory_limit_bytes"` // Effective ceiling used for GOMEMLIMIT calculation
+	CPUQuota                  float64 `json:"cpu_quota"`                    // 0 if unlimited
+	CPUs                      int     `json:"cpus"`                         // Computed GOMAXPROCS (0 if unlimited)
 }
 
 // TuningPlan contains computed Go runtime tuning parameters derived from container resource limits.
 type TuningPlan struct {
-	GOMEMLIMITBytes int64     `json:"gomemlimit_bytes"`   // Calculated memory limit in bytes (0 if unset/unlimited)
-	GOMEMLIMITStr   string    `json:"gomemlimit_str"`     // Formatted memory limit string (e.g. "966367641B", empty if unset)
-	GOMAXPROCS      int       `json:"gomaxprocs"`         // Calculated CPU quota core count (0 if unset/unlimited)
-	GOMAXPROCSStr   string    `json:"gomaxprocs_str"`     // Formatted GOMAXPROCS string (e.g. "4", empty if unset)
-	AppliedRatio    float64   `json:"applied_ratio"`      // Actual memory ratio applied (e.g. 0.90 or custom)
-	GOGC            int       `json:"gogc,omitempty"`     // Calculated GOGC target (-1 if off, 0 if unset/default)
-	GOGCStr         string    `json:"gogc_str,omitempty"` // Formatted GOGC string (e.g. "75", "40", "off", empty if unset)
-	GCProfile       GCProfile `json:"gc_profile,omitempty"`
-	GOGCApplied     bool      `json:"gogc_applied"`
+	GOMEMLIMITBytes   int64     `json:"gomemlimit_bytes"`             // Calculated memory limit in bytes (0 if unset/unlimited)
+	GOMEMLIMITStr     string    `json:"gomemlimit_str"`               // Formatted memory limit string (e.g. "966367641B", empty if unset)
+	// ConstrainingLimit is the active memory constraint: "max" or "high" (empty if unlimited; ties resolve to "max").
+	ConstrainingLimit string    `json:"constraining_limit,omitempty"`
+	GOMAXPROCS        int       `json:"gomaxprocs"`                   // Calculated CPU quota core count (0 if unset/unlimited)
+	GOMAXPROCSStr     string    `json:"gomaxprocs_str"`               // Formatted GOMAXPROCS string (e.g. "4", empty if unset)
+	AppliedRatio      float64   `json:"applied_ratio"`                // Actual memory ratio applied (e.g. 0.90 or custom)
+	GOGC              int       `json:"gogc,omitempty"`               // Calculated GOGC target (-1 if off, 0 if unset/default)
+	GOGCStr           string    `json:"gogc_str,omitempty"`           // Formatted GOGC string (e.g. "75", "40", "off", empty if unset)
+	GCProfile         GCProfile `json:"gc_profile,omitempty"`
+	GOGCApplied       bool      `json:"gogc_applied"`
 }
 
 // Sentinel errors for cgroup inspection and hierarchy resolution.
@@ -151,10 +169,17 @@ func ReadLimitsCustom(root string, procCgroupPath string) (Limits, error) {
 		return Limits{CgroupVersion: VersionUnknown}, fmt.Errorf("%w: %w", ErrCgroupProcUnreadable, procErr)
 	}
 
-	// 1. Detect cgroup v2 (unified hierarchy: memory.max or cgroup.controllers exists at root)
-	v2MemMax := filepath.Join(cleanRoot, "memory.max")
+	// 1. Detect cgroup v2 (unified hierarchy: memory.max, memory.high, or cgroup.controllers exists at root)
+	v2MemMax := filepath.Join(cleanRoot, cgroupV2MemoryMax)
+	v2MemHigh := filepath.Join(cleanRoot, cgroupV2MemoryHigh)
 	v2Controllers := filepath.Join(cleanRoot, "cgroup.controllers")
 	if _, err := os.Stat(v2MemMax); err == nil {
+		if !hasV2 {
+			return Limits{CgroupVersion: VersionUnknown}, nil
+		}
+		return readCgroupV2(cleanRoot, v2RelPath)
+	}
+	if _, err := os.Stat(v2MemHigh); err == nil {
 		if !hasV2 {
 			return Limits{CgroupVersion: VersionUnknown}, nil
 		}
@@ -258,8 +283,8 @@ func resolveTargetDirectory(baseDir, relPath string) (string, error) {
 	return candidate, nil
 }
 
-func readCgroupV2Memory(dir string) (int64, bool, error) {
-	memPath := filepath.Join(dir, "memory.max")
+func readCgroupV2MemoryValue(dir, filename string) (int64, bool, error) {
+	memPath := filepath.Join(dir, filename)
 	memBytes, err := readTrimmedFile(memPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -271,13 +296,21 @@ func readCgroupV2Memory(dir string) (int64, bool, error) {
 		return 0, false, nil
 	}
 	if memBytes == "" {
-		return 0, false, fmt.Errorf("%w: empty memory.max in %s", ErrCgroupLimitCorrupted, dir)
+		return 0, false, fmt.Errorf("%w: empty %s in %s", ErrCgroupLimitCorrupted, filename, dir)
 	}
 	val, parseErr := strconv.ParseInt(memBytes, 10, 64)
 	if parseErr != nil || val <= 0 {
-		return 0, false, fmt.Errorf("%w: invalid memory.max value %q in %s", ErrCgroupLimitCorrupted, memBytes, memPath)
+		return 0, false, fmt.Errorf("%w: invalid %s value %q in %s", ErrCgroupLimitCorrupted, filename, memBytes, memPath)
 	}
 	return val, true, nil
+}
+
+func readCgroupV2Memory(dir string) (int64, bool, error) {
+	return readCgroupV2MemoryValue(dir, cgroupV2MemoryMax)
+}
+
+func readCgroupV2MemoryHigh(dir string) (int64, bool, error) {
+	return readCgroupV2MemoryValue(dir, cgroupV2MemoryHigh)
 }
 
 func readCgroupV2CPU(dir string) (float64, bool, error) {
@@ -311,21 +344,33 @@ func readCgroupV2CPU(dir string) (float64, bool, error) {
 	return quota / period, true, nil
 }
 
-func traverseCgroupV2Memory(targetDir, root string) (int64, bool, error) {
-	var minMem int64
-	hasMem := false
+func traverseCgroupV2Memory(targetDir, root string) (maxLimit int64, hasMax bool, highLimit int64, hasHigh bool, err error) {
+	var minMax int64
+	var minHigh int64
 	curr := targetDir
 	for {
-		val, ok, err := readCgroupV2Memory(curr)
-		if err != nil {
-			return 0, false, err
+		maxVal, okMax, maxErr := readCgroupV2Memory(curr)
+		if maxErr != nil {
+			return 0, false, 0, false, maxErr
 		}
-		if ok {
-			if !hasMem || val < minMem {
-				minMem = val
-				hasMem = true
+		if okMax {
+			if !hasMax || maxVal < minMax {
+				minMax = maxVal
+				hasMax = true
 			}
 		}
+
+		highVal, okHigh, highErr := readCgroupV2MemoryHigh(curr)
+		if highErr != nil {
+			return 0, false, 0, false, highErr
+		}
+		if okHigh {
+			if !hasHigh || highVal < minHigh {
+				minHigh = highVal
+				hasHigh = true
+			}
+		}
+
 		if curr == root {
 			break
 		}
@@ -335,7 +380,7 @@ func traverseCgroupV2Memory(targetDir, root string) (int64, bool, error) {
 		}
 		curr = parent
 	}
-	return minMem, hasMem, nil
+	return minMax, hasMax, minHigh, hasHigh, nil
 }
 
 func traverseCgroupV2CPU(targetDir, root string) (float64, bool, error) {
@@ -373,13 +418,17 @@ func readCgroupV2(root, relPath string) (Limits, error) {
 
 	limits := Limits{CgroupVersion: VersionV2}
 
-	minMem, hasMem, memErr := traverseCgroupV2Memory(targetDir, root)
+	minMem, hasMax, minHigh, hasHigh, memErr := traverseCgroupV2Memory(targetDir, root)
 	if memErr != nil {
 		return Limits{CgroupVersion: VersionUnknown}, memErr
 	}
-	if hasMem {
+	if hasMax {
 		limits.MemoryLimitBytes = minMem
 	}
+	if hasHigh {
+		limits.MemoryHighBytes = minHigh
+	}
+	limits.EffectiveMemoryLimitBytes = CalculateEffectiveMemoryLimit(limits.MemoryLimitBytes, limits.MemoryHighBytes)
 
 	minQuota, hasCPU, cpuErr := traverseCgroupV2CPU(targetDir, root)
 	if cpuErr != nil {
@@ -566,6 +615,7 @@ func readCgroupV1(root string, v1RelPaths map[string]string) (Limits, error) {
 		}
 		if hasMem {
 			limits.MemoryLimitBytes = minMem
+			limits.EffectiveMemoryLimitBytes = minMem
 		}
 	}
 
@@ -588,6 +638,46 @@ func readCgroupV1(root string, v1RelPaths map[string]string) (Limits, error) {
 	}
 
 	return limits, nil
+}
+
+// CalculateEffectiveMemoryLimit determines the effective memory ceiling from a hard limit (max) and throttle watermark (high).
+// If both are configured (> 0), it returns min(maxBytes, highBytes).
+// If only one is configured, it returns that limit.
+// If neither is configured, it returns 0 (unlimited).
+func CalculateEffectiveMemoryLimit(maxBytes, highBytes int64) int64 {
+	switch {
+	case maxBytes > 0 && highBytes > 0:
+		if highBytes < maxBytes {
+			return highBytes
+		}
+		return maxBytes
+	case highBytes > 0:
+		return highBytes
+	case maxBytes > 0:
+		return maxBytes
+	default:
+		return 0
+	}
+}
+
+// DetermineConstrainingLimit returns which limit ("max" or "high") constrains the effective memory limit.
+// If both limits are configured and equal (maxBytes == highBytes), LimitConstraintMax ("max") is returned
+// because memory.max represents the kernel's hard OOM boundary, taking precedence as the primary ceiling.
+// Returns LimitConstraintNone ("") if neither limit is set.
+func DetermineConstrainingLimit(maxBytes, highBytes int64) string {
+	switch {
+	case maxBytes > 0 && highBytes > 0:
+		if highBytes < maxBytes {
+			return LimitConstraintHigh
+		}
+		return LimitConstraintMax
+	case highBytes > 0:
+		return LimitConstraintHigh
+	case maxBytes > 0:
+		return LimitConstraintMax
+	default:
+		return LimitConstraintNone
+	}
 }
 
 // CalculateGOMEMLIMIT computes the recommended GOMEMLIMIT in bytes given a raw memory limit.
@@ -762,10 +852,19 @@ func ResolveTuningPlanWithProfile(
 		GCProfile:    profile,
 	}
 
-	if limits.MemoryLimitBytes > 0 {
-		if memLimit, ok := CalculateGOMEMLIMIT(limits.MemoryLimitBytes, ratio, minHeadroomBytes); ok {
+	effectiveLimit := limits.EffectiveMemoryLimitBytes
+	if effectiveLimit <= 0 {
+		effectiveLimit = CalculateEffectiveMemoryLimit(limits.MemoryLimitBytes, limits.MemoryHighBytes)
+	}
+
+	if effectiveLimit > 0 {
+		if memLimit, ok := CalculateGOMEMLIMIT(effectiveLimit, ratio, minHeadroomBytes); ok {
 			plan.GOMEMLIMITBytes = memLimit
 			plan.GOMEMLIMITStr = fmt.Sprintf("%dB", memLimit)
+			plan.ConstrainingLimit = DetermineConstrainingLimit(limits.MemoryLimitBytes, limits.MemoryHighBytes)
+			if plan.ConstrainingLimit == LimitConstraintNone {
+				plan.ConstrainingLimit = LimitConstraintMax
+			}
 		}
 	}
 

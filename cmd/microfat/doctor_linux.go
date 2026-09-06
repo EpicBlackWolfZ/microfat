@@ -73,12 +73,15 @@ func probeCgroup() *CgroupReport {
 	plan := cgroup.ResolveTuningPlan(limits, os.Getenv(format.EnvMemRatio), cgroup.DefaultMemoryRatio, cgroup.DefaultMinHeadroomBytes)
 
 	return &CgroupReport{
-		Detected:         true,
-		Version:          limits.CgroupVersion,
-		MemoryLimitBytes: limits.MemoryLimitBytes,
-		CPUQuota:         limits.CPUQuota,
-		GOMEMLIMITBytes:  plan.GOMEMLIMITBytes,
-		GOMEMLIMITStr:    plan.GOMEMLIMITStr,
-		GOMAXPROCS:       plan.GOMAXPROCS,
+		Detected:                  true,
+		Version:                   limits.CgroupVersion,
+		MemoryLimitBytes:          limits.MemoryLimitBytes,
+		MemoryHighBytes:           limits.MemoryHighBytes,
+		EffectiveMemoryLimitBytes: limits.EffectiveMemoryLimitBytes,
+		ConstrainingLimit:         plan.ConstrainingLimit,
+		CPUQuota:                  limits.CPUQuota,
+		GOMEMLIMITBytes:           plan.GOMEMLIMITBytes,
+		GOMEMLIMITStr:             plan.GOMEMLIMITStr,
+		GOMAXPROCS:                plan.GOMAXPROCS,
 	}
 }

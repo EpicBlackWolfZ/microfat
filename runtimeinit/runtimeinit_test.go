@@ -214,6 +214,111 @@ func TestAutoTune_CgroupV2_Success(t *testing.T) {
 	})
 }
 
+func TestAutoTune_CgroupV2_MemoryHighApplication(t *testing.T) {
+	const (
+		mem1GB    = int64(1024 * 1024 * 1024)
+		mem2GB    = int64(2 * 1024 * 1024 * 1024)
+		testCPUs  = 2
+		testQuota = 2.0
+	)
+
+	t.Run("HighStricterThanMax_AppliesLimitFromHigh", func(t *testing.T) {
+		mockLimits := cgroup.Limits{
+			CgroupVersion:             cgroup.VersionV2,
+			MemoryLimitBytes:          mem2GB,
+			MemoryHighBytes:           mem1GB,
+			EffectiveMemoryLimitBytes: mem1GB,
+			CPUQuota:                  testQuota,
+			CPUs:                      testCPUs,
+		}
+
+		withIsolatedEnv(t, nil, &mockLimits, nil, func(memLimit *int64, _ *int, _ *int, _ *bytes.Buffer) {
+			res := AutoTune()
+
+			expectedMemLimit, ok := cgroup.CalculateGOMEMLIMIT(mem1GB, cgroup.DefaultMemoryRatio, cgroup.DefaultMinHeadroomBytes)
+			if !ok {
+				t.Fatalf("CalculateGOMEMLIMIT failed unexpectedly")
+			}
+
+			if !res.MemLimitApplied {
+				t.Errorf("expected memory limit to be applied")
+			}
+			if res.GOMEMLIMIT != expectedMemLimit || *memLimit != expectedMemLimit {
+				t.Errorf("expected GOMEMLIMIT derived from high (%d), got res=%d set=%d", expectedMemLimit, res.GOMEMLIMIT, *memLimit)
+			}
+			if res.EffectiveMemoryLimitBytes != mem1GB {
+				t.Errorf("expected EffectiveMemoryLimitBytes %d, got %d", mem1GB, res.EffectiveMemoryLimitBytes)
+			}
+			if res.ConstrainingLimit != cgroup.LimitConstraintHigh {
+				t.Errorf("expected ConstrainingLimit %q, got %q", cgroup.LimitConstraintHigh, res.ConstrainingLimit)
+			}
+		})
+	})
+
+	t.Run("MaxUnlimited_HighConfigured_AppliesLimitFromHigh", func(t *testing.T) {
+		mockLimits := cgroup.Limits{
+			CgroupVersion:             cgroup.VersionV2,
+			MemoryLimitBytes:          0,
+			MemoryHighBytes:           mem1GB,
+			EffectiveMemoryLimitBytes: mem1GB,
+			CPUQuota:                  testQuota,
+			CPUs:                      testCPUs,
+		}
+
+		withIsolatedEnv(t, nil, &mockLimits, nil, func(memLimit *int64, _ *int, _ *int, _ *bytes.Buffer) {
+			res := AutoTune()
+
+			expectedMemLimit, ok := cgroup.CalculateGOMEMLIMIT(mem1GB, cgroup.DefaultMemoryRatio, cgroup.DefaultMinHeadroomBytes)
+			if !ok {
+				t.Fatalf("CalculateGOMEMLIMIT failed unexpectedly")
+			}
+
+			if !res.MemLimitApplied {
+				t.Errorf("expected memory limit to be applied")
+			}
+			if res.GOMEMLIMIT != expectedMemLimit || *memLimit != expectedMemLimit {
+				t.Errorf("expected GOMEMLIMIT derived from high (%d), got res=%d set=%d", expectedMemLimit, res.GOMEMLIMIT, *memLimit)
+			}
+			if res.EffectiveMemoryLimitBytes != mem1GB {
+				t.Errorf("expected EffectiveMemoryLimitBytes %d, got %d", mem1GB, res.EffectiveMemoryLimitBytes)
+			}
+			if res.ConstrainingLimit != cgroup.LimitConstraintHigh {
+				t.Errorf("expected ConstrainingLimit %q, got %q", cgroup.LimitConstraintHigh, res.ConstrainingLimit)
+			}
+		})
+	})
+
+	t.Run("MaxEqualsHigh_ResolvesTieToMax", func(t *testing.T) {
+		mockLimits := cgroup.Limits{
+			CgroupVersion:             cgroup.VersionV2,
+			MemoryLimitBytes:          mem1GB,
+			MemoryHighBytes:           mem1GB,
+			EffectiveMemoryLimitBytes: mem1GB,
+			CPUQuota:                  testQuota,
+			CPUs:                      testCPUs,
+		}
+
+		withIsolatedEnv(t, nil, &mockLimits, nil, func(memLimit *int64, _ *int, _ *int, _ *bytes.Buffer) {
+			res := AutoTune()
+
+			expectedMemLimit, ok := cgroup.CalculateGOMEMLIMIT(mem1GB, cgroup.DefaultMemoryRatio, cgroup.DefaultMinHeadroomBytes)
+			if !ok {
+				t.Fatalf("CalculateGOMEMLIMIT failed unexpectedly")
+			}
+
+			if !res.MemLimitApplied {
+				t.Errorf("expected memory limit to be applied")
+			}
+			if res.GOMEMLIMIT != expectedMemLimit || *memLimit != expectedMemLimit {
+				t.Errorf("expected GOMEMLIMIT %d, got res=%d set=%d", expectedMemLimit, res.GOMEMLIMIT, *memLimit)
+			}
+			if res.ConstrainingLimit != cgroup.LimitConstraintMax {
+				t.Errorf("expected ConstrainingLimit %q on equal limits, got %q", cgroup.LimitConstraintMax, res.ConstrainingLimit)
+			}
+		})
+	})
+}
+
 func TestAutoTune_CgroupV1_Success(t *testing.T) {
 	const mem512MB int64 = 512 * 1024 * 1024
 	const quota2CPUs float64 = 2.0
@@ -663,6 +768,74 @@ func TestAutoTune_WithCgroupRoot_LiveFilesystem(t *testing.T) {
 	})
 }
 
+func TestAutoTune_WithCgroupRoot_MemoryHighFilesystem(t *testing.T) {
+	tmpDir := t.TempDir()
+	v2MemMax := filepath.Join(tmpDir, "memory.max")
+	v2MemHigh := filepath.Join(tmpDir, "memory.high")
+	v2CPUMax := filepath.Join(tmpDir, "cpu.max")
+	procFile := filepath.Join(tmpDir, "proc_cgroup")
+
+	const (
+		testMemHighBytes = int64(1073741824) // 1 GB
+		testMemHighStr   = "1073741824"
+		testCPUQuota     = "200000 100000" // 2 CPUs
+		expectedCPUs     = 2
+	)
+
+	if err := os.WriteFile(v2MemMax, []byte("max\n"), testFilePerm); err != nil {
+		t.Fatalf("writing memory.max: %v", err)
+	}
+	if err := os.WriteFile(v2MemHigh, []byte(testMemHighStr+"\n"), testFilePerm); err != nil {
+		t.Fatalf("writing memory.high: %v", err)
+	}
+	if err := os.WriteFile(v2CPUMax, []byte(testCPUQuota+"\n"), testFilePerm); err != nil {
+		t.Fatalf("writing cpu.max: %v", err)
+	}
+	if err := os.WriteFile(procFile, []byte("0::/\n"), testFilePerm); err != nil {
+		t.Fatalf("writing proc_cgroup: %v", err)
+	}
+
+	origReadFrom := readLimitsFromFunc
+	readLimitsFromFunc = func(root string) (cgroup.Limits, error) {
+		return cgroup.ReadLimitsCustom(root, procFile)
+	}
+	defer func() { readLimitsFromFunc = origReadFrom }()
+
+	withIsolatedEnv(t, nil, nil, nil, func(memLimit *int64, maxProcs *int, _ *int, _ *bytes.Buffer) {
+		res := AutoTune(WithCgroupRoot(tmpDir))
+
+		if res.CgroupVersion != cgroup.VersionV2 {
+			t.Errorf("expected cgroup v2, got %d", res.CgroupVersion)
+		}
+		if res.MemoryLimitBytes != 0 {
+			t.Errorf("expected memory limit 0 (unlimited), got %d", res.MemoryLimitBytes)
+		}
+		if res.MemoryHighBytes != testMemHighBytes {
+			t.Errorf("expected memory high %d, got %d", testMemHighBytes, res.MemoryHighBytes)
+		}
+		if res.EffectiveMemoryLimitBytes != testMemHighBytes {
+			t.Errorf("expected effective memory limit %d, got %d", testMemHighBytes, res.EffectiveMemoryLimitBytes)
+		}
+		if res.ConstrainingLimit != cgroup.LimitConstraintHigh {
+			t.Errorf("expected ConstrainingLimit %q, got %q", cgroup.LimitConstraintHigh, res.ConstrainingLimit)
+		}
+		if !res.MemLimitApplied || !res.MaxProcsApplied {
+			t.Errorf("expected limits applied")
+		}
+		if res.GOMAXPROCS != expectedCPUs || *maxProcs != expectedCPUs {
+			t.Errorf("expected GOMAXPROCS %d, got res=%d set=%d", expectedCPUs, res.GOMAXPROCS, *maxProcs)
+		}
+
+		expectedMemLimit, ok := cgroup.CalculateGOMEMLIMIT(testMemHighBytes, cgroup.DefaultMemoryRatio, cgroup.DefaultMinHeadroomBytes)
+		if !ok {
+			t.Fatalf("CalculateGOMEMLIMIT failed unexpectedly")
+		}
+		if res.GOMEMLIMIT != expectedMemLimit || *memLimit != expectedMemLimit {
+			t.Errorf("expected GOMEMLIMIT %d, got res=%d set=%d", expectedMemLimit, res.GOMEMLIMIT, *memLimit)
+		}
+	})
+}
+
 func TestAutoTune_DiagnosticsLogging(t *testing.T) {
 	const mem1GB int64 = 1024 * 1024 * 1024
 	mockLimits := cgroup.Limits{
@@ -733,6 +906,52 @@ func TestAutoTune_DiagnosticsLogging(t *testing.T) {
 		})
 	})
 
+	t.Run("JSONStructuredTelemetryLogging_MemoryHighConstraint", func(t *testing.T) {
+		const (
+			mem1GB = int64(1024 * 1024 * 1024)
+			mem2GB = int64(2 * 1024 * 1024 * 1024)
+		)
+		mockHighLimits := cgroup.Limits{
+			CgroupVersion:             cgroup.VersionV2,
+			MemoryLimitBytes:          mem2GB,
+			MemoryHighBytes:           mem1GB,
+			EffectiveMemoryLimitBytes: mem1GB,
+			CPUQuota:                  2.0,
+			CPUs:                      2,
+		}
+		mockEnv := map[string]string{
+			format.EnvLog: "json",
+		}
+		withIsolatedEnv(t, mockEnv, &mockHighLimits, nil, func(_ *int64, _ *int, _ *int, stderrBuf *bytes.Buffer) {
+			res := AutoTune()
+			if res.ConstrainingLimit != cgroup.LimitConstraintHigh {
+				t.Errorf("expected res.ConstrainingLimit 'high', got %q", res.ConstrainingLimit)
+			}
+			if res.MemoryHighBytes != mem1GB {
+				t.Errorf("expected MemoryHighBytes %d, got %d", mem1GB, res.MemoryHighBytes)
+			}
+			if res.EffectiveMemoryLimitBytes != mem1GB {
+				t.Errorf("expected EffectiveMemoryLimitBytes %d, got %d", mem1GB, res.EffectiveMemoryLimitBytes)
+			}
+
+			output := stderrBuf.String()
+			cleanJSON := strings.TrimPrefix(strings.TrimSpace(output), "[microfat] ")
+			var telem Telemetry
+			if err := json.Unmarshal([]byte(cleanJSON), &telem); err != nil {
+				t.Fatalf("unmarshaling json telemetry: %v", err)
+			}
+			if telem.ConstrainingLimit != cgroup.LimitConstraintHigh {
+				t.Errorf("expected telem.ConstrainingLimit 'high', got %q", telem.ConstrainingLimit)
+			}
+			if telem.CgroupMemHighBytes != mem1GB {
+				t.Errorf("expected CgroupMemHighBytes %d, got %d", mem1GB, telem.CgroupMemHighBytes)
+			}
+			if telem.EffectiveMemBytes != mem1GB {
+				t.Errorf("expected EffectiveMemBytes %d, got %d", mem1GB, telem.EffectiveMemBytes)
+			}
+		})
+	})
+
 	t.Run("SilentByDefault", func(t *testing.T) {
 		withIsolatedEnv(t, nil, &mockLimits, nil, func(_ *int64, _ *int, _ *int, stderrBuf *bytes.Buffer) {
 			_ = AutoTune()
@@ -744,18 +963,25 @@ func TestAutoTune_DiagnosticsLogging(t *testing.T) {
 }
 
 func TestResult_JSONSerialization(t *testing.T) {
+	const (
+		mem1GB = 1024 * 1024 * 1024
+		mem512MB = 512 * 1024 * 1024
+	)
 	res := Result{
-		CgroupVersion:    cgroup.VersionV2,
-		MemoryLimitBytes: 1024 * 1024 * 1024,
-		CPUQuota:         4.0,
-		GOMEMLIMIT:       966367641,
-		GOMAXPROCS:       4,
-		GOGC:             75,
-		ProfileApplied:   testProfileLatencyCritical,
-		MemLimitApplied:  true,
-		MaxProcsApplied:  true,
-		GOGCApplied:      true,
-		SkippedReason:    "",
+		CgroupVersion:             cgroup.VersionV2,
+		MemoryLimitBytes:          mem1GB,
+		MemoryHighBytes:           mem512MB,
+		EffectiveMemoryLimitBytes: mem512MB,
+		ConstrainingLimit:         cgroup.LimitConstraintHigh,
+		CPUQuota:                  4.0,
+		GOMEMLIMIT:                966367641,
+		GOMAXPROCS:                4,
+		GOGC:                      75,
+		ProfileApplied:            testProfileLatencyCritical,
+		MemLimitApplied:           true,
+		MaxProcsApplied:           true,
+		GOGCApplied:               true,
+		SkippedReason:             "",
 	}
 
 	data, err := json.Marshal(res)

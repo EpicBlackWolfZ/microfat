@@ -227,3 +227,78 @@ func TestCgroupCorruptedLimitValues(t *testing.T) {
 		}
 	})
 }
+
+func TestCalculateEffectiveMemoryLimitEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	const (
+		limit1K = int64(1024)
+		limit2K = int64(2048)
+		limit4K = int64(4096)
+	)
+
+	tests := []struct {
+		name      string
+		maxBytes  int64
+		highBytes int64
+		want      int64
+	}{
+		{"BothZero", 0, 0, 0},
+		{"BothNegative", -100, -200, 0},
+		{"MaxOnly", limit2K, 0, limit2K},
+		{"HighOnly", 0, limit2K, limit2K},
+		{"HighLowerThanMax", limit4K, limit2K, limit2K},
+		{"MaxLowerThanHigh", limit1K, limit2K, limit1K},
+		{"MaxEqualsHigh", limit2K, limit2K, limit2K},
+		{"NegativeMaxValidHigh", -500, limit2K, limit2K},
+		{"ValidMaxNegativeHigh", limit2K, -500, limit2K},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := CalculateEffectiveMemoryLimit(tt.maxBytes, tt.highBytes)
+			if got != tt.want {
+				t.Fatalf("CalculateEffectiveMemoryLimit(%d, %d) = %d, want %d", tt.maxBytes, tt.highBytes, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetermineConstrainingLimitEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	const (
+		limit1K = int64(1024)
+		limit2K = int64(2048)
+		limit4K = int64(4096)
+	)
+
+	tests := []struct {
+		name      string
+		maxBytes  int64
+		highBytes int64
+		want      string
+	}{
+		{"BothZero", 0, 0, LimitConstraintNone},
+		{"BothNegative", -100, -200, LimitConstraintNone},
+		{"MaxOnly", limit2K, 0, LimitConstraintMax},
+		{"HighOnly", 0, limit2K, LimitConstraintHigh},
+		{"HighLowerThanMax", limit4K, limit2K, LimitConstraintHigh},
+		{"MaxLowerThanHigh", limit1K, limit2K, LimitConstraintMax},
+		// Ties between max and high resolve to "max" since memory.max is the kernel's hard OOM boundary.
+		{"MaxEqualsHigh", limit2K, limit2K, LimitConstraintMax},
+		{"NegativeMaxValidHigh", -500, limit2K, LimitConstraintHigh},
+		{"ValidMaxNegativeHigh", limit2K, -500, LimitConstraintMax},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := DetermineConstrainingLimit(tt.maxBytes, tt.highBytes)
+			if got != tt.want {
+				t.Fatalf("DetermineConstrainingLimit(%d, %d) = %q, want %q", tt.maxBytes, tt.highBytes, got, tt.want)
+			}
+		})
+	}
+}
