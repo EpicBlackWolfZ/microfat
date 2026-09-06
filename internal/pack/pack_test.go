@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"encoding/binary"
 	"sync"
 	"testing"
 
@@ -3045,30 +3046,170 @@ func TestPrewarm_RequiresValidDictionaryChecksum(t *testing.T) {
 		t.Fatalf("Pack failed: %v", err)
 	}
 
-	fatFile, err := os.OpenFile(fatPath, os.O_RDWR, 0)
+	fatBytes, err := os.ReadFile(fatPath)
 	if err != nil {
-		t.Fatalf("open fat file failed: %v", err)
+		t.Fatalf("reading fat file: %v", err)
 	}
-	defer func() { _ = fatFile.Close() }()
 
-	stat, _ := fatFile.Stat()
+	fatReader := bytes.NewReader(fatBytes)
+	statSize := int64(len(fatBytes))
 
-	// Read index and poison dictionary SHA256 in memory
-	idx, err := format.ReadTrailerAndIndex(fatFile, stat.Size())
+	origIdx, err := format.ReadTrailerAndIndex(fatReader, statSize)
 	if err != nil {
 		t.Fatalf("ReadTrailerAndIndex failed: %v", err)
 	}
-
-	// Corrupt dictionary SHA256 in index
-	idx.DictionarySHA256 = ""
-	cacheDir := filepath.Join(tempDir, "cache")
-
-	// Call PrewarmVariantWithDict with invalid uncompressed size
-	entry := idx.Variants[0]
-	entry.UncompressedSize = -5
-	_, _, _, err = PrewarmVariantWithDict(fatFile, &entry, cacheDir, nil)
-	if err == nil || !errors.Is(err, format.ErrPayloadTooLarge) {
-		t.Fatalf("expected ErrPayloadTooLarge for negative uncompressed size in PrewarmVariantWithDict, got %v", err)
+	if origIdx.DictionarySize <= 0 || origIdx.DictionarySHA256 == "" {
+		t.Fatalf("expected packed binary to have shared dictionary with SHA-256")
 	}
+
+	trailerBytes := fatBytes[statSize-format.TrailerSize:]
+	indexOffset := int64(binary.LittleEndian.Uint64(trailerBytes[0:8]))
+
+	buildPoisonedFatFile := func(t *testing.T, poisonedSHA string) (*os.File, int64) {
+		t.Helper()
+		tamperedIdx := *origIdx
+		tamperedIdx.DictionarySHA256 = poisonedSHA
+
+		var buf bytes.Buffer
+		buf.Write(fatBytes[:indexOffset])
+		if _, err := format.WriteIndexAndTrailerWithVersion(&buf, &tamperedIdx, indexOffset, format.FormatVersion1); err != nil {
+			t.Fatalf("failed to rewrite index and trailer: %v", err)
+		}
+
+		f, err := os.CreateTemp(t.TempDir(), "poisoned_dict_*.fat")
+		if err != nil {
+			t.Fatalf("failed to create temp file: %v", err)
+		}
+		if _, err := f.Write(buf.Bytes()); err != nil {
+			_ = f.Close()
+			t.Fatalf("failed to write temp file: %v", err)
+		}
+		t.Cleanup(func() { _ = f.Close() })
+		return f, int64(buf.Len())
+	}
+
+	t.Run("Empty Dictionary SHA-256 Rejected", func(t *testing.T) {
+		t.Parallel()
+		cacheDir := t.TempDir()
+		fatFile, totalSize := buildPoisonedFatFile(t, "")
+		_, _, err := PrewarmBinary(fatFile, totalSize, nil, cacheDir)
+		if err == nil || !errors.Is(err, format.ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum for empty dictionary SHA, got: %v", err)
+		}
+	})
+
+	t.Run("Malformed Dictionary SHA-256 Rejected", func(t *testing.T) {
+		t.Parallel()
+		cacheDir := t.TempDir()
+		fatFile, totalSize := buildPoisonedFatFile(t, "not-a-valid-sha256-hex-digest")
+		_, _, err := PrewarmBinary(fatFile, totalSize, nil, cacheDir)
+		if err == nil || !errors.Is(err, format.ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum for malformed dictionary SHA, got: %v", err)
+		}
+	})
+
+	t.Run("Mismatched Dictionary SHA-256 Rejected", func(t *testing.T) {
+		t.Parallel()
+		cacheDir := t.TempDir()
+		wrongSHA := strings.Repeat("0", 64)
+		fatFile, totalSize := buildPoisonedFatFile(t, wrongSHA)
+		_, _, err := PrewarmBinary(fatFile, totalSize, nil, cacheDir)
+		if err == nil || !errors.Is(err, format.ErrDictionaryCorrupted) {
+			t.Fatalf("expected ErrDictionaryCorrupted for mismatched dictionary SHA, got: %v", err)
+		}
+	})
+
+	t.Run("Authentic Dictionary SHA-256 Succeeds", func(t *testing.T) {
+		t.Parallel()
+		cacheDir := t.TempDir()
+		f, err := os.Open(fatPath)
+		if err != nil {
+			t.Fatalf("failed to open authentic fat file: %v", err)
+		}
+		defer func() { _ = f.Close() }()
+
+		idx, results, err := PrewarmBinary(f, statSize, nil, cacheDir)
+		if err != nil {
+			t.Fatalf("expected PrewarmBinary to succeed with authentic dictionary, got: %v", err)
+		}
+		if idx == nil || len(results) != 2 {
+			t.Fatalf("expected 2 prewarm results, got: %v", results)
+		}
+	})
+}
+
+func TestPrewarmVariantWithDict_RejectsInvalidDimensions(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	cacheDir := filepath.Join(tempDir, "cache")
+	dummyReader := bytes.NewReader(make([]byte, 1024))
+
+	validSHA := strings.Repeat("a", 64)
+
+	t.Run("Negative Uncompressed Size", func(t *testing.T) {
+		t.Parallel()
+		entry := &format.VariantEntry{
+			Level:            "v3",
+			Offset:           0,
+			CompressedSize:   100,
+			UncompressedSize: -1,
+			SHA256:           validSHA,
+		}
+		_, _, _, err := PrewarmVariantWithDict(dummyReader, entry, cacheDir, nil)
+		if err == nil || !errors.Is(err, format.ErrPayloadTooLarge) {
+			t.Fatalf("expected ErrPayloadTooLarge for negative uncompressed size, got: %v", err)
+		}
+	})
+
+	t.Run("Zero Uncompressed Size", func(t *testing.T) {
+		t.Parallel()
+		entry := &format.VariantEntry{
+			Level:            "v3",
+			Offset:           0,
+			CompressedSize:   100,
+			UncompressedSize: 0,
+			SHA256:           validSHA,
+		}
+		_, _, _, err := PrewarmVariantWithDict(dummyReader, entry, cacheDir, nil)
+		if err == nil || !errors.Is(err, format.ErrPayloadTooLarge) {
+			t.Fatalf("expected ErrPayloadTooLarge for zero uncompressed size, got: %v", err)
+		}
+	})
+
+	t.Run("Oversized Uncompressed Size", func(t *testing.T) {
+		t.Parallel()
+		entry := &format.VariantEntry{
+			Level:            "v3",
+			Offset:           0,
+			CompressedSize:   100,
+			UncompressedSize: format.MaxPayloadSize + 1,
+			SHA256:           validSHA,
+		}
+		_, _, _, err := PrewarmVariantWithDict(dummyReader, entry, cacheDir, nil)
+		if err == nil || !errors.Is(err, format.ErrPayloadTooLarge) {
+			t.Fatalf("expected ErrPayloadTooLarge for oversized uncompressed size, got: %v", err)
+		}
+	})
+
+	t.Run("Empty or Malformed SHA256", func(t *testing.T) {
+		t.Parallel()
+		entry := &format.VariantEntry{
+			Level:            "v3",
+			Offset:           0,
+			CompressedSize:   100,
+			UncompressedSize: 100,
+			SHA256:           "",
+		}
+		_, _, _, err := PrewarmVariantWithDict(dummyReader, entry, cacheDir, nil)
+		if err == nil || !errors.Is(err, format.ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum for empty SHA256, got: %v", err)
+		}
+
+		entry.SHA256 = "invalid-sha"
+		_, _, _, err = PrewarmVariantWithDict(dummyReader, entry, cacheDir, nil)
+		if err == nil || !errors.Is(err, format.ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum for malformed SHA256, got: %v", err)
+		}
+	})
 }
 
