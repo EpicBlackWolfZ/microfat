@@ -93,6 +93,16 @@ const (
 	EnvPolicyApplied              = "MICROFAT_POLICY_APPLIED"
 	EnvOverrideReason             = "MICROFAT_OVERRIDE_REASON"
 
+	// EnvOriginalExe specifies the informational asset-resolution hint indicating the
+	// original fat binary path prior to memfd/cache execution.
+	//
+	// Security boundary: This variable is strictly an informational asset-resolution hint
+	// for locating neighboring filesystem resources (configurations, plugins, static assets,
+	// sibling CLI binaries). It is propagated via the process environment and must NOT be used
+	// by applications or libraries as a cryptographic identity, access-control token, or
+	// trusted binary origin.
+	EnvOriginalExe = "MICROFAT_ORIGINAL_EXE"
+
 	// Execution modes.
 	ExecModeMemfd = "memfd"
 	ExecModeCache = "cache"

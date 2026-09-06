@@ -136,4 +136,59 @@ func TestProcessFidelityAndExecutionInvariants(t *testing.T) {
 			t.Fatalf("unexpected output executing from spaced path:\n%s", stdout)
 		}
 	})
+
+	t.Run("Scenario33_OriginalExecutableReflection", func(t *testing.T) {
+		t.Parallel()
+
+		absGoldenFatBin, err := filepath.Abs(goldenFatBin)
+		if err != nil {
+			t.Fatalf("resolving abs path: %v", err)
+		}
+
+		t.Run("MemfdExecutionMode", func(t *testing.T) {
+			t.Parallel()
+			stdout, stderr, exitCode, err := executeFatBinary(t, goldenFatBin, nil, "--echo-env", "MICROFAT_ORIGINAL_EXE")
+			if err != nil || exitCode != defaultExitCode {
+				t.Fatalf("execution failed (code %d): %v\nstderr: %s", exitCode, err, stderr)
+			}
+			if stdout != absGoldenFatBin {
+				t.Fatalf("expected MICROFAT_ORIGINAL_EXE %q, got %q", absGoldenFatBin, stdout)
+			}
+		})
+
+		t.Run("CacheExecutionMode", func(t *testing.T) {
+			t.Parallel()
+			env := []string{"MICROFAT_EXEC_MODE=cache"}
+			stdout, stderr, exitCode, err := executeFatBinary(t, goldenFatBin, env, "--echo-env", "MICROFAT_ORIGINAL_EXE")
+			if err != nil || exitCode != defaultExitCode {
+				t.Fatalf("execution failed (code %d): %v\nstderr: %s", exitCode, err, stderr)
+			}
+			if stdout != absGoldenFatBin {
+				t.Fatalf("expected MICROFAT_ORIGINAL_EXE in cache mode %q, got %q", absGoldenFatBin, stdout)
+			}
+		})
+
+		t.Run("OverridesHostileParentEnv", func(t *testing.T) {
+			t.Parallel()
+			env := []string{"MICROFAT_ORIGINAL_EXE=/untrusted/attacker/path"}
+			stdout, stderr, exitCode, err := executeFatBinary(t, goldenFatBin, env, "--echo-env", "MICROFAT_ORIGINAL_EXE")
+			if err != nil || exitCode != defaultExitCode {
+				t.Fatalf("execution failed (code %d): %v\nstderr: %s", exitCode, err, stderr)
+			}
+			if stdout != absGoldenFatBin {
+				t.Fatalf("expected MICROFAT_ORIGINAL_EXE %q overriding parent env, got %q", absGoldenFatBin, stdout)
+			}
+		})
+
+		t.Run("SeccompBlockedMemfdFallback", func(t *testing.T) {
+			t.Parallel()
+			stdout, stderr, exitCode, err := executeWithSeccompBlockedMemfd(t, goldenFatBin, nil, "--echo-env", "MICROFAT_ORIGINAL_EXE")
+			if err != nil || exitCode != defaultExitCode {
+				t.Fatalf("execution under seccomp failed (code %d): %v\nstderr: %s", exitCode, err, stderr)
+			}
+			if stdout != absGoldenFatBin {
+				t.Fatalf("expected MICROFAT_ORIGINAL_EXE under seccomp fallback %q, got %q", absGoldenFatBin, stdout)
+			}
+		})
+	})
 }

@@ -104,6 +104,7 @@ func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, idx *
 // executeVariant runs the selected variant payload in-memory using Linux memfd_create,
 // falling back to user cache execution if memfd is restricted or if cache mode is explicitly requested.
 func executeVariant(
+	selfPath string,
 	selfFile *os.File,
 	entry *format.VariantEntry,
 	idx *format.Index,
@@ -113,6 +114,11 @@ func executeVariant(
 	policyRes microarch.PolicyResult,
 	startTime time.Time,
 ) error {
+	selfPath = strings.TrimSpace(selfPath)
+	if selfPath == "" && selfFile != nil {
+		selfPath = selfFile.Name()
+	}
+
 	// Check if cache dispatch mode is explicitly requested via environment
 	requestedMode := os.Getenv(format.EnvExecMode)
 	if requestedMode == "" {
@@ -120,11 +126,11 @@ func executeVariant(
 	}
 
 	if strings.EqualFold(requestedMode, format.ExecModeCache) {
-		return executeViaCache(selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, nil, startTime)
+		return executeViaCache(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, nil, startTime)
 	}
 
 	// 1. Try In-Memory memfd_create
-	err := executeViaMemfd(selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, startTime)
+	err := executeViaMemfd(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, startTime)
 	if err == nil {
 		return nil
 	}
@@ -140,7 +146,7 @@ func executeVariant(
 	}
 
 	// 2. Fallback to cached file execution
-	return executeViaCache(selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, err, startTime)
+	return executeViaCache(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, err, startTime)
 }
 
 func upsertEnv(env []string, keyIndex map[string]int, key, val string) []string {
@@ -154,6 +160,7 @@ func upsertEnv(env []string, keyIndex map[string]int, key, val string) []string 
 }
 
 func buildAutoTunedEnviron(
+	selfPath string,
 	baseEnv []string,
 	entry *format.VariantEntry,
 	execMode string,
@@ -169,12 +176,25 @@ func buildAutoTunedEnviron(
 			env = append(env, e)
 			continue
 		}
+		if k == format.EnvOriginalExe {
+			// Strip any pre-existing MICROFAT_ORIGINAL_EXE from parent environment to prevent spoofing
+			continue
+		}
 		if idx, exists := keyIndex[k]; exists {
 			env[idx] = e
 		} else {
 			keyIndex[k] = len(env)
 			env = append(env, e)
 		}
+	}
+
+	trimmedSelfPath := strings.TrimSpace(selfPath)
+	if trimmedSelfPath != "" {
+		absPath, err := filepath.Abs(trimmedSelfPath)
+		if err != nil {
+			absPath = filepath.Clean(trimmedSelfPath)
+		}
+		env = upsertEnv(env, keyIndex, format.EnvOriginalExe, absPath)
 	}
 
 	env = upsertEnv(env, keyIndex, format.EnvSelectedVariant, entry.Level)
@@ -395,6 +415,7 @@ func logErrorDiagnostics(
 // If memfd creation or sealing fails (e.g. due to restrictive seccomp profiles or unsupported kernel versions),
 // it returns an error allowing auto-dispatch to fall back to hardened descriptor-bound cache execution.
 func executeViaMemfd(
+	selfPath string,
 	selfFile *os.File,
 	entry *format.VariantEntry,
 	idx *format.Index,
@@ -404,7 +425,11 @@ func executeViaMemfd(
 	policyRes microarch.PolicyResult,
 	startTime time.Time,
 ) error {
-	env, limits := buildAutoTunedEnviron(baseEnv, entry, format.ExecModeMemfd, hostInfo, policyRes)
+	selfPath = strings.TrimSpace(selfPath)
+	if selfPath == "" && selfFile != nil {
+		selfPath = selfFile.Name()
+	}
+	env, limits := buildAutoTunedEnviron(selfPath, baseEnv, entry, format.ExecModeMemfd, hostInfo, policyRes)
 
 	fd, err := memfdCreateFunc("microfat_payload", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
 	if err != nil {
@@ -441,6 +466,7 @@ func executeViaMemfd(
 }
 
 func executeViaCache(
+	selfPath string,
 	selfFile *os.File,
 	entry *format.VariantEntry,
 	idx *format.Index,
@@ -451,7 +477,11 @@ func executeViaCache(
 	primaryErr error,
 	startTime time.Time,
 ) error {
-	env, limits := buildAutoTunedEnviron(baseEnv, entry, format.ExecModeCache, hostInfo, policyRes)
+	selfPath = strings.TrimSpace(selfPath)
+	if selfPath == "" && selfFile != nil {
+		selfPath = selfFile.Name()
+	}
+	env, limits := buildAutoTunedEnviron(selfPath, baseEnv, entry, format.ExecModeCache, hostInfo, policyRes)
 
 	dirFD, cacheDir, err := resolveCacheDirFunc("")
 	if err != nil {

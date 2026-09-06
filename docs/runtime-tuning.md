@@ -262,6 +262,37 @@ func main() {
 }
 ```
 
+### Locating Original Executable & Sibling Assets (`runtimeinit.Executable`)
+
+When a payload binary executes in-memory via anonymous Linux `memfd_create`, Linux maps the process executable to `/proc/self/fd/<fd>`, which causes standard `os.Executable()` calls to return strings like `memfd:microfat_payload (deleted)`.
+
+To resolve the path to the original fat executable (for locating adjacent assets, config files, plugins, or sibling CLI tools), call `runtimeinit.Executable()`:
+
+```go
+package main
+
+import (
+	"log"
+	"path/filepath"
+
+	"github.com/EpicBlackWolfZ/microfat/runtimeinit"
+)
+
+func main() {
+	exePath, err := runtimeinit.Executable()
+	if err != nil {
+		log.Fatalf("failed to determine executable path: %v", err)
+	}
+
+	configPath := filepath.Join(filepath.Dir(exePath), "config.yaml")
+	log.Printf("Loading configuration from %s", configPath)
+}
+```
+
+> [!WARNING]
+> **Authenticity & Security Boundary Invariant**:
+> `MICROFAT_ORIGINAL_EXE` and `runtimeinit.Executable()` provide an **informational asset-resolution hint** indicating where the launching binary resided on disk. Because this value is propagated through the process environment, it can be manipulated by parent execution contexts. Applications and libraries must **NEVER** rely on `MICROFAT_ORIGINAL_EXE` as a cryptographic identity, access-control token, or trusted binary origin.
+
 ---
 
 ## 7. Diagnostics, Telemetry & Observability
@@ -272,6 +303,7 @@ Whenever the launcher stub executes a payload variant, it exports runtime metada
 
 | Environment Variable | Description | Example |
 | :--- | :--- | :--- |
+| `MICROFAT_ORIGINAL_EXE` | Absolute path to original fat binary prior to memfd/cache execution (asset hint) | `/usr/local/bin/myapp` |
 | `MICROFAT_SELECTED_VARIANT` | Microarchitecture level selected for execution | `v3` |
 | `MICROFAT_HOST_ARCH` | Detected host CPU architecture | `amd64` |
 | `MICROFAT_HOST_LEVEL` | Highest detected microarchitecture capability of host | `v4` |
