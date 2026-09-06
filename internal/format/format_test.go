@@ -11,9 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
+	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -621,14 +623,18 @@ func (m mockFileInfo) IsDir() bool        { return m.isDir }
 func (m mockFileInfo) Sys() any           { return m.sys }
 
 func TestResolveCacheDir_SecurityValidation(t *testing.T) {
-	origLstat := lstatFunc
+	origOpen := openDirFunc
+	origClose := closeDirFunc
+	origFstat := fstatDirFunc
+	origFchmod := fchmodDirFunc
 	origGeteuid := geteuidFunc
-	origChmod := chmodFunc
 	origHome := userHomeDirFunc
 	defer func() {
-		lstatFunc = origLstat
+		openDirFunc = origOpen
+		closeDirFunc = origClose
+		fstatDirFunc = origFstat
+		fchmodDirFunc = origFchmod
 		geteuidFunc = origGeteuid
-		chmodFunc = origChmod
 		userHomeDirFunc = origHome
 	}()
 
@@ -859,29 +865,41 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 		t.Setenv("XDG_CACHE_HOME", xdgDir)
 		t.Setenv("TMPDIR", tempDir)
 
-		// Inject lstatFunc to simulate foreign UID specifically on xdgMicrofat
-		lstatFunc = func(name string) (os.FileInfo, error) {
-			realFI, err := os.Lstat(name)
-			if err != nil {
-				return nil, err
+		// Inject openDirFunc and fstatDirFunc to simulate foreign UID specifically on xdgMicrofat
+		activeFDs := make(map[int]string)
+		var mu sync.Mutex
+		openDirFunc = func(name string) (int, error) {
+			fd, err := origOpen(name)
+			if err == nil {
+				mu.Lock()
+				activeFDs[fd] = name
+				mu.Unlock()
 			}
-			if name == xdgMicrofat {
-				stat, ok := realFI.Sys().(*syscall.Stat_t)
-				if ok {
-					cloneStat := *stat
-					cloneStat.Uid = uint32(os.Geteuid() + 1000)
-					return mockFileInfo{
-						name:    realFI.Name(),
-						size:    realFI.Size(),
-						mode:    realFI.Mode(),
-						modTime: realFI.ModTime(),
-						isDir:   realFI.IsDir(),
-						sys:     &cloneStat,
-					}, nil
-				}
-			}
-			return realFI, nil
+			return fd, err
 		}
+		closeDirFunc = func(fd int) error {
+			mu.Lock()
+			delete(activeFDs, fd)
+			mu.Unlock()
+			return origClose(fd)
+		}
+		fstatDirFunc = func(fd int, stat *unix.Stat_t) error {
+			if err := origFstat(fd, stat); err != nil {
+				return err
+			}
+			mu.Lock()
+			p := activeFDs[fd]
+			mu.Unlock()
+			if p == xdgMicrofat {
+				stat.Uid = uint32(os.Geteuid() + 1000)
+			}
+			return nil
+		}
+		defer func() {
+			openDirFunc = origOpen
+			closeDirFunc = origClose
+			fstatDirFunc = origFstat
+		}()
 
 		res, err := ResolveCacheDir("")
 		if err != nil {
@@ -908,12 +926,37 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 		t.Setenv("XDG_CACHE_HOME", xdgDir)
 		t.Setenv("TMPDIR", tempDir)
 
-		chmodFunc = func(name string, mode os.FileMode) error {
-			if name == xdgMicrofat {
+		activeFDs := make(map[int]string)
+		var mu sync.Mutex
+		openDirFunc = func(name string) (int, error) {
+			fd, err := origOpen(name)
+			if err == nil {
+				mu.Lock()
+				activeFDs[fd] = name
+				mu.Unlock()
+			}
+			return fd, err
+		}
+		closeDirFunc = func(fd int) error {
+			mu.Lock()
+			delete(activeFDs, fd)
+			mu.Unlock()
+			return origClose(fd)
+		}
+		fchmodDirFunc = func(fd int, mode uint32) error {
+			mu.Lock()
+			p := activeFDs[fd]
+			mu.Unlock()
+			if p == xdgMicrofat {
 				return errors.New("simulated chmod failure")
 			}
-			return os.Chmod(name, mode)
+			return origFchmod(fd, mode)
 		}
+		defer func() {
+			openDirFunc = origOpen
+			closeDirFunc = origClose
+			fchmodDirFunc = origFchmod
+		}()
 
 		res, err := ResolveCacheDir("")
 		if err != nil {
@@ -946,10 +989,14 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 }
 
 func TestValidateCacheDirSecurity(t *testing.T) {
-	origLstat := lstatFunc
+	origOpen := openDirFunc
+	origFstat := fstatDirFunc
+	origFchmod := fchmodDirFunc
 	origGeteuid := geteuidFunc
 	defer func() {
-		lstatFunc = origLstat
+		openDirFunc = origOpen
+		fstatDirFunc = origFstat
+		fchmodDirFunc = origFchmod
 		geteuidFunc = origGeteuid
 	}()
 
@@ -1003,10 +1050,11 @@ func TestValidateCacheDirSecurity(t *testing.T) {
 		}
 	})
 
-	t.Run("sys not Stat_t", func(t *testing.T) {
-		lstatFunc = func(string) (os.FileInfo, error) {
-			return mockFileInfo{name: "fake", isDir: true, sys: nil}, nil
+	t.Run("fstat failure", func(t *testing.T) {
+		fstatDirFunc = func(fd int, stat *unix.Stat_t) error {
+			return errors.New("simulated fstat failure")
 		}
+		defer func() { fstatDirFunc = origFstat }()
 		err := validateCacheDirSecurity(tempDir)
 		if err == nil {
 			t.Fatalf("expected error, got nil")
@@ -1014,13 +1062,12 @@ func TestValidateCacheDirSecurity(t *testing.T) {
 		if !errors.Is(err, ErrInsecureCacheDir) {
 			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
 		}
-		if !strings.Contains(err.Error(), "unable to retrieve file system attributes") {
-			t.Fatalf("expected 'unable to retrieve file system attributes' in error: %v", err)
+		if !strings.Contains(err.Error(), "unable to fstat cache directory descriptor") {
+			t.Fatalf("expected 'unable to fstat cache directory descriptor' in error: %v", err)
 		}
 	})
 
 	t.Run("valid 0700 and 0750 directories", func(t *testing.T) {
-		lstatFunc = os.Lstat
 		dir700 := filepath.Join(tempDir, "valid_700")
 		if err := os.MkdirAll(dir700, testPerm0700); err != nil {
 			t.Fatalf("mkdir failed: %v", err)
@@ -1040,6 +1087,67 @@ func TestValidateCacheDirSecurity(t *testing.T) {
 			t.Fatalf("expected valid 0750 directory, got err: %v", err)
 		}
 	})
+
+	t.Run("open generic failure", func(t *testing.T) {
+		openDirFunc = func(string) (int, error) {
+			return -1, errors.New("simulated open permission denied")
+		}
+		defer func() { openDirFunc = origOpen }()
+		err := validateCacheDirSecurity(tempDir)
+		if err == nil || !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir on generic open failure, got: %v", err)
+		}
+	})
+
+	t.Run("negative euid", func(t *testing.T) {
+		geteuidFunc = func() int { return -1 }
+		defer func() { geteuidFunc = origGeteuid }()
+		err := validateCacheDirSecurity(tempDir)
+		if err == nil || !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir on negative euid, got: %v", err)
+		}
+	})
+
+	t.Run("remediate fstat failure after chmod", func(t *testing.T) {
+		insecureDir := filepath.Join(tempDir, "remed_fstat_fail")
+		if err := os.MkdirAll(insecureDir, testPerm0777); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		_ = os.Chmod(insecureDir, testPerm0777)
+
+		callCount := 0
+		fstatDirFunc = func(fd int, stat *unix.Stat_t) error {
+			callCount++
+			if callCount == 1 {
+				return origFstat(fd, stat)
+			}
+			return errors.New("simulated post-chmod fstat failure")
+		}
+		defer func() { fstatDirFunc = origFstat }()
+
+		_, err := OpenAndValidateCacheDirFD(insecureDir, true)
+		if err == nil || !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir on post-chmod fstat failure, got: %v", err)
+		}
+	})
+
+	t.Run("remediate chmod leaves write bits", func(t *testing.T) {
+		insecureDir := filepath.Join(tempDir, "remed_still_insecure")
+		if err := os.MkdirAll(insecureDir, testPerm0777); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		_ = os.Chmod(insecureDir, testPerm0777)
+
+		fchmodDirFunc = func(int, uint32) error {
+			return nil // simulate fchmod returned success without actually changing mode
+		}
+		defer func() { fchmodDirFunc = origFchmod }()
+
+		_, err := OpenAndValidateCacheDirFD(insecureDir, true)
+		if err == nil || !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir when write bits remain, got: %v", err)
+		}
+	})
 }
 
 func TestIsDirOwnedByCurrentUID(t *testing.T) {
@@ -1055,6 +1163,13 @@ func TestIsDirOwnedByCurrentUID(t *testing.T) {
 	fakeFI := mockFileInfo{name: "fake", isDir: true, sys: nil}
 	if isDirOwnedByCurrentUID(fakeFI) {
 		t.Fatalf("expected fakeFI without Stat_t to return false")
+	}
+
+	origGeteuid := geteuidFunc
+	defer func() { geteuidFunc = origGeteuid }()
+	geteuidFunc = func() int { return -1 }
+	if isDirOwnedByCurrentUID(fi) {
+		t.Fatalf("expected negative euid to return false")
 	}
 }
 

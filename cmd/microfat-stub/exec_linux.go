@@ -3,6 +3,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -24,9 +25,10 @@ import (
 )
 
 const (
-	privateCacheDirMode = 0o700
-	privateExecMode     = 0o700
-	extraEnvCapacity    = 16
+	privateCacheDirMode  = 0o700
+	privateExecMode      = 0o700
+	extraEnvCapacity     = 16
+	maxTempFileAttempts  = 1000
 	// memfdTargetSeals defines the mandatory Linux kernel memory file descriptor seals applied to
 	// anonymous RAM payloads prior to execution via /proc/self/fd/<fd>.
 	// - F_SEAL_WRITE: prevents any modification of the decompressed binary code in memory.
@@ -43,11 +45,15 @@ var (
 		_, err := unix.FcntlInt(uintptr(fd), unix.F_ADD_SEALS, seals)
 		return err
 	}
-	readCgroupLimitsFunc = cgroup.ReadLimits
-	resolveCacheDirFunc  = format.ResolveCacheDir
-	userHomeDirFunc      = os.UserHomeDir
-	openCachedBinaryFunc = func(path string) (int, error) {
+	readCgroupLimitsFunc   = cgroup.ReadLimits
+	resolveCacheDirFunc    = format.ResolveCacheDirFD
+	userHomeDirFunc        = os.UserHomeDir
+	cryptoRandReader       = rand.Reader
+	openCachedBinaryFunc   = func(path string) (int, error) {
 		return cache.OpenFileFunc(path)
+	}
+	openCachedBinaryAtFunc = func(dirFD int, name string) (int, error) {
+		return cache.OpenFileAtFunc(dirFD, name)
 	}
 )
 
@@ -432,13 +438,17 @@ func executeViaCache(
 ) error {
 	env, limits := buildAutoTunedEnviron(baseEnv, entry, format.ExecModeCache, hostInfo, policyRes)
 
-	cacheDir, err := resolveCacheDirFunc("")
+	dirFD, cacheDir, err := resolveCacheDirFunc("")
 	if err != nil {
 		errOut := fmt.Errorf("%w: launcher execution failed: unable to initialize cache: %w (primary memfd error: %v)",
 			format.ErrCacheInit, err, primaryErr)
 		logErrorDiagnostics(format.StageCacheDirInit, errOut, hostInfo, entry, policyRes, "cache directory creation failed")
 		return errOut
 	}
+	if dirFD < 0 {
+		return fmt.Errorf("%w: invalid cache directory descriptor", format.ErrCacheInit)
+	}
+	defer func() { _ = unix.Close(dirFD) }()
 
 	if !format.ValidateChecksum(entry.SHA256) || entry.SHA256 == "" {
 		errOut := fmt.Errorf("%w: launcher execution failed: invalid variant sha256 checksum format %q",
@@ -447,10 +457,11 @@ func executeViaCache(
 		return errOut
 	}
 
-	cachedBinary := filepath.Join(cacheDir, filepath.Clean(entry.SHA256))
+	cachedName := filepath.Clean(entry.SHA256)
+	cachedBinary := filepath.Join(cacheDir, cachedName)
 	var decompDuration time.Duration
 
-	fd, openErr := openAndValidateCacheFD(cachedBinary, entry)
+	fd, openErr := openAndValidateCacheAtFD(dirFD, cachedName, entry)
 	if openErr != nil && (errors.Is(openErr, syscall.ELOOP) || errors.Is(openErr, unix.ELOOP)) {
 		errOut := fmt.Errorf("%w: refusal to execute symlink at %s: %w", format.ErrCacheWrite, cachedBinary, openErr)
 		logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "symlink detected in cache")
@@ -458,23 +469,30 @@ func executeViaCache(
 	}
 
 	if openErr != nil {
-		tmpFile, err := os.CreateTemp(cacheDir, ".exec-*.tmp")
-		if err != nil {
+		tmpFD, tmpName, tmpPath, createErr := createTempFileAt(dirFD, cacheDir)
+		if createErr != nil {
 			errOut := fmt.Errorf("%w: launcher execution failed: cannot create temp file in %s: %w (primary memfd error: %v)",
-				format.ErrCacheWrite, cacheDir, err, primaryErr)
+				format.ErrCacheWrite, cacheDir, createErr, primaryErr)
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "temp file creation failed in "+cacheDir)
 			return errOut
 		}
-		tmpPath := tmpFile.Name()
+		tmpFile := os.NewFile(uintptr(tmpFD), tmpPath)
+
 		defer func() {
-			_ = tmpFile.Close()
-			_ = os.Remove(tmpPath)
+			if tmpFile != nil {
+				_ = tmpFile.Close()
+			}
+			if tmpName != "" {
+				_ = unix.Unlinkat(dirFD, tmpName, 0)
+			}
 		}()
 
 		decompStart := time.Now()
 		if err := extractVariantToWriter(selfFile, entry, idx, tmpFile); err != nil {
 			_ = tmpFile.Close()
-			_ = os.Remove(tmpPath)
+			_ = unix.Unlinkat(dirFD, tmpName, 0)
+			tmpFile = nil
+			tmpName = ""
 			logErrorDiagnostics(format.StageCacheExtract, err, hostInfo, entry, policyRes, "decompressing payload to cache failed")
 			return fmt.Errorf("%w: extracting to cache fallback: %w (primary memfd error: %v)", format.ErrCacheExtract, err, primaryErr)
 		}
@@ -482,7 +500,9 @@ func executeViaCache(
 
 		if err := tmpFile.Chmod(format.PrivateExecMode); err != nil {
 			_ = tmpFile.Close()
-			_ = os.Remove(tmpPath)
+			_ = unix.Unlinkat(dirFD, tmpName, 0)
+			tmpFile = nil
+			tmpName = ""
 			errOut := fmt.Errorf("%w: setting permissions on temp cache file %s: %w (primary memfd error: %v)",
 				format.ErrCacheWrite, tmpPath, err, primaryErr)
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "chmod temp cache file failed")
@@ -490,31 +510,39 @@ func executeViaCache(
 		}
 		if err := tmpFile.Sync(); err != nil {
 			_ = tmpFile.Close()
-			_ = os.Remove(tmpPath)
+			_ = unix.Unlinkat(dirFD, tmpName, 0)
+			tmpFile = nil
+			tmpName = ""
 			errOut := fmt.Errorf("%w: syncing temp cache file %s: %w (primary memfd error: %v)",
 				format.ErrCacheWrite, tmpPath, err, primaryErr)
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "syncing temp cache file failed")
 			return errOut
 		}
 		if err := tmpFile.Close(); err != nil {
-			_ = os.Remove(tmpPath)
+			_ = unix.Unlinkat(dirFD, tmpName, 0)
+			tmpFile = nil
+			tmpName = ""
 			errOut := fmt.Errorf("%w: closing temp cache file %s: %w (primary memfd error: %v)",
 				format.ErrCacheWrite, tmpPath, err, primaryErr)
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "closing temp cache file failed")
 			return errOut
 		}
-		if err := os.Rename(tmpPath, cachedBinary); err != nil {
-			_ = os.Remove(tmpPath)
+		tmpFile = nil
+
+		if err := unix.Renameat(dirFD, tmpName, dirFD, cachedName); err != nil {
+			_ = unix.Unlinkat(dirFD, tmpName, 0)
+			tmpName = ""
 			errOut := fmt.Errorf("%w: renaming temp cache file %s to %s: %w (primary memfd error: %v)",
 				format.ErrCacheWrite, tmpPath, cachedBinary, err, primaryErr)
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "renaming temp cache file failed")
 			return errOut
 		}
+		tmpName = ""
 
 		// Re-open with canonical descriptor-bound primitive and validate before execve
-		fd, openErr = openAndValidateCacheFD(cachedBinary, entry)
+		fd, openErr = openAndValidateCacheAtFD(dirFD, cachedName, entry)
 		if openErr != nil {
-			_ = os.Remove(cachedBinary)
+			_ = unix.Unlinkat(dirFD, cachedName, 0)
 			errOut := fmt.Errorf("%w: opening verified cache file %s: %w (primary memfd error: %v)",
 				format.ErrCacheWrite, cachedBinary, openErr, primaryErr)
 			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "opening verified cache file failed")
@@ -537,6 +565,44 @@ func executeViaCache(
 			format.ErrExecve, procPath, execErr, primaryErr)
 	}
 	return fmt.Errorf("%w: cache execve failed (%s): %w", format.ErrExecve, procPath, execErr)
+}
+
+func createTempFileAt(dirFD int, dirPath string) (int, string, string, error) {
+	var rnd [8]byte
+	for range maxTempFileAttempts {
+		if _, err := io.ReadFull(cryptoRandReader, rnd[:]); err != nil {
+			return -1, "", "", fmt.Errorf("generating random suffix: %w", err)
+		}
+		name := fmt.Sprintf(".exec-%s.tmp", hex.EncodeToString(rnd[:]))
+		fd, err := unix.Openat(dirFD, name, unix.O_RDWR|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC, privateExecMode)
+		if err == nil {
+			return fd, name, filepath.Join(dirPath, name), nil
+		}
+		if !errors.Is(err, unix.EEXIST) && !errors.Is(err, syscall.EEXIST) {
+			return -1, "", "", err
+		}
+	}
+	return -1, "", "", errors.New("failed to create temporary file in cache directory")
+}
+
+func openAndValidateCacheAtFD(dirFD int, name string, entry *format.VariantEntry) (int, error) {
+	fd, err := cache.OpenAndValidateVariantAtFDWithOpener(dirFD, name, entry, true, openCachedBinaryAtFunc)
+	if err != nil && (os.Getenv(format.EnvDebug) == "1" || strings.EqualFold(os.Getenv(format.EnvDebug), "true")) {
+		if errors.Is(err, cache.ErrSizeMismatch) {
+			fmt.Fprintf(
+				os.Stderr,
+				"[microfat:debug] truncated cache file detected (%s), re-extracting\n",
+				name,
+			)
+		} else if errors.Is(err, format.ErrPayloadCorrupted) {
+			fmt.Fprintf(
+				os.Stderr,
+				"[microfat:debug] corrupted cache file detected (checksum mismatch in %s), re-extracting\n",
+				name,
+			)
+		}
+	}
+	return fd, err
 }
 
 // openAndValidateCacheFD opens the cached binary path and delegates to the canonical descriptor-bound

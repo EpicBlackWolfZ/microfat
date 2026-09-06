@@ -1323,8 +1323,8 @@ func TestStubPrewarmAndCacheDispatch(t *testing.T) {
 	// 8. Cache resolution error during prewarm
 	oldResolver := resolveCacheDirFunc
 	defer func() { resolveCacheDirFunc = oldResolver }()
-	resolveCacheDirFunc = func(string) (string, error) {
-		return "", errors.New("cache init failed")
+	resolveCacheDirFunc = func(string) (int, string, error) {
+		return -1, "", errors.New("cache init failed")
 	}
 	os.Args = []string{fatPath, flagPrewarm}
 	if err := runBinary(fatPath); err == nil {
@@ -2343,8 +2343,9 @@ func TestExplicitMemfdModeEnforcement(t *testing.T) {
 		execveFunc = origExec
 	})
 
-	resolveCacheDirFunc = func(string) (string, error) {
-		return cacheDir, nil
+	resolveCacheDirFunc = func(string) (int, string, error) {
+		fd, err := format.OpenAndValidateCacheDirFD(cacheDir, true)
+		return fd, cacheDir, err
 	}
 
 	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v1"}
@@ -2672,10 +2673,23 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 		t.Setenv("XDG_CACHE_HOME", cacheHome)
 
 		origOpen := openCachedBinaryFunc
-		defer func() { openCachedBinaryFunc = origOpen }()
+		origOpenAt := openCachedBinaryAtFunc
+		defer func() {
+			openCachedBinaryFunc = origOpen
+			openCachedBinaryAtFunc = origOpenAt
+		}()
 
 		callCount := 0
 		openCachedBinaryFunc = func(path string) (int, error) {
+			callCount++
+			if callCount == 1 {
+				// Initial check before extraction: report not existing
+				return -1, os.ErrNotExist
+			}
+			// Second call after extraction and rename: simulate failure to open
+			return -1, errors.New("simulated open error after rename")
+		}
+		openCachedBinaryAtFunc = func(dirFD int, name string) (int, error) {
 			callCount++
 			if callCount == 1 {
 				// Initial check before extraction: report not existing
@@ -2773,9 +2787,13 @@ func TestCacheExecution_SymlinkRefusalAndTOCTOUDefense(t *testing.T) {
 			t.Fatalf("write original cache file failed: %v", err)
 		}
 
-		// Intercept openCachedBinaryFunc to replace the file on disk immediately AFTER open
+		// Intercept openCachedBinaryFunc and openCachedBinaryAtFunc to replace the file on disk immediately AFTER open
 		oldOpen := openCachedBinaryFunc
-		defer func() { openCachedBinaryFunc = oldOpen }()
+		oldOpenAt := openCachedBinaryAtFunc
+		defer func() {
+			openCachedBinaryFunc = oldOpen
+			openCachedBinaryAtFunc = oldOpenAt
+		}()
 
 		openCachedBinaryFunc = func(path string) (int, error) {
 			fd, err := oldOpen(path)
@@ -2787,6 +2805,18 @@ func TestCacheExecution_SymlinkRefusalAndTOCTOUDefense(t *testing.T) {
 			hostileBytes := []byte("HOSTILE_REPLACED_PAYLOAD_DATA_OVERWRITTEN")
 			_ = os.WriteFile(hostilePath, hostileBytes, 0o700)
 			_ = os.Rename(hostilePath, path)
+			return fd, nil
+		}
+		openCachedBinaryAtFunc = func(dirFD int, name string) (int, error) {
+			fd, err := oldOpenAt(dirFD, name)
+			if err != nil {
+				return fd, err
+			}
+			// Replace file on disk with a new inode (atomic rename) concurrently
+			hostilePath := filepath.Join(tmpDir, "hostile_replacement")
+			hostileBytes := []byte("HOSTILE_REPLACED_PAYLOAD_DATA_OVERWRITTEN")
+			_ = os.WriteFile(hostilePath, hostileBytes, 0o700)
+			_ = os.Rename(hostilePath, filepath.Join(microfatCache, name))
 			return fd, nil
 		}
 
@@ -2815,6 +2845,7 @@ func TestCacheExecution_SymlinkRefusalAndTOCTOUDefense(t *testing.T) {
 }
 
 func TestOpenAndValidateCacheFD_SecurityContract(t *testing.T) {
+	t.Setenv(format.EnvDebug, "1")
 	tmpDir := t.TempDir()
 	payload := []byte("canonical descriptor-bound cache validation payload test 98765")
 	entry, rawFile := createDummyVariantFile(t, tmpDir, payload)
@@ -2973,6 +3004,41 @@ func TestOpenAndValidateCacheFD_SecurityContract(t *testing.T) {
 	})
 }
 
+type failReader struct{}
+
+func (failReader) Read([]byte) (int, error) {
+	return 0, errors.New("simulated rand failure")
+}
+
+func TestCreateTempFileAt_Errors(t *testing.T) {
+	tmpDir := t.TempDir()
+	dirFD, err := unix.Open(tmpDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		t.Fatalf("open dir: %v", err)
+	}
+	defer func() { _ = unix.Close(dirFD) }()
+
+	t.Run("InvalidDirFD", func(t *testing.T) {
+		fd, _, _, err := createTempFileAt(-1, tmpDir)
+		if err == nil {
+			_ = unix.Close(fd)
+			t.Fatalf("expected error for invalid dirFD, got nil")
+		}
+	})
+
+	t.Run("CryptoRandReaderError", func(t *testing.T) {
+		origRand := cryptoRandReader
+		defer func() { cryptoRandReader = origRand }()
+		cryptoRandReader = failReader{}
+
+		fd, _, _, err := createTempFileAt(dirFD, tmpDir)
+		if err == nil {
+			_ = unix.Close(fd)
+			t.Fatalf("expected error on rand reader failure, got nil")
+		}
+	})
+}
+
 func TestCacheExecution_PostExtractionValidationFailure(t *testing.T) {
 	tmpDir := t.TempDir()
 	payload := []byte("post-extraction validation failure scenario")
@@ -2991,7 +3057,11 @@ func TestCacheExecution_PostExtractionValidationFailure(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
 
 	origOpen := openCachedBinaryFunc
-	defer func() { openCachedBinaryFunc = origOpen }()
+	origOpenAt := openCachedBinaryAtFunc
+	defer func() {
+		openCachedBinaryFunc = origOpen
+		openCachedBinaryAtFunc = origOpenAt
+	}()
 
 	callCount := 0
 	openCachedBinaryFunc = func(path string) (int, error) {
@@ -3001,6 +3071,15 @@ func TestCacheExecution_PostExtractionValidationFailure(t *testing.T) {
 			return -1, os.ErrNotExist
 		}
 		// Second call after extraction and rename: open a corrupted file instead to simulate tamper/corruption
+		corruptedPath := filepath.Join(tmpDir, "post_extract_corrupted")
+		_ = os.WriteFile(corruptedPath, bytes.Repeat([]byte{0xFF}, len(payload)), 0o700)
+		return origOpen(corruptedPath)
+	}
+	openCachedBinaryAtFunc = func(dirFD int, name string) (int, error) {
+		callCount++
+		if callCount == 1 {
+			return -1, os.ErrNotExist
+		}
 		corruptedPath := filepath.Join(tmpDir, "post_extract_corrupted")
 		_ = os.WriteFile(corruptedPath, bytes.Repeat([]byte{0xFF}, len(payload)), 0o700)
 		return origOpen(corruptedPath)

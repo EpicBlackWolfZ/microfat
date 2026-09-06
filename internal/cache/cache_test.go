@@ -307,10 +307,19 @@ func TestOpenAndValidateFD_LifecycleAndPurge(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected success, got: %v", err)
 		}
-		defer func() { _ = closeFD(fd) }()
-		if fd < 0 {
-			t.Fatalf("expected valid non-negative fd, got %d", fd)
+		_ = closeFD(fd)
+
+		fd2, err2 := OpenAndValidateVariantFDWithOpener(path, entry, true, OpenFileFunc)
+		if err2 != nil {
+			t.Fatalf("expected success with OpenAndValidateVariantFDWithOpener, got: %v", err2)
 		}
+		_ = closeFD(fd2)
+
+		fd3, err3 := OpenAndValidateFDWithOpener(path, validSize, validSHA, true, nil)
+		if err3 != nil {
+			t.Fatalf("expected success with nil opener, got: %v", err3)
+		}
+		_ = closeFD(fd3)
 	})
 
 	t.Run("ValidFile_DescriptorPinningSurvivesUnlinkAndReplace", func(t *testing.T) {
@@ -364,5 +373,170 @@ func TestOpenAndValidateFD_LifecycleAndPurge(t *testing.T) {
 		if preadErr2 != nil || int64(n2) != validSize || !bytes.Equal(readBuf, payload) {
 			t.Fatalf("pinned descriptor failed after unlink: err=%v, n=%d", preadErr2, n2)
 		}
+	})
+}
+
+func TestOpenAndValidateAtFD_LifecycleAndPurge(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	dirFD, err := unix.Open(tempDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		t.Fatalf("open tempDir: %v", err)
+	}
+	defer func() { _ = unix.Close(dirFD) }()
+
+	payload := []byte("descriptor-bound at-fd lifecycle test content 12345")
+	h := sha256.Sum256(payload)
+	validSHA := hex.EncodeToString(h[:])
+	validSize := int64(len(payload))
+
+	t.Run("NonexistentFile", func(t *testing.T) {
+		fd, err := OpenAndValidateAtFD(dirFD, "does_not_exist", validSize, validSHA, true)
+		if err == nil {
+			_ = closeFD(fd)
+			t.Fatalf("expected error on nonexistent file, got nil")
+		}
+		if fd != -1 {
+			t.Fatalf("expected fd == -1 on error, got %d", fd)
+		}
+	})
+
+	t.Run("CustomOpenerFailure", func(t *testing.T) {
+		simErr := errors.New("simulated opener failure")
+		fd, err := OpenAndValidateAtFDWithOpener(
+			dirFD, "any_name", validSize, validSHA, true,
+			func(int, string) (int, error) { return -1, simErr },
+		)
+		if !errors.Is(err, simErr) {
+			t.Fatalf("expected simulated error, got: %v", err)
+		}
+		if fd != -1 {
+			t.Fatalf("expected fd == -1 on error, got %d", fd)
+		}
+	})
+
+	t.Run("NilOpenerDefaultsToOpenFileAtFunc", func(t *testing.T) {
+		fileName := "nil_opener_test"
+		if err := os.WriteFile(filepath.Join(tempDir, fileName), payload, 0o700); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+		fd, err := OpenAndValidateAtFDWithOpener(dirFD, fileName, validSize, validSHA, false, nil)
+		if err != nil {
+			t.Fatalf("expected nil opener to use default opener, got: %v", err)
+		}
+		_ = closeFD(fd)
+	})
+
+	t.Run("NonRegularDirectory_NeverPurged", func(t *testing.T) {
+		subDirName := "test_subdir_target"
+		subDirPath := filepath.Join(tempDir, subDirName)
+		if err := os.MkdirAll(subDirPath, 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+
+		fd, err := OpenAndValidateAtFD(dirFD, subDirName, validSize, validSHA, true)
+		if !errors.Is(err, ErrNonRegularFile) {
+			t.Fatalf("expected ErrNonRegularFile, got: %v", err)
+		}
+		if fd != -1 {
+			t.Fatalf("expected fd == -1 on error, got %d", fd)
+		}
+
+		// Assert directory was NOT unlinked
+		fi, statErr := os.Stat(subDirPath)
+		if statErr != nil || !fi.IsDir() {
+			t.Fatalf("non-regular directory should remain on disk: %v", statErr)
+		}
+	})
+
+	t.Run("TruncatedFile_PurgedWhenRequested", func(t *testing.T) {
+		fileName := "trunc_purge_at_test"
+		filePath := filepath.Join(tempDir, fileName)
+		if err := os.WriteFile(filePath, []byte("short"), 0o700); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+
+		fd, err := OpenAndValidateAtFD(dirFD, fileName, validSize, validSHA, true)
+		if !errors.Is(err, ErrSizeMismatch) {
+			t.Fatalf("expected ErrSizeMismatch, got: %v", err)
+		}
+		if fd != -1 {
+			t.Fatalf("expected fd == -1 on error, got %d", fd)
+		}
+
+		// Assert file WAS unlinked
+		if _, statErr := os.Stat(filePath); !os.IsNotExist(statErr) {
+			t.Fatalf("expected file to be unlinked, stat returned: %v", statErr)
+		}
+	})
+
+	t.Run("TruncatedFile_RetainedWhenNotRequested", func(t *testing.T) {
+		fileName := "trunc_retain_at_test"
+		filePath := filepath.Join(tempDir, fileName)
+		if err := os.WriteFile(filePath, []byte("short"), 0o700); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+
+		fd, err := OpenAndValidateAtFD(dirFD, fileName, validSize, validSHA, false)
+		if !errors.Is(err, ErrSizeMismatch) {
+			t.Fatalf("expected ErrSizeMismatch, got: %v", err)
+		}
+		if fd != -1 {
+			t.Fatalf("expected fd == -1 on error, got %d", fd)
+		}
+
+		// Assert file WAS NOT unlinked
+		if _, statErr := os.Stat(filePath); statErr != nil {
+			t.Fatalf("expected file to remain on disk: %v", statErr)
+		}
+	})
+
+	t.Run("CorruptedFile_PurgedWhenRequested", func(t *testing.T) {
+		fileName := "corrupt_purge_at_test"
+		filePath := filepath.Join(tempDir, fileName)
+		tampered := bytes.Repeat([]byte{0x77}, int(validSize))
+		if err := os.WriteFile(filePath, tampered, 0o700); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+
+		fd, err := OpenAndValidateAtFD(dirFD, fileName, validSize, validSHA, true)
+		if !errors.Is(err, ErrChecksumMismatch) {
+			t.Fatalf("expected ErrChecksumMismatch, got: %v", err)
+		}
+		if fd != -1 {
+			t.Fatalf("expected fd == -1 on error, got %d", fd)
+		}
+
+		// Assert file WAS unlinked
+		if _, statErr := os.Stat(filePath); !os.IsNotExist(statErr) {
+			t.Fatalf("expected file to be unlinked, stat returned: %v", statErr)
+		}
+	})
+
+	t.Run("ValidFile_VariantEntryAndOpener", func(t *testing.T) {
+		fileName := "valid_variant_at_test"
+		filePath := filepath.Join(tempDir, fileName)
+		if err := os.WriteFile(filePath, payload, 0o700); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+
+		entry := &format.VariantEntry{
+			Level:            "v1",
+			SHA256:           validSHA,
+			UncompressedSize: validSize,
+		}
+
+		fd, err := OpenAndValidateVariantAtFD(dirFD, fileName, entry, true)
+		if err != nil {
+			t.Fatalf("expected success with OpenAndValidateVariantAtFD, got: %v", err)
+		}
+		_ = closeFD(fd)
+
+		fd2, err := OpenAndValidateVariantAtFDWithOpener(dirFD, fileName, entry, true, OpenFileAtFunc)
+		if err != nil {
+			t.Fatalf("expected success with OpenAndValidateVariantAtFDWithOpener, got: %v", err)
+		}
+		_ = closeFD(fd2)
 	})
 }

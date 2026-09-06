@@ -19,6 +19,11 @@ var OpenFileFunc = func(path string) (int, error) {
 	return -1, fmt.Errorf("%w: cannot open file descriptor on this OS", ErrUnsupportedPlatform)
 }
 
+// OpenFileAtFunc returns ErrUnsupportedPlatform on non-Unix platforms where file descriptors are not supported.
+var OpenFileAtFunc = func(dirFD int, name string) (int, error) {
+	return -1, fmt.Errorf("%w: cannot open file descriptor on this OS", ErrUnsupportedPlatform)
+}
+
 func closeFD(fd int) error {
 	return nil
 }
@@ -29,6 +34,39 @@ func isNotExistErr(err error) bool {
 
 // OpenAndValidateVariantFD returns ErrUnsupportedPlatform on non-Unix operating systems.
 func OpenAndValidateVariantFD(path string, entry *format.VariantEntry, removeOnCorrupt bool) (int, error) {
+	return -1, fmt.Errorf("%w: descriptor-bound execution is Unix-specific", ErrUnsupportedPlatform)
+}
+
+// OpenAndValidateVariantAtFD returns ErrUnsupportedPlatform on non-Unix operating systems.
+func OpenAndValidateVariantAtFD(dirFD int, name string, entry *format.VariantEntry, removeOnCorrupt bool) (int, error) {
+	return -1, fmt.Errorf("%w: descriptor-bound execution is Unix-specific", ErrUnsupportedPlatform)
+}
+
+// OpenAndValidateVariantAtFDWithOpener returns ErrUnsupportedPlatform on non-Unix operating systems.
+func OpenAndValidateVariantAtFDWithOpener(
+	dirFD int,
+	name string,
+	entry *format.VariantEntry,
+	removeOnCorrupt bool,
+	opener func(int, string) (int, error),
+) (int, error) {
+	return -1, fmt.Errorf("%w: descriptor-bound execution is Unix-specific", ErrUnsupportedPlatform)
+}
+
+// OpenAndValidateAtFD returns ErrUnsupportedPlatform on non-Unix operating systems.
+func OpenAndValidateAtFD(dirFD int, name string, expectedSize int64, expectedSHA256 string, removeOnCorrupt bool) (int, error) {
+	return -1, fmt.Errorf("%w: descriptor-bound execution is Unix-specific", ErrUnsupportedPlatform)
+}
+
+// OpenAndValidateAtFDWithOpener returns ErrUnsupportedPlatform on non-Unix operating systems.
+func OpenAndValidateAtFDWithOpener(
+	dirFD int,
+	name string,
+	expectedSize int64,
+	expectedSHA256 string,
+	removeOnCorrupt bool,
+	opener func(int, string) (int, error),
+) (int, error) {
 	return -1, fmt.Errorf("%w: descriptor-bound execution is Unix-specific", ErrUnsupportedPlatform)
 }
 

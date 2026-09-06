@@ -94,8 +94,9 @@ func TestConcurrentCacheRacingStress(t *testing.T) {
 		execveFunc = origExecve
 	})
 
-	resolveCacheDirFunc = func(string) (string, error) {
-		return cacheDir, nil
+	resolveCacheDirFunc = func(string) (int, string, error) {
+		fd, err := format.OpenAndValidateCacheDirFD(cacheDir, true)
+		return fd, cacheDir, err
 	}
 
 	var execCount int64
@@ -170,8 +171,9 @@ func TestCorruptedCacheEvictionAndRecovery(t *testing.T) {
 		execveFunc = origExecve
 	})
 
-	resolveCacheDirFunc = func(string) (string, error) {
-		return cacheDir, nil
+	resolveCacheDirFunc = func(string) (int, string, error) {
+		fd, err := format.OpenAndValidateCacheDirFD(cacheDir, true)
+		return fd, cacheDir, err
 	}
 
 	// 1. Plant a truncated/corrupt cache file with wrong size
@@ -218,8 +220,8 @@ func TestReadOnlyCacheDirectoryHandling(t *testing.T) {
 		resolveCacheDirFunc = origResolve
 	})
 
-	resolveCacheDirFunc = func(string) (string, error) {
-		return "", errors.New("permission denied")
+	resolveCacheDirFunc = func(string) (int, string, error) {
+		return -1, "", errors.New("permission denied")
 	}
 
 	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
@@ -249,8 +251,9 @@ func TestSimulatedSeccompMemfdFallback(t *testing.T) {
 		execveFunc = origExecve
 	})
 
-	resolveCacheDirFunc = func(string) (string, error) {
-		return cacheDir, nil
+	resolveCacheDirFunc = func(string) (int, string, error) {
+		fd, err := format.OpenAndValidateCacheDirFD(cacheDir, true)
+		return fd, cacheDir, err
 	}
 
 	// Simulate strict seccomp filter blocking memfd_create with EPERM
@@ -296,8 +299,9 @@ func TestMaliciousPathTraversalChecksumBlocked(t *testing.T) {
 		resolveCacheDirFunc = origResolve
 	})
 
-	resolveCacheDirFunc = func(string) (string, error) {
-		return cacheDir, nil
+	resolveCacheDirFunc = func(string) (int, string, error) {
+		fd, err := format.OpenAndValidateCacheDirFD(cacheDir, true)
+		return fd, cacheDir, err
 	}
 
 	maliciousEntry := &format.VariantEntry{
@@ -339,8 +343,9 @@ func TestDecompressionBombPayloadBlocked(t *testing.T) {
 		execveFunc = origExecve
 	})
 
-	resolveCacheDirFunc = func(string) (string, error) {
-		return cacheDir, nil
+	resolveCacheDirFunc = func(string) (int, string, error) {
+		fd, err := format.OpenAndValidateCacheDirFD(cacheDir, true)
+		return fd, cacheDir, err
 	}
 
 	var execveCalled bool
@@ -406,8 +411,9 @@ func TestPayloadChecksumMismatchAbort(t *testing.T) {
 		memfdCreateFunc = origMemfd
 	})
 
-	resolveCacheDirFunc = func(string) (string, error) {
-		return cacheDir, nil
+	resolveCacheDirFunc = func(string) (int, string, error) {
+		fd, err := format.OpenAndValidateCacheDirFD(cacheDir, true)
+		return fd, cacheDir, err
 	}
 
 	var execveCalled bool
@@ -496,8 +502,9 @@ func TestWarmCacheVerifyOption(t *testing.T) {
 		execveFunc = origExecve
 	})
 
-	resolveCacheDirFunc = func(string) (string, error) {
-		return cacheDir, nil
+	resolveCacheDirFunc = func(string) (int, string, error) {
+		fd, err := format.OpenAndValidateCacheDirFD(cacheDir, true)
+		return fd, cacheDir, err
 	}
 
 	cachedBinary := filepath.Join(cacheDir, entry.SHA256)
@@ -701,8 +708,9 @@ func TestMemfdSealingGracefulFallback(t *testing.T) {
 		memfdSealFunc = origSeal
 	})
 
-	resolveCacheDirFunc = func(string) (string, error) {
-		return cacheDir, nil
+	resolveCacheDirFunc = func(string) (int, string, error) {
+		fd, err := format.OpenAndValidateCacheDirFD(cacheDir, true)
+		return fd, cacheDir, err
 	}
 
 	testCases := []struct {
