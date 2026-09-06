@@ -200,18 +200,18 @@ spec:
 
 ---
 
-## 6. Standalone Applications (`runtimeinit`)
+## 6. Standalone Applications (`runtimeinit` & `runtimeinit/autoload`)
 
-If you want to use the same auto-tuning logic in Go applications compiled without `microfat`, import the `runtimeinit` package directly.
+If you want to use the same auto-tuning logic in Go applications compiled without `microfat`, use either the automatic `runtimeinit/autoload` subpackage or the programmatic `runtimeinit` package directly.
 
-### Automatic Initialization via Blank Import
-Simply add a blank import to your `main.go` or application entry point:
+### Automatic Initialization via Blank Import (`runtimeinit/autoload`)
+Simply add a blank import to your `main.go` or application entry point to auto-tune parameters at startup:
 
 ```go
 package main
 
 import (
-	_ "github.com/EpicBlackWolfZ/microfat/runtimeinit"
+	_ "github.com/EpicBlackWolfZ/microfat/runtimeinit/autoload"
 )
 
 func main() {

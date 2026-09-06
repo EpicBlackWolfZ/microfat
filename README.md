@@ -179,17 +179,39 @@ make bench-ultra
 
 ## Standalone Container Tuning (`runtimeinit`)
 
-For Go services running directly in Docker or Kubernetes without the fat binary wrapper, import `runtimeinit` to automatically tune `debug.SetMemoryLimit` and `runtime.GOMAXPROCS`:
+For Go services running directly in Docker or Kubernetes without the fat binary wrapper, microfat provides both zero-code startup auto-tuning via `runtimeinit/autoload` and programmatic tuning via `runtimeinit`:
+
+### Zero-Code Startup Auto-Tuning
+Add a blank import to auto-tune `debug.SetMemoryLimit` (90% container ceiling) and `runtime.GOMAXPROCS` (CFS quota) before `main()` executes:
 
 ```go
 package main
 
 import (
-	_ "github.com/EpicBlackWolfZ/microfat/runtimeinit"
+	_ "github.com/EpicBlackWolfZ/microfat/runtimeinit/autoload"
 )
 
 func main() {
-	// GOMEMLIMIT (90% cgroup ceiling) and GOMAXPROCS (CFS quota) are auto-configured
+	// GOMEMLIMIT and GOMAXPROCS are auto-configured
+}
+```
+
+### Programmatic Auto-Tuning
+For explicit control, custom profiles, or headroom overrides:
+
+```go
+package main
+
+import (
+	"github.com/EpicBlackWolfZ/microfat/runtimeinit"
+)
+
+func main() {
+	res := runtimeinit.AutoTune(
+		runtimeinit.WithProfile(runtimeinit.ProfileLatencyCritical),
+		runtimeinit.WithMemoryRatio(0.85),
+	)
+	_ = res
 }
 ```
 
