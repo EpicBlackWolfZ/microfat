@@ -395,8 +395,8 @@ func newPackCmd() *cobra.Command {
 					EnableDict:        enableDict,
 					DictSize:          dictSize,
 					FormatVersion:     formatVersion,
-					Stdout:            os.Stdout,
-					Stderr:            os.Stderr,
+					Stdout:            cmd.OutOrStdout(),
+					Stderr:            cmd.ErrOrStderr(),
 				}
 				fmt.Printf("Compiling and packaging PGO matrix for '%s' (%s/%s)...\n", m.AppName, m.TargetOS, m.TargetArch)
 				res, err := builder.BuildAndPack(cmd.Context(), m, opts)
@@ -462,6 +462,15 @@ func newPackCmd() *cobra.Command {
 			}
 			if formatVersion != 0 {
 				opts.FormatVersion = formatVersion
+			}
+			opts.WarnFunc = func(format string, args ...any) {
+				var msg string
+				if len(args) == 0 {
+					msg = format
+				} else {
+					msg = fmt.Sprintf(format, args...)
+				}
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "[microfat:warn] %s\n", msg)
 			}
 
 			fmt.Printf("Packaging fat binary '%s'...\n", outputPath)
@@ -552,8 +561,8 @@ then packages them into a self-dispatching microfat binary.`,
 				EnableDict:        enableDict,
 				DictSize:          dictSize,
 				FormatVersion:     formatVersion,
-				Stdout:            os.Stdout,
-				Stderr:            os.Stderr,
+				Stdout:            cmd.OutOrStdout(),
+				Stderr:            cmd.ErrOrStderr(),
 			}
 
 			fmt.Printf("Compiling and packaging PGO matrix for '%s' (%s/%s)...\n", m.AppName, m.TargetOS, m.TargetArch)

@@ -2623,3 +2623,399 @@ func TestPrewarmAndVerify_AliasNormalization(t *testing.T) {
 	})
 }
 
+func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	const (
+		smallByteLen          = 3
+		dictPatternIterCount  = 1200
+		dictPatternMultiplier = 43
+		dictPatternMask       = 0xA5A5A5A5
+	)
+
+	tempDir := t.TempDir()
+	stubPath := filepath.Join(tempDir, "stub")
+	if err := os.WriteFile(stubPath, []byte("DUMMY_STUB_HEADER_DATA_1234567890"), 0o755); err != nil {
+		t.Fatalf("failed to write stub: %v", err)
+	}
+
+	// Create small dummy variants (< 8 bytes total across variants)
+	smallVar1 := filepath.Join(tempDir, "small_v1")
+	smallVar3 := filepath.Join(tempDir, "small_v3")
+	if err := os.WriteFile(smallVar1, make([]byte, smallByteLen), 0o755); err != nil {
+		t.Fatalf("failed to write small_v1: %v", err)
+	}
+	if err := os.WriteFile(smallVar3, make([]byte, smallByteLen), 0o755); err != nil {
+		t.Fatalf("failed to write small_v3: %v", err)
+	}
+
+	// Create large repetitive dummy variants (> 10 KB with repetitive symbols for valid dict training)
+	largeVar1 := filepath.Join(tempDir, "large_v1")
+	largeVar3 := filepath.Join(tempDir, "large_v3")
+	var repBuf bytes.Buffer
+	for i := range dictPatternIterCount {
+		repBuf.WriteString(fmt.Sprintf("runtime_metadata_symbol_entry_%04d_hash_%x\n", i, (i*dictPatternMultiplier)^dictPatternMask))
+	}
+	if err := os.WriteFile(largeVar1, append(repBuf.Bytes(), []byte("variant_v1_code_segment\n")...), 0o755); err != nil {
+		t.Fatalf("failed to write large_v1: %v", err)
+	}
+	if err := os.WriteFile(largeVar3, append(repBuf.Bytes(), []byte("variant_v3_code_segment\n")...), 0o755); err != nil {
+		t.Fatalf("failed to write large_v3: %v", err)
+	}
+
+	t.Run("ProfileSize with small variants emits diagnostic warning and proceeds", func(t *testing.T) {
+		t.Parallel()
+
+		var warnings []string
+		outPath := filepath.Join(tempDir, "out_size_small.fat")
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        outPath,
+			AppName:           "size-small-app",
+			TargetOS:          testOSLinux,
+			TargetArch:        testArchAMD64,
+			Profile:           codec.ProfileSize,
+			Variants:          map[string]string{"v1": smallVar1, "v3": smallVar3},
+			SkipELFValidation: true,
+			WarnFunc: func(format string, args ...any) {
+				warnings = append(warnings, fmt.Sprintf(format, args...))
+			},
+		}
+
+		idx, err := Pack(opts)
+		if err != nil {
+			t.Fatalf("expected Pack to succeed, got error: %v", err)
+		}
+		if idx == nil {
+			t.Fatalf("expected non-nil index")
+		}
+		if idx.DictionarySize != 0 {
+			t.Errorf("expected zero dictionary size when training fails, got %d", idx.DictionarySize)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
+		}
+		expectedMsg := "shared dictionary training failed (sample data too small for dictionary training (< 8 bytes)); " +
+			"proceeding with independent variant compression"
+		if !strings.Contains(warnings[0], expectedMsg) {
+			t.Errorf("warning %q does not contain expected %q", warnings[0], expectedMsg)
+		}
+
+		// Verify produced binary is structurally sound and verifiable
+		f, err := os.Open(outPath)
+		if err != nil {
+			t.Fatalf("failed to open output: %v", err)
+		}
+		defer func() { _ = f.Close() }()
+
+		stat, err := f.Stat()
+		if err != nil {
+			t.Fatalf("failed to stat output: %v", err)
+		}
+		vIdx, results, err := VerifyBinary(f, stat.Size())
+		if err != nil {
+			t.Fatalf("VerifyBinary failed: %v", err)
+		}
+		if vIdx.DictionarySize != 0 {
+			t.Errorf("expected 0 DictionarySize in verified index, got %d", vIdx.DictionarySize)
+		}
+		if len(results) != 2 {
+			t.Fatalf("expected 2 results, got %d", len(results))
+		}
+		for _, r := range results {
+			if !r.Valid || r.Error != nil {
+				t.Errorf("expected valid result for %s: %v", r.Level, r.Error)
+			}
+		}
+	})
+
+	t.Run("ProfileSize with small variants and nil WarnFunc falls back cleanly without panic", func(t *testing.T) {
+		t.Parallel()
+
+		outPath := filepath.Join(tempDir, "out_size_nil_warn.fat")
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        outPath,
+			AppName:           "size-nil-warn-app",
+			TargetOS:          testOSLinux,
+			TargetArch:        testArchAMD64,
+			Profile:           codec.ProfileSize,
+			Variants:          map[string]string{"v1": smallVar1, "v3": smallVar3},
+			SkipELFValidation: true,
+			WarnFunc:          nil,
+		}
+
+		idx, err := Pack(opts)
+		if err != nil {
+			t.Fatalf("expected Pack to succeed, got error: %v", err)
+		}
+		if idx == nil {
+			t.Fatalf("expected non-nil index")
+		}
+		if idx.DictionarySize != 0 {
+			t.Errorf("expected 0 DictionarySize, got %d", idx.DictionarySize)
+		}
+	})
+
+	t.Run("ProfileSize case-insensitive (' Size ') with small variants emits diagnostic and proceeds", func(t *testing.T) {
+		t.Parallel()
+
+		var warnings []string
+		outPath := filepath.Join(tempDir, "out_size_case_insensitive.fat")
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        outPath,
+			AppName:           "size-case-app",
+			TargetOS:          testOSLinux,
+			TargetArch:        testArchAMD64,
+			Profile:           " Size ",
+			Variants:          map[string]string{"v1": smallVar1, "v3": smallVar3},
+			SkipELFValidation: true,
+			WarnFunc: func(format string, args ...any) {
+				warnings = append(warnings, fmt.Sprintf(format, args...))
+			},
+		}
+
+		idx, err := Pack(opts)
+		if err != nil {
+			t.Fatalf("expected Pack to succeed, got error: %v", err)
+		}
+		if idx == nil {
+			t.Fatalf("expected non-nil index")
+		}
+		if idx.DictionarySize != 0 {
+			t.Errorf("expected zero dictionary size when training fails, got %d", idx.DictionarySize)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("expected 1 warning for ' Size ', got %d: %v", len(warnings), warnings)
+		}
+		if !strings.Contains(warnings[0], "shared dictionary training failed") {
+			t.Errorf("expected warning to mention failed training, got %q", warnings[0])
+		}
+	})
+
+	t.Run("ProfileSize with large repetitive variants succeeds silently with dictionary", func(t *testing.T) {
+		t.Parallel()
+
+		var warnings []string
+		outPath := filepath.Join(tempDir, "out_size_large.fat")
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        outPath,
+			AppName:           "size-large-app",
+			TargetOS:          testOSLinux,
+			TargetArch:        testArchAMD64,
+			Profile:           codec.ProfileSize,
+			Variants:          map[string]string{"v1": largeVar1, "v3": largeVar3},
+			SkipELFValidation: true,
+			WarnFunc: func(format string, args ...any) {
+				warnings = append(warnings, fmt.Sprintf(format, args...))
+			},
+		}
+
+		idx, err := Pack(opts)
+		if err != nil {
+			t.Fatalf("expected Pack to succeed, got error: %v", err)
+		}
+		if idx == nil {
+			t.Fatalf("expected non-nil index")
+		}
+		if idx.DictionarySize <= 0 {
+			t.Errorf("expected DictionarySize > 0, got %d", idx.DictionarySize)
+		}
+		if len(warnings) != 0 {
+			t.Errorf("expected 0 warnings on successful dictionary training, got %v", warnings)
+		}
+	})
+
+	t.Run("Explicit EnableDict with small variants fails fast with error", func(t *testing.T) {
+		t.Parallel()
+
+		var warnings []string
+		outPath := filepath.Join(tempDir, "out_explicit_small.fat")
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        outPath,
+			AppName:           "explicit-small-app",
+			TargetOS:          testOSLinux,
+			TargetArch:        testArchAMD64,
+			EnableDict:        true,
+			Variants:          map[string]string{"v1": smallVar1, "v3": smallVar3},
+			SkipELFValidation: true,
+			WarnFunc: func(format string, args ...any) {
+				warnings = append(warnings, fmt.Sprintf(format, args...))
+			},
+		}
+
+		idx, err := Pack(opts)
+		if err == nil {
+			t.Fatalf("expected Pack to fail, but succeeded with idx: %+v", idx)
+		}
+		if !strings.Contains(err.Error(), "training shared dictionary: sample data too small for dictionary training (< 8 bytes)") {
+			t.Errorf("error %q does not contain expected message", err.Error())
+		}
+		if len(warnings) != 0 {
+			t.Errorf("expected no warnings when explicit EnableDict fails fast, got %v", warnings)
+		}
+	})
+
+	t.Run("Explicit EnableDict with single variant fails fast with error", func(t *testing.T) {
+		t.Parallel()
+
+		outPath := filepath.Join(tempDir, "out_explicit_single.fat")
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        outPath,
+			AppName:           "explicit-single-app",
+			TargetOS:          testOSLinux,
+			TargetArch:        testArchAMD64,
+			EnableDict:        true,
+			Variants:          map[string]string{"v1": smallVar1},
+			SkipELFValidation: true,
+		}
+
+		_, err := Pack(opts)
+		if err == nil {
+			t.Fatalf("expected Pack to fail for single variant with EnableDict, but got nil error")
+		}
+		if !strings.Contains(err.Error(), "training shared dictionary: requires at least two variants") {
+			t.Errorf("error %q does not contain expected message", err.Error())
+		}
+	})
+
+	t.Run("Unreadable variant during sampling fails fast under EnableDict", func(t *testing.T) {
+		t.Parallel()
+
+		outPath := filepath.Join(tempDir, "out_missing_var_dict.fat")
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        outPath,
+			AppName:           "missing-var-app",
+			TargetOS:          testOSLinux,
+			TargetArch:        testArchAMD64,
+			EnableDict:        true,
+			Variants:          map[string]string{"v1": smallVar1, "v3": filepath.Join(tempDir, "non_existent")},
+			SkipELFValidation: true,
+		}
+
+		_, err := Pack(opts)
+		if err == nil {
+			t.Fatalf("expected Pack to fail on missing variant with EnableDict")
+		}
+		if !strings.Contains(err.Error(), "sampling variants for dictionary training:") {
+			t.Errorf("error %q does not contain sampling variants error", err.Error())
+		}
+	})
+
+	t.Run("Unreadable variant during sampling emits diagnostic under ProfileSize then fails in payload writer", func(t *testing.T) {
+		t.Parallel()
+
+		var warnings []string
+		outPath := filepath.Join(tempDir, "out_missing_var_size.fat")
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        outPath,
+			AppName:           "missing-var-size-app",
+			TargetOS:          testOSLinux,
+			TargetArch:        testArchAMD64,
+			Profile:           codec.ProfileSize,
+			Variants:          map[string]string{"v1": smallVar1, "v3": filepath.Join(tempDir, "non_existent")},
+			SkipELFValidation: true,
+			WarnFunc: func(format string, args ...any) {
+				warnings = append(warnings, fmt.Sprintf(format, args...))
+			},
+		}
+
+		_, err := Pack(opts)
+		if err == nil {
+			t.Fatalf("expected Pack to fail on missing variant")
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
+		}
+		if !strings.Contains(warnings[0], "shared dictionary training failed (sampling variants:") {
+			t.Errorf("warning %q does not contain expected sampling failure message", warnings[0])
+		}
+		if !errors.Is(err, ErrVariantNotFound) {
+			t.Errorf("expected ErrVariantNotFound, got %v", err)
+		}
+	})
+
+	t.Run("Zero byte variants under ProfileSize emits no sample data warning and proceeds", func(t *testing.T) {
+		t.Parallel()
+
+		emptyVar1 := filepath.Join(tempDir, "empty_v1")
+		emptyVar3 := filepath.Join(tempDir, "empty_v3")
+		if err := os.WriteFile(emptyVar1, []byte{}, 0o755); err != nil {
+			t.Fatalf("failed to write empty_v1: %v", err)
+		}
+		if err := os.WriteFile(emptyVar3, []byte{}, 0o755); err != nil {
+			t.Fatalf("failed to write empty_v3: %v", err)
+		}
+
+		var warnings []string
+		outPath := filepath.Join(tempDir, "out_empty_size.fat")
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        outPath,
+			AppName:           "empty-size-app",
+			TargetOS:          testOSLinux,
+			TargetArch:        testArchAMD64,
+			Profile:           codec.ProfileSize,
+			Variants:          map[string]string{"v1": emptyVar1, "v3": emptyVar3},
+			SkipELFValidation: true,
+			WarnFunc: func(format string, args ...any) {
+				warnings = append(warnings, fmt.Sprintf(format, args...))
+			},
+		}
+
+		idx, err := Pack(opts)
+		if err != nil {
+			t.Fatalf("expected Pack to succeed, got %v", err)
+		}
+		if idx.DictionarySize != 0 {
+			t.Errorf("expected 0 DictionarySize, got %d", idx.DictionarySize)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
+		}
+		expectedMsg := "shared dictionary training failed (no sample data); proceeding with independent variant compression"
+		if !strings.Contains(warnings[0], expectedMsg) {
+			t.Errorf("warning %q does not contain %q", warnings[0], expectedMsg)
+		}
+	})
+
+	t.Run("Zero byte variants under EnableDict fails fast with no sample data error", func(t *testing.T) {
+		t.Parallel()
+
+		emptyVar1 := filepath.Join(tempDir, "empty_v1_fail")
+		emptyVar3 := filepath.Join(tempDir, "empty_v3_fail")
+		if err := os.WriteFile(emptyVar1, []byte{}, 0o755); err != nil {
+			t.Fatalf("failed to write empty_v1: %v", err)
+		}
+		if err := os.WriteFile(emptyVar3, []byte{}, 0o755); err != nil {
+			t.Fatalf("failed to write empty_v3: %v", err)
+		}
+
+		outPath := filepath.Join(tempDir, "out_empty_dict.fat")
+		opts := Options{
+			StubPath:          stubPath,
+			OutputPath:        outPath,
+			AppName:           "empty-dict-app",
+			TargetOS:          testOSLinux,
+			TargetArch:        testArchAMD64,
+			EnableDict:        true,
+			Variants:          map[string]string{"v1": emptyVar1, "v3": emptyVar3},
+			SkipELFValidation: true,
+		}
+
+		_, err := Pack(opts)
+		if err == nil {
+			t.Fatalf("expected Pack to fail on empty variants with EnableDict")
+		}
+		if !strings.Contains(err.Error(), "training shared dictionary: no sample data") {
+			t.Errorf("error %q does not contain expected message", err.Error())
+		}
+	})
+}
+
