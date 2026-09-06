@@ -34,6 +34,7 @@ type config struct {
 	profile               Profile
 	liveHeapEstimateBytes int64
 	explicitGOGC          *int
+	dryRun                bool
 }
 
 // Option configures auto-tuning behavior for AutoTune.
@@ -48,6 +49,7 @@ func defaultConfig() *config {
 		profile:               ProfileDefault,
 		liveHeapEstimateBytes: 0,
 		explicitGOGC:          nil,
+		dryRun:                false,
 	}
 }
 
@@ -115,5 +117,12 @@ func WithLiveHeapEstimateString(s string) Option {
 func WithGOGC(gogc int) Option {
 	return func(c *config) {
 		c.explicitGOGC = &gogc
+	}
+}
+
+// WithDryRun configures whether AutoTune runs in dry-run simulation mode without mutating Go runtime settings.
+func WithDryRun(dryRun bool) Option {
+	return func(c *config) {
+		c.dryRun = dryRun
 	}
 }

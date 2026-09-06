@@ -80,6 +80,7 @@ const (
 	EnvDebug                      = "MICROFAT_DEBUG"
 	EnvLog                        = "MICROFAT_LOG"
 	EnvAutotune                   = "MICROFAT_AUTOTUNE"
+	EnvDryRun                     = "MICROFAT_DRY_RUN"
 	EnvMemRatio                   = "MICROFAT_MEM_RATIO"
 	EnvGCProfile                  = "MICROFAT_GC_PROFILE"
 	EnvLiveHeapEstimate           = "MICROFAT_LIVE_HEAP_ESTIMATE"

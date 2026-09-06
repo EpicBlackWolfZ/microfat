@@ -400,6 +400,7 @@ Every fat binary built with standard `microfat-stub` supports built-in meta-comm
 | Variable | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `MICROFAT_AUTOTUNE` | `bool` (`1`/`0`, `true`/`false`) | `1` | Enable automatic Linux cgroup v1/v2 limit probing and `GOMEMLIMIT`/`GOMAXPROCS` injection. |
+| `MICROFAT_DRY_RUN` | `bool` (`1`/`0`, `true`/`false`) | `0` | Simulate cgroup auto-tuning without modifying active Go runtime state (`debug.SetMemoryLimit`, `runtime.GOMAXPROCS`, `debug.SetGCPercent`). |
 | `MICROFAT_MEM_RATIO` | `float` | `0.90` | Fraction of container cgroup memory ceiling assigned to `GOMEMLIMIT` (e.g. `0.85` or `0.80`). |
 | `MICROFAT_GC_PROFILE` | `string` | `default` | Workload GC profile: `latency_critical` (GOGC=75), `memory_constrained` (GOGC=40), `batch_etl` (GOGC=off), `adaptive`. |
 | `MICROFAT_LIVE_HEAP_ESTIMATE` | `string` | *(unset)* | Steady-state live heap size string for `adaptive` profile (e.g. `150MB`, `150MiB`, `157286400`). |
