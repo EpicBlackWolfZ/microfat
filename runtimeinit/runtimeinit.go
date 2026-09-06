@@ -112,7 +112,7 @@ type Telemetry struct {
 //  6. If MICROFAT_MEM_RATIO is defined (e.g. "0.85"), it overrides the default memory limit calculation ratio.
 func AutoTune(opts ...Option) Result {
 	cfg := defaultConfig()
-	dryRunEnv := getenvFunc(format.EnvDryRun)
+	dryRunEnv := strings.TrimSpace(getenvFunc(format.EnvDryRun))
 	if dryRunEnv == envValEnabledOne || strings.EqualFold(dryRunEnv, envValEnabledTrue) {
 		cfg.dryRun = true
 	}
@@ -123,7 +123,7 @@ func AutoTune(opts ...Option) Result {
 	}
 
 	// 1. Check if auto-tuning is explicitly disabled
-	autoTuneEnv := getenvFunc(format.EnvAutotune)
+	autoTuneEnv := strings.TrimSpace(getenvFunc(format.EnvAutotune))
 	if autoTuneEnv == envValDisabledZero || strings.EqualFold(autoTuneEnv, envValDisabledFalse) {
 		res := Result{
 			DryRun:        cfg.dryRun,
@@ -282,7 +282,7 @@ func applyTuningPlan(plan cgroup.TuningPlan, activeProfile Profile, activeLiveHe
 
 func logResult(cfg *config, res Result) {
 	var gogcStr string
-	if res.GOGCApplied || (res.DryRun && res.GOGC != 0) {
+	if res.GOGCApplied || (res.DryRun && (res.GOGC != 0 || cfg.explicitGOGC != nil)) {
 		if res.GOGC == cgroup.DefaultBatchETLGOGC {
 			gogcStr = "off"
 		} else {

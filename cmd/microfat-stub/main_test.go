@@ -262,6 +262,41 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 		t.Errorf("expected auto-tuned GOMEMLIMIT, GOMAXPROCS, and cgroup telemetry in env: %v", envCgroup)
 	}
 
+	// 6b. Test dry-run simulation via MICROFAT_DRY_RUN
+	for _, dryRunVal := range []string{"1", "true", "TRUE"} {
+		t.Setenv("MICROFAT_AUTOTUNE", "1")
+		t.Setenv("MICROFAT_DRY_RUN", dryRunVal)
+		envDry, limitsDry := buildAutoTunedEnviron("", []string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
+		if limitsDry == nil || limitsDry.CgroupVersion != cgroup.VersionV2 {
+			t.Fatalf("expected active cgroup limits in dry-run mode for %q, got %+v", dryRunVal, limitsDry)
+		}
+		var foundDryCgroupVer, foundDryCgroupMem, foundDryCgroupCPU bool
+		for _, e := range envDry {
+			if strings.HasPrefix(e, "GOMEMLIMIT=") {
+				t.Errorf("unexpected GOMEMLIMIT injected under dry-run %q: %s", dryRunVal, e)
+			}
+			if strings.HasPrefix(e, "GOMAXPROCS=") {
+				t.Errorf("unexpected GOMAXPROCS injected under dry-run %q: %s", dryRunVal, e)
+			}
+			if strings.HasPrefix(e, "GOGC=") {
+				t.Errorf("unexpected GOGC injected under dry-run %q: %s", dryRunVal, e)
+			}
+			if e == "MICROFAT_CGROUP_VERSION=2" {
+				foundDryCgroupVer = true
+			}
+			if strings.HasPrefix(e, "MICROFAT_CGROUP_GOMEMLIMIT=") {
+				foundDryCgroupMem = true
+			}
+			if e == "MICROFAT_CGROUP_GOMAXPROCS=4" {
+				foundDryCgroupCPU = true
+			}
+		}
+		if !foundDryCgroupVer || !foundDryCgroupMem || !foundDryCgroupCPU {
+			t.Errorf("expected cgroup simulation vars populated under dry-run %q: %v", dryRunVal, envDry)
+		}
+	}
+	t.Setenv("MICROFAT_DRY_RUN", "")
+
 	// 7. Test printInfo with mocked limits
 	idx := &format.Index{
 		AppName:    "testapp",

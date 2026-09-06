@@ -123,6 +123,17 @@ func TestAutoload_Subprocess(t *testing.T) {
 			expectedStdout:    testAutoloadOutput,
 			expectedStderrSub: "dry_run=true",
 		},
+		{
+			name: "AutoTuneOnStartupWithDryRun_JSON",
+			env: []string{
+				format.EnvLog + "=json",
+				format.EnvAutotune + "=1",
+				format.EnvDryRun + "=1",
+			},
+			expectedExitErr:   false,
+			expectedStdout:    testAutoloadOutput,
+			expectedStderrSub: `"dry_run":true`,
+		},
 	}
 
 	for _, tc := range testCases {

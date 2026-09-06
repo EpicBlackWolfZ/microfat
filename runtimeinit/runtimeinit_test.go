@@ -848,7 +848,7 @@ func TestAutoTune_DiagnosticsLogging(t *testing.T) {
 
 	t.Run("JSONLogging", func(t *testing.T) {
 		mockEnv := map[string]string{
-			format.EnvLog:       "json",
+			format.EnvLog:       envValLogJSON,
 			format.EnvGCProfile: testProfileLatencyCritical,
 		}
 		withIsolatedEnv(t, mockEnv, &mockLimits, nil, func(_ *int64, _ *int, _ *int, stderrBuf *bytes.Buffer) {
@@ -921,7 +921,7 @@ func TestAutoTune_DiagnosticsLogging(t *testing.T) {
 			CPUs:                      2,
 		}
 		mockEnv := map[string]string{
-			format.EnvLog: "json",
+			format.EnvLog: envValLogJSON,
 		}
 		withIsolatedEnv(t, mockEnv, &mockHighLimits, nil, func(_ *int64, _ *int, _ *int, stderrBuf *bytes.Buffer) {
 			res := AutoTune()
@@ -1127,21 +1127,88 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 	})
 
 	t.Run("ExplicitGOGCOption", func(t *testing.T) {
-		withIsolatedEnv(t, nil, &mockLimitsV2, nil, func(_ *int64, _ *int, gogc *int, _ *bytes.Buffer) {
-			const targetGOGC = 60
-			res := AutoTune(WithDryRun(true), WithGOGC(targetGOGC))
-			if !res.DryRun {
-				t.Errorf("expected DryRun true")
+		t.Run("PositiveGOGC", func(t *testing.T) {
+			withIsolatedEnv(t, nil, &mockLimitsV2, nil, func(_ *int64, _ *int, gogc *int, _ *bytes.Buffer) {
+				const targetGOGC = 60
+				res := AutoTune(WithDryRun(true), WithGOGC(targetGOGC))
+				if !res.DryRun {
+					t.Errorf("expected DryRun true")
+				}
+				if res.GOGC != targetGOGC {
+					t.Errorf("expected res.GOGC %d, got %d", targetGOGC, res.GOGC)
+				}
+				if res.GOGCApplied {
+					t.Errorf("expected GOGCApplied false")
+				}
+				if *gogc != -999 {
+					t.Errorf("expected setGCPercentFunc not called, got %d", *gogc)
+				}
+			})
+		})
+
+		t.Run("ZeroGOGC", func(t *testing.T) {
+			mockEnv := map[string]string{
+				format.EnvLog: envValLogJSON,
 			}
-			if res.GOGC != targetGOGC {
-				t.Errorf("expected res.GOGC %d, got %d", targetGOGC, res.GOGC)
+			withIsolatedEnv(t, mockEnv, &mockLimitsV2, nil, func(_ *int64, _ *int, gogc *int, stderrBuf *bytes.Buffer) {
+				var customLogged string
+				customLogger := func(formatStr string, args ...any) {
+					customLogged = fmt.Sprintf(formatStr, args...)
+				}
+
+				res := AutoTune(WithDryRun(true), WithGOGC(0), WithLogger(customLogger))
+				if !res.DryRun {
+					t.Errorf("expected DryRun true")
+				}
+				if res.GOGC != 0 {
+					t.Errorf("expected res.GOGC 0, got %d", res.GOGC)
+				}
+				if res.GOGCApplied {
+					t.Errorf("expected GOGCApplied false")
+				}
+				if *gogc != -999 {
+					t.Errorf("expected setGCPercentFunc not called, got %d", *gogc)
+				}
+				if !strings.Contains(customLogged, "gogc=0") {
+					t.Errorf("expected custom logger to contain 'gogc=0', got %q", customLogged)
+				}
+
+				// Also verify JSON telemetry formatting for GOGC=0
+				withIsolatedEnv(t, mockEnv, &mockLimitsV2, nil, func(_ *int64, _ *int, _ *int, stderrBufJSON *bytes.Buffer) {
+					_ = AutoTune(WithDryRun(true), WithGOGC(0))
+					cleanJSON := strings.TrimPrefix(strings.TrimSpace(stderrBufJSON.String()), "[microfat] ")
+					var telem Telemetry
+					if err := json.Unmarshal([]byte(cleanJSON), &telem); err != nil {
+						t.Fatalf("unmarshaling json telemetry: %v", err)
+					}
+					if telem.GOGC != "0" {
+						t.Errorf("expected telemetry GOGC '0', got %q", telem.GOGC)
+					}
+				})
+			})
+		})
+
+		t.Run("NegativeOneGOGC_Off", func(t *testing.T) {
+			mockEnv := map[string]string{
+				format.EnvLog: envValLogJSON,
 			}
-			if res.GOGCApplied {
-				t.Errorf("expected GOGCApplied false")
-			}
-			if *gogc != -999 {
-				t.Errorf("expected setGCPercentFunc not called, got %d", *gogc)
-			}
+			withIsolatedEnv(t, mockEnv, &mockLimitsV2, nil, func(_ *int64, _ *int, gogc *int, stderrBuf *bytes.Buffer) {
+				res := AutoTune(WithDryRun(true), WithGOGC(-1))
+				if res.GOGC != -1 {
+					t.Errorf("expected res.GOGC -1, got %d", res.GOGC)
+				}
+				if *gogc != -999 {
+					t.Errorf("expected setGCPercentFunc not called, got %d", *gogc)
+				}
+				cleanJSON := strings.TrimPrefix(strings.TrimSpace(stderrBuf.String()), "[microfat] ")
+				var telem Telemetry
+				if err := json.Unmarshal([]byte(cleanJSON), &telem); err != nil {
+					t.Fatalf("unmarshaling json telemetry: %v", err)
+				}
+				if telem.GOGC != "off" {
+					t.Errorf("expected telemetry GOGC 'off', got %q", telem.GOGC)
+				}
+			})
 		})
 	})
 
@@ -1154,6 +1221,8 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 			{name: "EnvTrueLower", envVal: "true"},
 			{name: "EnvTrueUpper", envVal: "TRUE"},
 			{name: "EnvTrueMixed", envVal: "True"},
+			{name: "EnvWhitespaceOne", envVal: "  1  "},
+			{name: "EnvWhitespaceTrue", envVal: "  true  "},
 		}
 
 		for _, tc := range testCases {
@@ -1243,7 +1312,7 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 
 	t.Run("DryRunWithJSONTelemetryLogging", func(t *testing.T) {
 		mockEnv := map[string]string{
-			format.EnvLog:       "json",
+			format.EnvLog:       envValLogJSON,
 			format.EnvGCProfile: testProfileLatencyCritical,
 		}
 		withIsolatedEnv(t, mockEnv, &mockLimitsV2, nil, func(_ *int64, _ *int, _ *int, stderrBuf *bytes.Buffer) {
@@ -1280,7 +1349,7 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 
 	t.Run("DryRunWithJSONTelemetryLogging_BatchETL", func(t *testing.T) {
 		mockEnv := map[string]string{
-			format.EnvLog:       "json",
+			format.EnvLog:       envValLogJSON,
 			format.EnvGCProfile: "batch_etl",
 		}
 		withIsolatedEnv(t, mockEnv, &mockLimitsV2, nil, func(_ *int64, _ *int, _ *int, stderrBuf *bytes.Buffer) {
@@ -1362,6 +1431,30 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 			}
 		})
 	})
+
+	t.Run("ConcurrentDryRun", func(t *testing.T) {
+		withIsolatedEnv(t, nil, &mockLimitsV2, nil, func(memLimit *int64, maxProcs *int, gogc *int, _ *bytes.Buffer) {
+			const goroutines = 20
+			var wg sync.WaitGroup
+			wg.Add(goroutines)
+			for i := 0; i < goroutines; i++ {
+				go func() {
+					defer wg.Done()
+					res := AutoTune(WithDryRun(true), WithProfile(ProfileLatencyCritical))
+					if !res.DryRun {
+						t.Errorf("expected DryRun true")
+					}
+					if res.MemLimitApplied || res.MaxProcsApplied || res.GOGCApplied {
+						t.Errorf("expected no applied flags in concurrent dry run")
+					}
+				}()
+			}
+			wg.Wait()
+			if *memLimit != -1 || *maxProcs != -1 || *gogc != -999 {
+				t.Errorf("expected no runtime mutations in concurrent dry run")
+			}
+		})
+	})
 }
 
 func TestResult_JSONSerialization(t *testing.T) {
@@ -1414,6 +1507,32 @@ func TestResult_JSONSerialization(t *testing.T) {
 			t.Errorf("expected '\"dry_run\":true' in JSON, got %s", string(data))
 		}
 		var dec Result
+		if err := json.Unmarshal(data, &dec); err != nil {
+			t.Fatalf("json.Unmarshal failed: %v", err)
+		}
+		if !dec.DryRun {
+			t.Errorf("expected dec.DryRun to be true")
+		}
+	})
+
+	t.Run("TelemetryJSONSerialization", func(t *testing.T) {
+		telem := Telemetry{
+			Event:         eventRuntimeInit,
+			CgroupVersion: cgroup.VersionV2,
+			DryRun:        true,
+			GOMEMLIMIT:    "1024B",
+			GOMAXPROCS:    "4",
+			GOGC:          "75",
+			SkippedReason: testReasonDryRun,
+		}
+		data, err := json.Marshal(telem)
+		if err != nil {
+			t.Fatalf("json.Marshal failed: %v", err)
+		}
+		if !strings.Contains(string(data), `"dry_run":true`) {
+			t.Errorf("expected '\"dry_run\":true' in Telemetry JSON, got %s", string(data))
+		}
+		var dec Telemetry
 		if err := json.Unmarshal(data, &dec); err != nil {
 			t.Fatalf("json.Unmarshal failed: %v", err)
 		}

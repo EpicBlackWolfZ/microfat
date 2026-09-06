@@ -248,9 +248,13 @@ func buildAutoTunedEnviron(
 		env = upsertEnv(env, keyIndex, format.EnvCgroupGCProfile, string(plan.GCProfile))
 	}
 
-	// Check if user opted out of auto-tuning
-	autoTuneOpt := os.Getenv(format.EnvAutotune)
+	// Check if user opted out of auto-tuning or requested dry-run simulation
+	autoTuneOpt := strings.TrimSpace(os.Getenv(format.EnvAutotune))
 	if autoTuneOpt == "0" || strings.EqualFold(autoTuneOpt, "false") {
+		return env, &limits
+	}
+	dryRunOpt := strings.TrimSpace(os.Getenv(format.EnvDryRun))
+	if dryRunOpt == "1" || strings.EqualFold(dryRunOpt, "true") {
 		return env, &limits
 	}
 
