@@ -19,6 +19,13 @@ var OpenFileFunc = func(path string) (int, error) {
 	return unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 }
 
+// OpenFileAtFunc defines the directory-relative descriptor opener enforcing O_NOFOLLOW and O_CLOEXEC.
+var OpenFileAtFunc = func(dirFD int, name string) (int, error) {
+	return unix.Openat(dirFD, name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+}
+
+var unlinkAtFunc = unix.Unlinkat
+
 func closeFD(fd int) error {
 	return unix.Close(fd)
 }
@@ -42,6 +49,60 @@ func OpenAndValidateVariantFDWithOpener(
 	opener func(string) (int, error),
 ) (int, error) {
 	return OpenAndValidateFDWithOpener(path, entry.UncompressedSize, entry.SHA256, removeOnCorrupt, opener)
+}
+
+// OpenAndValidateVariantAtFD opens and validates variant name relative to dirFD against expected size and SHA-256.
+// If removeOnCorrupt is true, corrupted regular files are unlinked relative to dirFD via unlinkat.
+// Non-regular files (symlinks, directories) are rejected with an error without modifying the filesystem.
+func OpenAndValidateVariantAtFD(dirFD int, name string, entry *format.VariantEntry, removeOnCorrupt bool) (int, error) {
+	return OpenAndValidateAtFDWithOpener(dirFD, name, entry.UncompressedSize, entry.SHA256, removeOnCorrupt, OpenFileAtFunc)
+}
+
+// OpenAndValidateVariantAtFDWithOpener opens and validates variant name relative to dirFD using an injected opener func.
+func OpenAndValidateVariantAtFDWithOpener(
+	dirFD int,
+	name string,
+	entry *format.VariantEntry,
+	removeOnCorrupt bool,
+	opener func(int, string) (int, error),
+) (int, error) {
+	return OpenAndValidateAtFDWithOpener(dirFD, name, entry.UncompressedSize, entry.SHA256, removeOnCorrupt, opener)
+}
+
+// OpenAndValidateAtFD opens name relative to dirFD with O_NOFOLLOW, asserts that the open descriptor is a regular file
+// with exact byte length matching expectedSize, and verifies expectedSHA256 via pread on the same descriptor.
+// If removeOnCorrupt is true, corrupted regular files are unlinked relative to dirFD via unlinkat.
+// Non-regular files are rejected without removing.
+// On success, returns the pinned, validated descriptor. The caller is responsible for closing it.
+func OpenAndValidateAtFD(dirFD int, name string, expectedSize int64, expectedSHA256 string, removeOnCorrupt bool) (int, error) {
+	return OpenAndValidateAtFDWithOpener(dirFD, name, expectedSize, expectedSHA256, removeOnCorrupt, OpenFileAtFunc)
+}
+
+// OpenAndValidateAtFDWithOpener opens name relative to dirFD using an injected opener func.
+func OpenAndValidateAtFDWithOpener(
+	dirFD int,
+	name string,
+	expectedSize int64,
+	expectedSHA256 string,
+	removeOnCorrupt bool,
+	opener func(int, string) (int, error),
+) (int, error) {
+	if opener == nil {
+		opener = OpenFileAtFunc
+	}
+
+	fd, err := opener(dirFD, name)
+	if err != nil {
+		return -1, err
+	}
+
+	onCorrupt := func() {
+		if removeOnCorrupt {
+			_ = unlinkAtFunc(dirFD, name, 0)
+		}
+	}
+
+	return validateOpenedDescriptor(fd, name, expectedSize, expectedSHA256, onCorrupt)
 }
 
 // OpenAndValidateFD opens path with O_NOFOLLOW, asserts that the open descriptor is a regular file
@@ -70,6 +131,16 @@ func OpenAndValidateFDWithOpener(
 		return -1, err
 	}
 
+	onCorrupt := func() {
+		if removeOnCorrupt {
+			_ = os.Remove(path)
+		}
+	}
+
+	return validateOpenedDescriptor(fd, path, expectedSize, expectedSHA256, onCorrupt)
+}
+
+func validateOpenedDescriptor(fd int, label string, expectedSize int64, expectedSHA256 string, onCorrupt func()) (int, error) {
 	var stat unix.Stat_t
 	if statErr := unix.Fstat(fd, &stat); statErr != nil {
 		_ = unix.Close(fd)
@@ -80,23 +151,23 @@ func OpenAndValidateFDWithOpener(
 	if !isRegular {
 		_ = unix.Close(fd)
 		// Do NOT remove non-regular targets (such as symlinks or directories)
-		return -1, fmt.Errorf("%w: %s (mode 0o%o)", ErrNonRegularFile, path, stat.Mode)
+		return -1, fmt.Errorf("%w: %s (mode 0o%o)", ErrNonRegularFile, label, stat.Mode)
 	}
 
 	if stat.Size != expectedSize {
 		_ = unix.Close(fd)
-		if removeOnCorrupt {
-			_ = os.Remove(path)
+		if onCorrupt != nil {
+			onCorrupt()
 		}
-		return -1, fmt.Errorf("%w: %s (expected %d bytes, got %d bytes)", ErrSizeMismatch, path, expectedSize, stat.Size)
+		return -1, fmt.Errorf("%w: %s (expected %d bytes, got %d bytes)", ErrSizeMismatch, label, expectedSize, stat.Size)
 	}
 
 	if !verifyCachedFD(fd, expectedSHA256) {
 		_ = unix.Close(fd)
-		if removeOnCorrupt {
-			_ = os.Remove(path)
+		if onCorrupt != nil {
+			onCorrupt()
 		}
-		return -1, fmt.Errorf("%w: cache file %s checksum mismatch", ErrChecksumMismatch, path)
+		return -1, fmt.Errorf("%w: cache file %s checksum mismatch", ErrChecksumMismatch, label)
 	}
 
 	return fd, nil
@@ -143,14 +214,24 @@ func VerifyVariant(entry *format.VariantEntry, cacheDir string) format.PrewarmRe
 		UncompressedSize: entry.UncompressedSize,
 	}
 
+	var dirFD = -1
 	if cacheDir == "" {
-		resolved, err := format.ResolveCacheDir("")
+		resolvedFD, resolved, err := format.ResolveCacheDirFD("")
 		if err != nil {
 			res.Status = format.PrewarmStatusMissing
 			res.Error = fmt.Sprintf("resolving cache directory: %v", err)
 			return res
 		}
 		cacheDir = resolved
+		dirFD = resolvedFD
+	} else {
+		resolvedFD, err := format.OpenAndValidateCacheDirFD(cacheDir, false)
+		if err == nil {
+			dirFD = resolvedFD
+		}
+	}
+	if dirFD >= 0 {
+		defer func() { _ = unix.Close(dirFD) }()
 	}
 
 	if entry.SHA256 == "" || !format.ValidateChecksum(entry.SHA256) {
@@ -160,10 +241,17 @@ func VerifyVariant(entry *format.VariantEntry, cacheDir string) format.PrewarmRe
 	}
 
 	cleanDir := filepath.Clean(cacheDir)
-	cachedBinary := filepath.Join(cleanDir, filepath.Clean(entry.SHA256))
+	cachedName := filepath.Clean(entry.SHA256)
+	cachedBinary := filepath.Join(cleanDir, cachedName)
 	res.CachedPath = cachedBinary
 
-	fd, err := OpenAndValidateFD(cachedBinary, entry.UncompressedSize, entry.SHA256, false)
+	var fd int
+	var err error
+	if dirFD >= 0 {
+		fd, err = OpenAndValidateVariantAtFD(dirFD, cachedName, entry, false)
+	} else {
+		fd, err = OpenAndValidateFD(cachedBinary, entry.UncompressedSize, entry.SHA256, false)
+	}
 	if err != nil {
 		if isNotExistErr(err) {
 			res.Status = format.PrewarmStatusMissing

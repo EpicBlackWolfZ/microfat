@@ -85,6 +85,12 @@ func TestDiagnoseError(t *testing.T) {
 			expectedHint: HintMemfdSeal,
 		},
 		{
+			name:         "cache dir init ErrInsecureCacheDir",
+			stage:        StageCacheDirInit,
+			err:          ErrInsecureCacheDir,
+			expectedHint: HintInsecureCacheDir,
+		},
+		{
 			name:         "cache dir init EROFS read only fs",
 			stage:        StageCacheDirInit,
 			err:          syscall.EROFS,

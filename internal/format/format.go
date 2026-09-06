@@ -133,6 +133,7 @@ var (
 	ErrMemfdSealingFailed = errors.New("memfd sealing failed")
 	ErrExecve             = errors.New("execve failed")
 	ErrCacheInit          = errors.New("cache directory initialization failed")
+	ErrInsecureCacheDir   = errors.New("cache directory has insecure permissions or invalid ownership")
 	ErrCacheWrite         = errors.New("cache file creation failed")
 	ErrCacheExtract       = errors.New("cache decompression failed")
 )
@@ -1364,49 +1365,105 @@ func IsFatBinary(r io.ReaderAt, totalSize int64) bool {
 	return bytes.Equal(buf, []byte(MagicString))
 }
 
-// ResolveCacheDir resolves and creates the microfat cache directory with 0700 permissions.
+// ResolveCacheDirFD resolves, creates, and securely validates the microfat cache directory,
+// returning an open file descriptor pinned to the directory alongside its absolute path.
+//
+// On Unix systems, the returned directory descriptor allows callers to anchor subsequent operations
+// using *at syscalls (openat, unlinkat, renameat) relative to dirFD, eliminating pathname TOCTOU
+// vulnerabilities between directory validation and payload extraction or execution.
+// On non-Unix platforms, dirFD is -1.
+// If dirFD >= 0, the caller is responsible for closing dirFD when finished.
+//
+// Targeting the effective UID (os.Geteuid()) is explicitly intended to support setuid execution
+// semantics, ensuring that cache directory validation and fallback paths (e.g. /tmp/.microfat-<euid>)
+// align with process file creation privileges and effective runtime ownership.
+//
 // Precedence:
 //  1. customDir argument (if non-empty)
 //  2. MICROFAT_CACHE_DIR environment variable (if set)
 //  3. $XDG_CACHE_HOME/microfat (or ~/.cache/microfat)
-//  4. Fallback: /tmp/.microfat-<uid>
-func ResolveCacheDir(customDir string) (string, error) {
+//  4. Fallback: /tmp/.microfat-<euid>
+//
+// Security Invariants:
+//   - Explicit paths (customDir or MICROFAT_CACHE_DIR) must be regular directories (not symlinks),
+//     owned by the current process effective UID, and without group or other write permissions (mode & 0o022 == 0).
+//     Insecure configurations fail fast with an error wrapping ErrInsecureCacheDir without attempting remediation.
+//   - For the automatic discovery cascade (XDG_CACHE_HOME, ~/.cache, /tmp/.microfat-<euid>), candidate directories
+//     owned by the current process effective UID with permissive write bits are tightened directly on the open descriptor
+//     via fchmod to 0700. Foreign-owned directories, symlinks, or candidates where chmod fails are rejected,
+//     falling through to the next candidate in the cascade.
+func ResolveCacheDirFD(customDir string) (int, string, error) {
 	if customDir != "" {
 		cleanDir := filepath.Clean(customDir)
 		if err := os.MkdirAll(cleanDir, PrivateCacheDirMode); err != nil {
-			return "", fmt.Errorf("creating custom cache directory %s: %w", cleanDir, err)
+			return -1, "", fmt.Errorf("creating custom cache directory %s: %w", cleanDir, err)
 		}
-		return cleanDir, nil
+		fd, err := OpenAndValidateCacheDirFD(cleanDir, false)
+		if err != nil {
+			return -1, "", fmt.Errorf("custom cache directory %s is insecure: %w", cleanDir, err)
+		}
+		return fd, cleanDir, nil
 	}
 
 	if envDir := os.Getenv(EnvCacheDir); envDir != "" {
 		cleanDir := filepath.Clean(envDir)
 		if err := os.MkdirAll(cleanDir, PrivateCacheDirMode); err != nil {
-			return "", fmt.Errorf("creating cache directory from %s (%s): %w", EnvCacheDir, cleanDir, err)
+			return -1, "", fmt.Errorf("creating cache directory from %s (%s): %w", EnvCacheDir, cleanDir, err)
 		}
-		return cleanDir, nil
+		fd, err := OpenAndValidateCacheDirFD(cleanDir, false)
+		if err != nil {
+			return -1, "", fmt.Errorf("cache directory from %s (%s) is insecure: %w", EnvCacheDir, cleanDir, err)
+		}
+		return fd, cleanDir, nil
 	}
 
-	var primaryDir string
+	var candidates []string
 	if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
-		primaryDir = filepath.Join(xdg, "microfat")
-	} else if home, err := userHomeDirFunc(); err == nil {
-		primaryDir = filepath.Join(home, ".cache", "microfat")
-	} else {
-		primaryDir = filepath.Join(os.TempDir(), "microfat")
+		candidates = append(candidates, filepath.Join(xdg, "microfat"))
+	} else if userHomeDirFunc != nil {
+		if home, err := userHomeDirFunc(); err == nil && home != "" {
+			candidates = append(candidates, filepath.Join(home, ".cache", "microfat"))
+		}
+	}
+	candidates = append(candidates, filepath.Join(os.TempDir(), fmt.Sprintf(".microfat-%d", geteuidFunc())))
+
+	var attempted []string
+	seen := make(map[string]bool, len(candidates))
+
+	for _, cand := range candidates {
+		cleanDir := filepath.Clean(cand)
+		if seen[cleanDir] {
+			continue
+		}
+		seen[cleanDir] = true
+		attempted = append(attempted, cleanDir)
+
+		// #nosec G703 -- cache directory creation with private permissions
+		if err := os.MkdirAll(cleanDir, PrivateCacheDirMode); err != nil {
+			continue
+		}
+
+		fd, err := OpenAndValidateCacheDirFD(cleanDir, true)
+		if err == nil {
+			return fd, cleanDir, nil
+		}
 	}
 
-	// #nosec G703 -- cache directory creation with private permissions
-	if err := os.MkdirAll(primaryDir, PrivateCacheDirMode); err == nil {
-		return primaryDir, nil
-	}
-
-	fallbackDir := filepath.Join(os.TempDir(), fmt.Sprintf(".microfat-%d", os.Getuid()))
-	// #nosec G703 -- fallback cache directory creation
-	if err := os.MkdirAll(fallbackDir, PrivateCacheDirMode); err == nil {
-		return fallbackDir, nil
-	}
-
-	return "", fmt.Errorf("unable to initialize microfat cache directories (tried %s, %s)", primaryDir, fallbackDir)
+	return -1, "", fmt.Errorf("%w: unable to initialize microfat cache directories (tried %s)",
+		ErrCacheInit, strings.Join(attempted, ", "))
 }
+
+// ResolveCacheDir resolves and creates the microfat cache directory with 0700 permissions.
+// On Unix systems, it validates security invariants using descriptor-based pinning to prevent TOCTOU races.
+func ResolveCacheDir(customDir string) (string, error) {
+	fd, dir, err := ResolveCacheDirFD(customDir)
+	if err != nil {
+		return "", err
+	}
+	if fd >= 0 {
+		_ = closeDirFunc(fd)
+	}
+	return dir, nil
+}
+
 

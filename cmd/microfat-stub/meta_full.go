@@ -17,6 +17,7 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -145,9 +146,12 @@ func prewarmStub(
 		verifyOnly = true
 	}
 
-	cacheDir, err := resolveCacheDirFunc("")
+	dirFD, cacheDir, err := resolveCacheDirFunc("")
 	if err != nil {
 		return fmt.Errorf("resolving cache directory: %w", err)
+	}
+	if dirFD >= 0 {
+		_ = unix.Close(dirFD)
 	}
 
 	if verifyOnly {

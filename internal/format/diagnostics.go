@@ -49,6 +49,8 @@ const (
 		"Update microfat launcher stub or re-package with a supported codec (e.g. zstd, lz4, none)."
 	HintDecompressFailed = "Payload decompression failed or corrupted. " +
 		"Re-package the binary with 'microfat pack' or verify integrity with 'microfat verify'."
+	HintInsecureCacheDir = "Cache directory has insecure permissions, is a symlink, or is owned by another user. " +
+		"Use a private directory owned by your UID with mode 0700 or set MICROFAT_CACHE_DIR."
 )
 
 // DiagnoseError inspects an execution failure and stage context, returning an actionable
@@ -125,6 +127,8 @@ func diagnoseMemfdSeal(err error) string {
 
 func diagnoseCacheWrite(err error) string {
 	switch {
+	case errors.Is(err, ErrInsecureCacheDir):
+		return HintInsecureCacheDir
 	case errors.Is(err, syscall.EROFS):
 		return HintReadOnlyFS
 	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):

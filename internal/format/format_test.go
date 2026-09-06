@@ -6,11 +6,16 @@ import (
 	"encoding/binary"
 	json "encoding/json/v2"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -590,6 +595,581 @@ func TestResolveCacheDir(t *testing.T) {
 	_, err = ResolveCacheDir("")
 	if err == nil {
 		t.Errorf("expected error for impossible MICROFAT_CACHE_DIR")
+	}
+}
+
+const (
+	testPerm0777   = 0o777
+	testPerm0750   = 0o750
+	testPerm0700   = 0o700
+	testPerm0600   = 0o600
+	testForeignUID = 99999
+)
+
+type mockFileInfo struct {
+	name    string
+	size    int64
+	mode    os.FileMode
+	modTime time.Time
+	isDir   bool
+	sys     any
+}
+
+func (m mockFileInfo) Name() string       { return m.name }
+func (m mockFileInfo) Size() int64        { return m.size }
+func (m mockFileInfo) Mode() os.FileMode  { return m.mode }
+func (m mockFileInfo) ModTime() time.Time { return m.modTime }
+func (m mockFileInfo) IsDir() bool        { return m.isDir }
+func (m mockFileInfo) Sys() any           { return m.sys }
+
+func TestResolveCacheDir_SecurityValidation(t *testing.T) {
+	origOpen := openDirFunc
+	origClose := closeDirFunc
+	origFstat := fstatDirFunc
+	origFchmod := fchmodDirFunc
+	origGeteuid := geteuidFunc
+	origHome := userHomeDirFunc
+	defer func() {
+		openDirFunc = origOpen
+		closeDirFunc = origClose
+		fstatDirFunc = origFstat
+		fchmodDirFunc = origFchmod
+		geteuidFunc = origGeteuid
+		userHomeDirFunc = origHome
+	}()
+
+	t.Run("explicit customDir with permissive permissions fails fast without chmod", func(t *testing.T) {
+		tempDir := t.TempDir()
+		insecureDir := filepath.Join(tempDir, "insecure_custom")
+		if err := os.MkdirAll(insecureDir, testPerm0777); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		if err := os.Chmod(insecureDir, testPerm0777); err != nil {
+			t.Fatalf("chmod failed: %v", err)
+		}
+
+		_, err := ResolveCacheDir(insecureDir)
+		if err == nil {
+			t.Fatalf("expected error for insecure customDir, got nil")
+		}
+		if !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
+		}
+
+		// Invariant: explicit paths must fail fast without attempting to chmod
+		fi, statErr := os.Lstat(insecureDir)
+		if statErr != nil {
+			t.Fatalf("lstat failed: %v", statErr)
+		}
+		if fi.Mode().Perm() != testPerm0777 {
+			t.Fatalf("expected permissions to remain 0777, got %04o", fi.Mode().Perm())
+		}
+	})
+
+	t.Run("explicit customDir as symlink fails fast", func(t *testing.T) {
+		tempDir := t.TempDir()
+		targetDir := filepath.Join(tempDir, "symlink_target")
+		if err := os.MkdirAll(targetDir, testPerm0700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		symlinkDir := filepath.Join(tempDir, "symlink_custom")
+		if err := os.Symlink(targetDir, symlinkDir); err != nil {
+			t.Fatalf("symlink failed: %v", err)
+		}
+
+		_, err := ResolveCacheDir(symlinkDir)
+		if err == nil {
+			t.Fatalf("expected error for symlink customDir, got nil")
+		}
+		if !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
+		}
+	})
+
+	t.Run("explicit customDir with foreign UID fails fast", func(t *testing.T) {
+		tempDir := t.TempDir()
+		validDir := filepath.Join(tempDir, "foreign_custom")
+		if err := os.MkdirAll(validDir, testPerm0700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+
+		geteuidFunc = func() int { return testForeignUID }
+		defer func() { geteuidFunc = origGeteuid }()
+
+		_, err := ResolveCacheDir(validDir)
+		if err == nil {
+			t.Fatalf("expected error for foreign UID, got nil")
+		}
+		if !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
+		}
+	})
+
+	t.Run("explicit customDir with 0700 and 0750 succeeds", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		dir700 := filepath.Join(tempDir, "cache_700")
+		if err := os.MkdirAll(dir700, testPerm0700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		res, err := ResolveCacheDir(dir700)
+		if err != nil || res != dir700 {
+			t.Fatalf("expected %s, got %s (err: %v)", dir700, res, err)
+		}
+
+		dir750 := filepath.Join(tempDir, "cache_750")
+		if err := os.MkdirAll(dir750, testPerm0750); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		if err := os.Chmod(dir750, testPerm0750); err != nil {
+			t.Fatalf("chmod failed: %v", err)
+		}
+		res, err = ResolveCacheDir(dir750)
+		if err != nil || res != dir750 {
+			t.Fatalf("expected %s, got %s (err: %v)", dir750, res, err)
+		}
+	})
+
+	t.Run("explicit MICROFAT_CACHE_DIR fails fast on insecure dir and symlink", func(t *testing.T) {
+		tempDir := t.TempDir()
+		insecureDir := filepath.Join(tempDir, "insecure_env")
+		if err := os.MkdirAll(insecureDir, testPerm0777); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		if err := os.Chmod(insecureDir, testPerm0777); err != nil {
+			t.Fatalf("chmod failed: %v", err)
+		}
+
+		t.Setenv(EnvCacheDir, insecureDir)
+		_, err := ResolveCacheDir("")
+		if err == nil {
+			t.Fatalf("expected error for insecure MICROFAT_CACHE_DIR, got nil")
+		}
+		if !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
+		}
+
+		// Check symlink rejection via env
+		symlinkDir := filepath.Join(tempDir, "symlink_env")
+		targetDir := filepath.Join(tempDir, "target_env")
+		if err := os.MkdirAll(targetDir, testPerm0700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		if err := os.Symlink(targetDir, symlinkDir); err != nil {
+			t.Fatalf("symlink failed: %v", err)
+		}
+
+		t.Setenv(EnvCacheDir, symlinkDir)
+		_, err = ResolveCacheDir("")
+		if err == nil {
+			t.Fatalf("expected error for symlink MICROFAT_CACHE_DIR, got nil")
+		}
+		if !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
+		}
+	})
+
+	t.Run("discovery cascade tightens permissions to 0700 on own directory", func(t *testing.T) {
+		tempDir := t.TempDir()
+		xdgDir := filepath.Join(tempDir, "xdg_tighten")
+		cacheDir := filepath.Join(xdgDir, "microfat")
+		if err := os.MkdirAll(cacheDir, testPerm0777); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		if err := os.Chmod(cacheDir, testPerm0777); err != nil {
+			t.Fatalf("chmod failed: %v", err)
+		}
+
+		t.Setenv(EnvCacheDir, "")
+		t.Setenv("XDG_CACHE_HOME", xdgDir)
+
+		res, err := ResolveCacheDir("")
+		if err != nil || res != cacheDir {
+			t.Fatalf("expected %s, got %s (err: %v)", cacheDir, res, err)
+		}
+
+		fi, statErr := os.Lstat(cacheDir)
+		if statErr != nil {
+			t.Fatalf("lstat failed: %v", statErr)
+		}
+		if fi.Mode().Perm() != testPerm0700 {
+			t.Fatalf("expected tightened mode 0700, got %04o", fi.Mode().Perm())
+		}
+	})
+
+	t.Run("discovery cascade accepts 0750 without modification", func(t *testing.T) {
+		tempDir := t.TempDir()
+		xdgDir := filepath.Join(tempDir, "xdg_750")
+		cacheDir := filepath.Join(xdgDir, "microfat")
+		if err := os.MkdirAll(cacheDir, testPerm0750); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		if err := os.Chmod(cacheDir, testPerm0750); err != nil {
+			t.Fatalf("chmod failed: %v", err)
+		}
+
+		t.Setenv(EnvCacheDir, "")
+		t.Setenv("XDG_CACHE_HOME", xdgDir)
+
+		res, err := ResolveCacheDir("")
+		if err != nil || res != cacheDir {
+			t.Fatalf("expected %s, got %s (err: %v)", cacheDir, res, err)
+		}
+
+		fi, statErr := os.Lstat(cacheDir)
+		if statErr != nil {
+			t.Fatalf("lstat failed: %v", statErr)
+		}
+		if fi.Mode().Perm() != testPerm0750 {
+			t.Fatalf("expected mode 0750 preserved, got %04o", fi.Mode().Perm())
+		}
+	})
+
+	t.Run("discovery cascade falls through if candidate is a symlink", func(t *testing.T) {
+		tempDir := t.TempDir()
+		xdgDir := filepath.Join(tempDir, "xdg_symlink")
+		if err := os.MkdirAll(xdgDir, testPerm0700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		fakeTarget := filepath.Join(tempDir, "fake_target")
+		if err := os.MkdirAll(fakeTarget, testPerm0700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		if err := os.Symlink(fakeTarget, filepath.Join(xdgDir, "microfat")); err != nil {
+			t.Fatalf("symlink failed: %v", err)
+		}
+
+		t.Setenv(EnvCacheDir, "")
+		t.Setenv("XDG_CACHE_HOME", xdgDir)
+		t.Setenv("TMPDIR", tempDir)
+
+		res, err := ResolveCacheDir("")
+		if err != nil {
+			t.Fatalf("expected fallback to succeed, got: %v", err)
+		}
+		expectedFallback := filepath.Join(tempDir, fmt.Sprintf(".microfat-%d", os.Geteuid()))
+		if res != expectedFallback {
+			t.Fatalf("expected fallback to %s, got %s", expectedFallback, res)
+		}
+	})
+
+	t.Run("discovery cascade falls through if candidate is foreign-owned", func(t *testing.T) {
+		tempDir := t.TempDir()
+		xdgDir := filepath.Join(tempDir, "xdg_foreign")
+		xdgMicrofat := filepath.Join(xdgDir, "microfat")
+		if err := os.MkdirAll(xdgMicrofat, testPerm0700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+
+		t.Setenv(EnvCacheDir, "")
+		t.Setenv("XDG_CACHE_HOME", xdgDir)
+		t.Setenv("TMPDIR", tempDir)
+
+		// Inject openDirFunc and fstatDirFunc to simulate foreign UID specifically on xdgMicrofat
+		activeFDs := make(map[int]string)
+		var mu sync.Mutex
+		openDirFunc = func(name string) (int, error) {
+			fd, err := origOpen(name)
+			if err == nil {
+				mu.Lock()
+				activeFDs[fd] = name
+				mu.Unlock()
+			}
+			return fd, err
+		}
+		closeDirFunc = func(fd int) error {
+			mu.Lock()
+			delete(activeFDs, fd)
+			mu.Unlock()
+			return origClose(fd)
+		}
+		fstatDirFunc = func(fd int, stat *unix.Stat_t) error {
+			if err := origFstat(fd, stat); err != nil {
+				return err
+			}
+			mu.Lock()
+			p := activeFDs[fd]
+			mu.Unlock()
+			if p == xdgMicrofat {
+				stat.Uid = uint32(os.Geteuid() + 1000)
+			}
+			return nil
+		}
+		defer func() {
+			openDirFunc = origOpen
+			closeDirFunc = origClose
+			fstatDirFunc = origFstat
+		}()
+
+		res, err := ResolveCacheDir("")
+		if err != nil {
+			t.Fatalf("expected fallback to succeed, got: %v", err)
+		}
+		expectedFallback := filepath.Join(tempDir, fmt.Sprintf(".microfat-%d", os.Geteuid()))
+		if res != expectedFallback {
+			t.Fatalf("expected fallback to %s, got %s", expectedFallback, res)
+		}
+	})
+
+	t.Run("discovery cascade falls through if chmod fails", func(t *testing.T) {
+		tempDir := t.TempDir()
+		xdgDir := filepath.Join(tempDir, "xdg_chmod_fail")
+		xdgMicrofat := filepath.Join(xdgDir, "microfat")
+		if err := os.MkdirAll(xdgMicrofat, testPerm0777); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		if err := os.Chmod(xdgMicrofat, testPerm0777); err != nil {
+			t.Fatalf("chmod failed: %v", err)
+		}
+
+		t.Setenv(EnvCacheDir, "")
+		t.Setenv("XDG_CACHE_HOME", xdgDir)
+		t.Setenv("TMPDIR", tempDir)
+
+		activeFDs := make(map[int]string)
+		var mu sync.Mutex
+		openDirFunc = func(name string) (int, error) {
+			fd, err := origOpen(name)
+			if err == nil {
+				mu.Lock()
+				activeFDs[fd] = name
+				mu.Unlock()
+			}
+			return fd, err
+		}
+		closeDirFunc = func(fd int) error {
+			mu.Lock()
+			delete(activeFDs, fd)
+			mu.Unlock()
+			return origClose(fd)
+		}
+		fchmodDirFunc = func(fd int, mode uint32) error {
+			mu.Lock()
+			p := activeFDs[fd]
+			mu.Unlock()
+			if p == xdgMicrofat {
+				return errors.New("simulated chmod failure")
+			}
+			return origFchmod(fd, mode)
+		}
+		defer func() {
+			openDirFunc = origOpen
+			closeDirFunc = origClose
+			fchmodDirFunc = origFchmod
+		}()
+
+		res, err := ResolveCacheDir("")
+		if err != nil {
+			t.Fatalf("expected fallback to succeed, got: %v", err)
+		}
+		expectedFallback := filepath.Join(tempDir, fmt.Sprintf(".microfat-%d", os.Geteuid()))
+		if res != expectedFallback {
+			t.Fatalf("expected fallback to %s, got %s", expectedFallback, res)
+		}
+	})
+
+	t.Run("discovery cascade returns ErrCacheInit when all candidates fail", func(t *testing.T) {
+		t.Setenv(EnvCacheDir, "")
+		t.Setenv("XDG_CACHE_HOME", "")
+		userHomeDirFunc = func() (string, error) {
+			return "", errors.New("no home")
+		}
+
+		// Simulate foreign UID for everything
+		geteuidFunc = func() int { return testForeignUID }
+
+		_, err := ResolveCacheDir("")
+		if err == nil {
+			t.Fatalf("expected error when all candidates fail, got nil")
+		}
+		if !errors.Is(err, ErrCacheInit) {
+			t.Fatalf("expected ErrCacheInit, got: %v", err)
+		}
+	})
+}
+
+func TestValidateCacheDirSecurity(t *testing.T) {
+	origOpen := openDirFunc
+	origFstat := fstatDirFunc
+	origFchmod := fchmodDirFunc
+	origGeteuid := geteuidFunc
+	defer func() {
+		openDirFunc = origOpen
+		fstatDirFunc = origFstat
+		fchmodDirFunc = origFchmod
+		geteuidFunc = origGeteuid
+	}()
+
+	tempDir := t.TempDir()
+
+	t.Run("non-existent directory", func(t *testing.T) {
+		err := validateCacheDirSecurity(filepath.Join(tempDir, "does_not_exist"))
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
+		}
+	})
+
+	t.Run("regular file instead of directory", func(t *testing.T) {
+		filePath := filepath.Join(tempDir, "regular_file")
+		if err := os.WriteFile(filePath, []byte("data"), testPerm0600); err != nil {
+			t.Fatalf("write file failed: %v", err)
+		}
+		err := validateCacheDirSecurity(filePath)
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "not a directory") {
+			t.Fatalf("expected 'not a directory' in error: %v", err)
+		}
+	})
+
+	t.Run("symlink to directory", func(t *testing.T) {
+		target := filepath.Join(tempDir, "sym_target")
+		if err := os.MkdirAll(target, testPerm0700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		link := filepath.Join(tempDir, "sym_link")
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatalf("symlink failed: %v", err)
+		}
+		err := validateCacheDirSecurity(link)
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "cannot be a symlink") {
+			t.Fatalf("expected 'cannot be a symlink' in error: %v", err)
+		}
+	})
+
+	t.Run("fstat failure", func(t *testing.T) {
+		fstatDirFunc = func(fd int, stat *unix.Stat_t) error {
+			return errors.New("simulated fstat failure")
+		}
+		defer func() { fstatDirFunc = origFstat }()
+		err := validateCacheDirSecurity(tempDir)
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "unable to fstat cache directory descriptor") {
+			t.Fatalf("expected 'unable to fstat cache directory descriptor' in error: %v", err)
+		}
+	})
+
+	t.Run("valid 0700 and 0750 directories", func(t *testing.T) {
+		dir700 := filepath.Join(tempDir, "valid_700")
+		if err := os.MkdirAll(dir700, testPerm0700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		if err := validateCacheDirSecurity(dir700); err != nil {
+			t.Fatalf("expected valid 0700 directory, got err: %v", err)
+		}
+
+		dir750 := filepath.Join(tempDir, "valid_750")
+		if err := os.MkdirAll(dir750, testPerm0750); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		if err := os.Chmod(dir750, testPerm0750); err != nil {
+			t.Fatalf("chmod failed: %v", err)
+		}
+		if err := validateCacheDirSecurity(dir750); err != nil {
+			t.Fatalf("expected valid 0750 directory, got err: %v", err)
+		}
+	})
+
+	t.Run("open generic failure", func(t *testing.T) {
+		openDirFunc = func(string) (int, error) {
+			return -1, errors.New("simulated open permission denied")
+		}
+		defer func() { openDirFunc = origOpen }()
+		err := validateCacheDirSecurity(tempDir)
+		if err == nil || !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir on generic open failure, got: %v", err)
+		}
+	})
+
+	t.Run("negative euid", func(t *testing.T) {
+		geteuidFunc = func() int { return -1 }
+		defer func() { geteuidFunc = origGeteuid }()
+		err := validateCacheDirSecurity(tempDir)
+		if err == nil || !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir on negative euid, got: %v", err)
+		}
+	})
+
+	t.Run("remediate fstat failure after chmod", func(t *testing.T) {
+		insecureDir := filepath.Join(tempDir, "remed_fstat_fail")
+		if err := os.MkdirAll(insecureDir, testPerm0777); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		_ = os.Chmod(insecureDir, testPerm0777)
+
+		callCount := 0
+		fstatDirFunc = func(fd int, stat *unix.Stat_t) error {
+			callCount++
+			if callCount == 1 {
+				return origFstat(fd, stat)
+			}
+			return errors.New("simulated post-chmod fstat failure")
+		}
+		defer func() { fstatDirFunc = origFstat }()
+
+		_, err := OpenAndValidateCacheDirFD(insecureDir, true)
+		if err == nil || !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir on post-chmod fstat failure, got: %v", err)
+		}
+	})
+
+	t.Run("remediate chmod leaves write bits", func(t *testing.T) {
+		insecureDir := filepath.Join(tempDir, "remed_still_insecure")
+		if err := os.MkdirAll(insecureDir, testPerm0777); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		_ = os.Chmod(insecureDir, testPerm0777)
+
+		fchmodDirFunc = func(int, uint32) error {
+			return nil // simulate fchmod returned success without actually changing mode
+		}
+		defer func() { fchmodDirFunc = origFchmod }()
+
+		_, err := OpenAndValidateCacheDirFD(insecureDir, true)
+		if err == nil || !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir when write bits remain, got: %v", err)
+		}
+	})
+}
+
+func TestIsDirOwnedByCurrentUID(t *testing.T) {
+	tempDir := t.TempDir()
+	fi, err := os.Lstat(tempDir)
+	if err != nil {
+		t.Fatalf("lstat failed: %v", err)
+	}
+	if !isDirOwnedByCurrentUID(fi) {
+		t.Fatalf("expected tempDir to be owned by current UID")
+	}
+
+	fakeFI := mockFileInfo{name: "fake", isDir: true, sys: nil}
+	if isDirOwnedByCurrentUID(fakeFI) {
+		t.Fatalf("expected fakeFI without Stat_t to return false")
+	}
+
+	origGeteuid := geteuidFunc
+	defer func() { geteuidFunc = origGeteuid }()
+	geteuidFunc = func() int { return -1 }
+	if isDirOwnedByCurrentUID(fi) {
+		t.Fatalf("expected negative euid to return false")
 	}
 }
 
