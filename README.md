@@ -215,6 +215,20 @@ func main() {
 }
 ```
 
+### Locating Original Executable & Sibling Assets (`runtimeinit.Executable`)
+When running packaged inside a microfat binary, child payloads execute via anonymous `memfd` in RAM where `os.Executable()` resolves to `memfd:microfat_payload (deleted)`. Use `runtimeinit.Executable()` to retrieve the path to the original fat binary for locating neighboring configuration files, assets, plugins, or sibling CLI binaries:
+
+```go
+exePath, err := runtimeinit.Executable()
+if err != nil {
+	log.Fatalf("cannot determine executable path: %v", err)
+}
+configPath := filepath.Join(filepath.Dir(exePath), "config.yaml")
+```
+
+> [!NOTE]
+> **Authenticity Boundary**: `MICROFAT_ORIGINAL_EXE` and `runtimeinit.Executable()` are informational asset-resolution hints. They must NOT be used as cryptographic identity, access-control tokens, or trusted binary origin claims.
+
 ---
 
 ## Runtime Meta-Commands

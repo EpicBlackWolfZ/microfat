@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strconv"
@@ -37,8 +38,28 @@ var (
 	readLimitsFunc     = cgroup.ReadLimits
 	readLimitsFromFunc = cgroup.ReadLimitsFrom
 	getenvFunc         = os.Getenv
+	executableFunc     = os.Executable
+	absFunc            = filepath.Abs
 	stderrWriter       io.Writer = os.Stderr
 )
+
+// Executable returns the path of the original fat binary if executed via microfat,
+// or falls back to os.Executable() for standard execution.
+//
+// Note: When running under microfat, this value is derived from the launcher-provided
+// environment hint (MICROFAT_ORIGINAL_EXE) and is intended strictly for informational
+// asset resolution (such as locating neighboring configuration files, assets, plugins,
+// or sibling CLI binaries). Applications and libraries must NOT use this value as a
+// cryptographic identity, access-control token, or trusted binary origin.
+func Executable() (string, error) {
+	if origExe := strings.TrimSpace(getenvFunc(format.EnvOriginalExe)); origExe != "" {
+		if abs, err := absFunc(origExe); err == nil {
+			return abs, nil
+		}
+		return filepath.Clean(origExe), nil
+	}
+	return executableFunc()
+}
 
 // Result contains the outcome and resolved parameters of a container auto-tuning operation.
 type Result struct {

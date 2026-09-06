@@ -1067,3 +1067,185 @@ func TestRuntimeInit_ProgrammaticSubprocess(t *testing.T) {
 		t.Errorf("expected 'profile=latency_critical gogc=75' in stdout, got: %s", stdout)
 	}
 }
+
+func TestExecutable(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get current working directory: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		envVal      string
+		mockExec    func() (string, error)
+		mockAbs     func(string) (string, error)
+		wantPath    string
+		wantErr     bool
+		wantErrText string
+	}{
+		{
+			name:     "OriginalExeAbsolutePath",
+			envVal:   "/usr/local/bin/myapp",
+			wantPath: "/usr/local/bin/myapp",
+		},
+		{
+			name:     "OriginalExeRelativePath",
+			envVal:   "bin/myapp",
+			wantPath: filepath.Join(wd, "bin", "myapp"),
+		},
+		{
+			name:     "OriginalExeDotSegments",
+			envVal:   "/opt/app/../app/./bin/myapp",
+			wantPath: "/opt/app/bin/myapp",
+		},
+		{
+			name:     "OriginalExeAbsError_FallsBackToClean",
+			envVal:   "foo/../bar",
+			mockAbs:  func(string) (string, error) { return "", errors.New("simulated abs error") },
+			wantPath: "bar",
+		},
+		{
+			name:     "OriginalExeWhitespaceTrimmed",
+			envVal:   "   /usr/local/bin/myapp   ",
+			wantPath: "/usr/local/bin/myapp",
+		},
+		{
+			name:     "OriginalExeWhitespaceOnly_FallsBackToOsExecutable",
+			envVal:   "   \t\n ",
+			mockExec: func() (string, error) {
+				return "/fallback/binary", nil
+			},
+			wantPath: "/fallback/binary",
+		},
+		{
+			name:   "FallbackToOsExecutableSuccess",
+			envVal: "",
+			mockExec: func() (string, error) {
+				return "/fallback/binary", nil
+			},
+			wantPath: "/fallback/binary",
+		},
+		{
+			name:   "FallbackToOsExecutableError",
+			envVal: "",
+			mockExec: func() (string, error) {
+				return "", errors.New("cannot determine executable")
+			},
+			wantErr:     true,
+			wantErrText: "cannot determine executable",
+		},
+		{
+			name:   "FallbackToDefaultOsExecutable",
+			envVal: "",
+			mockExec: nil, // exercises default executableFunc (os.Executable)
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			origExec := executableFunc
+			origAbs := absFunc
+			defer func() {
+				executableFunc = origExec
+				absFunc = origAbs
+			}()
+
+			if tt.mockExec != nil {
+				executableFunc = tt.mockExec
+			}
+			if tt.mockAbs != nil {
+				absFunc = tt.mockAbs
+			}
+
+			mockEnv := make(map[string]string)
+			if tt.envVal != "" {
+				mockEnv[format.EnvOriginalExe] = tt.envVal
+			}
+
+			withIsolatedEnv(t, mockEnv, nil, nil, func(_ *int64, _ *int, _ *int, _ *bytes.Buffer) {
+				got, err := Executable()
+				if tt.wantErr {
+					if err == nil {
+						t.Fatalf("expected error containing %q, got nil", tt.wantErrText)
+					}
+					if !strings.Contains(err.Error(), tt.wantErrText) {
+						t.Errorf("expected error %q, got %v", tt.wantErrText, err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if tt.mockExec == nil && tt.envVal == "" {
+					expected, expErr := os.Executable()
+					if expErr != nil {
+						t.Fatalf("os.Executable failed: %v", expErr)
+					}
+					if got != expected {
+						t.Errorf("got %q, want %q from os.Executable", got, expected)
+					}
+					return
+				}
+				if got != tt.wantPath {
+					t.Errorf("got %q, want %q", got, tt.wantPath)
+				}
+			})
+		})
+	}
+}
+
+func TestRuntimeInit_ExecutableSubprocess(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := findRepoRoot(t)
+	fixturePath := "runtimeinit/testdata/executable_app/main.go"
+
+	tests := []struct {
+		name       string
+		env        []string
+		wantPrefix string
+		wantExact  string
+	}{
+		{
+			name:      "ExplicitAbsolutePath",
+			env:       []string{format.EnvOriginalExe + "=/opt/custom/bin/app"},
+			wantExact: "/opt/custom/bin/app",
+		},
+		{
+			name:      "RelativePathNormalized",
+			env:       []string{format.EnvOriginalExe + "=bin/app"},
+			wantExact: filepath.Join(repoRoot, "bin", "app"),
+		},
+		{
+			name:       "FallbackWhenUnset",
+			env:        nil,
+			wantPrefix: "/",
+		},
+		{
+			name:       "FallbackWhenWhitespaceOnly",
+			env:        []string{format.EnvOriginalExe + "=   \t  "},
+			wantPrefix: "/",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, err := runFixture(t, repoRoot, fixturePath, tt.env)
+			if err != nil {
+				t.Fatalf("runFixture failed: %v, stderr: %s", err, stderr)
+			}
+			trimmed := strings.TrimSpace(stdout)
+			if tt.wantExact != "" && trimmed != tt.wantExact {
+				t.Errorf("got stdout %q, want %q", trimmed, tt.wantExact)
+			}
+			if tt.wantPrefix != "" && !strings.HasPrefix(trimmed, tt.wantPrefix) {
+				t.Errorf("got stdout %q, expected prefix %q", trimmed, tt.wantPrefix)
+			}
+		})
+	}
+}
+

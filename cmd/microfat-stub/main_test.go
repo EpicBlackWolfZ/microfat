@@ -102,7 +102,7 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 	}
 
 	// 1. Standard auto-tune with metadata injection
-	env, _ := buildAutoTunedEnviron(base, entry, format.ExecModeMemfd, hostInfo, testPolicyRes)
+	env, _ := buildAutoTunedEnviron("", base, entry, format.ExecModeMemfd, hostInfo, testPolicyRes)
 	hasVariant := false
 	hasHostArch := false
 	hasHostLevel := false
@@ -149,14 +149,14 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 
 	// 2. Opt-out via MICROFAT_AUTOTUNE=0
 	t.Setenv("MICROFAT_AUTOTUNE", "0")
-	envOptOut, _ := buildAutoTunedEnviron(base, entry, format.ExecModeCache, hostInfo, microarch.PolicyResult{})
+	envOptOut, _ := buildAutoTunedEnviron("", base, entry, format.ExecModeCache, hostInfo, microarch.PolicyResult{})
 	if len(envOptOut) < len(base)+7 { // base + 7 injected metadata vars
 		t.Errorf("expected opt-out env to have at least len %d, got %d", len(base)+7, len(envOptOut))
 	}
 
 	// 3. Opt-out via MICROFAT_AUTOTUNE=false
 	t.Setenv("MICROFAT_AUTOTUNE", "false")
-	envFalse, _ := buildAutoTunedEnviron(base, entry, format.ExecModeCache, hostInfo, microarch.PolicyResult{})
+	envFalse, _ := buildAutoTunedEnviron("", base, entry, format.ExecModeCache, hostInfo, microarch.PolicyResult{})
 	if len(envFalse) != len(envOptOut) {
 		t.Errorf("expected opt-out false to match length")
 	}
@@ -164,7 +164,7 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 	// 4. Preserve existing GOMEMLIMIT and GOMAXPROCS
 	t.Setenv("MICROFAT_AUTOTUNE", "1")
 	existing := []string{"GOMEMLIMIT=1GiB", "GOMAXPROCS=8"}
-	envPreserve, _ := buildAutoTunedEnviron(existing, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
+	envPreserve, _ := buildAutoTunedEnviron("", existing, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
 	var foundMem, foundProcs bool
 	for _, e := range envPreserve {
 		if e == "GOMEMLIMIT=1GiB" {
@@ -180,16 +180,16 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 
 	// 5. Custom memory ratio variations
 	t.Setenv("MICROFAT_MEM_RATIO", "0.85")
-	_, _ = buildAutoTunedEnviron(base, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
+	_, _ = buildAutoTunedEnviron("", base, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
 
 	t.Setenv("MICROFAT_MEM_RATIO", "invalid")
-	_, _ = buildAutoTunedEnviron(base, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
+	_, _ = buildAutoTunedEnviron("", base, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
 
 	t.Setenv("MICROFAT_MEM_RATIO", "1.5")
-	_, _ = buildAutoTunedEnviron(base, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
+	_, _ = buildAutoTunedEnviron("", base, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
 
 	t.Setenv("MICROFAT_MEM_RATIO", "-0.2")
-	_, _ = buildAutoTunedEnviron(base, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
+	_, _ = buildAutoTunedEnviron("", base, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
 
 	// 6. Test with mocked active cgroup limits
 	oldReadCgroup := readCgroupLimitsFunc
@@ -200,7 +200,7 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 		return cgroup.Limits{CgroupVersion: cgroup.VersionUnknown}, errors.New("cgroup error")
 	}
 	t.Setenv(format.EnvDebug, "1")
-	envErr, limitsErr := buildAutoTunedEnviron([]string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
+	envErr, limitsErr := buildAutoTunedEnviron("", []string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
 	if limitsErr != nil {
 		t.Fatalf("expected nil limits on cgroup read error, got %+v", limitsErr)
 	}
@@ -214,7 +214,9 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 	readCgroupLimitsFunc = func() (cgroup.Limits, error) {
 		return cgroup.Limits{CgroupVersion: cgroup.VersionUnknown}, nil
 	}
-	envUnknown, limitsUnknown := buildAutoTunedEnviron([]string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
+	envUnknown, limitsUnknown := buildAutoTunedEnviron(
+		"", []string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{},
+	)
 	if limitsUnknown != nil {
 		t.Fatalf("expected nil limits on VersionUnknown, got %+v", limitsUnknown)
 	}
@@ -234,7 +236,7 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 		}, nil
 	}
 
-	envCgroup, limits := buildAutoTunedEnviron([]string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
+	envCgroup, limits := buildAutoTunedEnviron("", []string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
 	if limits == nil || limits.CgroupVersion != cgroup.VersionV2 {
 		t.Fatalf("expected active cgroup limits, got %+v", limits)
 	}
@@ -319,7 +321,7 @@ func TestBuildAutoTunedEnviron_DeduplicationAndReplacement(t *testing.T) {
 		"GOMAXPROCS=4",
 	}
 
-	env, _ := buildAutoTunedEnviron(base, entry, format.ExecModeMemfd, hostInfo, testPolicyRes)
+	env, _ := buildAutoTunedEnviron("", base, entry, format.ExecModeMemfd, hostInfo, testPolicyRes)
 
 	// Verify all keys are strictly unique
 	seenKeys := make(map[string]int)
@@ -732,7 +734,7 @@ func TestExecuteVariantExecutionPaths(t *testing.T) {
 	}
 	policyRes := microarch.PolicyResult{}
 	if err := executeVariant(
-		rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now(),
+		rawFile.Name(), rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now(),
 	); err != nil {
 		t.Errorf("expected success for executeVariant, got %v", err)
 	}
@@ -741,7 +743,7 @@ func TestExecuteVariantExecutionPaths(t *testing.T) {
 	execveFunc = func(argv0 string, argv []string, envv []string) error {
 		return errors.New("simulated execve error")
 	}
-	err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+	err := executeVariant(rawFile.Name(), rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
 	if err == nil || !strings.Contains(err.Error(), "cache fallback execve failed") {
 		t.Errorf("expected cache fallback error, got %v", err)
 	}
@@ -751,7 +753,9 @@ func TestExecuteVariantExecutionPaths(t *testing.T) {
 		return nil
 	}
 	if err := executeViaCache(
-		rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, errors.New("memfd err"), time.Now(),
+		rawFile.Name(), rawFile, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, errors.New("memfd err"), time.Now(),
 	); err != nil {
 		t.Errorf("expected success for existing cached binary, got %v", err)
 	}
@@ -760,7 +764,9 @@ func TestExecuteVariantExecutionPaths(t *testing.T) {
 	freshCacheDir := filepath.Join(tempDir, "fresh_cache_dir")
 	t.Setenv("XDG_CACHE_HOME", freshCacheDir)
 	if err := executeViaCache(
-		rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, errors.New("memfd err"), time.Now(),
+		rawFile.Name(), rawFile, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, errors.New("memfd err"), time.Now(),
 	); err != nil {
 		t.Errorf("expected success for fresh cache directory extraction, got %v", err)
 	}
@@ -768,7 +774,9 @@ func TestExecuteVariantExecutionPaths(t *testing.T) {
 	// 5. Fallback when XDG_CACHE_HOME is empty (uses user home dir)
 	t.Setenv("XDG_CACHE_HOME", "")
 	if err := executeViaCache(
-		rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, errors.New("memfd err"), time.Now(),
+		rawFile.Name(), rawFile, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, errors.New("memfd err"), time.Now(),
 	); err != nil {
 		t.Errorf("expected success when XDG_CACHE_HOME is empty, got %v", err)
 	}
@@ -780,7 +788,9 @@ func TestExecuteVariantExecutionPaths(t *testing.T) {
 		return "", errors.New("no home dir")
 	}
 	if err := executeViaCache(
-		rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, errors.New("memfd err"), time.Now(),
+		rawFile.Name(), rawFile, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, errors.New("memfd err"), time.Now(),
 	); err != nil {
 		t.Errorf("expected success when userHomeDir fails, got %v", err)
 	}
@@ -789,7 +799,9 @@ func TestExecuteVariantExecutionPaths(t *testing.T) {
 	// 6. Fallback when primary cacheDir cannot be created (forbidden path)
 	t.Setenv("XDG_CACHE_HOME", "/dev/null/forbidden_path")
 	if err := executeViaCache(
-		rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, errors.New("memfd err"), time.Now(),
+		rawFile.Name(), rawFile, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, errors.New("memfd err"), time.Now(),
 	); err != nil {
 		t.Errorf("expected success falling back to /tmp/.microfat-uid, got %v", err)
 	}
@@ -798,7 +810,9 @@ func TestExecuteVariantExecutionPaths(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "/dev/null/forbidden_primary")
 	t.Setenv("TMPDIR", "/dev/null/forbidden_secondary")
 	if err := executeViaCache(
-		rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, errors.New("memfd err"), time.Now(),
+		rawFile.Name(), rawFile, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, errors.New("memfd err"), time.Now(),
 	); err == nil {
 		t.Errorf("expected error when both cache directories cannot be created")
 	}
@@ -810,7 +824,9 @@ func TestExecuteVariantExecutionPaths(t *testing.T) {
 	}
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(tempDir, "bad_cache_extract"))
 	err = executeViaCache(
-		rawFile, badEntryCache, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, errors.New("memfd err"), time.Now(),
+		rawFile.Name(), rawFile, badEntryCache, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, errors.New("memfd err"), time.Now(),
 	)
 	if err == nil {
 		t.Errorf("expected error extracting invalid entry in executeViaCache")
@@ -826,7 +842,9 @@ func TestExecuteVariantExecutionPaths(t *testing.T) {
 		Level: "v1", Offset: 0, CompressedSize: 10, UncompressedSize: 50, SHA256: "brand_new_hash_456",
 	}
 	err = executeViaCache(
-		rawFile, newHashEntry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, errors.New("memfd err"), time.Now(),
+		rawFile.Name(), rawFile, newHashEntry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, errors.New("memfd err"), time.Now(),
 	)
 	if err == nil {
 		t.Errorf("expected error when cache dir is not writable")
@@ -834,7 +852,7 @@ func TestExecuteVariantExecutionPaths(t *testing.T) {
 
 	// 9. Error in executeViaMemfd when variant extraction fails
 	if err := executeViaMemfd(
-		rawFile, badEntryCache, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now(),
+		rawFile.Name(), rawFile, badEntryCache, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now(),
 	); err == nil {
 		t.Errorf("expected error in executeViaMemfd when extractVariantToWriter fails")
 	}
@@ -844,7 +862,7 @@ func TestExecuteVariantExecutionPaths(t *testing.T) {
 		return errors.New("memfd execve failed")
 	}
 	if err := executeViaMemfd(
-		rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now(),
+		rawFile.Name(), rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now(),
 	); err == nil {
 		t.Errorf("expected error in executeViaMemfd when execve returns error")
 	}
@@ -1422,7 +1440,7 @@ func TestExecuteVariant_SyscallMocking(t *testing.T) {
 				return nil
 			}
 
-			err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+			err := executeVariant(rawFile.Name(), rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
 			if err != nil {
 				t.Fatalf("expected graceful fallback to cache, got error: %v", err)
 			}
@@ -1466,7 +1484,11 @@ func TestExecuteVariant_TruncatedCacheRecovery(t *testing.T) {
 	_ = os.WriteFile(cachedPath, []byte{}, 0o755)
 
 	t.Setenv(format.EnvDebug, "1")
-	err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+	err := executeViaCache(
+		rawFile.Name(), rawFile, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, nil, time.Now(),
+	)
 	if err != nil {
 		t.Fatalf("executeViaCache failed on zero-byte cache file: %v", err)
 	}
@@ -1483,7 +1505,11 @@ func TestExecuteVariant_TruncatedCacheRecovery(t *testing.T) {
 	// 2. Partial/corrupted size cache file (half length)
 	_ = os.WriteFile(cachedPath, payloadData[:len(payloadData)/2], 0o755)
 	executedPath = ""
-	err = executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+	err = executeViaCache(
+		rawFile.Name(), rawFile, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, nil, time.Now(),
+	)
 	if err != nil {
 		t.Fatalf("executeViaCache failed on partial cache file: %v", err)
 	}
@@ -1630,7 +1656,7 @@ func TestExecuteVariant_StrictEnvironmentMatrix(t *testing.T) {
 		}
 		base := []string{"USER=deployer", "LANG=en_US.UTF-8"}
 
-		err := executeVariant(rawFile, entry, nil, []string{testAppArg}, base, hostInfo, policyRes, time.Now())
+		err := executeVariant(rawFile.Name(), rawFile, entry, nil, []string{testAppArg}, base, hostInfo, policyRes, time.Now())
 		if err != nil {
 			t.Fatalf("executeVariant failed: %v", err)
 		}
@@ -1775,7 +1801,7 @@ func TestExecuteVariant_DiagnosticHints(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stderr = w
 
-		err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		err := executeVariant(rawFile.Name(), rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
 		_ = w.Close()
 		os.Stderr = oldStderr
 
@@ -1806,7 +1832,7 @@ func TestExecuteVariant_DiagnosticHints(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stderr = w
 
-		err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		err := executeVariant(rawFile.Name(), rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
 		_ = w.Close()
 		os.Stderr = oldStderr
 
@@ -1838,7 +1864,7 @@ func TestExecuteVariant_DiagnosticHints(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stderr = w
 
-		err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		err := executeVariant(rawFile.Name(), rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
 		_ = w.Close()
 		os.Stderr = oldStderr
 
@@ -2070,7 +2096,7 @@ func TestBuildAutoTunedEnviron_GCProfiles(t *testing.T) {
 
 	t.Run("LatencyCriticalProfile", func(t *testing.T) {
 		t.Setenv(format.EnvGCProfile, "latency_critical")
-		env, limits := buildAutoTunedEnviron(nil, entry, format.ExecModeMemfd, hostInfo, policyRes)
+		env, limits := buildAutoTunedEnviron("", nil, entry, format.ExecModeMemfd, hostInfo, policyRes)
 		if limits == nil {
 			t.Fatalf("expected limits")
 		}
@@ -2091,7 +2117,7 @@ func TestBuildAutoTunedEnviron_GCProfiles(t *testing.T) {
 
 	t.Run("BatchETLProfile", func(t *testing.T) {
 		t.Setenv(format.EnvGCProfile, "batch_etl")
-		env, _ := buildAutoTunedEnviron(nil, entry, format.ExecModeMemfd, hostInfo, policyRes)
+		env, _ := buildAutoTunedEnviron("", nil, entry, format.ExecModeMemfd, hostInfo, policyRes)
 		envMap := make(map[string]string)
 		for _, e := range env {
 			parts := strings.SplitN(e, "=", 2)
@@ -2107,7 +2133,7 @@ func TestBuildAutoTunedEnviron_GCProfiles(t *testing.T) {
 	t.Run("ExplicitGOGCPrecedence", func(t *testing.T) {
 		t.Setenv(format.EnvGCProfile, "latency_critical")
 		baseEnv := []string{"GOGC=120"}
-		env, _ := buildAutoTunedEnviron(baseEnv, entry, format.ExecModeMemfd, hostInfo, policyRes)
+		env, _ := buildAutoTunedEnviron("", baseEnv, entry, format.ExecModeMemfd, hostInfo, policyRes)
 		gogcCount := 0
 		var finalGOGC string
 		for _, e := range env {
@@ -2366,7 +2392,7 @@ func TestExplicitMemfdModeEnforcement(t *testing.T) {
 			return -1, syscall.EPERM
 		}
 
-		err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		err := executeVariant(rawFile.Name(), rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
 		if err == nil {
 			t.Fatal("expected executeVariant to fail, got nil")
 		}
@@ -2394,7 +2420,7 @@ func TestExplicitMemfdModeEnforcement(t *testing.T) {
 			return syscall.EPERM
 		}
 
-		err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		err := executeVariant(rawFile.Name(), rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
 		if err == nil {
 			t.Fatal("expected executeVariant to fail on seal failure in memfd mode, got nil")
 		}
@@ -2429,7 +2455,7 @@ func TestExplicitMemfdModeEnforcement(t *testing.T) {
 			return syscall.ENOSYS
 		}
 
-		err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		err := executeVariant(rawFile.Name(), rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
 		if err != nil {
 			t.Fatalf("expected fallback to cache in auto mode on seal failure, got error: %v", err)
 		}
@@ -2476,7 +2502,7 @@ func TestStub_SecurityInvariants(t *testing.T) {
 			return nil
 		}
 
-		err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		err := executeVariant(rawFile.Name(), rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
 		if err != nil {
 			t.Fatalf("executeVariant failed: %v", err)
 		}
@@ -2495,7 +2521,7 @@ func TestStub_SecurityInvariants(t *testing.T) {
 			t.Fatalf("writing tampered file: %v", err)
 		}
 
-		err = executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		err = executeVariant(rawFile.Name(), rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
 		if err != nil {
 			t.Fatalf("executeVariant failed on re-extraction: %v", err)
 		}
@@ -2538,7 +2564,7 @@ func TestStub_SecurityInvariants(t *testing.T) {
 			return nil
 		}
 
-		err := executeVariant(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
+		err := executeVariant(rawFile.Name(), rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, time.Now())
 		if err != nil {
 			t.Fatalf("executeVariant failed: %v", err)
 		}
@@ -2578,12 +2604,16 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 		if err := os.MkdirAll(targetPath, 0o700); err != nil {
 			t.Fatalf("mkdir targetPath failed: %v", err)
 		}
-		if err := os.WriteFile(filepath.Join(targetPath, "blocking_child"), []byte("blocker"), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(targetPath, "blocking_child"), []byte("blocker"), 0o600); err != nil {
 			t.Fatalf("write child file failed: %v", err)
 		}
 
 		primaryErr := errors.New("simulated primary memfd exhaustion")
-		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, primaryErr, time.Now())
+		err := executeViaCache(
+			rawFile.Name(), rawFile, entry, nil,
+			[]string{testAppArg}, []string{testPathEnv},
+			hostInfo, policyRes, primaryErr, time.Now(),
+		)
 		if err == nil {
 			t.Fatalf("expected error when rename fails, got nil")
 		}
@@ -2616,7 +2646,11 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 			return nil
 		}
 
-		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		err := executeViaCache(
+			rawFile.Name(), rawFile, entry, nil,
+			[]string{testAppArg}, []string{testPathEnv},
+			hostInfo, policyRes, nil, time.Now(),
+		)
 		if err != nil {
 			t.Fatalf("expected re-extraction and successful execution, got %v", err)
 		}
@@ -2641,7 +2675,11 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 			return nil
 		}
 
-		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		err := executeViaCache(
+			rawFile.Name(), rawFile, entry, nil,
+			[]string{testAppArg}, []string{testPathEnv},
+			hostInfo, policyRes, nil, time.Now(),
+		)
 		if err != nil {
 			t.Fatalf("expected re-extraction on truncated cache file, got %v", err)
 		}
@@ -2655,7 +2693,11 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 			return errors.New("execve simulated failure")
 		}
 
-		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		err := executeViaCache(
+			rawFile.Name(), rawFile, entry, nil,
+			[]string{testAppArg}, []string{testPathEnv},
+			hostInfo, policyRes, nil, time.Now(),
+		)
 		if err == nil {
 			t.Fatalf("expected execve failure, got nil")
 		}
@@ -2699,7 +2741,11 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 			return -1, errors.New("simulated open error after rename")
 		}
 
-		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		err := executeViaCache(
+			rawFile.Name(), rawFile, entry, nil,
+			[]string{testAppArg}, []string{testPathEnv},
+			hostInfo, policyRes, nil, time.Now(),
+		)
 		if err == nil {
 			t.Fatalf("expected error when openCachedBinary fails after rename, got nil")
 		}
@@ -2758,7 +2804,11 @@ func TestCacheExecution_SymlinkRefusalAndTOCTOUDefense(t *testing.T) {
 			return nil
 		}
 
-		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		err := executeViaCache(
+			rawFile.Name(), rawFile, entry, nil,
+			[]string{testAppArg}, []string{testPathEnv},
+			hostInfo, policyRes, nil, time.Now(),
+		)
 		if err == nil {
 			t.Fatalf("expected error refusing symlink execution, got nil")
 		}
@@ -2831,7 +2881,11 @@ func TestCacheExecution_SymlinkRefusalAndTOCTOUDefense(t *testing.T) {
 			return nil
 		}
 
-		err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+		err := executeViaCache(
+			rawFile.Name(), rawFile, entry, nil,
+			[]string{testAppArg}, []string{testPathEnv},
+			hostInfo, policyRes, nil, time.Now(),
+		)
 		if err != nil {
 			t.Fatalf("executeViaCache failed: %v", err)
 		}
@@ -3085,7 +3139,11 @@ func TestCacheExecution_PostExtractionValidationFailure(t *testing.T) {
 		return origOpen(corruptedPath)
 	}
 
-	err := executeViaCache(rawFile, entry, nil, []string{testAppArg}, []string{testPathEnv}, hostInfo, policyRes, nil, time.Now())
+	err := executeViaCache(
+		rawFile.Name(), rawFile, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, nil, time.Now(),
+	)
 	if err == nil {
 		t.Fatalf("expected error when post-extraction validation fails, got nil")
 	}
@@ -3289,6 +3347,229 @@ func TestParsePrewarmArgs(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildAutoTunedEnviron_OriginalExeReflection(t *testing.T) {
+	t.Parallel()
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get current working directory: %v", err)
+	}
+
+	entry := &format.VariantEntry{
+		Level:            "v3",
+		Offset:           0,
+		CompressedSize:   500,
+		UncompressedSize: 1000,
+		SHA256:           "abcdef123456",
+	}
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{}
+
+	tests := []struct {
+		name        string
+		selfPath    string
+		baseEnv     []string
+		wantOrigExe string
+		wantPresent bool
+	}{
+		{
+			name:        "EmptySelfPath_NotPresent",
+			selfPath:    "",
+			baseEnv:     []string{testPathEnv},
+			wantPresent: false,
+		},
+		{
+			name:        "AbsolutePath",
+			selfPath:    "/usr/bin/myfat",
+			baseEnv:     []string{testPathEnv},
+			wantOrigExe: "/usr/bin/myfat",
+			wantPresent: true,
+		},
+		{
+			name:        "RelativePathNormalizedToAbsolute",
+			selfPath:    "relative/fat_app",
+			baseEnv:     []string{testPathEnv},
+			wantOrigExe: filepath.Join(wd, "relative", "fat_app"),
+			wantPresent: true,
+		},
+		{
+			name:        "PathWithDotSegmentsCleaned",
+			selfPath:    "/usr/local/../bin/./myapp",
+			baseEnv:     []string{testPathEnv},
+			wantOrigExe: "/usr/bin/myapp",
+			wantPresent: true,
+		},
+		{
+			name:        "OverridesPreExistingEnvInBase",
+			selfPath:    "/usr/bin/new_binary",
+			baseEnv:     []string{testPathEnv, format.EnvOriginalExe + "=/legacy/old_binary"},
+			wantOrigExe: "/usr/bin/new_binary",
+			wantPresent: true,
+		},
+		{
+			name:        "EmptySelfPath_StripsBaseEnvOriginalExe",
+			selfPath:    "",
+			baseEnv:     []string{testPathEnv, format.EnvOriginalExe + "=/spoofed/path"},
+			wantPresent: false,
+		},
+		{
+			name:        "WhitespaceSelfPath_StripsBaseEnvOriginalExe",
+			selfPath:    "   ",
+			baseEnv:     []string{testPathEnv, format.EnvOriginalExe + "=/spoofed/path"},
+			wantPresent: false,
+		},
+		{
+			name:        "WhitespaceSurroundedSelfPath_TrimmedAndNormalized",
+			selfPath:    "  /usr/bin/trimmed_binary  ",
+			baseEnv:     []string{testPathEnv},
+			wantOrigExe: "/usr/bin/trimmed_binary",
+			wantPresent: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			env, _ := buildAutoTunedEnviron(tt.selfPath, tt.baseEnv, entry, format.ExecModeMemfd, hostInfo, policyRes)
+
+			var gotOrigExe string
+			var found bool
+			seenCount := 0
+			for _, e := range env {
+				if strings.HasPrefix(e, format.EnvOriginalExe+"=") {
+					seenCount++
+					found = true
+					gotOrigExe = strings.TrimPrefix(e, format.EnvOriginalExe+"=")
+				}
+			}
+
+			if tt.wantPresent {
+				if !found {
+					t.Fatalf("expected %s in env, but not found", format.EnvOriginalExe)
+				}
+				if seenCount != 1 {
+					t.Errorf("expected exactly 1 occurrence of %s, got %d", format.EnvOriginalExe, seenCount)
+				}
+				if gotOrigExe != tt.wantOrigExe {
+					t.Errorf("got %s=%q, want %q", format.EnvOriginalExe, gotOrigExe, tt.wantOrigExe)
+				}
+			} else if found {
+				t.Errorf("expected %s to NOT be present, got %q", format.EnvOriginalExe, gotOrigExe)
+			}
+		})
+	}
+}
+
+func TestExecution_OriginalExePropagation(t *testing.T) {
+	tempDir := t.TempDir()
+	payload := []byte("ORIGINAL_EXE_PROPAGATION_TEST_PAYLOAD")
+	entry, rawFile := createDummyVariantFile(t, tempDir, payload)
+	defer rawFile.Close()
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{}
+
+	origExec := execveFunc
+	defer func() { execveFunc = origExec }()
+
+	expectedAbsPath, err := filepath.Abs(rawFile.Name())
+	if err != nil {
+		t.Fatalf("resolving abs path: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		execMode string
+		invoke   func(selfPath string, baseEnv []string) error
+	}{
+		{
+			name:     "MemfdExecutionMode",
+			execMode: format.ExecModeMemfd,
+			invoke: func(selfPath string, baseEnv []string) error {
+				return executeViaMemfd(selfPath, rawFile, entry, nil, []string{testAppArg}, baseEnv, hostInfo, policyRes, time.Now())
+			},
+		},
+		{
+			name:     "CacheExecutionMode",
+			execMode: format.ExecModeCache,
+			invoke: func(selfPath string, baseEnv []string) error {
+				return executeViaCache(
+					selfPath, rawFile, entry, nil, []string{testAppArg}, baseEnv, hostInfo, policyRes, nil, time.Now(),
+				)
+			},
+		},
+		{
+			name:     "ExecuteVariantAutoMode",
+			execMode: "",
+			invoke: func(selfPath string, baseEnv []string) error {
+				return executeVariant(selfPath, rawFile, entry, nil, []string{testAppArg}, baseEnv, hostInfo, policyRes, time.Now())
+			},
+		},
+		{
+			name:     "ExecuteVariant_EmptySelfPath_FallbackToSelfFile",
+			execMode: "",
+			invoke: func(_ string, baseEnv []string) error {
+				return executeVariant("", rawFile, entry, nil, []string{testAppArg}, baseEnv, hostInfo, policyRes, time.Now())
+			},
+		},
+		{
+			name:     "ExecuteViaMemfd_EmptySelfPath_FallbackToSelfFile",
+			execMode: format.ExecModeMemfd,
+			invoke: func(_ string, baseEnv []string) error {
+				return executeViaMemfd("", rawFile, entry, nil, []string{testAppArg}, baseEnv, hostInfo, policyRes, time.Now())
+			},
+		},
+		{
+			name:     "ExecuteViaCache_EmptySelfPath_FallbackToSelfFile",
+			execMode: format.ExecModeCache,
+			invoke: func(_ string, baseEnv []string) error {
+				return executeViaCache("", rawFile, entry, nil, []string{testAppArg}, baseEnv, hostInfo, policyRes, nil, time.Now())
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.execMode != "" {
+				t.Setenv(format.EnvExecMode, tt.execMode)
+			} else {
+				t.Setenv(format.EnvExecMode, "")
+				t.Setenv(format.EnvDispatchMode, "")
+			}
+
+			var capturedEnv []string
+			execveFunc = func(argv0 string, argv []string, envv []string) error {
+				capturedEnv = envv
+				return nil
+			}
+
+			baseEnv := []string{"PATH=/bin", format.EnvOriginalExe + "=/stale/fake/path"}
+			if err := tt.invoke(rawFile.Name(), baseEnv); err != nil {
+				t.Fatalf("execution failed: %v", err)
+			}
+
+			var gotOrigExe string
+			var found bool
+			for _, e := range capturedEnv {
+				if strings.HasPrefix(e, format.EnvOriginalExe+"=") {
+					found = true
+					gotOrigExe = strings.TrimPrefix(e, format.EnvOriginalExe+"=")
+				}
+			}
+
+			if !found {
+				t.Fatalf("expected %s in execve environment, but was missing", format.EnvOriginalExe)
+			}
+			if gotOrigExe != expectedAbsPath {
+				t.Errorf("got %s=%q, want %q (overriding stale path)", format.EnvOriginalExe, gotOrigExe, expectedAbsPath)
+			}
+		})
+	}
+}
+
 
 
 
