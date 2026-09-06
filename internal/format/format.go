@@ -72,6 +72,8 @@ const (
 	EnvCgroupGOMEMLIMIT           = "MICROFAT_CGROUP_GOMEMLIMIT"
 	EnvCgroupGOMAXPROCS           = "MICROFAT_CGROUP_GOMAXPROCS"
 	EnvCgroupLimitBytes           = "MICROFAT_CGROUP_LIMIT_BYTES"
+	EnvCgroupHighBytes            = "MICROFAT_CGROUP_HIGH_BYTES"
+	EnvCgroupEffectiveLimitBytes  = "MICROFAT_CGROUP_EFFECTIVE_LIMIT_BYTES"
 	EnvCgroupCPUs                 = "MICROFAT_CGROUP_CPUS"
 	EnvCgroupGOGC                 = "MICROFAT_CGROUP_GOGC"
 	EnvCgroupGCProfile            = "MICROFAT_CGROUP_GC_PROFILE"

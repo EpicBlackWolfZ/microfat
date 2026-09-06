@@ -1315,6 +1315,37 @@ func TestRootCgroupVsUnresolvedControllers(t *testing.T) {
 		}
 	})
 
+	t.Run("CgroupV2_MemoryHighRootDetected", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		requireNoError(t, os.WriteFile(procFile, []byte("0::/\n"), 0o600))
+		requireNoError(t, os.WriteFile(filepath.Join(tempDir, cgroupV2MemoryHigh), []byte("1073741824\n"), 0o600))
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		requireNoError(t, err)
+		if limits.CgroupVersion != VersionV2 {
+			t.Errorf("expected VersionV2 when memory.high exists at root, got %d", limits.CgroupVersion)
+		}
+		if limits.MemoryHighBytes != testBytes1GB {
+			t.Errorf("expected MemoryHighBytes %d, got %d", testBytes1GB, limits.MemoryHighBytes)
+		}
+	})
+
+	t.Run("CgroupV2_MemoryHighRootMissingV2EntryInProcfs", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+		procFile := filepath.Join(tempDir, "proc_cgroup")
+		requireNoError(t, os.WriteFile(procFile, []byte("1:net_cls:/\n"), 0o600))
+		requireNoError(t, os.WriteFile(filepath.Join(tempDir, cgroupV2MemoryHigh), []byte("1073741824\n"), 0o600))
+
+		limits, err := ReadLimitsCustom(tempDir, procFile)
+		requireNoError(t, err)
+		if limits.CgroupVersion != VersionUnknown {
+			t.Errorf("expected VersionUnknown when 0:: entry is missing, got %d", limits.CgroupVersion)
+		}
+	})
+
 	t.Run("ResolveTargetDirectory_EmptyPathRejected", func(t *testing.T) {
 		t.Parallel()
 		tempDir := t.TempDir()
@@ -1411,6 +1442,214 @@ func requireNoError(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReadLimitsCgroupV2_MemoryHighConfigurations(t *testing.T) {
+	t.Parallel()
+
+	const (
+		bytes1GB = int64(1024 * 1024 * 1024)
+		bytes2GB = int64(2 * 1024 * 1024 * 1024)
+		bytes4GB = int64(4 * 1024 * 1024 * 1024)
+
+		strBytes1GB = "1073741824\n"
+		strBytes2GB = "2147483648\n"
+		strBytes4GB = "4294967296\n"
+	)
+
+	tests := []struct {
+		name              string
+		memMaxContent     string
+		memHighContent    string
+		wantMemLimitBytes int64
+		wantMemHighBytes  int64
+		wantEffective     int64
+		wantConstraining  string
+	}{
+		{
+			name:              "HighOnly_MaxIsMax",
+			memMaxContent:     "max\n",
+			memHighContent:    strBytes2GB,
+			wantMemLimitBytes: 0,
+			wantMemHighBytes:  bytes2GB,
+			wantEffective:     bytes2GB,
+			wantConstraining:  LimitConstraintHigh,
+		},
+		{
+			name:              "HighLowerThanMax",
+			memMaxContent:     strBytes4GB,
+			memHighContent:    strBytes2GB,
+			wantMemLimitBytes: bytes4GB,
+			wantMemHighBytes:  bytes2GB,
+			wantEffective:     bytes2GB,
+			wantConstraining:  LimitConstraintHigh,
+		},
+		{
+			name:              "MaxLowerThanHigh",
+			memMaxContent:     strBytes1GB,
+			memHighContent:    strBytes2GB,
+			wantMemLimitBytes: bytes1GB,
+			wantMemHighBytes:  bytes2GB,
+			wantEffective:     bytes1GB,
+			wantConstraining:  LimitConstraintMax,
+		},
+		{
+			name:              "MaxEqualsHigh",
+			memMaxContent:     strBytes2GB,
+			memHighContent:    strBytes2GB,
+			wantMemLimitBytes: bytes2GB,
+			wantMemHighBytes:  bytes2GB,
+			wantEffective:     bytes2GB,
+			wantConstraining:  LimitConstraintMax,
+		},
+		{
+			name:              "BothMaxUnlimited",
+			memMaxContent:     "max\n",
+			memHighContent:    "max\n",
+			wantMemLimitBytes: 0,
+			wantMemHighBytes:  0,
+			wantEffective:     0,
+			wantConstraining:  LimitConstraintNone,
+		},
+		{
+			name:              "MaxSet_HighMissing",
+			memMaxContent:     strBytes2GB,
+			memHighContent:    "",
+			wantMemLimitBytes: bytes2GB,
+			wantMemHighBytes:  0,
+			wantEffective:     bytes2GB,
+			wantConstraining:  LimitConstraintMax,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tempDir := t.TempDir()
+			procFile := filepath.Join(tempDir, "proc_cgroup")
+			requireNoError(t, os.WriteFile(procFile, []byte("0::/\n"), 0o600))
+
+			if tt.memMaxContent != "" {
+				requireNoError(t, os.WriteFile(filepath.Join(tempDir, cgroupV2MemoryMax), []byte(tt.memMaxContent), 0o644))
+			}
+			if tt.memHighContent != "" {
+				requireNoError(t, os.WriteFile(filepath.Join(tempDir, cgroupV2MemoryHigh), []byte(tt.memHighContent), 0o644))
+			}
+
+			limits, err := ReadLimitsCustom(tempDir, procFile)
+			requireNoError(t, err)
+
+			if limits.CgroupVersion != VersionV2 {
+				t.Errorf("expected VersionV2, got %d", limits.CgroupVersion)
+			}
+			if limits.MemoryLimitBytes != tt.wantMemLimitBytes {
+				t.Errorf("expected MemoryLimitBytes %d, got %d", tt.wantMemLimitBytes, limits.MemoryLimitBytes)
+			}
+			if limits.MemoryHighBytes != tt.wantMemHighBytes {
+				t.Errorf("expected MemoryHighBytes %d, got %d", tt.wantMemHighBytes, limits.MemoryHighBytes)
+			}
+			if limits.EffectiveMemoryLimitBytes != tt.wantEffective {
+				t.Errorf("expected EffectiveMemoryLimitBytes %d, got %d", tt.wantEffective, limits.EffectiveMemoryLimitBytes)
+			}
+
+			plan := ResolveTuningPlan(limits, "", DefaultMemoryRatio, DefaultMinHeadroomBytes)
+			if plan.ConstrainingLimit != tt.wantConstraining {
+				t.Errorf("expected ConstrainingLimit %q, got %q", tt.wantConstraining, plan.ConstrainingLimit)
+			}
+			if tt.wantEffective > 0 {
+				if plan.GOMEMLIMITBytes <= 0 {
+					t.Errorf("expected positive GOMEMLIMITBytes, got %d", plan.GOMEMLIMITBytes)
+				}
+			} else {
+				if plan.GOMEMLIMITBytes != 0 {
+					t.Errorf("expected GOMEMLIMITBytes 0 for unlimited, got %d", plan.GOMEMLIMITBytes)
+				}
+			}
+		})
+	}
+}
+
+func TestReadLimitsCgroupV2Nested_MemoryHighInherited(t *testing.T) {
+	t.Parallel()
+
+	const (
+		bytes2GB = int64(2 * 1024 * 1024 * 1024)
+		bytes3GB = int64(3 * 1024 * 1024 * 1024)
+		bytes4GB = int64(4 * 1024 * 1024 * 1024)
+	)
+
+	tempDir := t.TempDir()
+	cgroupRoot := filepath.Join(tempDir, "sys_fs_cgroup")
+	procFile := filepath.Join(tempDir, "proc_cgroup")
+
+	parentDir := filepath.Join(cgroupRoot, "parent.slice")
+	leafDir := filepath.Join(parentDir, "app.slice")
+	requireNoError(t, os.MkdirAll(leafDir, 0o755))
+
+	// Root: unlimited
+	requireNoError(t, os.WriteFile(filepath.Join(cgroupRoot, cgroupV2MemoryMax), []byte("max\n"), 0o600))
+	requireNoError(t, os.WriteFile(filepath.Join(cgroupRoot, cgroupV2MemoryHigh), []byte("max\n"), 0o600))
+
+	// Parent: max=4GB, high=2GB
+	requireNoError(t, os.WriteFile(filepath.Join(parentDir, cgroupV2MemoryMax), []byte("4294967296\n"), 0o600))
+	requireNoError(t, os.WriteFile(filepath.Join(parentDir, cgroupV2MemoryHigh), []byte("2147483648\n"), 0o600))
+
+	// Leaf: max=max, high=3GB (parent's 2GB high is stricter)
+	requireNoError(t, os.WriteFile(filepath.Join(leafDir, cgroupV2MemoryMax), []byte("max\n"), 0o600))
+	requireNoError(t, os.WriteFile(filepath.Join(leafDir, cgroupV2MemoryHigh), []byte("3221225472\n"), 0o600))
+
+	procContent := "0::/parent.slice/app.slice\n"
+	requireNoError(t, os.WriteFile(procFile, []byte(procContent), 0o600))
+
+	limits, err := ReadLimitsCustom(cgroupRoot, procFile)
+	requireNoError(t, err)
+
+	if limits.MemoryLimitBytes != bytes4GB {
+		t.Errorf("expected MemoryLimitBytes %d, got %d", bytes4GB, limits.MemoryLimitBytes)
+	}
+	if limits.MemoryHighBytes != bytes2GB {
+		t.Errorf("expected MemoryHighBytes %d (strictest ancestor), got %d", bytes2GB, limits.MemoryHighBytes)
+	}
+	if limits.EffectiveMemoryLimitBytes != bytes2GB {
+		t.Errorf("expected EffectiveMemoryLimitBytes %d, got %d", bytes2GB, limits.EffectiveMemoryLimitBytes)
+	}
+
+	plan := ResolveTuningPlan(limits, "", DefaultMemoryRatio, DefaultMinHeadroomBytes)
+	if plan.ConstrainingLimit != LimitConstraintHigh {
+		t.Errorf("expected ConstrainingLimit %q, got %q", LimitConstraintHigh, plan.ConstrainingLimit)
+	}
+	_ = bytes3GB
+}
+
+func TestReadLimitsCgroupV2_MemoryHighCorrupted(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		highContent string
+	}{
+		{"EmptyFile", ""},
+		{"NonNumeric", "corrupted_text\n"},
+		{"NegativeValue", "-104857600\n"},
+		{"ZeroValue", "0\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tempDir := t.TempDir()
+			procFile := filepath.Join(tempDir, "proc_cgroup")
+			requireNoError(t, os.WriteFile(procFile, []byte("0::/\n"), 0o600))
+
+			requireNoError(t, os.WriteFile(filepath.Join(tempDir, cgroupV2MemoryMax), []byte("max\n"), 0o600))
+			requireNoError(t, os.WriteFile(filepath.Join(tempDir, cgroupV2MemoryHigh), []byte(tt.highContent), 0o600))
+
+			limits, err := ReadLimitsCustom(tempDir, procFile)
+			if err == nil || limits.CgroupVersion != VersionUnknown || !errors.Is(err, ErrCgroupLimitCorrupted) {
+				t.Fatalf("expected VersionUnknown + ErrCgroupLimitCorrupted, got limits=%+v, err=%v", limits, err)
+			}
+		})
 	}
 }
 

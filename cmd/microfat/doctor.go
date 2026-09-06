@@ -88,13 +88,16 @@ type CacheReport struct {
 
 // CgroupReport contains Linux container resource limits and computed Go tuning parameters.
 type CgroupReport struct {
-	Detected         bool    `json:"detected"`
-	Version          int     `json:"version"`
-	MemoryLimitBytes int64   `json:"memory_limit_bytes"`
-	CPUQuota         float64 `json:"cpu_quota"`
-	GOMEMLIMITBytes  int64   `json:"gomemlimit_bytes,omitempty"`
-	GOMEMLIMITStr    string  `json:"gomemlimit_str,omitempty"`
-	GOMAXPROCS       int     `json:"gomaxprocs,omitempty"`
+	Detected                  bool    `json:"detected"`
+	Version                   int     `json:"version"`
+	MemoryLimitBytes          int64   `json:"memory_limit_bytes"`
+	MemoryHighBytes           int64   `json:"memory_high_bytes,omitempty"`
+	EffectiveMemoryLimitBytes int64   `json:"effective_memory_limit_bytes,omitempty"`
+	ConstrainingLimit         string  `json:"constraining_limit,omitempty"`
+	CPUQuota                  float64 `json:"cpu_quota"`
+	GOMEMLIMITBytes           int64   `json:"gomemlimit_bytes,omitempty"`
+	GOMEMLIMITStr             string  `json:"gomemlimit_str,omitempty"`
+	GOMAXPROCS                int     `json:"gomaxprocs,omitempty"`
 }
 
 // ToolchainReport contains binary build metadata.
@@ -415,13 +418,20 @@ func printCgroupSection(w io.Writer, cg *CgroupReport) {
 		} else {
 			_, _ = fmt.Fprintf(w, "    • Memory Limit:   unlimited\n")
 		}
+		if cg.MemoryHighBytes > 0 {
+			_, _ = fmt.Fprintf(w, "    • Memory High:    %s\n", formatBytes(cg.MemoryHighBytes))
+		}
 		if cg.CPUQuota > 0 {
 			_, _ = fmt.Fprintf(w, "    • CFS CPU Quota:  %.2f cores\n", cg.CPUQuota)
 		} else {
 			_, _ = fmt.Fprintf(w, "    • CFS CPU Quota:  unlimited\n")
 		}
 		if cg.GOMEMLIMITStr != "" {
-			_, _ = fmt.Fprintf(w, "    • Auto GOMEMLIMIT: %s (~%s)\n", cg.GOMEMLIMITStr, formatBytes(cg.GOMEMLIMITBytes))
+			constraintNote := ""
+			if cg.ConstrainingLimit != "" {
+				constraintNote = fmt.Sprintf(" [bounded by %s]", cg.ConstrainingLimit)
+			}
+			_, _ = fmt.Fprintf(w, "    • Auto GOMEMLIMIT: %s (~%s)%s\n", cg.GOMEMLIMITStr, formatBytes(cg.GOMEMLIMITBytes), constraintNote)
 		}
 		if cg.GOMAXPROCS > 0 {
 			_, _ = fmt.Fprintf(w, "    • Auto GOMAXPROCS: %d\n", cg.GOMAXPROCS)

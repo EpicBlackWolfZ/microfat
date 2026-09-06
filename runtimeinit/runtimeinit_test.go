@@ -733,6 +733,52 @@ func TestAutoTune_DiagnosticsLogging(t *testing.T) {
 		})
 	})
 
+	t.Run("JSONStructuredTelemetryLogging_MemoryHighConstraint", func(t *testing.T) {
+		const (
+			mem1GB = int64(1024 * 1024 * 1024)
+			mem2GB = int64(2 * 1024 * 1024 * 1024)
+		)
+		mockHighLimits := cgroup.Limits{
+			CgroupVersion:             cgroup.VersionV2,
+			MemoryLimitBytes:          mem2GB,
+			MemoryHighBytes:           mem1GB,
+			EffectiveMemoryLimitBytes: mem1GB,
+			CPUQuota:                  2.0,
+			CPUs:                      2,
+		}
+		mockEnv := map[string]string{
+			format.EnvLog: "json",
+		}
+		withIsolatedEnv(t, mockEnv, &mockHighLimits, nil, func(_ *int64, _ *int, _ *int, stderrBuf *bytes.Buffer) {
+			res := AutoTune()
+			if res.ConstrainingLimit != cgroup.LimitConstraintHigh {
+				t.Errorf("expected res.ConstrainingLimit 'high', got %q", res.ConstrainingLimit)
+			}
+			if res.MemoryHighBytes != mem1GB {
+				t.Errorf("expected MemoryHighBytes %d, got %d", mem1GB, res.MemoryHighBytes)
+			}
+			if res.EffectiveMemoryLimitBytes != mem1GB {
+				t.Errorf("expected EffectiveMemoryLimitBytes %d, got %d", mem1GB, res.EffectiveMemoryLimitBytes)
+			}
+
+			output := stderrBuf.String()
+			cleanJSON := strings.TrimPrefix(strings.TrimSpace(output), "[microfat] ")
+			var telem Telemetry
+			if err := json.Unmarshal([]byte(cleanJSON), &telem); err != nil {
+				t.Fatalf("unmarshaling json telemetry: %v", err)
+			}
+			if telem.ConstrainingLimit != cgroup.LimitConstraintHigh {
+				t.Errorf("expected telem.ConstrainingLimit 'high', got %q", telem.ConstrainingLimit)
+			}
+			if telem.CgroupMemHighBytes != mem1GB {
+				t.Errorf("expected CgroupMemHighBytes %d, got %d", mem1GB, telem.CgroupMemHighBytes)
+			}
+			if telem.EffectiveMemBytes != mem1GB {
+				t.Errorf("expected EffectiveMemBytes %d, got %d", mem1GB, telem.EffectiveMemBytes)
+			}
+		})
+	})
+
 	t.Run("SilentByDefault", func(t *testing.T) {
 		withIsolatedEnv(t, nil, &mockLimits, nil, func(_ *int64, _ *int, _ *int, stderrBuf *bytes.Buffer) {
 			_ = AutoTune()
@@ -744,18 +790,25 @@ func TestAutoTune_DiagnosticsLogging(t *testing.T) {
 }
 
 func TestResult_JSONSerialization(t *testing.T) {
+	const (
+		mem1GB = 1024 * 1024 * 1024
+		mem512MB = 512 * 1024 * 1024
+	)
 	res := Result{
-		CgroupVersion:    cgroup.VersionV2,
-		MemoryLimitBytes: 1024 * 1024 * 1024,
-		CPUQuota:         4.0,
-		GOMEMLIMIT:       966367641,
-		GOMAXPROCS:       4,
-		GOGC:             75,
-		ProfileApplied:   testProfileLatencyCritical,
-		MemLimitApplied:  true,
-		MaxProcsApplied:  true,
-		GOGCApplied:      true,
-		SkippedReason:    "",
+		CgroupVersion:             cgroup.VersionV2,
+		MemoryLimitBytes:          mem1GB,
+		MemoryHighBytes:           mem512MB,
+		EffectiveMemoryLimitBytes: mem512MB,
+		ConstrainingLimit:         cgroup.LimitConstraintHigh,
+		CPUQuota:                  4.0,
+		GOMEMLIMIT:                966367641,
+		GOMAXPROCS:                4,
+		GOGC:                      75,
+		ProfileApplied:            testProfileLatencyCritical,
+		MemLimitApplied:           true,
+		MaxProcsApplied:           true,
+		GOGCApplied:               true,
+		SkippedReason:             "",
 	}
 
 	data, err := json.Marshal(res)
