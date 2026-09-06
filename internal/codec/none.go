@@ -29,6 +29,13 @@ func (c *NoneCodec) Compress(w io.Writer, src []byte, _ string) error {
 
 // Decompress reads raw bytes from r directly into w, verifying size if specified.
 func (c *NoneCodec) Decompress(w io.Writer, r io.Reader, uncompressedSize int64) error {
+	if uncompressedSize < 0 {
+		return fmt.Errorf("%w: invalid negative uncompressed size %d", ErrSizeMismatch, uncompressedSize)
+	}
+	if uncompressedSize > DefaultMaxPayloadSize {
+		return fmt.Errorf("%w: uncompressed size %d exceeds safety limit %d", ErrSizeMismatch, uncompressedSize, DefaultMaxPayloadSize)
+	}
+
 	bw := newBoundedWriter(w, uncompressedSize)
 	_, copyErr := io.Copy(bw, r)
 	if copyErr != nil {
@@ -40,6 +47,9 @@ func (c *NoneCodec) Decompress(w io.Writer, r io.Reader, uncompressedSize int64)
 
 	if uncompressedSize > 0 && bw.written != uncompressedSize {
 		return fmt.Errorf("%w: expected %d bytes, got %d", ErrSizeMismatch, uncompressedSize, bw.written)
+	}
+	if uncompressedSize == 0 && bw.written != 0 {
+		return fmt.Errorf("%w: expected 0 bytes, got %d", ErrSizeMismatch, bw.written)
 	}
 
 	return nil

@@ -1708,7 +1708,7 @@ func TestExecuteVariant_StrictEnvironmentMatrix(t *testing.T) {
 			"USER":                    "deployer",
 			"LANG":                    "en_US.UTF-8",
 			format.EnvSelectedVariant: "v1",
-			format.EnvHostArch:        "amd64",
+			format.EnvHostArch:        testArchAMD64,
 			format.EnvHostLevel:       "v3",
 			format.EnvExecMode:        format.ExecModeMemfd,
 			format.EnvDispatchMode:    format.ExecModeMemfd,

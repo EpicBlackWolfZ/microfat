@@ -73,7 +73,7 @@ func DiagnoseError(stage string, err error) string {
 		return diagnoseExec(err)
 	case StageCodecLookup:
 		return diagnoseCodec(err)
-	case StageDecompress:
+	case StageMemfdExtract, StageDecompress:
 		return diagnoseDecompress(err)
 	case StageLauncherMain:
 		return diagnoseGeneric(err)
@@ -93,7 +93,10 @@ func diagnoseDecompress(err error) string {
 	if errors.Is(err, codec.ErrDecompressionFailed) ||
 		errors.Is(err, codec.ErrSizeMismatch) ||
 		errors.Is(err, ErrDictionaryCorrupted) ||
-		errors.Is(err, ErrPayloadCorrupted) {
+		errors.Is(err, ErrPayloadCorrupted) ||
+		errors.Is(err, ErrPayloadTooLarge) ||
+		errors.Is(err, ErrMemfdExtract) ||
+		errors.Is(err, ErrCacheExtract) {
 		return HintDecompressFailed
 	}
 	return diagnoseGeneric(err)

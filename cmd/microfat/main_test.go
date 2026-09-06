@@ -22,6 +22,7 @@ const (
 	flagManifest = "--manifest"
 	flagVerify   = "--verify"
 	flagStub     = "--stub"
+	flagName     = "--name"
 
 	testOSLinux   = "linux"
 	testArchAMD64 = "amd64"
@@ -79,7 +80,7 @@ func TestRootCmdAndSubcommands(t *testing.T) {
 	packCmd.SetArgs([]string{
 		flagStub, stubPath,
 		flagOutput, fatPath,
-		"--name", "demo-app",
+		flagName, "demo-app",
 		"-v", "v1=" + v1Path,
 		"-v", "v3=" + v3Path,
 		flagSkipELF,
@@ -341,7 +342,7 @@ func TestPackARM64CLI(t *testing.T) {
 	packCmd.SetArgs([]string{
 		flagStub, stubPath,
 		flagOutput, fatPath,
-		"--name", "arm64-cli-app",
+		flagName, "arm64-cli-app",
 		"--arch", "arm64",
 		"-v", "v8.0=" + v80Path,
 		"-v", "v8.2=" + v82Path,
@@ -802,8 +803,8 @@ func TestPackAndInspect_DictionaryFlags(t *testing.T) {
 	packCmd := newPackCmd()
 	packCmd.SetArgs([]string{
 		flagStub, stubPath,
-		"--output", fatPath,
-		"--name", "dict-cli-app",
+		flagOutput, fatPath,
+		flagName, "dict-cli-app",
 		"--dict",
 		"--dict-size", "65536",
 		"-v", "v1=" + v1Path,
@@ -970,3 +971,101 @@ func TestPack_DictionaryDiagnostics(t *testing.T) {
 		}
 	})
 }
+
+func TestTrimInPlace_ResolvesSymlink(t *testing.T) {
+	tempDir := t.TempDir()
+
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("STUB_CODE_LAUNCHER"), 0o755)
+
+	v1Path := filepath.Join(tempDir, "v1")
+	v3Path := filepath.Join(tempDir, "v3")
+	_ = os.WriteFile(v1Path, []byte("BINARY_PAYLOAD_V1"), 0o755)
+	_ = os.WriteFile(v3Path, []byte("BINARY_PAYLOAD_V3"), 0o755)
+
+	realFatPath := filepath.Join(tempDir, "real_app.fat")
+	packCmd := newPackCmd()
+	packCmd.SetArgs([]string{
+		flagStub, stubPath,
+		flagOutput, realFatPath,
+		flagName, "symlink-app",
+		"-v", "v1=" + v1Path,
+		"-v", "v3=" + v3Path,
+		flagSkipELF,
+	})
+	if err := packCmd.Execute(); err != nil {
+		t.Fatalf("pack failed: %v", err)
+	}
+
+	symlinkPath := filepath.Join(tempDir, "symlink_app.fat")
+	if err := os.Symlink(realFatPath, symlinkPath); err != nil {
+		t.Fatalf("symlink creation failed: %v", err)
+	}
+
+	trimCmd := newTrimCmd()
+	trimCmd.SetArgs([]string{
+		symlinkPath,
+		"--level", "v1",
+	})
+	if err := trimCmd.Execute(); err != nil {
+		t.Fatalf("trim via symlink failed: %v", err)
+	}
+
+	fi, err := os.Lstat(symlinkPath)
+	if err != nil {
+		t.Fatalf("lstat symlink failed: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("symlink was replaced by regular file instead of being preserved")
+	}
+
+	target, err := os.Readlink(symlinkPath)
+	if err != nil {
+		t.Fatalf("readlink failed: %v", err)
+	}
+	if target != realFatPath {
+		t.Fatalf("symlink target changed: got %s, want %s", target, realFatPath)
+	}
+}
+
+func TestTrim_DestinationInNewDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("STUB_CODE_LAUNCHER"), 0o755)
+
+	v1Path := filepath.Join(tempDir, "v1")
+	v3Path := filepath.Join(tempDir, "v3")
+	_ = os.WriteFile(v1Path, []byte("BINARY_PAYLOAD_V1"), 0o755)
+	_ = os.WriteFile(v3Path, []byte("BINARY_PAYLOAD_V3"), 0o755)
+
+	srcFatPath := filepath.Join(tempDir, "app.fat")
+	packCmd := newPackCmd()
+	packCmd.SetArgs([]string{
+		flagStub, stubPath,
+		flagOutput, srcFatPath,
+		flagName, "test-app",
+		"-v", "v1=" + v1Path,
+		"-v", "v3=" + v3Path,
+		flagSkipELF,
+	})
+	if err := packCmd.Execute(); err != nil {
+		t.Fatalf("pack failed: %v", err)
+	}
+
+	destFatPath := filepath.Join(tempDir, "nested", "sub", "trimmed.fat")
+	trimCmd := newTrimCmd()
+	trimCmd.SetArgs([]string{
+		srcFatPath,
+		"--level", "v1",
+		"-o", destFatPath,
+	})
+	if err := trimCmd.Execute(); err != nil {
+		t.Fatalf("trim with destination in new directory failed: %v", err)
+	}
+
+	if _, err := os.Stat(destFatPath); err != nil {
+		t.Fatalf("expected trimmed file at %s, got err: %v", destFatPath, err)
+	}
+}
+

@@ -77,6 +77,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	e2eRootDir = tempDir
+	_ = os.Setenv("XDG_CACHE_HOME", filepath.Join(tempDir, "cache"))
 
 	exitCode := runSetupAndExecute(m)
 	_ = os.RemoveAll(e2eRootDir)

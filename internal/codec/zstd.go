@@ -119,6 +119,13 @@ func (c *ZstdCodec) Decompress(w io.Writer, r io.Reader, uncompressedSize int64)
 
 // DecompressWithDict decompresses a zstd stream from r into w using a shared dictionary.
 func (c *ZstdCodec) DecompressWithDict(w io.Writer, r io.Reader, uncompressedSize int64, dict []byte) error {
+	if uncompressedSize < 0 {
+		return fmt.Errorf("%w: invalid negative uncompressed size %d", ErrSizeMismatch, uncompressedSize)
+	}
+	if uncompressedSize > DefaultMaxPayloadSize {
+		return fmt.Errorf("%w: uncompressed size %d exceeds safety limit %d", ErrSizeMismatch, uncompressedSize, DefaultMaxPayloadSize)
+	}
+
 	opts := []zstd.DOption{
 		zstd.WithDecoderMaxMemory(DefaultDecoderMaxMemory),
 		zstd.WithDecoderMaxWindow(DefaultDecoderMaxWindow),
@@ -129,7 +136,7 @@ func (c *ZstdCodec) DecompressWithDict(w io.Writer, r io.Reader, uncompressedSiz
 
 	reader, err := zstd.NewReader(r, opts...)
 	if err != nil {
-		return fmt.Errorf("initializing zstd reader: %w", err)
+		return fmt.Errorf("%w: initializing zstd reader: %w", ErrDecompressionFailed, err)
 	}
 	defer reader.Close()
 
@@ -144,6 +151,9 @@ func (c *ZstdCodec) DecompressWithDict(w io.Writer, r io.Reader, uncompressedSiz
 
 	if uncompressedSize > 0 && bw.written != uncompressedSize {
 		return fmt.Errorf("%w: expected %d bytes, got %d", ErrSizeMismatch, uncompressedSize, bw.written)
+	}
+	if uncompressedSize == 0 && bw.written != 0 {
+		return fmt.Errorf("%w: expected 0 bytes, got %d", ErrSizeMismatch, bw.written)
 	}
 
 	return nil

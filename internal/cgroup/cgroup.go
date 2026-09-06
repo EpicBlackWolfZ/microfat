@@ -686,7 +686,7 @@ func CalculateGOMEMLIMIT(limitBytes int64, ratio float64, minHeadroomBytes int64
 	if limitBytes <= 0 || limitBytes >= UnlimitedCgroupV1MemoryThreshold {
 		return 0, false
 	}
-	if ratio <= 0 || ratio > 1.0 {
+	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio <= 0 || ratio > 1.0 {
 		ratio = DefaultMemoryRatio
 	}
 	if minHeadroomBytes <= 0 {
@@ -713,7 +713,7 @@ func CalculateGOMEMLIMIT(limitBytes int64, ratio float64, minHeadroomBytes int64
 // CalculateGOMAXPROCS computes the recommended GOMAXPROCS value from a fractional CPU quota.
 // Returns (cpus, true) if a valid quota exists, or (0, false) if unlimited.
 func CalculateGOMAXPROCS(quota float64) (int, bool) {
-	if quota <= 0 {
+	if quota <= 0 || math.IsNaN(quota) || math.IsInf(quota, 0) {
 		return 0, false
 	}
 	// Floor rounding to prevent CFS scheduler period oversubscription and latency spikes
@@ -819,6 +819,52 @@ func ResolveTuningPlan(limits Limits, envRatioStr string, defaultRatio float64, 
 	return ResolveTuningPlanWithProfile(limits, envRatioStr, defaultRatio, minHeadroomBytes, GCProfileDefault, 0)
 }
 
+func resolveTuningRatio(envRatioStr string, defaultRatio float64, profile GCProfile) float64 {
+	ratio := defaultRatio
+	if profile == GCProfileMemoryConstrained && defaultRatio == DefaultMemoryRatio {
+		ratio = DefaultMemoryConstrainedRatio
+	}
+	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio <= 0 || ratio > 1.0 {
+		ratio = DefaultMemoryRatio
+	}
+
+	if trimmed := strings.TrimSpace(envRatioStr); trimmed != "" {
+		if parsed, err := strconv.ParseFloat(trimmed, 64); err == nil {
+			if !math.IsNaN(parsed) && !math.IsInf(parsed, 0) && parsed > 0 && parsed <= 1.0 {
+				ratio = parsed
+			}
+		}
+	}
+	return ratio
+}
+
+func applyProfileGOGC(plan *TuningPlan, profile GCProfile, liveHeapEstimateBytes int64) {
+	switch profile {
+	case GCProfileLatencyCritical:
+		plan.GOGC = DefaultLatencyCriticalGOGC
+		plan.GOGCStr = strconv.Itoa(DefaultLatencyCriticalGOGC)
+		plan.GOGCApplied = true
+	case GCProfileMemoryConstrained:
+		plan.GOGC = DefaultMemoryConstrainedGOGC
+		plan.GOGCStr = strconv.Itoa(DefaultMemoryConstrainedGOGC)
+		plan.GOGCApplied = true
+	case GCProfileBatchETL:
+		plan.GOGC = DefaultBatchETLGOGC
+		plan.GOGCStr = "off"
+		plan.GOGCApplied = true
+	case GCProfileAdaptive:
+		if liveHeapEstimateBytes > 0 && plan.GOMEMLIMITBytes > 0 {
+			if gogc, ok := CalculateAdaptiveGOGC(plan.GOMEMLIMITBytes, liveHeapEstimateBytes); ok {
+				plan.GOGC = gogc
+				plan.GOGCStr = strconv.Itoa(gogc)
+				plan.GOGCApplied = true
+			}
+		}
+	case GCProfileDefault:
+		// Default profile does not alter GOGC
+	}
+}
+
 // ResolveTuningPlanWithProfile derives GOMEMLIMIT, GOMAXPROCS, and GOGC settings from container limits,
 // taking into account the active GCProfile, live heap estimate, and custom memory ratios.
 func ResolveTuningPlanWithProfile(
@@ -829,19 +875,7 @@ func ResolveTuningPlanWithProfile(
 	profile GCProfile,
 	liveHeapEstimateBytes int64,
 ) TuningPlan {
-	ratio := defaultRatio
-	if profile == GCProfileMemoryConstrained && defaultRatio == DefaultMemoryRatio {
-		ratio = DefaultMemoryConstrainedRatio
-	}
-	if ratio <= 0 || ratio > 1.0 {
-		ratio = DefaultMemoryRatio
-	}
-
-	if trimmed := strings.TrimSpace(envRatioStr); trimmed != "" {
-		if parsedRatio, rErr := strconv.ParseFloat(trimmed, 64); rErr == nil && parsedRatio > 0 && parsedRatio <= 1.0 {
-			ratio = parsedRatio
-		}
-	}
+	ratio := resolveTuningRatio(envRatioStr, defaultRatio, profile)
 
 	if minHeadroomBytes <= 0 {
 		minHeadroomBytes = DefaultMinHeadroomBytes
@@ -878,30 +912,7 @@ func ResolveTuningPlanWithProfile(
 		}
 	}
 
-	switch profile {
-	case GCProfileLatencyCritical:
-		plan.GOGC = DefaultLatencyCriticalGOGC
-		plan.GOGCStr = strconv.Itoa(DefaultLatencyCriticalGOGC)
-		plan.GOGCApplied = true
-	case GCProfileMemoryConstrained:
-		plan.GOGC = DefaultMemoryConstrainedGOGC
-		plan.GOGCStr = strconv.Itoa(DefaultMemoryConstrainedGOGC)
-		plan.GOGCApplied = true
-	case GCProfileBatchETL:
-		plan.GOGC = DefaultBatchETLGOGC
-		plan.GOGCStr = "off"
-		plan.GOGCApplied = true
-	case GCProfileAdaptive:
-		if liveHeapEstimateBytes > 0 && plan.GOMEMLIMITBytes > 0 {
-			if gogc, ok := CalculateAdaptiveGOGC(plan.GOMEMLIMITBytes, liveHeapEstimateBytes); ok {
-				plan.GOGC = gogc
-				plan.GOGCStr = strconv.Itoa(gogc)
-				plan.GOGCApplied = true
-			}
-		}
-	case GCProfileDefault:
-		// Default profile does not alter GOGC
-	}
+	applyProfileGOGC(&plan, profile, liveHeapEstimateBytes)
 
 	return plan
 }

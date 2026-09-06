@@ -101,6 +101,9 @@ fuzz: ## Run Go native fuzz testing targets across format, codec, cgroup, and pa
 	@$(GO) test -fuzz=^FuzzDecompressLZ4$$ -fuzztime=$(FUZZTIME) ./internal/codec
 	@$(GO) test -fuzz=^FuzzCalculateGOMEMLIMIT$$ -fuzztime=$(FUZZTIME) ./internal/cgroup
 	@$(GO) test -fuzz=^FuzzCalculateGOMAXPROCS$$ -fuzztime=$(FUZZTIME) ./internal/cgroup
+	@$(GO) test -fuzz=^FuzzParseGCProfile$$ -fuzztime=$(FUZZTIME) ./internal/cgroup
+	@$(GO) test -fuzz=^FuzzResolveTuningPlan$$ -fuzztime=$(FUZZTIME) ./internal/cgroup
+	@$(GO) test -fuzz=^FuzzVariantLevelParsing$$ -fuzztime=$(FUZZTIME) ./internal/microarch
 	@$(GO) test -fuzz=^FuzzValidateELFBinary$$ -fuzztime=$(FUZZTIME) ./internal/pack
 	@$(GO) test -fuzz=^FuzzVerifyBinary$$ -fuzztime=$(FUZZTIME) ./internal/pack
 	@echo "\033[32m✔\033[0m Fuzz testing completed cleanly"
