@@ -1575,7 +1575,6 @@ func TestReadLimitsCgroupV2Nested_MemoryHighInherited(t *testing.T) {
 
 	const (
 		bytes2GB = int64(2 * 1024 * 1024 * 1024)
-		bytes3GB = int64(3 * 1024 * 1024 * 1024)
 		bytes4GB = int64(4 * 1024 * 1024 * 1024)
 	)
 
@@ -1619,7 +1618,6 @@ func TestReadLimitsCgroupV2Nested_MemoryHighInherited(t *testing.T) {
 	if plan.ConstrainingLimit != LimitConstraintHigh {
 		t.Errorf("expected ConstrainingLimit %q, got %q", LimitConstraintHigh, plan.ConstrainingLimit)
 	}
-	_ = bytes3GB
 }
 
 func TestReadLimitsCgroupV2_MemoryHighCorrupted(t *testing.T) {

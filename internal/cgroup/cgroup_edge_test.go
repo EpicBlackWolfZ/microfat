@@ -286,6 +286,7 @@ func TestDetermineConstrainingLimitEdgeCases(t *testing.T) {
 		{"HighOnly", 0, limit2K, LimitConstraintHigh},
 		{"HighLowerThanMax", limit4K, limit2K, LimitConstraintHigh},
 		{"MaxLowerThanHigh", limit1K, limit2K, LimitConstraintMax},
+		// Ties between max and high resolve to "max" since memory.max is the kernel's hard OOM boundary.
 		{"MaxEqualsHigh", limit2K, limit2K, LimitConstraintMax},
 		{"NegativeMaxValidHigh", -500, limit2K, LimitConstraintHigh},
 		{"ValidMaxNegativeHigh", limit2K, -500, LimitConstraintMax},

@@ -121,7 +121,8 @@ type Limits struct {
 type TuningPlan struct {
 	GOMEMLIMITBytes   int64     `json:"gomemlimit_bytes"`             // Calculated memory limit in bytes (0 if unset/unlimited)
 	GOMEMLIMITStr     string    `json:"gomemlimit_str"`               // Formatted memory limit string (e.g. "966367641B", empty if unset)
-	ConstrainingLimit string    `json:"constraining_limit,omitempty"` // Active memory constraint: "max" or "high" (empty if unlimited)
+	// ConstrainingLimit is the active memory constraint: "max" or "high" (empty if unlimited; ties resolve to "max").
+	ConstrainingLimit string    `json:"constraining_limit,omitempty"`
 	GOMAXPROCS        int       `json:"gomaxprocs"`                   // Calculated CPU quota core count (0 if unset/unlimited)
 	GOMAXPROCSStr     string    `json:"gomaxprocs_str"`               // Formatted GOMAXPROCS string (e.g. "4", empty if unset)
 	AppliedRatio      float64   `json:"applied_ratio"`                // Actual memory ratio applied (e.g. 0.90 or custom)
@@ -660,6 +661,8 @@ func CalculateEffectiveMemoryLimit(maxBytes, highBytes int64) int64 {
 }
 
 // DetermineConstrainingLimit returns which limit ("max" or "high") constrains the effective memory limit.
+// If both limits are configured and equal (maxBytes == highBytes), LimitConstraintMax ("max") is returned
+// because memory.max represents the kernel's hard OOM boundary, taking precedence as the primary ceiling.
 // Returns LimitConstraintNone ("") if neither limit is set.
 func DetermineConstrainingLimit(maxBytes, highBytes int64) string {
 	switch {
