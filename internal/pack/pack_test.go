@@ -3019,3 +3019,56 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 	})
 }
 
+func TestPrewarm_RequiresValidDictionaryChecksum(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("STUB_CODE_LAUNCHER"), 0o755)
+
+	v1Path := filepath.Join(tempDir, "v1")
+	v3Path := filepath.Join(tempDir, "v3")
+	_ = os.WriteFile(v1Path, bytes.Repeat([]byte("PAYLOAD_V1_DATA_PATTERN_"), 100), 0o755)
+	_ = os.WriteFile(v3Path, bytes.Repeat([]byte("PAYLOAD_V3_DATA_PATTERN_"), 100), 0o755)
+
+	fatPath := filepath.Join(tempDir, "dict_app.fat")
+	opts := DefaultOptions()
+	opts.StubPath = stubPath
+	opts.OutputPath = fatPath
+	opts.AppName = "dict-app"
+	opts.EnableDict = true
+	opts.Variants = map[string]string{"v1": v1Path, "v3": v3Path}
+	opts.SkipELFValidation = true
+
+	_, err := Pack(opts)
+	if err != nil {
+		t.Fatalf("Pack failed: %v", err)
+	}
+
+	fatFile, err := os.OpenFile(fatPath, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("open fat file failed: %v", err)
+	}
+	defer func() { _ = fatFile.Close() }()
+
+	stat, _ := fatFile.Stat()
+
+	// Read index and poison dictionary SHA256 in memory
+	idx, err := format.ReadTrailerAndIndex(fatFile, stat.Size())
+	if err != nil {
+		t.Fatalf("ReadTrailerAndIndex failed: %v", err)
+	}
+
+	// Corrupt dictionary SHA256 in index
+	idx.DictionarySHA256 = ""
+	cacheDir := filepath.Join(tempDir, "cache")
+
+	// Call PrewarmVariantWithDict with invalid uncompressed size
+	entry := idx.Variants[0]
+	entry.UncompressedSize = -5
+	_, _, _, err = PrewarmVariantWithDict(fatFile, &entry, cacheDir, nil)
+	if err == nil || !errors.Is(err, format.ErrPayloadTooLarge) {
+		t.Fatalf("expected ErrPayloadTooLarge for negative uncompressed size in PrewarmVariantWithDict, got %v", err)
+	}
+}
+

@@ -99,3 +99,37 @@ func FuzzReadLimitsFrom(f *testing.F) {
 		}
 	})
 }
+
+func FuzzResolveTuningPlan(f *testing.F) {
+	f.Add(int64(512*1024*1024), int64(0), 4.0, "0.90", int64(64*1024*1024), "default", int64(0))
+	f.Add(int64(1024*1024*1024), int64(512*1024*1024), 2.5, "0.80", int64(32*1024*1024), "latency_critical", int64(100*1024*1024))
+	f.Add(int64(0), int64(0), 0.0, "invalid", int64(0), "adaptive", int64(50*1024*1024))
+	f.Add(int64(-1), int64(-100), -5.0, "-0.5", int64(-1), "batch_etl", int64(0))
+
+	f.Fuzz(func(
+		t *testing.T,
+		maxMem int64,
+		highMem int64,
+		cpuQuota float64,
+		ratioStr string,
+		headroom int64,
+		profileStr string,
+		liveHeap int64,
+	) {
+		limits := Limits{
+			CgroupVersion:    VersionV2,
+			MemoryLimitBytes: maxMem,
+			MemoryHighBytes:  highMem,
+			CPUQuota:         cpuQuota,
+		}
+		prof, _ := ParseGCProfile(profileStr)
+		plan := ResolveTuningPlanWithProfile(limits, ratioStr, DefaultMemoryRatio, headroom, prof, liveHeap)
+		if plan.GOMEMLIMITBytes < 0 {
+			t.Fatalf("negative GOMEMLIMITBytes: %d", plan.GOMEMLIMITBytes)
+		}
+		if plan.GOMAXPROCS < 0 {
+			t.Fatalf("negative GOMAXPROCS: %d", plan.GOMAXPROCS)
+		}
+	})
+}
+

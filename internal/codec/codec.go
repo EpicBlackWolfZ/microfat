@@ -86,9 +86,9 @@ type boundedWriter struct {
 }
 
 // newBoundedWriter constructs a boundedWriter with the specified limit.
-// If limit <= 0, it falls back to DefaultMaxPayloadSize.
+// If limit <= 0 or limit > DefaultMaxPayloadSize, it falls back to DefaultMaxPayloadSize.
 func newBoundedWriter(w io.Writer, limit int64) *boundedWriter {
-	if limit <= 0 {
+	if limit <= 0 || limit > DefaultMaxPayloadSize {
 		limit = DefaultMaxPayloadSize
 	}
 	return &boundedWriter{

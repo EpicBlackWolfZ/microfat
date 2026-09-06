@@ -187,6 +187,18 @@ func TestDiagnoseError(t *testing.T) {
 			expectedHint: HintDecompressFailed,
 		},
 		{
+			name:         "extract_memfd with ErrMemfdExtract",
+			stage:        StageMemfdExtract,
+			err:          fmt.Errorf("%w: %w", ErrMemfdExtract, codec.ErrDecompressionFailed),
+			expectedHint: HintDecompressFailed,
+		},
+		{
+			name:         "extract_memfd with ErrPayloadTooLarge",
+			stage:        StageMemfdExtract,
+			err:          ErrPayloadTooLarge,
+			expectedHint: HintDecompressFailed,
+		},
+		{
 			name:         "generic launcher_main EROFS",
 			stage:        StageLauncherMain,
 			err:          syscall.EROFS,

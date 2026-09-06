@@ -582,16 +582,17 @@ func VerifyBinary(r io.ReaderAt, totalSize int64) (*format.Index, []Verification
 			return nil, nil, fmt.Errorf("%w: dictionary size %d or offset %d out of bounds",
 				format.ErrInvalidDictionary, idx.DictionarySize, idx.DictionaryOffset)
 		}
+		if idx.DictionarySHA256 == "" || !format.ValidateChecksum(idx.DictionarySHA256) {
+			return nil, nil, fmt.Errorf("%w: dictionary missing or invalid sha256 checksum", format.ErrInvalidChecksum)
+		}
 		dictBytes = make([]byte, idx.DictionarySize)
 		if _, err := r.ReadAt(dictBytes, idx.DictionaryOffset); err != nil {
 			return nil, nil, fmt.Errorf("reading shared dictionary: %w", err)
 		}
-		if idx.DictionarySHA256 != "" {
-			h := sha256.Sum256(dictBytes)
-			actualHex := hex.EncodeToString(h[:])
-			if actualHex != idx.DictionarySHA256 {
-				return nil, nil, fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, actualHex)
-			}
+		h := sha256.Sum256(dictBytes)
+		actualHex := hex.EncodeToString(h[:])
+		if actualHex != idx.DictionarySHA256 {
+			return nil, nil, fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, actualHex)
 		}
 	}
 
@@ -624,7 +625,12 @@ func VerifyBinary(r io.ReaderAt, totalSize int64) (*format.Index, []Verification
 		actualHashHex := hex.EncodeToString(hasher.Sum(nil))
 		res.ActualSHA256 = actualHashHex
 
-		if v.SHA256 != "" && actualHashHex != v.SHA256 {
+		if v.SHA256 == "" || !format.ValidateChecksum(v.SHA256) {
+			res.Error = fmt.Errorf("%w: missing or invalid expected sha256 checksum for variant %s", format.ErrInvalidChecksum, v.Level)
+			res.ErrorString = res.Error.Error()
+			results = append(results, res)
+			continue
+		} else if actualHashHex != v.SHA256 {
 			res.Error = fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, v.SHA256, actualHashHex)
 			res.ErrorString = res.Error.Error()
 			results = append(results, res)
@@ -684,6 +690,9 @@ func PrewarmVariantWithDict(
 ) (cachedPath string, alreadyCached bool, duration time.Duration, err error) {
 	if entry.SHA256 == "" || !format.ValidateChecksum(entry.SHA256) {
 		return "", false, 0, fmt.Errorf("%w: invalid or missing variant checksum %q", format.ErrInvalidChecksum, entry.SHA256)
+	}
+	if entry.UncompressedSize <= 0 || entry.UncompressedSize > format.MaxPayloadSize {
+		return "", false, 0, fmt.Errorf("%w: invalid variant uncompressed size %d", format.ErrPayloadTooLarge, entry.UncompressedSize)
 	}
 
 	cleanDir := filepath.Clean(cacheDir)
@@ -780,16 +789,17 @@ func PrewarmBinary(
 			return nil, nil, fmt.Errorf("%w: dictionary size %d or offset %d out of bounds",
 				format.ErrInvalidDictionary, idx.DictionarySize, idx.DictionaryOffset)
 		}
+		if idx.DictionarySHA256 == "" || !format.ValidateChecksum(idx.DictionarySHA256) {
+			return nil, nil, fmt.Errorf("%w: dictionary missing or invalid sha256 checksum", format.ErrInvalidChecksum)
+		}
 		dictBytes = make([]byte, idx.DictionarySize)
 		if _, err := r.ReadAt(dictBytes, idx.DictionaryOffset); err != nil {
 			return nil, nil, fmt.Errorf("reading shared dictionary: %w", err)
 		}
-		if idx.DictionarySHA256 != "" {
-			h := sha256.Sum256(dictBytes)
-			actualHex := hex.EncodeToString(h[:])
-			if actualHex != idx.DictionarySHA256 {
-				return nil, nil, fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, actualHex)
-			}
+		h := sha256.Sum256(dictBytes)
+		actualHex := hex.EncodeToString(h[:])
+		if actualHex != idx.DictionarySHA256 {
+			return nil, nil, fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, actualHex)
 		}
 	}
 

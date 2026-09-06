@@ -144,6 +144,7 @@ var (
 	// Launcher execution stage sentinels for typed error diagnostics.
 	ErrMemfdCreate        = errors.New("memfd_create failed")
 	ErrMemfdSealingFailed = errors.New("memfd sealing failed")
+	ErrMemfdExtract       = errors.New("memfd payload extraction failed")
 	ErrExecve             = errors.New("execve failed")
 	ErrCacheInit          = errors.New("cache directory initialization failed")
 	ErrInsecureCacheDir   = errors.New("cache directory has insecure permissions or invalid ownership")

@@ -147,7 +147,7 @@ $$\text{Recommended GOGC} \le \min\left(100, \; \max\left(10, \; \left(\frac{\te
 | :--- | :--- | :--- | :--- | :--- |
 | **Latency-Critical** | `latency_critical` | `75` | `0.90` | Strict SLA APIs, gRPC services, HTTP gateways (< 10ms p99). |
 | **Memory-Constrained** | `memory_constrained` | `40` | `0.80` | Micro-containers (< 256MB/512MB RAM), sidecars, microVMs. |
-| **Batch / ETL** | `batch_etl` | `off` / `200` | `0.90` | Kafka stream consumers, data pipelines, compression workloads. |
+| **Batch / ETL** | `batch_etl` | `off` (`-1`) | `0.90` | Kafka stream consumers, data pipelines, compression workloads. |
 | **Adaptive** | `adaptive` | Dynamic | `0.90` | Dynamic sizing via `MICROFAT_LIVE_HEAP_ESTIMATE` (e.g. `150MB`). |
 | **Default** | `default` | `100` | `0.90` | General cloud microservices and daemons. |
 

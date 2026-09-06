@@ -2,6 +2,7 @@ package cgroup
 
 import (
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,6 +19,9 @@ func TestCalculateGOMAXPROCSEdgeCases(t *testing.T) {
 	}{
 		{"ZeroQuota", 0.0, 0, false},
 		{"NegativeQuota", -2.5, 0, false},
+		{"NaNQuota", math.NaN(), 0, false},
+		{"PosInfQuota", math.Inf(1), 0, false},
+		{"NegInfQuota", math.Inf(-1), 0, false},
 		{"MicroContainerFractional0_1", 0.1, 1, true},
 		{"MicroContainerFractional0_5", 0.5, 1, true},
 		{"MicroContainerFractional0_99", 0.99, 1, true},
@@ -62,6 +66,10 @@ func TestCalculateGOMEMLIMITEdgeCases(t *testing.T) {
 		{"SmallContainer64MB", 64 * 1024 * 1024, 0.90, 64 * 1024 * 1024, 0, true},
 		{"Standard512MB", 512 * 1024 * 1024, 0.90, 64 * 1024 * 1024, 400 * 1024 * 1024, true},
 		{"CustomZeroRatioDefaultsTo90Percent", 512 * 1024 * 1024, 0.0, 64 * 1024 * 1024, 400 * 1024 * 1024, true},
+		{"CustomNaNRatioDefaultsTo90Percent", 512 * 1024 * 1024, math.NaN(), 64 * 1024 * 1024, 400 * 1024 * 1024, true},
+		{"CustomInfRatioDefaultsTo90Percent", 512 * 1024 * 1024, math.Inf(1), 64 * 1024 * 1024, 400 * 1024 * 1024, true},
+		{"CustomNegativeRatioDefaultsTo90Percent", 512 * 1024 * 1024, -0.5, 64 * 1024 * 1024, 400 * 1024 * 1024, true},
+		{"CustomOverOneRatioDefaultsTo90Percent", 512 * 1024 * 1024, 1.5, 64 * 1024 * 1024, 400 * 1024 * 1024, true},
 		{"CustomZeroHeadroomDefaultsTo64MB", 512 * 1024 * 1024, 0.90, 0, 400 * 1024 * 1024, true},
 	}
 

@@ -23,6 +23,7 @@ import (
 const (
 	percentMultiplier = 100.0
 	keyValueParts     = 2
+	defaultDirMode    = 0o750
 )
 
 var exitFunc = os.Exit
@@ -294,9 +295,18 @@ func newTrimCmd() *cobra.Command {
 			destPath := srcPath
 			if outputPath != "" {
 				destPath = filepath.Clean(outputPath)
+			} else {
+				realPath, err := filepath.EvalSymlinks(srcPath)
+				if err == nil && realPath != srcPath {
+					fmt.Printf("[microfat] Notice: resolved symlink '%s' -> target '%s'\n", srcPath, realPath)
+					destPath = realPath
+				}
 			}
 
 			destDir := filepath.Dir(destPath)
+			if err := os.MkdirAll(destDir, defaultDirMode); err != nil {
+				return fmt.Errorf("creating destination directory %s: %w", destDir, err)
+			}
 			tmpFile, err := os.CreateTemp(destDir, ".microfat-trim-*.tmp")
 			if err != nil {
 				return fmt.Errorf("creating temp file in %s: %w", destDir, err)

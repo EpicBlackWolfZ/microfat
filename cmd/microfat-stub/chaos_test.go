@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
@@ -815,6 +816,258 @@ func TestMemfdSealingGracefulFallback(t *testing.T) {
 	}
 }
 
+func TestRedTeam_FormatV1_EmptySHA256_Rejected(t *testing.T) {
+	origExecve := execveFunc
+	defer func() { execveFunc = origExecve }()
 
+	execveCalled := false
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		execveCalled = true
+		return nil
+	}
 
+	payload := []byte("#!/bin/sh\necho 'untrusted payload'\n")
+	fatFile, entry, idx := createSyntheticFatFile(t, payload)
+	defer func() { _ = fatFile.Close() }()
 
+	// Poison the entry: Format v1 with empty SHA-256
+	entry.SHA256 = ""
+	idx.Version = format.FormatVersion1
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{SelectedVariant: entry.Level}
+
+	var buf bytes.Buffer
+	err := extractVariantToWriter(fatFile, entry, idx, &buf)
+	if err == nil {
+		t.Fatal("expected extractVariantToWriter to reject entry with empty SHA-256, got nil")
+	}
+	if !errors.Is(err, format.ErrInvalidChecksum) {
+		t.Fatalf("expected ErrInvalidChecksum, got: %v", err)
+	}
+
+	// Also verify executeVariant rejects it in memfd mode
+	t.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+	execErr := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{"app"}, []string{}, hostInfo, policyRes, time.Now())
+	if execErr == nil {
+		t.Fatal("expected executeVariant to fail when variant has empty SHA-256")
+	}
+	if execveCalled {
+		t.Fatal("execve must NOT be called for variant with empty SHA-256")
+	}
+}
+
+func TestRedTeam_InvalidDimensions_Rejected(t *testing.T) {
+	payload := []byte("TEST_PAYLOAD")
+	fatFile, entry, idx := createSyntheticFatFile(t, payload)
+	defer func() { _ = fatFile.Close() }()
+
+	var buf bytes.Buffer
+
+	// Negative uncompressed size
+	entry.UncompressedSize = -10
+	err := extractVariantToWriter(fatFile, entry, idx, &buf)
+	if err == nil || !errors.Is(err, format.ErrPayloadTooLarge) {
+		t.Fatalf("expected ErrPayloadTooLarge for negative uncompressed size, got %v", err)
+	}
+
+	// Zero uncompressed size
+	entry.UncompressedSize = 0
+	err = extractVariantToWriter(fatFile, entry, idx, &buf)
+	if err == nil || !errors.Is(err, format.ErrPayloadTooLarge) {
+		t.Fatalf("expected ErrPayloadTooLarge for zero uncompressed size, got %v", err)
+	}
+
+	// Oversized uncompressed size > MaxPayloadSize
+	entry.UncompressedSize = format.MaxPayloadSize + 1
+	err = extractVariantToWriter(fatFile, entry, idx, &buf)
+	if err == nil || !errors.Is(err, format.ErrPayloadTooLarge) {
+		t.Fatalf("expected ErrPayloadTooLarge for oversized uncompressed size, got %v", err)
+	}
+}
+
+func TestRedTeam_EnvironmentVariableSanitization(t *testing.T) {
+	spoofedBaseEnv := []string{
+		"PATH=/usr/bin:/bin",
+		"USER=victim",
+		format.EnvOriginalExe + "=/opt/fake/binary",
+		format.EnvCgroupVersion + "=2",
+		format.EnvCgroupLimitBytes + "=9999999999",
+		format.EnvCgroupCPUs + "=128.00",
+		format.EnvPolicyApplied + "=spoofed_policy",
+		format.EnvOverrideReason + "=spoofed_reason",
+		format.EnvSelectedVariant + "=fake_v4",
+		format.EnvSelectedSHA256 + "=fake_sha",
+	}
+
+	entry := &format.VariantEntry{
+		Level:            "v1",
+		UncompressedSize: 1024,
+		SHA256:           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	}
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v1"}
+	policyRes := microarch.PolicyResult{}
+
+	origReadCgroup := readCgroupLimitsFunc
+	defer func() { readCgroupLimitsFunc = origReadCgroup }()
+	readCgroupLimitsFunc = func() (cgroup.Limits, error) {
+		return cgroup.Limits{CgroupVersion: cgroup.VersionUnknown}, nil
+	}
+
+	env, _ := buildAutoTunedEnviron("/real/path/to/app", spoofedBaseEnv, entry, format.ExecModeMemfd, hostInfo, policyRes)
+
+	envMap := make(map[string]string)
+	for _, e := range env {
+		k, v, ok := strings.Cut(e, "=")
+		if ok {
+			envMap[k] = v
+		}
+	}
+
+	if envMap[format.EnvOriginalExe] != "/real/path/to/app" {
+		t.Errorf("expected %s to be set to /real/path/to/app, got %q", format.EnvOriginalExe, envMap[format.EnvOriginalExe])
+	}
+	if _, exists := envMap[format.EnvCgroupVersion]; exists {
+		t.Errorf("spoofed %s leaked into environment", format.EnvCgroupVersion)
+	}
+	if _, exists := envMap[format.EnvCgroupLimitBytes]; exists {
+		t.Errorf("spoofed %s leaked into environment", format.EnvCgroupLimitBytes)
+	}
+	if _, exists := envMap[format.EnvCgroupCPUs]; exists {
+		t.Errorf("spoofed %s leaked into environment", format.EnvCgroupCPUs)
+	}
+	if _, exists := envMap[format.EnvPolicyApplied]; exists {
+		t.Errorf("spoofed %s leaked into environment", format.EnvPolicyApplied)
+	}
+	if _, exists := envMap[format.EnvOverrideReason]; exists {
+		t.Errorf("spoofed %s leaked into environment", format.EnvOverrideReason)
+	}
+	if envMap[format.EnvSelectedVariant] != "v1" {
+		t.Errorf("expected %s=v1, got %q", format.EnvSelectedVariant, envMap[format.EnvSelectedVariant])
+	}
+}
+
+func TestRedTeam_DecompressionError_DoesNotFallbackToPreExistingCache(t *testing.T) {
+	origExecve := execveFunc
+	defer func() { execveFunc = origExecve }()
+
+	execveCalled := false
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		execveCalled = true
+		return nil
+	}
+
+	payload := []byte("#!/bin/sh\necho 'valid initial binary'\n")
+	fatFile, entry, idx := createSyntheticFatFile(t, payload)
+	defer func() { _ = fatFile.Close() }()
+
+	cacheDir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	t.Setenv(format.EnvExecMode, "")
+	t.Setenv(format.EnvDispatchMode, "")
+
+	// Pre-populate cache directory with entry.SHA256
+	microfatCacheDir := filepath.Join(cacheDir, "microfat")
+	if err := os.MkdirAll(microfatCacheDir, 0o700); err != nil {
+		t.Fatalf("failed to create cache dir: %v", err)
+	}
+	cachedBinPath := filepath.Join(microfatCacheDir, entry.SHA256)
+	if err := os.WriteFile(cachedBinPath, payload, 0o700); err != nil {
+		t.Fatalf("failed to write cached binary: %v", err)
+	}
+
+	// Corrupt payload stream in the fat file
+	corruptBytes := make([]byte, entry.CompressedSize)
+	for i := range corruptBytes {
+		corruptBytes[i] = 0xFF
+	}
+	fRw, err := os.OpenFile(fatFile.Name(), os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("failed to open fat file for writing: %v", err)
+	}
+	if _, err := fRw.WriteAt(corruptBytes, entry.Offset); err != nil {
+		_ = fRw.Close()
+		t.Fatalf("failed to corrupt payload: %v", err)
+	}
+	_ = fRw.Close()
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{SelectedVariant: entry.Level}
+
+	execErr := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{"app"}, []string{}, hostInfo, policyRes, time.Now())
+	if execErr == nil {
+		t.Fatal("expected executeVariant to fail on corrupted payload stream, but succeeded")
+	}
+	if execveCalled {
+		t.Fatal("security violation: launcher executed pre-existing cached binary despite corrupted fat binary payload")
+	}
+}
+
+func TestRedTeam_FileDescriptorHygiene_NoLeakOnExecveFailure(t *testing.T) {
+	origExecve := execveFunc
+	defer func() { execveFunc = origExecve }()
+
+	// Mock execve to fail with EPERM (simulating seccomp filter blocking execve)
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		return syscall.EPERM
+	}
+
+	payload := []byte("#!/bin/sh\necho 'fd hygiene test'\n")
+	fatFile, entry, idx := createSyntheticFatFile(t, payload)
+	defer func() { _ = fatFile.Close() }()
+
+	cacheDir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+
+	getOpenFDs := func() map[string]string {
+		fds := make(map[string]string)
+		entries, err := os.ReadDir("/proc/self/fd")
+		if err != nil {
+			return fds
+		}
+		for _, e := range entries {
+			target, err := os.Readlink(filepath.Join("/proc/self/fd", e.Name()))
+			if err == nil {
+				fds[e.Name()] = target
+			}
+		}
+		return fds
+	}
+
+	baselineFDs := getOpenFDs()
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{SelectedVariant: entry.Level}
+
+	// 1. Test in memfd mode
+	t.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+	err := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{"app"}, []string{}, hostInfo, policyRes, time.Now())
+	if err == nil || !errors.Is(err, format.ErrExecve) {
+		t.Fatalf("expected ErrExecve from executeVariant in memfd mode, got %v", err)
+	}
+
+	postMemfdFDs := getOpenFDs()
+	for fd, target := range postMemfdFDs {
+		if _, existed := baselineFDs[fd]; !existed {
+			if strings.Contains(target, "memfd") || strings.Contains(target, "microfat") {
+				t.Fatalf("FD leak detected after memfd execve failure: fd %s -> %s", fd, target)
+			}
+		}
+	}
+
+	// 2. Test in cache mode
+	t.Setenv(format.EnvExecMode, format.ExecModeCache)
+	err = executeVariant(fatFile.Name(), fatFile, entry, idx, []string{"app"}, []string{}, hostInfo, policyRes, time.Now())
+	if err == nil || !errors.Is(err, format.ErrExecve) {
+		t.Fatalf("expected ErrExecve from executeVariant in cache mode, got %v", err)
+	}
+
+	postCacheFDs := getOpenFDs()
+	for fd, target := range postCacheFDs {
+		if _, existed := baselineFDs[fd]; !existed {
+			if strings.Contains(target, "microfat") || strings.Contains(target, cacheDir) {
+				t.Fatalf("FD leak detected after cache execve failure: fd %s -> %s", fd, target)
+			}
+		}
+	}
+}

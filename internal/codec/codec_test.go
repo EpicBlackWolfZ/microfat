@@ -693,3 +693,47 @@ func BenchmarkCodecs(b *testing.B) {
 		})
 	}
 }
+
+func TestDecompress_NegativeAndOversizedBounds(t *testing.T) {
+	t.Parallel()
+
+	data := generateTestData(1024)
+	for _, name := range []string{codec.AlgorithmNone, codec.AlgorithmLZ4, codec.AlgorithmZstd} {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			c, err := codec.Get(name)
+			if err != nil {
+				t.Fatalf("codec.Get(%q) failed: %v", name, err)
+			}
+
+			var comp bytes.Buffer
+			if err := c.Compress(&comp, data, ""); err != nil {
+				t.Fatalf("compress failed: %v", err)
+			}
+			compBytes := comp.Bytes()
+
+			// 1. Negative uncompressedSize
+			var out bytes.Buffer
+			err = c.Decompress(&out, bytes.NewReader(compBytes), -1)
+			if err == nil || !errors.Is(err, codec.ErrSizeMismatch) {
+				t.Fatalf("expected ErrSizeMismatch for negative uncompressedSize, got %v", err)
+			}
+
+			// 2. uncompressedSize = 0 with non-empty payload
+			out.Reset()
+			err = c.Decompress(&out, bytes.NewReader(compBytes), 0)
+			if err == nil || !errors.Is(err, codec.ErrSizeMismatch) {
+				t.Fatalf("expected ErrSizeMismatch for 0 uncompressedSize with data, got %v", err)
+			}
+
+			// 3. uncompressedSize > DefaultMaxPayloadSize
+			out.Reset()
+			err = c.Decompress(&out, bytes.NewReader(compBytes), codec.DefaultMaxPayloadSize+1)
+			if err == nil || !errors.Is(err, codec.ErrSizeMismatch) {
+				t.Fatalf("expected ErrSizeMismatch for exceeding DefaultMaxPayloadSize, got %v", err)
+			}
+		})
+	}
+}
+
