@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -768,5 +769,75 @@ func TestResult_JSONSerialization(t *testing.T) {
 	}
 	if !reflect.DeepEqual(res, decoded) {
 		t.Errorf("expected %+v, got %+v", res, decoded)
+	}
+}
+
+func findRepoRoot(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+
+	root := filepath.Clean(filepath.Join(wd, ".."))
+	goModPath := filepath.Join(root, "go.mod")
+	if _, err := os.Stat(goModPath); os.IsNotExist(err) {
+		t.Fatalf("expected go.mod at %s", goModPath)
+	}
+	return root
+}
+
+func runFixture(t *testing.T, repoRoot string, fixtureRelPath string, extraEnv []string) (string, string, error) {
+	t.Helper()
+
+	targetPath := filepath.Join(repoRoot, fixtureRelPath)
+	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+		t.Fatalf("expected fixture at %s", targetPath)
+	}
+
+	cmd := exec.Command("go", "run", targetPath)
+	cmd.Dir = repoRoot
+	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local")
+	cmd.Env = append(cmd.Env, extraEnv...)
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	err := cmd.Run()
+	return stdoutBuf.String(), stderrBuf.String(), err
+}
+
+func TestRuntimeInit_NoSideEffectsOnImport(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := findRepoRoot(t)
+	stdout, stderr, err := runFixture(t, repoRoot, "runtimeinit/testdata/programmatic_app/main.go", []string{
+		format.EnvDebug + "=1",
+		format.EnvAutotune + "=1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v, stderr: %s", err, stderr)
+	}
+
+	if !strings.Contains(strings.TrimSpace(stdout), "programmatic ok") {
+		t.Errorf("expected stdout 'programmatic ok', got: %q", stdout)
+	}
+	if stderr != "" {
+		t.Errorf("expected empty stderr on import of runtimeinit, got: %s", stderr)
+	}
+}
+
+func TestRuntimeInit_ProgrammaticSubprocess(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := findRepoRoot(t)
+	stdout, stderr, err := runFixture(t, repoRoot, "runtimeinit/testdata/custom_app/main.go", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v, stderr: %s", err, stderr)
+	}
+
+	if !strings.Contains(stdout, "profile=latency_critical gogc=75") {
+		t.Errorf("expected 'profile=latency_critical gogc=75' in stdout, got: %s", stdout)
 	}
 }

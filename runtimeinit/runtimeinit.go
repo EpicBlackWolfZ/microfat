@@ -1,5 +1,9 @@
-// Package runtimeinit provides automated and programmatic container cgroup resource auto-tuning
+// Package runtimeinit provides programmatic container cgroup resource auto-tuning
 // (GOMEMLIMIT and GOMAXPROCS) for standalone Go services.
+//
+// For automatic zero-code startup tuning via package init(), import the autoload subpackage:
+//
+//	import _ "github.com/EpicBlackWolfZ/microfat/runtimeinit/autoload"
 package runtimeinit
 
 import (
@@ -66,10 +70,6 @@ type Telemetry struct {
 	MaxProcsApplied     bool    `json:"max_procs_applied"`
 	GOGCApplied         bool    `json:"gogc_applied"`
 	SkippedReason       string  `json:"skipped_reason,omitempty"`
-}
-
-func init() {
-	_ = AutoTune()
 }
 
 // AutoTune inspects container cgroup limits and configures GOMEMLIMIT, GOMAXPROCS, and GOGC.
