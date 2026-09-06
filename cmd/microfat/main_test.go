@@ -835,3 +835,138 @@ func TestPackAndInspect_DictionaryFlags(t *testing.T) {
 		t.Fatalf("verify dict binary failed: %v", err)
 	}
 }
+
+func TestPack_DictionaryDiagnostics(t *testing.T) {
+	const (
+		smallByteLen         = 3
+		dictPatternIterCount = 800
+		dictPatternMul       = 31
+		dictPatternMask      = 0x12345678
+	)
+
+	tempDir := t.TempDir()
+
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("STUB_CODE_LAUNCHER"), 0o755)
+
+	// Small dummy variants (< 8 bytes total)
+	smallV1Path := filepath.Join(tempDir, "small_v1")
+	smallV3Path := filepath.Join(tempDir, "small_v3")
+	_ = os.WriteFile(smallV1Path, make([]byte, smallByteLen), 0o755)
+	_ = os.WriteFile(smallV3Path, make([]byte, smallByteLen), 0o755)
+
+	// Large repetitive dummy variants for successful dictionary training
+	largeV1Path := filepath.Join(tempDir, "large_v1")
+	largeV3Path := filepath.Join(tempDir, "large_v3")
+	var v1Buf, v3Buf bytes.Buffer
+	for i := range dictPatternIterCount {
+		str := fmt.Sprintf("runtime_symbol_record_%04d_metadata_hash_%x\n", i, (i*dictPatternMul)^dictPatternMask)
+		v1Buf.WriteString(str)
+		v3Buf.WriteString(str)
+	}
+	v1Buf.WriteString("v1_specific_arch_code_optimizations\n")
+	v3Buf.WriteString("v3_specific_arch_code_optimizations\n")
+	_ = os.WriteFile(largeV1Path, v1Buf.Bytes(), 0o755)
+	_ = os.WriteFile(largeV3Path, v3Buf.Bytes(), 0o755)
+
+	t.Run("microfat pack --profile size with small variants emits warning on stderr and exits 0", func(t *testing.T) {
+		fatPath := filepath.Join(tempDir, "size_small.fat")
+		packCmd := newPackCmd()
+		var stderrBuf bytes.Buffer
+		packCmd.SetErr(&stderrBuf)
+		packCmd.SetArgs([]string{
+			flagStub, stubPath,
+			flagOutput, fatPath,
+			"--profile", "size",
+			"-v", "v1=" + smallV1Path,
+			"-v", "v3=" + smallV3Path,
+			flagSkipELF,
+		})
+
+		if err := packCmd.Execute(); err != nil {
+			t.Fatalf("expected pack to succeed, got %v", err)
+		}
+
+		errOutput := stderrBuf.String()
+		expectedPrefix := "[microfat:warn]"
+		expectedSub := "shared dictionary training failed (sample data too small for dictionary training (< 8 bytes)); " +
+			"proceeding with independent variant compression"
+		if !strings.Contains(errOutput, expectedPrefix) {
+			t.Errorf("expected stderr to contain %q, got %q", expectedPrefix, errOutput)
+		}
+		if !strings.Contains(errOutput, expectedSub) {
+			t.Errorf("expected stderr to contain %q, got %q", expectedSub, errOutput)
+		}
+	})
+
+	t.Run("microfat pack --profile Size (mixed-case) with small variants emits warning on stderr and exits 0", func(t *testing.T) {
+		fatPath := filepath.Join(tempDir, "size_mixed_small.fat")
+		packCmd := newPackCmd()
+		var stderrBuf bytes.Buffer
+		packCmd.SetErr(&stderrBuf)
+		packCmd.SetArgs([]string{
+			flagStub, stubPath,
+			flagOutput, fatPath,
+			"--profile", "Size",
+			"-v", "v1=" + smallV1Path,
+			"-v", "v3=" + smallV3Path,
+			flagSkipELF,
+		})
+
+		if err := packCmd.Execute(); err != nil {
+			t.Fatalf("expected pack to succeed, got %v", err)
+		}
+
+		errOutput := stderrBuf.String()
+		if !strings.Contains(errOutput, "[microfat:warn]") {
+			t.Errorf("expected stderr to contain [microfat:warn], got %q", errOutput)
+		}
+	})
+
+	t.Run("microfat pack --dict with small variants fails fast with error", func(t *testing.T) {
+		fatPath := filepath.Join(tempDir, "dict_small_fail.fat")
+		packCmd := newPackCmd()
+		var stderrBuf bytes.Buffer
+		packCmd.SetErr(&stderrBuf)
+		packCmd.SetArgs([]string{
+			flagStub, stubPath,
+			flagOutput, fatPath,
+			"--dict",
+			"-v", "v1=" + smallV1Path,
+			"-v", "v3=" + smallV3Path,
+			flagSkipELF,
+		})
+
+		err := packCmd.Execute()
+		if err == nil {
+			t.Fatalf("expected pack --dict to fail with small variants, but succeeded")
+		}
+		if !strings.Contains(err.Error(), "training shared dictionary: sample data too small for dictionary training (< 8 bytes)") {
+			t.Errorf("error %q does not contain expected failure reason", err.Error())
+		}
+	})
+
+	t.Run("microfat pack --profile size with large repetitive variants succeeds silently without warning on stderr", func(t *testing.T) {
+		fatPath := filepath.Join(tempDir, "size_large_silent.fat")
+		packCmd := newPackCmd()
+		var stderrBuf bytes.Buffer
+		packCmd.SetErr(&stderrBuf)
+		packCmd.SetArgs([]string{
+			flagStub, stubPath,
+			flagOutput, fatPath,
+			"--profile", "size",
+			"-v", "v1=" + largeV1Path,
+			"-v", "v3=" + largeV3Path,
+			flagSkipELF,
+		})
+
+		if err := packCmd.Execute(); err != nil {
+			t.Fatalf("expected pack to succeed, got %v", err)
+		}
+
+		errOutput := stderrBuf.String()
+		if strings.Contains(errOutput, "[microfat:warn]") {
+			t.Errorf("expected no [microfat:warn] diagnostics on successful dict training, got %q", errOutput)
+		}
+	})
+}

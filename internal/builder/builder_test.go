@@ -745,4 +745,118 @@ func TestBuildAndPack_CompressionProfiles(t *testing.T) {
 	}
 }
 
+func TestAssemblePackOptions_WarnFuncAndStderr(t *testing.T) {
+	t.Parallel()
+
+	m := &builder.Manifest{
+		AppName:    "warnapp",
+		TargetOS:   testOSLinux,
+		TargetArch: testArchAMD64,
+	}
+
+	t.Run("wires custom WarnFunc when provided", func(t *testing.T) {
+		t.Parallel()
+
+		var invoked bool
+		customWarn := func(format string, args ...any) {
+			invoked = true
+		}
+
+		packOpts := builder.AssemblePackOptionsForTest(
+			m, "stub", "out", "warnapp", nil,
+			builder.BuildOptions{WarnFunc: customWarn},
+		)
+
+		if packOpts.WarnFunc == nil {
+			t.Fatalf("expected WarnFunc to be set on packOpts")
+		}
+		packOpts.WarnFunc("test message %s", "arg")
+		if !invoked {
+			t.Errorf("expected custom WarnFunc to be invoked")
+		}
+	})
+
+	t.Run("falls back to Stderr with [microfat:warn] prefix", func(t *testing.T) {
+		t.Parallel()
+
+		var stderrBuf bytes.Buffer
+		packOpts := builder.AssemblePackOptionsForTest(
+			m, "stub", "out", "warnapp", nil,
+			builder.BuildOptions{Stderr: &stderrBuf},
+		)
+
+		if packOpts.WarnFunc == nil {
+			t.Fatalf("expected WarnFunc to be populated from Stderr fallback")
+		}
+		packOpts.WarnFunc("dictionary training skipped: %s", "reason")
+
+		expected := "[microfat:warn] dictionary training skipped: reason\n"
+		if stderrBuf.String() != expected {
+			t.Errorf("expected %q, got %q", expected, stderrBuf.String())
+		}
+
+		stderrBuf.Reset()
+		packOpts.WarnFunc("dictionary training skipped (reduction 0%): no savings")
+		expectedPercent := "[microfat:warn] dictionary training skipped (reduction 0%): no savings\n"
+		if stderrBuf.String() != expectedPercent {
+			t.Errorf("expected %q, got %q", expectedPercent, stderrBuf.String())
+		}
+	})
+
+	t.Run("WarnFunc remains nil when neither WarnFunc nor Stderr is set", func(t *testing.T) {
+		t.Parallel()
+
+		packOpts := builder.AssemblePackOptionsForTest(
+			m, "stub", "out", "warnapp", nil,
+			builder.BuildOptions{},
+		)
+
+		if packOpts.WarnFunc != nil {
+			t.Errorf("expected nil WarnFunc when neither WarnFunc nor Stderr is provided")
+		}
+	})
+
+	t.Run("Profile size on small variants emits warning to Stderr via pack.Pack", func(t *testing.T) {
+		t.Parallel()
+
+		tempDir := t.TempDir()
+		stubPath := filepath.Join(tempDir, "stub")
+		if err := os.WriteFile(stubPath, []byte("stub_bytes"), 0o755); err != nil {
+			t.Fatalf("write stub: %v", err)
+		}
+		v1Path := filepath.Join(tempDir, "v1")
+		v3Path := filepath.Join(tempDir, "v3")
+		if err := os.WriteFile(v1Path, []byte("123"), 0o755); err != nil {
+			t.Fatalf("write v1: %v", err)
+		}
+		if err := os.WriteFile(v3Path, []byte("456"), 0o755); err != nil {
+			t.Fatalf("write v3: %v", err)
+		}
+
+		var stderrBuf bytes.Buffer
+		outPath := filepath.Join(tempDir, "fat.bin")
+
+		packOpts := builder.AssemblePackOptionsForTest(
+			m, stubPath, outPath, "warnapp",
+			map[string]string{"v1": v1Path, "v3": v3Path},
+			builder.BuildOptions{
+				Profile:           "size",
+				Stderr:            &stderrBuf,
+				SkipELFValidation: true,
+			},
+		)
+
+		idx, err := pack.Pack(packOpts)
+		if err != nil {
+			t.Fatalf("expected pack.Pack to succeed, got %v", err)
+		}
+		if idx == nil {
+			t.Fatalf("expected non-nil index")
+		}
+		if !strings.Contains(stderrBuf.String(), "[microfat:warn] shared dictionary training failed") {
+			t.Errorf("expected [microfat:warn] diagnostic on stderr, got %q", stderrBuf.String())
+		}
+	})
+}
+
 

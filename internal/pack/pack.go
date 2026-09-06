@@ -44,6 +44,9 @@ type VariantCompressionOptions struct {
 	Level       string
 }
 
+// WarnFunc is a callback invoked when non-fatal diagnostic warnings occur during packaging.
+type WarnFunc func(format string, args ...any)
+
 // Options configures the packaging process.
 type Options struct {
 	StubPath           string
@@ -59,8 +62,15 @@ type Options struct {
 	DictSize           int               // Target dictionary size in bytes (default: 112 KB)
 	VariantCompression map[string]VariantCompressionOptions
 	Permissions        os.FileMode
-	FormatVersion      int  // FormatVersion1 (JSON) or FormatVersion2 (Binary, default)
-	SkipELFValidation  bool // Optional flag to bypass ELF header validation (primarily for testing)
+	FormatVersion      int      // FormatVersion1 (JSON) or FormatVersion2 (Binary, default)
+	SkipELFValidation  bool     // Optional flag to bypass ELF header validation (primarily for testing)
+	WarnFunc           WarnFunc // Optional diagnostic warning callback for non-fatal assembly telemetry
+}
+
+func (o *Options) warnf(format string, args ...any) {
+	if o != nil && o.WarnFunc != nil {
+		o.WarnFunc(format, args...)
+	}
 }
 
 // DefaultOptions returns a new Options instance initialized with safe, recommended defaults:
@@ -91,8 +101,9 @@ type VerificationResult struct {
 }
 
 const (
-	sampleChunkSize   = 4 * 1024 // 4 KB per sample chunk
-	maxSamplesPerFile = 32
+	sampleChunkSize    = 4 * 1024 // 4 KB per sample chunk
+	maxSamplesPerFile  = 32
+	minVariantsForDict = 2
 )
 
 func sampleVariantPayloads(variantPaths map[string]string, levels []string) ([][]byte, error) {
@@ -102,6 +113,10 @@ func sampleVariantPayloads(variantPaths map[string]string, levels []string) ([][
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("reading variant %s for sample training: %w", lvl, err)
+		}
+
+		if len(data) == 0 {
+			continue
 		}
 
 		if len(data) <= sampleChunkSize {
@@ -125,6 +140,66 @@ func sampleVariantPayloads(variantPaths map[string]string, levels []string) ([][
 	return samples, nil
 }
 
+func prepareSharedDictionary(opts *Options, levels []string) ([]byte, string, error) {
+	enableDict := opts.EnableDict
+	if !enableDict && strings.EqualFold(strings.TrimSpace(opts.Profile), codec.ProfileSize) && len(levels) >= minVariantsForDict {
+		algo, _ := codec.ParseCompressionSpec(opts.Compression)
+		if algo == "" || algo == codec.AlgorithmZstd {
+			enableDict = true
+		}
+	}
+
+	if !enableDict {
+		return nil, "", nil
+	}
+
+	if len(levels) < minVariantsForDict {
+		return nil, "", errors.New("training shared dictionary: requires at least two variants")
+	}
+
+	samples, err := sampleVariantPayloads(opts.Variants, levels)
+	if err != nil {
+		if opts.EnableDict {
+			return nil, "", fmt.Errorf("sampling variants for dictionary training: %w", err)
+		}
+		opts.warnf("shared dictionary training failed (sampling variants: %v); proceeding with independent variant compression", err)
+		return nil, "", nil
+	}
+
+	if len(samples) == 0 {
+		if opts.EnableDict {
+			return nil, "", errors.New("training shared dictionary: no sample data")
+		}
+		opts.warnf("shared dictionary training failed (no sample data); proceeding with independent variant compression")
+		return nil, "", nil
+	}
+
+	dictSize := opts.DictSize
+	if dictSize <= 0 {
+		dictSize = codec.DefaultDictSize
+	}
+
+	dict, tErr := codec.TrainDictionary(samples, dictSize, opts.CompressionLevel)
+	if tErr != nil {
+		if opts.EnableDict {
+			return nil, "", fmt.Errorf("training shared dictionary: %w", tErr)
+		}
+		opts.warnf("shared dictionary training failed (%v); proceeding with independent variant compression", tErr)
+		return nil, "", nil
+	}
+
+	if len(dict) == 0 {
+		if opts.EnableDict {
+			return nil, "", errors.New("training shared dictionary: empty dictionary produced")
+		}
+		opts.warnf("shared dictionary training failed (empty dictionary produced); proceeding with independent variant compression")
+		return nil, "", nil
+	}
+
+	h := sha256.Sum256(dict)
+	return dict, hex.EncodeToString(h[:]), nil
+}
+
 // Pack stitches the stub and compressed variant binaries into a complete microfat fat executable.
 func Pack(opts Options) (*format.Index, error) {
 	if err := validateOptions(&opts); err != nil {
@@ -138,39 +213,9 @@ func Pack(opts Options) (*format.Index, error) {
 
 	levels := sortVariantLevels(opts.Variants, opts.TargetArch)
 
-	// Determine if shared dictionary compression should be trained
-	enableDict := opts.EnableDict
-	if !enableDict && opts.Profile == codec.ProfileSize && len(levels) >= 2 {
-		algo, _ := codec.ParseCompressionSpec(opts.Compression)
-		if algo == "" || algo == codec.AlgorithmZstd {
-			enableDict = true
-		}
-	}
-
-	var dictBytes []byte
-	var dictSHAHex string
-	if enableDict && len(levels) >= 2 {
-		samples, err := sampleVariantPayloads(opts.Variants, levels)
-		if err != nil {
-			if opts.EnableDict {
-				return nil, fmt.Errorf("sampling variants for dictionary training: %w", err)
-			}
-		} else if len(samples) > 0 {
-			dictSize := opts.DictSize
-			if dictSize <= 0 {
-				dictSize = codec.DefaultDictSize
-			}
-			dict, tErr := codec.TrainDictionary(samples, dictSize, opts.CompressionLevel)
-			if tErr != nil {
-				if opts.EnableDict {
-					return nil, fmt.Errorf("training shared dictionary: %w", tErr)
-				}
-			} else if len(dict) > 0 {
-				dictBytes = dict
-				h := sha256.Sum256(dictBytes)
-				dictSHAHex = hex.EncodeToString(h[:])
-			}
-		}
+	dictBytes, dictSHAHex, err := prepareSharedDictionary(&opts, levels)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create temporary file in the destination directory for atomic replacement

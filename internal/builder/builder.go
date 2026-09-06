@@ -43,6 +43,7 @@ type BuildOptions struct {
 	FormatVersion     int
 	Stdout            io.Writer
 	Stderr            io.Writer
+	WarnFunc          pack.WarnFunc
 }
 
 // BuildResult contains metadata about the compiled and packaged fat binary.
@@ -463,6 +464,20 @@ func assemblePackOptions(
 		}
 		if len(varCompMap) > 0 {
 			packOpts.VariantCompression = varCompMap
+		}
+	}
+
+	if opts.WarnFunc != nil {
+		packOpts.WarnFunc = opts.WarnFunc
+	} else if opts.Stderr != nil {
+		packOpts.WarnFunc = func(format string, args ...any) {
+			var msg string
+			if len(args) == 0 {
+				msg = format
+			} else {
+				msg = fmt.Sprintf(format, args...)
+			}
+			_, _ = fmt.Fprintf(opts.Stderr, "[microfat:warn] %s\n", msg)
 		}
 	}
 
