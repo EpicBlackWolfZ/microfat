@@ -69,7 +69,8 @@ if [[ -n "$V1" && -n "$V2" && -n "$V3" && -n "$V4" && -n "$STUB_AMD64" ]]; then
 
     package_fat_archive "$OUT_AMD64" "amd64"
 else
-    echo "WARN: Skipping AMD64 bundling (one or more variants not found)"
+    echo "ERROR: Missing required AMD64 build artifacts" >&2
+    exit 1
 fi
 
 # 2. ARM64 Fat Binary Assembly
@@ -94,5 +95,6 @@ if [[ -n "$ARM_V80" && -n "$ARM_V82" && -n "$ARM_V90" && -n "$STUB_ARM64" ]]; th
 
     package_fat_archive "$OUT_ARM64" "arm64"
 else
-    echo "WARN: Skipping ARM64 bundling (one or more variants not found)"
+    echo "ERROR: Missing required ARM64 build artifacts" >&2
+    exit 1
 fi

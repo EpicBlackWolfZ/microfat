@@ -688,6 +688,9 @@ func PrewarmVariantWithDict(
 	cacheDir string,
 	dict []byte,
 ) (cachedPath string, alreadyCached bool, duration time.Duration, err error) {
+	if entry == nil {
+		return "", false, 0, errors.New("nil variant entry")
+	}
 	if entry.SHA256 == "" || !format.ValidateChecksum(entry.SHA256) {
 		return "", false, 0, fmt.Errorf("%w: invalid or missing variant checksum %q", format.ErrInvalidChecksum, entry.SHA256)
 	}
@@ -695,63 +698,54 @@ func PrewarmVariantWithDict(
 		return "", false, 0, fmt.Errorf("%w: invalid variant uncompressed size %d", format.ErrPayloadTooLarge, entry.UncompressedSize)
 	}
 
-	cleanDir := filepath.Clean(cacheDir)
-	if err := os.MkdirAll(cleanDir, format.PrivateCacheDirMode); err != nil {
-		return "", false, 0, fmt.Errorf("creating cache dir %s: %w", cleanDir, err)
-	}
-
-	cachedBinary := filepath.Join(cleanDir, filepath.Clean(entry.SHA256))
-	if verifyCachedBinary(cachedBinary, entry.UncompressedSize, entry.SHA256) {
-		return cachedBinary, true, 0, nil
-	}
-
-	tmpFile, err := os.CreateTemp(cleanDir, ".prewarm-*.tmp")
+	dirFD, cleanDir, err := format.ResolveCacheDirFD(cacheDir)
 	if err != nil {
-		return "", false, 0, fmt.Errorf("creating temp file in %s: %w", cleanDir, err)
+		return "", false, 0, fmt.Errorf("resolving cache dir %s: %w", cacheDir, err)
 	}
-	tmpPath := tmpFile.Name()
-	defer func() {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpPath)
-	}()
+	if dirFD >= 0 {
+		defer func() { _ = cache.CloseFD(dirFD) }()
+	}
+
+	cachedName := filepath.Clean(entry.SHA256)
+	cachedBinary := filepath.Join(cleanDir, cachedName)
+
+	if dirFD >= 0 {
+		vfd, openErr := cache.OpenAndValidateVariantAtFD(dirFD, cachedName, entry, false)
+		if openErr == nil {
+			_ = cache.CloseFD(vfd)
+			return cachedBinary, true, 0, nil
+		}
+		if cache.IsSymlinkErr(openErr) || errors.Is(openErr, cache.ErrNonRegularFile) {
+			return "", false, 0, fmt.Errorf("%w: refusal to prewarm over symlink or non-regular file at %s: %w",
+				format.ErrCacheWrite, cachedBinary, openErr)
+		}
+	} else {
+		fi, lstatErr := os.Lstat(cachedBinary)
+		if lstatErr == nil {
+			if fi.Mode()&os.ModeSymlink != 0 || !fi.Mode().IsRegular() {
+				return "", false, 0, fmt.Errorf("%w: refusal to prewarm over symlink or non-regular file at %s",
+					format.ErrCacheWrite, cachedBinary)
+			}
+			if verifyCachedBinary(cachedBinary, entry.UncompressedSize, entry.SHA256) {
+				return cachedBinary, true, 0, nil
+			}
+		}
+	}
 
 	c, err := codec.Get(entry.Compression)
 	if err != nil {
 		return "", false, 0, fmt.Errorf("lookup codec %q for %s: %w", entry.Compression, entry.Level, err)
 	}
 
-	decompStart := time.Now()
 	secReader := io.NewSectionReader(r, entry.Offset, entry.CompressedSize)
-	hasher := sha256.New()
-	mw := io.MultiWriter(tmpFile, hasher)
-	if err := codec.DecompressWithOptionalDict(c, mw, secReader, entry.UncompressedSize, dict); err != nil {
-		return "", false, 0, fmt.Errorf("decompressing variant %s: %w", entry.Level, err)
+	decompStart := time.Now()
+	cachedBinary, err = cache.MaterializeVariantAtFD(dirFD, cleanDir, entry, func(w io.Writer) error {
+		return codec.DecompressWithOptionalDict(c, w, secReader, entry.UncompressedSize, dict)
+	})
+	if err != nil {
+		return "", false, 0, err
 	}
 	decompDuration := time.Since(decompStart)
-
-	actualHash := hex.EncodeToString(hasher.Sum(nil))
-	if actualHash != entry.SHA256 {
-		return "", false, 0, fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, entry.SHA256, actualHash)
-	}
-
-	if err := tmpFile.Chmod(format.PrivateExecMode); err != nil {
-		return "", false, 0, fmt.Errorf("setting permissions on %s: %w", tmpPath, err)
-	}
-	if err := tmpFile.Sync(); err != nil {
-		return "", false, 0, fmt.Errorf("syncing temp file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return "", false, 0, fmt.Errorf("closing temp file %s: %w", tmpPath, err)
-	}
-
-	if err := os.Rename(tmpPath, cachedBinary); err != nil {
-		return "", false, 0, fmt.Errorf("atomically renaming cached variant to %s: %w", cachedBinary, err)
-	}
-
-	if !verifyCachedBinary(cachedBinary, entry.UncompressedSize, entry.SHA256) {
-		_ = os.Remove(cachedBinary)
-		return "", false, 0, fmt.Errorf("%w: failed to verify cached binary %s post-extraction", format.ErrCacheWrite, cachedBinary)
-	}
 
 	return cachedBinary, false, decompDuration, nil
 }

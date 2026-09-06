@@ -1050,6 +1050,27 @@ func TestValidateCacheDirSecurity(t *testing.T) {
 		}
 	})
 
+	t.Run("symlink to directory with trailing slash", func(t *testing.T) {
+		target := filepath.Join(tempDir, "sym_target_slash")
+		if err := os.MkdirAll(target, testPerm0700); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		link := filepath.Join(tempDir, "sym_link_slash")
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatalf("symlink failed: %v", err)
+		}
+		err := validateCacheDirSecurity(link + "/")
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !errors.Is(err, ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "cannot be a symlink") {
+			t.Fatalf("expected 'cannot be a symlink' in error: %v", err)
+		}
+	})
+
 	t.Run("fstat failure", func(t *testing.T) {
 		fstatDirFunc = func(fd int, stat *unix.Stat_t) error {
 			return errors.New("simulated fstat failure")
@@ -2420,7 +2441,7 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 		}
 	})
 
-	t.Run("Format v1 allows variant with empty SHA256 in ValidateBounds", func(t *testing.T) {
+	t.Run("Format v1 rejects variant with empty SHA256 in ValidateBounds", func(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
 			Version:    FormatVersion1,
@@ -2429,8 +2450,9 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 				{Level: "v1", Offset: 100, CompressedSize: 100, UncompressedSize: 200, SHA256: ""},
 			},
 		}
-		if err := idx.ValidateBounds(1000); err != nil {
-			t.Fatalf("expected valid bounds for Format v1 with empty SHA256, got %v", err)
+		err := idx.ValidateBounds(1000)
+		if !errors.Is(err, ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum for Format v1 with empty SHA256, got %v", err)
 		}
 	})
 
@@ -2872,7 +2894,7 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 		if !errors.Is(err, ErrInvalidChecksum) {
 			t.Fatalf("expected ErrInvalidChecksum for empty dict SHA256 in Format v2, got %v", err)
 		}
-		if !strings.Contains(err.Error(), "dictionary missing or invalid sha256 checksum in Format v2") {
+		if !strings.Contains(err.Error(), "dictionary missing or invalid sha256 checksum") {
 			t.Fatalf("unexpected error message: %v", err)
 		}
 	})
@@ -2938,7 +2960,7 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 		}
 	})
 
-	t.Run("Format v1 allows empty dictionary SHA256 when DictionarySize is non-zero", func(t *testing.T) {
+	t.Run("Format v1 rejects empty dictionary SHA256 when DictionarySize is non-zero", func(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
 			Version:          FormatVersion1,
@@ -2948,8 +2970,12 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 			DictionarySHA256: "",
 			Variants:         []VariantEntry{validVariant},
 		}
-		if err := idx.ValidateBounds(boundaryMax); err != nil {
-			t.Fatalf("expected valid bounds for Format v1 with empty dict SHA256, got %v", err)
+		err := idx.ValidateBounds(boundaryMax)
+		if !errors.Is(err, ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum for Format v1 with empty dict SHA256, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "dictionary missing or invalid sha256 checksum") {
+			t.Fatalf("unexpected error message: %v", err)
 		}
 	})
 
@@ -2967,7 +2993,7 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 		if !errors.Is(err, ErrInvalidChecksum) {
 			t.Fatalf("expected ErrInvalidChecksum for malformed dict SHA in Format v1, got %v", err)
 		}
-		if !strings.Contains(err.Error(), "invalid dictionary sha256 checksum format") {
+		if !strings.Contains(err.Error(), "dictionary missing or invalid sha256 checksum") {
 			t.Fatalf("unexpected error message: %v", err)
 		}
 	})
@@ -3111,7 +3137,7 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 		}
 	})
 
-	t.Run("ReadTrailerAndIndex accepts Format v1 binary with non-zero dictionary and empty SHA256", func(t *testing.T) {
+	t.Run("ReadTrailerAndIndex rejects Format v1 binary with non-zero dictionary and empty SHA256", func(t *testing.T) {
 		t.Parallel()
 		idxV1 := &Index{
 			Version:          FormatVersion1,
@@ -3132,15 +3158,42 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 		}
 
 		totalSize := boundaryMax + written
+		_, err = ReadTrailerAndIndex(bytes.NewReader(buf.Bytes()), totalSize)
+		if !errors.Is(err, ErrInvalidChecksum) {
+			t.Fatalf("expected ErrInvalidChecksum for Format v1 with empty dict SHA256, got %v", err)
+		}
+	})
+
+	t.Run("ReadTrailerAndIndex accepts Format v1 binary with non-zero dictionary and valid SHA256", func(t *testing.T) {
+		t.Parallel()
+		idxV1 := &Index{
+			Version:          FormatVersion1,
+			AppName:          testAppName,
+			TargetOS:         testOSLinux,
+			TargetArch:       testArchAMD64,
+			CreatedUnix:      1724540000,
+			DictionaryOffset: dictOffset,
+			DictionarySize:   dictSize,
+			DictionarySHA256: testSHA256Sample,
+			Variants:         []VariantEntry{validVariant},
+		}
+
+		buf := bytes.NewBuffer(make([]byte, boundaryMax))
+		written, err := WriteIndexAndTrailerWithVersion(buf, idxV1, boundaryMax, FormatVersion1)
+		if err != nil {
+			t.Fatalf("WriteIndexAndTrailerWithVersion failed: %v", err)
+		}
+
+		totalSize := boundaryMax + written
 		parsed, err := ReadTrailerAndIndex(bytes.NewReader(buf.Bytes()), totalSize)
 		if err != nil {
-			t.Fatalf("expected clean parse for Format v1 with empty dict SHA256, got %v", err)
+			t.Fatalf("expected clean parse for Format v1 with valid dict SHA256, got %v", err)
 		}
 		if parsed.DictionarySize != dictSize {
 			t.Fatalf("expected DictionarySize %d, got %d", dictSize, parsed.DictionarySize)
 		}
-		if parsed.DictionarySHA256 != "" {
-			t.Fatalf("expected empty DictionarySHA256, got %q", parsed.DictionarySHA256)
+		if parsed.DictionarySHA256 != testSHA256Sample {
+			t.Fatalf("expected DictionarySHA256 %q, got %q", testSHA256Sample, parsed.DictionarySHA256)
 		}
 	})
 }

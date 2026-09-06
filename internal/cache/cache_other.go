@@ -24,8 +24,18 @@ var OpenFileAtFunc = func(dirFD int, name string) (int, error) {
 	return -1, fmt.Errorf("%w: cannot open file descriptor on this OS", ErrUnsupportedPlatform)
 }
 
-func closeFD(fd int) error {
+// CloseFD is a no-op on non-Unix systems.
+func CloseFD(fd int) error {
 	return nil
+}
+
+func closeFD(fd int) error {
+	return CloseFD(fd)
+}
+
+// IsSymlinkErr reports whether err represents a symlink traversal rejection.
+func IsSymlinkErr(err error) bool {
+	return false
 }
 
 func isNotExistErr(err error) bool {
@@ -132,6 +142,16 @@ func VerifyVariant(entry *format.VariantEntry, cacheDir string) format.PrewarmRe
 			return res
 		}
 		cacheDir = resolved
+	} else {
+		if _, err := format.OpenAndValidateCacheDirFD(cacheDir, false); err != nil {
+			if isNotExistErr(err) {
+				res.Status = format.PrewarmStatusMissing
+			} else {
+				res.Status = format.PrewarmStatusCorrupted
+			}
+			res.Error = fmt.Sprintf("validating cache directory %s: %v", cacheDir, err)
+			return res
+		}
 	}
 
 	if entry.SHA256 == "" || !format.ValidateChecksum(entry.SHA256) {
@@ -189,4 +209,79 @@ func VerifyVariant(entry *format.VariantEntry, cacheDir string) format.PrewarmRe
 	res.Valid = true
 	res.Status = format.PrewarmStatusValid
 	return res
+}
+
+// MaterializeVariantAtFD provides a portable implementation of variant cache materialization for non-Unix platforms.
+func MaterializeVariantAtFD(
+	dirFD int,
+	dirPath string,
+	entry *format.VariantEntry,
+	writePayload func(w io.Writer) error,
+) (string, error) {
+	if dirPath == "" {
+		return "", fmt.Errorf("%w: invalid empty cache directory path", format.ErrCacheWrite)
+	}
+	if entry == nil {
+		return "", errors.New("nil variant entry")
+	}
+	if entry.SHA256 == "" || !format.ValidateChecksum(entry.SHA256) {
+		return "", fmt.Errorf("%w: invalid variant checksum %q", format.ErrInvalidChecksum, entry.SHA256)
+	}
+	if entry.UncompressedSize <= 0 || entry.UncompressedSize > format.MaxPayloadSize {
+		return "", fmt.Errorf("%w: invalid variant uncompressed size %d", format.ErrPayloadTooLarge, entry.UncompressedSize)
+	}
+	if writePayload == nil {
+		return "", errors.New("nil writePayload function")
+	}
+
+	cleanDir := filepath.Clean(dirPath)
+	tmpFile, err := os.CreateTemp(cleanDir, ".exec-*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("%w: cannot create temp file in %s: %w", format.ErrCacheWrite, cleanDir, err)
+	}
+	tmpPath := tmpFile.Name()
+	defer func() {
+		if tmpFile != nil {
+			_ = tmpFile.Close()
+		}
+		if tmpPath != "" {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	hasher := sha256.New()
+	mw := io.MultiWriter(tmpFile, hasher)
+	if err := writePayload(mw); err != nil {
+		return "", fmt.Errorf("%w: writing variant payload: %w", format.ErrCacheExtract, err)
+	}
+
+	actualHex := hex.EncodeToString(hasher.Sum(nil))
+	if actualHex != entry.SHA256 {
+		return "", fmt.Errorf("%w: expected %s, got %s", format.ErrPayloadCorrupted, entry.SHA256, actualHex)
+	}
+
+	if err := tmpFile.Chmod(format.PrivateExecMode); err != nil {
+		return "", fmt.Errorf("%w: setting permissions on %s: %w", format.ErrCacheWrite, tmpPath, err)
+	}
+	if err := tmpFile.Sync(); err != nil {
+		return "", fmt.Errorf("%w: syncing temp cache file %s: %w", format.ErrCacheWrite, tmpPath, err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return "", fmt.Errorf("%w: closing temp cache file %s: %w", format.ErrCacheWrite, tmpPath, err)
+	}
+	tmpFile = nil
+
+	cachedName := filepath.Clean(entry.SHA256)
+	cachedBinary := filepath.Join(cleanDir, cachedName)
+	if err := os.Rename(tmpPath, cachedBinary); err != nil {
+		return "", fmt.Errorf("%w: renaming temp cache file %s to %s: %w", format.ErrCacheWrite, tmpPath, cachedBinary, err)
+	}
+	tmpPath = ""
+
+	if !VerifyBinary(cachedBinary, entry.UncompressedSize, entry.SHA256) {
+		_ = os.Remove(cachedBinary)
+		return "", fmt.Errorf("%w: failed to verify cached binary %s post-extraction", format.ErrCacheWrite, cachedBinary)
+	}
+
+	return cachedBinary, nil
 }

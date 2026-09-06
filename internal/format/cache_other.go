@@ -5,6 +5,7 @@ package format
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 var (
@@ -17,6 +18,7 @@ var (
 // OpenAndValidateCacheDirFD validates the cache directory on non-Unix platforms.
 // Since descriptor-based pinning is Unix-specific, it returns -1 as the descriptor on success.
 func OpenAndValidateCacheDirFD(dir string, allowRemediate bool) (int, error) {
+	dir = filepath.Clean(dir)
 	fi, err := lstatFunc(dir)
 	if err != nil {
 		return -1, fmt.Errorf("%w: unable to stat cache directory %s: %w", ErrInsecureCacheDir, dir, err)
