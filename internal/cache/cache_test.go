@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
@@ -73,6 +75,9 @@ func TestVerifyBinary(t *testing.T) {
 
 func TestVerifyVariant(t *testing.T) {
 	tempDir := t.TempDir()
+	if err := os.Chmod(tempDir, 0o700); err != nil {
+		t.Fatalf("chmod tempDir: %v", err)
+	}
 	payload := []byte("cache test variant payload")
 	h := sha256.Sum256(payload)
 	validSHA := hex.EncodeToString(h[:])
@@ -98,6 +103,48 @@ func TestVerifyVariant(t *testing.T) {
 		res := VerifyVariant(entry, filepath.Join(tempDir, "missing_parent", "cache"))
 		if res.Valid || res.Status != format.PrewarmStatusMissing {
 			t.Errorf("expected status 'missing', got %+v", res)
+		}
+	})
+
+	t.Run("InsecurePermissionsCacheDir", func(t *testing.T) {
+		insecureDir := filepath.Join(tempDir, "insecure_perms")
+		if err := os.MkdirAll(insecureDir, 0o777); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		_ = os.Chmod(insecureDir, 0o777)
+		res := VerifyVariant(entry, insecureDir)
+		if res.Valid || res.Status != format.PrewarmStatusCorrupted {
+			t.Errorf("expected status 'corrupted' for insecure cacheDir permissions, got %+v", res)
+		}
+	})
+
+	t.Run("SymlinkCacheDir", func(t *testing.T) {
+		realDir := filepath.Join(tempDir, "real_cache")
+		if err := os.MkdirAll(realDir, 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		symlinkDir := filepath.Join(tempDir, "symlink_cache")
+		if err := os.Symlink(realDir, symlinkDir); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		res := VerifyVariant(entry, symlinkDir)
+		if res.Valid || res.Status != format.PrewarmStatusCorrupted {
+			t.Errorf("expected status 'corrupted' for symlink cacheDir root, got %+v", res)
+		}
+	})
+
+	t.Run("SymlinkCacheDirWithTrailingSlash", func(t *testing.T) {
+		realDir := filepath.Join(tempDir, "real_cache_slash")
+		if err := os.MkdirAll(realDir, 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		symlinkDir := filepath.Join(tempDir, "symlink_cache_slash")
+		if err := os.Symlink(realDir, symlinkDir); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		res := VerifyVariant(entry, symlinkDir+"/")
+		if res.Valid || res.Status != format.PrewarmStatusCorrupted {
+			t.Errorf("expected status 'corrupted' for symlink cacheDir root with trailing slash, got %+v", res)
 		}
 	})
 
@@ -538,5 +585,233 @@ func TestOpenAndValidateAtFD_LifecycleAndPurge(t *testing.T) {
 			t.Fatalf("expected success with OpenAndValidateVariantAtFDWithOpener, got: %v", err)
 		}
 		_ = closeFD(fd2)
+	})
+}
+
+func TestMaterializeVariantAtFD(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.Chmod(tempDir, 0o700); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	dirFD, err := unix.Open(tempDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		t.Fatalf("open dirFD: %v", err)
+	}
+	defer func() { _ = unix.Close(dirFD) }()
+
+	payload := []byte("materialize-test-payload-bytes-1234567890")
+	h := sha256.Sum256(payload)
+	validSHA := hex.EncodeToString(h[:])
+	validSize := int64(len(payload))
+
+	entry := &format.VariantEntry{
+		Level:            "v1",
+		SHA256:           validSHA,
+		UncompressedSize: validSize,
+	}
+
+	t.Run("Success", func(t *testing.T) {
+		path, err := MaterializeVariantAtFD(dirFD, tempDir, entry, func(w io.Writer) error {
+			_, writeErr := w.Write(payload)
+			return writeErr
+		})
+		if err != nil {
+			t.Fatalf("unexpected error from MaterializeVariantAtFD: %v", err)
+		}
+		expectedPath := filepath.Join(tempDir, validSHA)
+		if path != expectedPath {
+			t.Errorf("expected path %q, got %q", expectedPath, path)
+		}
+
+		// Verify content
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed reading materialized file: %v", err)
+		}
+		if !bytes.Equal(data, payload) {
+			t.Errorf("content mismatch")
+		}
+
+		// Verify permissions (0700)
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat: %v", err)
+		}
+		if fi.Mode().Perm() != 0o700 {
+			t.Errorf("expected permissions 0700, got %04o", fi.Mode().Perm())
+		}
+	})
+
+	t.Run("AtomicOverwrite_CorruptedFile", func(t *testing.T) {
+		targetPath := filepath.Join(tempDir, validSHA)
+		corrupt := bytes.Repeat([]byte{0xAA}, int(validSize))
+		if err := os.WriteFile(targetPath, corrupt, 0o700); err != nil {
+			t.Fatalf("write corrupted: %v", err)
+		}
+
+		path, err := MaterializeVariantAtFD(dirFD, tempDir, entry, func(w io.Writer) error {
+			_, writeErr := w.Write(payload)
+			return writeErr
+		})
+		if err != nil {
+			t.Fatalf("unexpected error on atomic overwrite: %v", err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("reading overwritten file: %v", err)
+		}
+		if !bytes.Equal(data, payload) {
+			t.Errorf("expected recovered payload, got corrupted data")
+		}
+	})
+
+	t.Run("PayloadWriteError_CleansUp", func(t *testing.T) {
+		failEntry := &format.VariantEntry{
+			Level:            "v2",
+			SHA256:           strings.Repeat("b", 64),
+			UncompressedSize: 100,
+		}
+		writeErrSim := errors.New("simulated stream error")
+		_, err := MaterializeVariantAtFD(dirFD, tempDir, failEntry, func(w io.Writer) error {
+			_, _ = w.Write([]byte("partial"))
+			return writeErrSim
+		})
+		if err == nil || !errors.Is(err, format.ErrCacheExtract) {
+			t.Fatalf("expected ErrCacheExtract, got: %v", err)
+		}
+
+		// Verify no dangling .tmp files
+		entries, _ := os.ReadDir(tempDir)
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".tmp") {
+				t.Errorf("found dangling temp file: %s", e.Name())
+			}
+		}
+	})
+
+	t.Run("ChecksumMismatch_CleansUp", func(t *testing.T) {
+		failEntry := &format.VariantEntry{
+			Level:            "v3",
+			SHA256:           strings.Repeat("c", 64),
+			UncompressedSize: int64(len("wrong content")),
+		}
+		_, err := MaterializeVariantAtFD(dirFD, tempDir, failEntry, func(w io.Writer) error {
+			_, _ = w.Write([]byte("wrong content"))
+			return nil
+		})
+		if err == nil || !errors.Is(err, format.ErrPayloadCorrupted) {
+			t.Fatalf("expected ErrPayloadCorrupted, got: %v", err)
+		}
+
+		// Verify target file was not created
+		if _, statErr := os.Stat(filepath.Join(tempDir, failEntry.SHA256)); !os.IsNotExist(statErr) {
+			t.Errorf("expected target file not to exist on checksum mismatch")
+		}
+	})
+
+	t.Run("InvalidInputs", func(t *testing.T) {
+		// Invalid dirFD
+		if _, err := MaterializeVariantAtFD(-1, tempDir, entry, func(w io.Writer) error { return nil }); err == nil {
+			t.Errorf("expected error for invalid dirFD")
+		}
+
+		// Nil entry
+		if _, err := MaterializeVariantAtFD(dirFD, tempDir, nil, func(w io.Writer) error { return nil }); err == nil {
+			t.Errorf("expected error for nil entry")
+		}
+
+		// Empty or malformed SHA256
+		badSHA := &format.VariantEntry{Level: "v1", SHA256: "", UncompressedSize: 100}
+		if _, err := MaterializeVariantAtFD(dirFD, tempDir, badSHA, func(w io.Writer) error { return nil }); err == nil {
+			t.Errorf("expected error for empty SHA256")
+		}
+
+		// Invalid uncompressed size
+		badSize := &format.VariantEntry{Level: "v1", SHA256: validSHA, UncompressedSize: 0}
+		if _, err := MaterializeVariantAtFD(dirFD, tempDir, badSize, func(w io.Writer) error { return nil }); err == nil {
+			t.Errorf("expected error for zero uncompressed size")
+		}
+
+		// Nil writePayload
+		if _, err := MaterializeVariantAtFD(dirFD, tempDir, entry, nil); err == nil {
+			t.Errorf("expected error for nil writePayload")
+		}
+
+		// Empty dirPath
+		if _, err := MaterializeVariantAtFD(dirFD, "", entry, func(w io.Writer) error { return nil }); err == nil {
+			t.Errorf("expected error for empty dirPath")
+		}
+	})
+
+	t.Run("RenameFailure_CleansUpTemp", func(t *testing.T) {
+		renameSubDir := filepath.Join(tempDir, "rename_sub")
+		if err := os.MkdirAll(renameSubDir, 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		renameFD, err := unix.Open(renameSubDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		defer func() { _ = unix.Close(renameFD) }()
+
+		dirTarget := filepath.Join(renameSubDir, validSHA)
+		if err := os.MkdirAll(dirTarget, 0o700); err != nil {
+			t.Fatalf("mkdir dirTarget: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dirTarget, "child"), []byte("data"), 0o600); err != nil {
+			t.Fatalf("write child: %v", err)
+		}
+
+		_, err = MaterializeVariantAtFD(renameFD, renameSubDir, entry, func(w io.Writer) error {
+			_, writeErr := w.Write(payload)
+			return writeErr
+		})
+		if err == nil || !errors.Is(err, format.ErrCacheWrite) {
+			t.Fatalf("expected ErrCacheWrite on rename failure, got: %v", err)
+		}
+
+		// Verify no dangling temp files
+		entries, _ := os.ReadDir(renameSubDir)
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".tmp") {
+				t.Errorf("found dangling temp file after rename failure: %s", e.Name())
+			}
+		}
+	})
+
+	t.Run("PostRenameValidationFailure_PurgesCorruptedTarget", func(t *testing.T) {
+		failSubDir := filepath.Join(tempDir, "fail_sub")
+		if err := os.MkdirAll(failSubDir, 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		failFD, err := unix.Open(failSubDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		defer func() { _ = unix.Close(failFD) }()
+
+		origOpener := OpenFileAtFunc
+		OpenFileAtFunc = func(fd int, name string) (int, error) {
+			if name == validSHA {
+				return -1, errors.New("simulated opener failure on post-rename verification")
+			}
+			return origOpener(fd, name)
+		}
+		defer func() { OpenFileAtFunc = origOpener }()
+
+		_, err = MaterializeVariantAtFD(failFD, failSubDir, entry, func(w io.Writer) error {
+			_, writeErr := w.Write(payload)
+			return writeErr
+		})
+		if err == nil || !errors.Is(err, format.ErrCacheWrite) {
+			t.Fatalf("expected ErrCacheWrite on post-rename validation failure, got: %v", err)
+		}
+
+		// Verify target file was unlinked and purged
+		targetPath := filepath.Join(failSubDir, validSHA)
+		if _, statErr := os.Stat(targetPath); !os.IsNotExist(statErr) {
+			t.Errorf("expected target file %s to be unlinked after validation failure, got: %v", targetPath, statErr)
+		}
 	})
 }

@@ -3,16 +3,22 @@
 package cache
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"golang.org/x/sys/unix"
 )
+
+const maxTempFileAttempts = 1000
 
 // OpenFileFunc defines the default file descriptor opener enforcing O_NOFOLLOW and O_CLOEXEC.
 var OpenFileFunc = func(path string) (int, error) {
@@ -24,10 +30,27 @@ var OpenFileAtFunc = func(dirFD int, name string) (int, error) {
 	return unix.Openat(dirFD, name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 }
 
-var unlinkAtFunc = unix.Unlinkat
+var (
+	unlinkAtFunc     = unix.Unlinkat
+	renameAtFunc     = unix.Renameat
+	cryptoRandReader = rand.Reader
+)
+
+// CloseFD closes an open file descriptor on Unix systems, or returns nil if fd < 0.
+func CloseFD(fd int) error {
+	if fd < 0 {
+		return nil
+	}
+	return unix.Close(fd)
+}
 
 func closeFD(fd int) error {
-	return unix.Close(fd)
+	return CloseFD(fd)
+}
+
+// IsSymlinkErr reports whether err represents a symlink traversal rejection (such as ELOOP).
+func IsSymlinkErr(err error) bool {
+	return errors.Is(err, unix.ELOOP) || errors.Is(err, syscall.ELOOP)
 }
 
 func isNotExistErr(err error) bool {
@@ -214,7 +237,8 @@ func VerifyVariant(entry *format.VariantEntry, cacheDir string) format.PrewarmRe
 		UncompressedSize: entry.UncompressedSize,
 	}
 
-	var dirFD = -1
+	var dirFD int
+	var cleanDir string
 	if cacheDir == "" {
 		resolvedFD, resolved, err := format.ResolveCacheDirFD("")
 		if err != nil {
@@ -222,17 +246,23 @@ func VerifyVariant(entry *format.VariantEntry, cacheDir string) format.PrewarmRe
 			res.Error = fmt.Sprintf("resolving cache directory: %v", err)
 			return res
 		}
-		cacheDir = resolved
+		cleanDir = resolved
 		dirFD = resolvedFD
 	} else {
-		resolvedFD, err := format.OpenAndValidateCacheDirFD(cacheDir, false)
-		if err == nil {
-			dirFD = resolvedFD
+		cleanDir = filepath.Clean(cacheDir)
+		resolvedFD, err := format.OpenAndValidateCacheDirFD(cleanDir, false)
+		if err != nil {
+			if isNotExistErr(err) {
+				res.Status = format.PrewarmStatusMissing
+			} else {
+				res.Status = format.PrewarmStatusCorrupted
+			}
+			res.Error = fmt.Sprintf("validating cache directory %s: %v", cacheDir, err)
+			return res
 		}
+		dirFD = resolvedFD
 	}
-	if dirFD >= 0 {
-		defer func() { _ = unix.Close(dirFD) }()
-	}
+	defer func() { _ = CloseFD(dirFD) }()
 
 	if entry.SHA256 == "" || !format.ValidateChecksum(entry.SHA256) {
 		res.Status = format.PrewarmStatusCorrupted
@@ -240,18 +270,11 @@ func VerifyVariant(entry *format.VariantEntry, cacheDir string) format.PrewarmRe
 		return res
 	}
 
-	cleanDir := filepath.Clean(cacheDir)
 	cachedName := filepath.Clean(entry.SHA256)
 	cachedBinary := filepath.Join(cleanDir, cachedName)
 	res.CachedPath = cachedBinary
 
-	var fd int
-	var err error
-	if dirFD >= 0 {
-		fd, err = OpenAndValidateVariantAtFD(dirFD, cachedName, entry, false)
-	} else {
-		fd, err = OpenAndValidateFD(cachedBinary, entry.UncompressedSize, entry.SHA256, false)
-	}
+	fd, err := OpenAndValidateVariantAtFD(dirFD, cachedName, entry, false)
 	if err != nil {
 		if isNotExistErr(err) {
 			res.Status = format.PrewarmStatusMissing
@@ -269,4 +292,114 @@ func VerifyVariant(entry *format.VariantEntry, cacheDir string) format.PrewarmRe
 	res.Valid = true
 	res.Status = format.PrewarmStatusValid
 	return res
+}
+
+func createTempFileAt(dirFD int, dirPath string) (int, string, string, error) {
+	var rnd [8]byte
+	for range maxTempFileAttempts {
+		if _, err := io.ReadFull(cryptoRandReader, rnd[:]); err != nil {
+			return -1, "", "", fmt.Errorf("generating random suffix: %w", err)
+		}
+		name := fmt.Sprintf(".exec-%s.tmp", hex.EncodeToString(rnd[:]))
+		fd, err := unix.Openat(dirFD, name, unix.O_RDWR|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC, format.PrivateExecMode)
+		if err == nil {
+			return fd, name, filepath.Join(dirPath, name), nil
+		}
+		if !errors.Is(err, unix.EEXIST) && !errors.Is(err, syscall.EEXIST) {
+			return -1, "", "", err
+		}
+	}
+	return -1, "", "", errors.New("failed to create temporary file in cache directory")
+}
+
+// MaterializeVariantAtFD extracts and materializes a variant payload into the cache directory
+// referenced by dirFD using descriptor-bound operations:
+//  1. Generates a secure temporary file name (.exec-<hex>.tmp) and opens it via Openat with O_CREAT|O_EXCL.
+//  2. Streams the payload via writePayload into an io.MultiWriter(f, hasher).
+//  3. Verifies the computed SHA-256 matches entry.SHA256.
+//  4. Sets permissions to PrivateExecMode (0700), flushes via Sync(), and closes the descriptor.
+//  5. Atomically renames the temporary file to entry.SHA256 via Renameat.
+//  6. Re-opens and verifies the file descriptor via OpenAndValidateVariantAtFD before returning the validated path.
+//  7. On any error, all temporary files are unlinked via Unlinkat.
+//
+// On Unix platforms (Linux, Darwin, BSD), this operation is strictly descriptor-bound to eliminate TOCTOU races.
+func MaterializeVariantAtFD(
+	dirFD int,
+	dirPath string,
+	entry *format.VariantEntry,
+	writePayload func(w io.Writer) error,
+) (string, error) {
+	if dirFD < 0 {
+		return "", fmt.Errorf("%w: invalid directory descriptor", format.ErrCacheWrite)
+	}
+	if strings.TrimSpace(dirPath) == "" {
+		return "", fmt.Errorf("%w: invalid empty cache directory path", format.ErrCacheWrite)
+	}
+	if entry == nil {
+		return "", errors.New("nil variant entry")
+	}
+	if entry.SHA256 == "" || !format.ValidateChecksum(entry.SHA256) {
+		return "", fmt.Errorf("%w: invalid variant checksum %q", format.ErrInvalidChecksum, entry.SHA256)
+	}
+	if entry.UncompressedSize <= 0 || entry.UncompressedSize > format.MaxPayloadSize {
+		return "", fmt.Errorf("%w: invalid variant uncompressed size %d", format.ErrPayloadTooLarge, entry.UncompressedSize)
+	}
+	if writePayload == nil {
+		return "", errors.New("nil writePayload function")
+	}
+
+	cleanDir := filepath.Clean(dirPath)
+	cachedName := filepath.Clean(entry.SHA256)
+	cachedBinary := filepath.Join(cleanDir, cachedName)
+
+	tmpFD, tmpName, tmpPath, createErr := createTempFileAt(dirFD, cleanDir)
+	if createErr != nil {
+		return "", fmt.Errorf("%w: cannot create temp file in %s: %w", format.ErrCacheWrite, cleanDir, createErr)
+	}
+
+	tmpFile := os.NewFile(uintptr(tmpFD), tmpPath)
+	defer func() {
+		if tmpFile != nil {
+			_ = tmpFile.Close()
+		}
+		if tmpName != "" {
+			_ = unlinkAtFunc(dirFD, tmpName, 0)
+		}
+	}()
+
+	hasher := sha256.New()
+	mw := io.MultiWriter(tmpFile, hasher)
+	if err := writePayload(mw); err != nil {
+		return "", fmt.Errorf("%w: writing variant payload: %w", format.ErrCacheExtract, err)
+	}
+
+	actualHex := hex.EncodeToString(hasher.Sum(nil))
+	if actualHex != entry.SHA256 {
+		return "", fmt.Errorf("%w: expected %s, got %s", format.ErrPayloadCorrupted, entry.SHA256, actualHex)
+	}
+
+	if err := tmpFile.Chmod(format.PrivateExecMode); err != nil {
+		return "", fmt.Errorf("%w: setting permissions on %s: %w", format.ErrCacheWrite, tmpPath, err)
+	}
+	if err := tmpFile.Sync(); err != nil {
+		return "", fmt.Errorf("%w: syncing temp cache file %s: %w", format.ErrCacheWrite, tmpPath, err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return "", fmt.Errorf("%w: closing temp cache file %s: %w", format.ErrCacheWrite, tmpPath, err)
+	}
+	tmpFile = nil
+
+	if err := renameAtFunc(dirFD, tmpName, dirFD, cachedName); err != nil {
+		return "", fmt.Errorf("%w: renaming temp cache file %s to %s: %w", format.ErrCacheWrite, tmpPath, cachedBinary, err)
+	}
+	tmpName = ""
+
+	vfd, openErr := OpenAndValidateVariantAtFD(dirFD, cachedName, entry, false)
+	if openErr != nil {
+		_ = unlinkAtFunc(dirFD, cachedName, 0)
+		return "", fmt.Errorf("%w: opening verified cache file %s: %w", format.ErrCacheWrite, cachedBinary, openErr)
+	}
+	_ = closeFD(vfd)
+
+	return cachedBinary, nil
 }

@@ -3121,7 +3121,7 @@ func TestPrewarm_RequiresValidDictionaryChecksum(t *testing.T) {
 
 	t.Run("Authentic Dictionary SHA-256 Succeeds", func(t *testing.T) {
 		t.Parallel()
-		cacheDir := t.TempDir()
+		cacheDir := filepath.Join(t.TempDir(), "cache")
 		f, err := os.Open(fatPath)
 		if err != nil {
 			t.Fatalf("failed to open authentic fat file: %v", err)
@@ -3209,6 +3209,63 @@ func TestPrewarmVariantWithDict_RejectsInvalidDimensions(t *testing.T) {
 		_, _, _, err = PrewarmVariantWithDict(dummyReader, entry, cacheDir, nil)
 		if err == nil || !errors.Is(err, format.ErrInvalidChecksum) {
 			t.Fatalf("expected ErrInvalidChecksum for malformed SHA256, got: %v", err)
+		}
+	})
+}
+
+func TestPrewarmVariantWithDict_SymlinkRejection(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dummyReader := bytes.NewReader(make([]byte, 1024))
+	validSHA := strings.Repeat("a", 64)
+	entry := &format.VariantEntry{
+		Level:            "v1",
+		Offset:           0,
+		CompressedSize:   100,
+		UncompressedSize: 100,
+		SHA256:           validSHA,
+		Compression:      "zstd",
+	}
+
+	t.Run("SymlinkCacheDirRoot_Rejected", func(t *testing.T) {
+		realCache := filepath.Join(tempDir, "real_cache")
+		if err := os.MkdirAll(realCache, 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		symlinkCache := filepath.Join(tempDir, "symlink_cache_root")
+		if err := os.Symlink(realCache, symlinkCache); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+
+		_, _, _, err := PrewarmVariantWithDict(dummyReader, entry, symlinkCache, nil)
+		if err == nil {
+			t.Fatalf("expected error for symlink cacheDir root, got nil")
+		}
+		if !errors.Is(err, format.ErrInsecureCacheDir) {
+			t.Fatalf("expected ErrInsecureCacheDir for symlink cacheDir root, got: %v", err)
+		}
+	})
+
+	t.Run("SymlinkTargetVariant_Rejected", func(t *testing.T) {
+		cacheDir := filepath.Join(tempDir, "symlink_target_cache")
+		if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		decoyFile := filepath.Join(tempDir, "decoy")
+		if err := os.WriteFile(decoyFile, []byte("decoy"), 0o600); err != nil {
+			t.Fatalf("write decoy: %v", err)
+		}
+		symlinkVariant := filepath.Join(cacheDir, validSHA)
+		if err := os.Symlink(decoyFile, symlinkVariant); err != nil {
+			t.Fatalf("symlink variant: %v", err)
+		}
+
+		_, _, _, err := PrewarmVariantWithDict(dummyReader, entry, cacheDir, nil)
+		if err == nil {
+			t.Fatalf("expected error for symlink variant target, got nil")
+		}
+		if !errors.Is(err, format.ErrCacheWrite) {
+			t.Fatalf("expected ErrCacheWrite for symlink variant target, got: %v", err)
 		}
 	})
 }
