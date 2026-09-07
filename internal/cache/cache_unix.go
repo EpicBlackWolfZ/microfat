@@ -321,6 +321,8 @@ func createTempFileAt(dirFD int, dirPath string) (int, string, string, error) {
 //  5. Atomically renames the temporary file to entry.SHA256 via Renameat.
 //  6. Re-opens and verifies the file descriptor via OpenAndValidateVariantAtFD before returning the validated path.
 //  7. On any error, all temporary files are unlinked via Unlinkat.
+//
+// On Unix platforms (Linux, Darwin, BSD), this operation is strictly descriptor-bound to eliminate TOCTOU races.
 func MaterializeVariantAtFD(
 	dirFD int,
 	dirPath string,

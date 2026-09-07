@@ -212,6 +212,9 @@ func VerifyVariant(entry *format.VariantEntry, cacheDir string) format.PrewarmRe
 }
 
 // MaterializeVariantAtFD provides a portable implementation of variant cache materialization for non-Unix platforms.
+// On Unix platforms this operation is strictly descriptor-bound via openat/renameat. On platforms without openat/renameat
+// semantics (e.g. Windows), it uses the platform's safe temporary file and atomic rename primitives, providing
+// best-effort equivalent integrity guarantees while keeping the API signature unified across architectures.
 func MaterializeVariantAtFD(
 	dirFD int,
 	dirPath string,
