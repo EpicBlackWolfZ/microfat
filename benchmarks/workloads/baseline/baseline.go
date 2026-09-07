@@ -76,9 +76,11 @@ func (w *Workload) Setup(ctx context.Context, cfg workloads.ScenarioConfig) erro
 	w.seed = defaultSeed
 
 	if sStr, ok := cfg.Parameters["seed"]; ok {
-		if parsedSeed, err := strconv.ParseUint(sStr, 10, 64); err == nil {
-			w.seed = parsedSeed
+		parsedSeed, err := strconv.ParseUint(sStr, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid seed parameter %q: %w", sStr, err)
 		}
+		w.seed = parsedSeed
 	}
 
 	w.configured = true
@@ -103,7 +105,14 @@ func (w *Workload) Warmup(ctx context.Context, plan workloads.ExecutionPlan) err
 	return err
 }
 
-// RunTrial executes a timed benchmark trial, collecting raw sample latencies and operation totals.
+// RunTrial executes a benchmark trial, collecting per-batch kernel sample latencies and operation totals.
+//
+// Measurement Semantics:
+//   - DurationNs records the wall-clock time encompassing the entire trial (from trialStart to trialEnd).
+//     In Duration mode, execution runs in batches until elapsed time reaches or crosses plan.TargetDuration,
+//     so DurationNs represents the full active window (including loop and cancellation checks).
+//   - RawSamplesNs contains fine-grained durations of each isolated batch compute kernel execution.
+//     Thus, sum(RawSamplesNs) <= DurationNs as it isolates target kernel execution from outer trial orchestration.
 func (w *Workload) RunTrial(ctx context.Context, plan workloads.ExecutionPlan, trialIndex int) (*schema.TrialObservations, error) {
 	if !w.configured {
 		return nil, ErrNotSetup

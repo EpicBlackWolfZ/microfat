@@ -244,18 +244,15 @@ func TestBaselineWorkload_InvalidPlans(t *testing.T) {
 		t.Errorf("expected no-op success for zero warmup, got %v", err)
 	}
 
-	// Setup with invalid seed string falls back to default seed
+	// Setup with invalid seed string returns an error
 	badSeedCfg := workloads.ScenarioConfig{
 		Name: "bad_seed",
 		Parameters: map[string]string{
 			"seed": "not-a-number",
 		},
 	}
-	if err := w.Setup(ctx, badSeedCfg); err != nil {
-		t.Fatalf("setup with bad seed should succeed: %v", err)
-	}
-	if w.seed != defaultSeed {
-		t.Errorf("expected default seed, got %x", w.seed)
+	if err := w.Setup(ctx, badSeedCfg); err == nil {
+		t.Fatal("expected setup with invalid seed to fail, but it succeeded")
 	}
 
 	// Mid-trial cancellation during multi-batch iteration

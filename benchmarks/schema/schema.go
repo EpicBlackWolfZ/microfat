@@ -76,8 +76,14 @@ type ScenarioResult struct {
 }
 
 // TrialObservations records lossless raw measurements collected during a single trial run.
-// Note: RawSamplesNs may be empty for a trial if the trial measures only aggregate counters or telemetry,
-// while ScenarioAnalysis.SampleCount reflects the aggregate count of raw samples analyzed across the scenario.
+//
+// Measurement Scope Semantics:
+//   - DurationNs: Wall-clock duration of the entire trial execution window (from trial start to trial end).
+//     Used for overall throughput calculation (ThroughputOpsPerSec) and encompasses scheduler, context, and loop overhead.
+//   - RawSamplesNs: Individual isolated measurement samples (e.g. per-batch kernel execution durations or per-request latencies).
+//     Note that sum(RawSamplesNs) <= DurationNs because RawSamplesNs isolates the target operation execution from outer orchestration.
+//     RawSamplesNs may be empty for trials measuring aggregate counters or telemetry.
+//   - ScenarioAnalysis.SampleCount: Reflects the aggregate count of raw samples analyzed across the scenario.
 type TrialObservations struct {
 	TrialIndex   int              `json:"trial_index"`
 	StartTime    string           `json:"start_time"`
