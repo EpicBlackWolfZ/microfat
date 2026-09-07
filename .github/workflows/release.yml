@@ -11,9 +11,34 @@ permissions:
   id-token: write
 
 jobs:
+  gate:
+    name: Pre-Release Verification Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: true
+
+      - name: Run Full Pipeline (tidy, lint, vuln, test, coverage gate, build)
+        run: make all
+
+      - name: Run End-to-End Test Suite
+        run: make e2e
+
+      - name: Run Chaos and Fault Injection Suite
+        run: make chaos
+
   goreleaser:
     name: Build, Smoke Test & Publish Release
     runs-on: ubuntu-latest
+    needs: gate
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7.0.1

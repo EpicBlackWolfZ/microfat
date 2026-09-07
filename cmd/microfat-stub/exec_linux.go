@@ -559,82 +559,32 @@ func executeViaCache(
 	var decompDuration time.Duration
 
 	fd, openErr := openAndValidateCacheAtFD(dirFD, cachedName, entry)
-	if openErr != nil && (errors.Is(openErr, syscall.ELOOP) || errors.Is(openErr, unix.ELOOP)) {
+	if openErr != nil && cache.IsSymlinkErr(openErr) {
 		errOut := fmt.Errorf("%w: refusal to execute symlink at %s: %w", format.ErrCacheWrite, cachedBinary, openErr)
 		logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "symlink detected in cache")
 		return errOut
 	}
 
 	if openErr != nil {
-		tmpFD, tmpName, tmpPath, createErr := createTempFileAt(dirFD, cacheDir)
-		if createErr != nil {
-			errOut := fmt.Errorf("%w: launcher execution failed: cannot create temp file in %s: %w (primary memfd error: %v)",
-				format.ErrCacheWrite, cacheDir, createErr, primaryErr)
-			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "temp file creation failed in "+cacheDir)
-			return errOut
-		}
-		tmpFile := os.NewFile(uintptr(tmpFD), tmpPath)
-
-		defer func() {
-			if tmpFile != nil {
-				_ = tmpFile.Close()
-			}
-			if tmpName != "" {
-				_ = unix.Unlinkat(dirFD, tmpName, 0)
-			}
-		}()
-
 		decompStart := time.Now()
-		if err := extractVariantToWriter(selfFile, entry, idx, tmpFile); err != nil {
-			_ = tmpFile.Close()
-			_ = unix.Unlinkat(dirFD, tmpName, 0)
-			tmpFile = nil
-			tmpName = ""
-			logErrorDiagnostics(format.StageCacheExtract, err, hostInfo, entry, policyRes, "decompressing payload to cache failed")
-			return fmt.Errorf("%w: extracting to cache fallback: %w (primary memfd error: %v)", format.ErrCacheExtract, err, primaryErr)
+		cachedBinary, matErr := cache.MaterializeVariantAtFD(dirFD, cacheDir, entry, func(w io.Writer) error {
+			return extractVariantToWriter(selfFile, entry, idx, w)
+		})
+		if matErr != nil {
+			stage := format.StageCacheCreateTemp
+			if errors.Is(matErr, format.ErrCacheExtract) || isPayloadCorruptionOrDecompressionError(matErr) {
+				stage = format.StageCacheExtract
+				errOut := fmt.Errorf("%w: extracting to cache fallback: %w (primary memfd error: %v)",
+					format.ErrCacheExtract, matErr, primaryErr)
+				logErrorDiagnostics(stage, errOut, hostInfo, entry, policyRes, "decompressing payload to cache failed")
+				return errOut
+			}
+			errOut := fmt.Errorf("%w: launcher execution failed: %w (primary memfd error: %v)",
+				format.ErrCacheWrite, matErr, primaryErr)
+			logErrorDiagnostics(stage, errOut, hostInfo, entry, policyRes, "materializing cache binary failed")
+			return errOut
 		}
 		decompDuration = time.Since(decompStart)
-
-		if err := tmpFile.Chmod(format.PrivateExecMode); err != nil {
-			_ = tmpFile.Close()
-			_ = unix.Unlinkat(dirFD, tmpName, 0)
-			tmpFile = nil
-			tmpName = ""
-			errOut := fmt.Errorf("%w: setting permissions on temp cache file %s: %w (primary memfd error: %v)",
-				format.ErrCacheWrite, tmpPath, err, primaryErr)
-			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "chmod temp cache file failed")
-			return errOut
-		}
-		if err := tmpFile.Sync(); err != nil {
-			_ = tmpFile.Close()
-			_ = unix.Unlinkat(dirFD, tmpName, 0)
-			tmpFile = nil
-			tmpName = ""
-			errOut := fmt.Errorf("%w: syncing temp cache file %s: %w (primary memfd error: %v)",
-				format.ErrCacheWrite, tmpPath, err, primaryErr)
-			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "syncing temp cache file failed")
-			return errOut
-		}
-		if err := tmpFile.Close(); err != nil {
-			_ = unix.Unlinkat(dirFD, tmpName, 0)
-			tmpFile = nil
-			tmpName = ""
-			errOut := fmt.Errorf("%w: closing temp cache file %s: %w (primary memfd error: %v)",
-				format.ErrCacheWrite, tmpPath, err, primaryErr)
-			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "closing temp cache file failed")
-			return errOut
-		}
-		tmpFile = nil
-
-		if err := unix.Renameat(dirFD, tmpName, dirFD, cachedName); err != nil {
-			_ = unix.Unlinkat(dirFD, tmpName, 0)
-			tmpName = ""
-			errOut := fmt.Errorf("%w: renaming temp cache file %s to %s: %w (primary memfd error: %v)",
-				format.ErrCacheWrite, tmpPath, cachedBinary, err, primaryErr)
-			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "renaming temp cache file failed")
-			return errOut
-		}
-		tmpName = ""
 
 		// Re-open with canonical descriptor-bound primitive and validate before execve
 		fd, openErr = openAndValidateCacheAtFD(dirFD, cachedName, entry)

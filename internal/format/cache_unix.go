@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -42,6 +43,7 @@ var (
 // write bits, it remediates the descriptor directly via fchmod to 0700, completely eliminating pathname TOCTOU.
 // On success, returns the open pinned directory descriptor (fd >= 0). The caller is responsible for closing it.
 func OpenAndValidateCacheDirFD(dir string, allowRemediate bool) (int, error) {
+	dir = filepath.Clean(dir)
 	fd, err := openDirFunc(dir)
 	if err != nil {
 		if errors.Is(err, unix.ELOOP) || errors.Is(err, syscall.ELOOP) {

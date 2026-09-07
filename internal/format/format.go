@@ -345,12 +345,8 @@ func (idx *Index) validateDictionaryBounds(indexOffset int64) (int64, error) {
 	if idx.DictionaryOffset < 0 {
 		return 0, fmt.Errorf("%w: invalid dictionary offset %d", ErrInvalidDictionary, idx.DictionaryOffset)
 	}
-	if idx.Version >= FormatVersion2 {
-		if idx.DictionarySHA256 == "" || !ValidateChecksum(idx.DictionarySHA256) {
-			return 0, fmt.Errorf("%w: dictionary missing or invalid sha256 checksum in Format v2", ErrInvalidChecksum)
-		}
-	} else if idx.DictionarySHA256 != "" && !ValidateChecksum(idx.DictionarySHA256) {
-		return 0, fmt.Errorf("%w: invalid dictionary sha256 checksum format %q", ErrInvalidChecksum, idx.DictionarySHA256)
+	if idx.DictionarySHA256 == "" || !ValidateChecksum(idx.DictionarySHA256) {
+		return 0, fmt.Errorf("%w: dictionary missing or invalid sha256 checksum", ErrInvalidChecksum)
 	}
 	if idx.DictionaryOffset > indexOffset || idx.DictionarySize > indexOffset-idx.DictionaryOffset {
 		return 0, fmt.Errorf("%w: dictionary payload extends past index offset %d", ErrOutOfBounds, indexOffset)
@@ -388,12 +384,8 @@ func (idx *Index) validateVariantBounds(indexOffset int64, lastEnd int64) error 
 		}
 		lastEnd = v.Offset + v.CompressedSize
 
-		if idx.Version >= FormatVersion2 {
-			if v.SHA256 == "" || !ValidateChecksum(v.SHA256) {
-				return fmt.Errorf("%w: variant %s missing or invalid sha256 checksum in Format v2", ErrInvalidChecksum, v.Level)
-			}
-		} else if v.SHA256 != "" && !ValidateChecksum(v.SHA256) {
-			return fmt.Errorf("%w: invalid sha256 checksum format for variant %s: %q", ErrInvalidChecksum, v.Level, v.SHA256)
+		if v.SHA256 == "" || !ValidateChecksum(v.SHA256) {
+			return fmt.Errorf("%w: variant %s missing or invalid sha256 checksum", ErrInvalidChecksum, v.Level)
 		}
 	}
 	return nil
