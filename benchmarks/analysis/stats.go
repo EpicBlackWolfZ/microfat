@@ -54,18 +54,20 @@ func ComputeAnalysis(samples []int64, totalOps int64, totalDurationNs int64) (*s
 	minNs := sorted[0]
 	maxNs := sorted[sampleCount-1]
 
-	var sum float64
-	for _, s := range sorted {
-		sum += float64(s)
+	// Numerically stable single-pass mean and variance accumulation via Welford's algorithm.
+	// This avoids precision loss and catastrophic cancellation with large nanosecond durations.
+	var mean float64
+	var m2 float64
+	for k, s := range sorted {
+		x := float64(s)
+		count := float64(k + 1)
+		delta := x - mean
+		mean += delta / count
+		delta2 := x - mean
+		m2 += delta * delta2
 	}
-	meanNs := sum / float64(sampleCount)
-
-	var varianceSum float64
-	for _, s := range sorted {
-		diff := float64(s) - meanNs
-		varianceSum += diff * diff
-	}
-	stdDevNs := math.Sqrt(varianceSum / float64(sampleCount))
+	meanNs := mean
+	stdDevNs := math.Sqrt(m2 / float64(sampleCount))
 
 	percentiles := map[string]float64{
 		"p50":   linearInterpolationR7(sorted, percentileP50),
@@ -118,5 +120,6 @@ func linearInterpolationR7(sorted []int64, p float64) float64 {
 	}
 
 	f := r - float64(i)
-	return float64(sorted[i]) + f*float64(sorted[i+1]-sorted[i])
+	// Convert both terms to float64 before subtracting to prevent int64 arithmetic overflow with large sample values.
+	return float64(sorted[i]) + f*(float64(sorted[i+1])-float64(sorted[i]))
 }

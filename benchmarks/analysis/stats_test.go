@@ -176,4 +176,13 @@ func TestLinearInterpolationR7Boundaries(t *testing.T) {
 	if val := linearInterpolationR7(sorted, 1.0); val != 30.0 {
 		t.Errorf("expected 30.0 for percentile == 1.0, got %f", val)
 	}
+
+	// Large values that would overflow int64 subtraction if performed before float64 conversion:
+	largeSamples := []int64{0, math.MaxInt64}
+	// At p=0.5: r = 0.5 * 1 = 0.5, i=0, f=0.5.
+	// Expected: 0 + 0.5 * (float64(math.MaxInt64) - 0) = float64(math.MaxInt64)/2.
+	expectedMid := float64(math.MaxInt64) / 2.0
+	if val := linearInterpolationR7(largeSamples, 0.5); math.Abs(val-expectedMid) > 1.0 {
+		t.Errorf("expected %f for large samples midpoint, got %f", expectedMid, val)
+	}
 }

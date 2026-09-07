@@ -466,13 +466,17 @@ func TestRunner_DefaultIDAndCreatedAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
-	if evidence.Payload == nil {
-		t.Fatal("expected non-nil payload in evidence")
+	exp, err := evidence.Experiment()
+	if err != nil {
+		t.Fatalf("Experiment() failed: %v", err)
 	}
-	if evidence.Payload.ID == "" {
+	if exp == nil {
+		t.Fatal("expected non-nil experiment from evidence")
+	}
+	if exp.ID == "" {
 		t.Error("expected generated ID")
 	}
-	if evidence.Payload.CreatedAt == "" {
+	if exp.CreatedAt == "" {
 		t.Error("expected generated CreatedAt")
 	}
 }

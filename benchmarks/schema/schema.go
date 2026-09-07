@@ -76,6 +76,8 @@ type ScenarioResult struct {
 }
 
 // TrialObservations records lossless raw measurements collected during a single trial run.
+// Note: RawSamplesNs may be empty for a trial if the trial measures only aggregate counters or telemetry,
+// while ScenarioAnalysis.SampleCount reflects the aggregate count of raw samples analyzed across the scenario.
 type TrialObservations struct {
 	TrialIndex   int              `json:"trial_index"`
 	StartTime    string           `json:"start_time"`

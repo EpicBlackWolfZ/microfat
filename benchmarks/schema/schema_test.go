@@ -552,31 +552,13 @@ func TestCanonicalSerializationAndEvidence(t *testing.T) {
 			t.Fatalf("unexpected verification error: %v", err)
 		}
 
-		// Test Experiment() extraction when Payload is present
+		// Test Experiment() extraction from PayloadBytes
 		gotExp, err := ev.Experiment()
 		if err != nil {
 			t.Fatalf("unexpected Experiment() error: %v", err)
 		}
 		if gotExp.ID != exp1.ID {
 			t.Errorf("expected ID %s, got %s", exp1.ID, gotExp.ID)
-		}
-
-		// Test Experiment() extraction when Payload is nil but PayloadBytes is populated
-		evBytesOnly := *ev
-		evBytesOnly.Payload = nil
-		gotExp2, err := evBytesOnly.Experiment()
-		if err != nil {
-			t.Fatalf("unexpected Experiment() from bytes error: %v", err)
-		}
-		if gotExp2.ID != exp1.ID {
-			t.Errorf("expected ID %s, got %s", exp1.ID, gotExp2.ID)
-		}
-
-		// Verify evidence when PayloadBytes is empty but Payload is populated
-		evPayloadOnly := *ev
-		evPayloadOnly.PayloadBytes = nil
-		if err := schema.VerifyEvidence(&evPayloadOnly); err != nil {
-			t.Fatalf("unexpected verification error with payload only: %v", err)
 		}
 	})
 
@@ -628,7 +610,6 @@ func TestCanonicalSerializationAndEvidence(t *testing.T) {
 		tamperedBytes := append([]byte(nil), ev.PayloadBytes...)
 		tamperedBytes[0] = ' '
 		corruptedPayload.PayloadBytes = tamperedBytes
-		corruptedPayload.Payload = nil
 		if err := schema.VerifyEvidence(&corruptedPayload); err == nil {
 			t.Fatal("expected error verifying corrupted payload")
 		}
@@ -639,19 +620,10 @@ func TestCanonicalSerializationAndEvidence(t *testing.T) {
 			t.Fatal("expected error verifying tampered digest")
 		}
 
-		tamperedStruct := *ev
-		tamperedExp := *exp1
-		tamperedExp.Title = "Tampered Title"
-		tamperedStruct.Payload = &tamperedExp
-		if err := schema.VerifyEvidence(&tamperedStruct); err == nil {
-			t.Fatal("expected error verifying tampered payload struct against payload bytes")
-		}
-
 		emptyEvidence := &schema.Evidence{
 			SchemaVersion: schema.SchemaVersion,
 			DigestSHA256:  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
 			PayloadBytes:  nil,
-			Payload:       nil,
 		}
 		if err := schema.VerifyEvidence(emptyEvidence); err == nil {
 			t.Fatal("expected error verifying empty evidence with no payload")
