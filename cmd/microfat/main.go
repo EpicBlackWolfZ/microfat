@@ -62,6 +62,7 @@ self-dispatching fat executable with zero persistent process overhead and payloa
 	cmd.AddCommand(newPgoPackCmd())
 	cmd.AddCommand(newPrewarmCmd())
 	cmd.AddCommand(newDoctorCmd())
+	cmd.AddCommand(newBenchmarkCmd())
 
 	return cmd
 }

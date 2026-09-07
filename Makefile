@@ -27,7 +27,7 @@ GORELEASER := $(shell command -v goreleaser 2> /dev/null)
 
 FUZZTIME ?= 5s
 
-.PHONY: all help build build-amd64 build-arm64 build-all test e2e fuzz chaos coverage lint vuln tidy snapshot demo demo-arm64 bench bench-heavy bench-ultra bench-simd bench-startup bench-matrix test-all clean
+.PHONY: all help build build-amd64 build-arm64 build-all test e2e fuzz chaos coverage lint vuln tidy snapshot demo demo-arm64 benchmark bench bench-heavy bench-ultra bench-simd bench-startup bench-matrix test-all clean
 
 all: tidy lint vuln test coverage build ## Run complete verification pipeline (tidy, lint, vuln, test, coverage gate, build)
 
@@ -38,7 +38,10 @@ help: ## Show this help message
 	@echo "\033[1mUsage:\033[0m make [target]"
 	@echo ""
 	@echo "\033[1mPrimary Targets:\033[0m"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[32m%-14s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -v -E '^bench(-[a-z]+)?:' | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[32m%-14s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "\033[1mLegacy / Exploratory Demo Benchmarks (examples/demo):\033[0m"
+	@grep -E '^bench(-[a-z]+)?:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[33m%-14s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 
 build: ## Compile microfat CLI and microfat-stub binaries for host architecture into bin/
@@ -122,7 +125,7 @@ chaos: ## Run chaos and fault injection test suite
 
 test-all: tidy lint vuln test e2e chaos coverage build ## Run complete test suite including e2e, chaos and coverage gate
 
-COVERAGE_PKGS ?= ./cmd/... ./internal/... ./runtimeinit/...
+COVERAGE_PKGS ?= ./cmd/... ./internal/... ./runtimeinit/... ./benchmarks/...
 
 coverage: ## Run tests with atomic coverage and enforce >= 95% threshold gate
 	@echo "\033[34m==>\033[0m Running tests and checking coverage..."
@@ -185,6 +188,10 @@ demo-arm64: build-arm64 ## Build and package the ARM64 demonstration application
 	@echo "\033[34m==>\033[0m Building and packaging examples/demo (ARM64)..."
 	@$(MAKE) -C examples/demo fat-arm64
 
+benchmark: build ## Run canonical microfat benchmark suite and generate reproducible evidence
+	@echo "\033[34m==>\033[0m Running canonical microfat benchmark suite..."
+	@$(BIN_DIR)/microfat benchmark --trials 3 --trial-time 500ms --warmup 200ms
+
 bench: build ## Run the standard benchmark suite in examples/demo (~110ms)
 	@echo "\033[34m==>\033[0m Running standard demo benchmark suite..."
 	@$(MAKE) -C examples/demo bench
@@ -211,6 +218,6 @@ bench-matrix: build ## Run comprehensive combinatorial latency matrix benchmark 
 
 clean: ## Remove build artifacts and coverage files
 	@echo "\033[34m==>\033[0m Cleaning build artifacts..."
-	@rm -rf $(BIN_DIR) dist $(COVERAGE_FILE) coverage.html unit-tests.xml
+	@rm -rf $(BIN_DIR) dist $(COVERAGE_FILE) coverage.html unit-tests.xml results
 	@$(MAKE) -C examples/demo clean 2>/dev/null || true
 	@echo "\033[32m✔\033[0m Clean complete"
