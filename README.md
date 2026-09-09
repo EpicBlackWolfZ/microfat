@@ -6,21 +6,21 @@
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/EpicBlackWolfZ/microfat/codeql.yml?branch=main&logo=github&label=CodeQL)](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/codeql.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Microfat** combines multiple CPU microarchitecture-specific ELF binaries (`v1`, `v2`, `v3`, `v4` or `v8.0`..`v9.5`) into a single, self-dispatching Linux executable with zero persistent process overhead, automatic container resource auto-tuning (`GOMEMLIMIT` & `GOMAXPROCS`), and payload integrity verification.
+**Microfat** combines multiple CPU microarchitecture-specific ELF binaries (`v1`, `v2`, `v3`, `v4` or `v8.0`..`v9.5`) into a single, self-dispatching Linux executable without a persistent launcher process, automatic container resource auto-tuning (`GOMEMLIMIT` & `GOMAXPROCS`), and payload integrity verification.
 
 ---
 
 ## Key Highlights
 
-- 🚀 **Dynamic Hardware Dispatch**: Automatically probes host CPU instruction extensions (`AVX2`, `FMA`, `BMI2`, `AVX-512`, `SVE`, `SVE2`) and boots the optimal machine code at startup.
+- 🚀 **Dynamic Hardware Dispatch**: Automatically probes host CPU instruction extensions (`AVX2`, `FMA`, `BMI2`, `AVX-512`, `SVE`, `SVE2`) and selects a compatible variant according to the configured policy.
 - ⚡ **Zero Persistent Process Overhead**: Dispatches via Linux `memfd_create` and `syscall.Exec` directly from anonymous RAM (no wrapper daemon, PID 1 preserved in containers).
-- 🛡️ **Container Auto-Tuning**: Automatically parses Linux cgroup v1 & v2 limits to set safe `GOMEMLIMIT` pacing (preventing OOMKills) and `GOMAXPROCS` (preventing CFS CPU quota throttling).
+- 🛡️ **Container Auto-Tuning**: Automatically parses Linux cgroup v1 & v2 limits to set a soft Go-runtime memory budget (`GOMEMLIMIT`) and CPU parallelism (`GOMAXPROCS`); neither guarantees freedom from OOM kills or CPU throttling.
 - ✂️ **Flexible Lifecycle Modes**:
   - **Universal Fat Binary**: Distribute a single executable that runs everywhere (`v1`–`v4` or `v8.0`–`v9.5`).
-  - **Trimmed Fat Binary (`--microfat:trim` / `microfat trim`)**: Discard unneeded variants on disk (~50% size reduction) while retaining launcher auto-tuning and RAM execution.
+  - **Trimmed Fat Binary (`--microfat:trim` / `microfat trim`)**: Discard unneeded variants on disk while retaining launcher auto-tuning and RAM execution.
   - **Raw Native ELF (`--microfat:optimize`)**: Permanently specialize to raw uncompressed ELF machine code with 0.0ms launch overhead.
 - 🔒 **Payload Integrity Verification**: 56-byte trailer with SHA-256 index hashing and variant checksum validation.
-- 📦 **Shared Inter-Variant Dictionary**: Multi-variant compression with trained Zstandard dictionaries achieving up to **~75%** binary size reduction.
+- 📦 **Shared Inter-Variant Dictionary**: Multi-variant compression with trained Zstandard dictionaries; measure size savings on your own variants.
 
 > [!NOTE]
 > **Payload Integrity vs Producer Authenticity**: Embedded SHA-256 digests provide payload integrity verification; they do not authenticate the producer of the fat binary. To establish provenance and origin authenticity in production pipelines, sign fat executables with external tools such as Sigstore Cosign or GPG. See [SECURITY.md](SECURITY.md#payload-integrity-vs-producer-authenticity-hashing-vs-signing) for security architecture details.
@@ -251,10 +251,10 @@ Every fat executable supports reserved meta-commands for diagnostics and disk sp
 # View host capabilities, cgroup limits, and embedded variants
 ./myapp --microfat:info
 
-# Pre-extract host-optimal variant into cache (eliminates cold start latency)
+# Pre-extract selected compatible variant into cache (avoids decompression on a warm cache hit)
 ./myapp --microfat:prewarm
 
-# Trim unneeded variants in-place (keeps stub & cgroup auto-tuning, cuts size ~50%)
+# Trim unneeded variants in-place (keeps stub & cgroup auto-tuning, reduces artifact size)
 ./myapp --microfat:trim
 
 # Extract trimmed single-variant fat binary to a target path
@@ -288,45 +288,56 @@ Every fat executable supports reserved meta-commands for diagnostics and disk sp
 
 ---
 
-## Compression Decision Matrix & Go API Integration
+## Compression Profiles & CLI Integration
 
 `microfat` provides three compression profiles to balance cold-start startup overhead against disk size and network transfer bandwidth:
 
-| Profile | Codec | Typical Payload Size | Cold-Start Overhead | Ratio | Best-Fit Workload |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `latency` | `none` / `lz4` | `< 10 MB` | **< 80 µs – 350 µs** | 0% – 48% | Sub-millisecond serverless functions, low-latency CLI tools |
-| `balanced` *(default)* | `zstd` | `10 MB – 50 MB` | **< 1.5 ms** | ~50% – 60% | Kubernetes daemon sets, general cloud microservices |
-| `size` | `zstd:best` (+`--dict`) | `> 50 MB` | **< 4.5 ms – 6.0 ms** | **~65% – 78%** | Multi-variant matrices, bandwidth-constrained edge IoT, large monoliths |
+| Profile | Codec | Trade-off |
+| --- | --- | --- |
+| `latency` | `none` / `lz4` | Avoid or reduce decompression work; larger artifacts |
+| `balanced` (default) | `zstd` | Balance artifact size and startup work |
+| `size` | `zstd:best` (+`--dict`) | Favor storage/transfer reduction; measure extraction cost |
+
+Startup latency and compression ratios depend on the payload, host and execution mode.
 
 For full benchmarks and sizing recipes, see the [Advanced Optimizations Guide](docs/advanced-optimizations.md#4-compression-profiles--decision-matrix).
 
-### Programmatic Packaging in Go
+### Programmatic CLI Integration
 
-To package binaries programmatically, initialize options with `pack.DefaultOptions()`:
+External Go applications integrate through the supported CLI. Packages under `internal/` are
+private to this repository; a public Go packaging API is not provided.
+
+Run this program with four arguments: the CLI path, the matching launcher stub path, a native
+baseline payload path, and the output path. The example targets Linux AMD64; use the matching
+architecture and variant level for other targets.
 
 ```go
 package main
 
 import (
-	"log"
-
-	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+    "log"
+    "os"
+    "os/exec"
 )
 
 func main() {
-	opts := pack.DefaultOptions()
-	opts.StubPath = "bin/microfat-stub"
-	opts.OutputPath = "bin/myapp-fat"
-	opts.AppName = "myapp"
-	opts.Variants["v1"] = "dist/app_v1"
-	opts.Variants["v3"] = "dist/app_v3"
-	opts.Variants["v4"] = "dist/app_v4"
-
-	if _, err := pack.Pack(opts); err != nil {
-		log.Fatalf("Packaging failed: %v", err)
-	}
+    if len(os.Args) != 5 {
+        log.Fatal("usage: pack-example CLI STUB PAYLOAD OUTPUT")
+    }
+    cmd := exec.Command(os.Args[1], "pack", "--stub", os.Args[2],
+        "--os", "linux", "--arch", "amd64",
+        "-v", "v1="+os.Args[3], "-o", os.Args[4])
+    cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+    if err := cmd.Run(); err != nil {
+        log.Fatalf("packaging failed: %v", err)
+    }
 }
 ```
+
+Use absolute input paths when invoking this example from another working directory. The E2E suite
+compiles and executes this exact snippet outside the module, then inspects, verifies and launches
+its output. Measure process startup separately from sustained throughput; compare ISA specialization
+with identical runtime settings, and evaluate tuning on/off as a separate experiment.
 
 ---
 

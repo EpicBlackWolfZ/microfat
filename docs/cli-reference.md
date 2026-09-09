@@ -299,7 +299,7 @@ Accepts all manifest and compiler flags matching `microfat pack` (`--manifest`, 
 
 ### `microfat trim <binary>`
 
-Trim unneeded microarchitecture variants from a fat binary, retaining the launcher stub, container auto-tuning, and the chosen optimal level on disk.
+Trim unneeded microarchitecture variants from a fat binary, retaining the launcher stub, container auto-tuning, and the selected compatible level on disk.
 
 ```bash
 # In-place trimming to host microarchitecture level (-50% disk footprint)
@@ -328,7 +328,7 @@ microfat trim bin/myapp --max-level v3 --policy safe_avx512 -o bin/myapp-safe
 Pre-extract payload variants into the local node cache (`$XDG_CACHE_HOME/microfat`) to eliminate decompression latency on initial startup.
 
 ```bash
-# Prewarm host-optimal variant into cache
+# Prewarm selected compatible variant into cache
 microfat prewarm bin/myapp
 
 # Prewarm all embedded variants (for multi-tenant cache partitions)
@@ -347,7 +347,7 @@ microfat prewarm bin/myapp --json
 #### Flags
 | Flag | Shorthand | Type | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `--level` | `-l` | `string` | `""` | Specific variant level to prewarm (defaults to host-optimal). |
+| `--level` | `-l` | `string` | `""` | Specific variant level to prewarm (defaults to selected compatible). |
 | `--all` | *(none)* | `bool` | `false` | Prewarm all embedded variants into the cache directory. |
 | `--cache-dir` | *(none)* | `string` | `""` | Custom cache directory path. |
 | `--verify` | *(none)* | `bool` | `false` | Verify existing cache entry integrity without extracting. |

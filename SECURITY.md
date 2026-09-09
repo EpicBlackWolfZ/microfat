@@ -72,7 +72,7 @@ Every contribution and release in `microfat` undergoes automated multi-layer sec
   - These seals protect the backing file contents; they do not provide general process-memory isolation or prevent a privileged debugger from modifying private mappings.
   - The launcher strictly treats unsealed descriptors as unsafe. If sealing is unsupported (`ENOSYS`, `EINVAL`) or blocked (`EPERM`), auto mode falls back cleanly to disk cache execution, while explicit memfd mode aborts immediately.
 - **Descriptor-Bound Cache Fallback & TOCTOU Defense**:
-  - Fallback binaries in `$XDG_CACHE_HOME/microfat` (or `/tmp/.microfat-<uid>`) are isolated with strict `0700` (`rwx------`) permissions per-user.
+  - New cache directories in `$XDG_CACHE_HOME/microfat` (or `/tmp/.microfat-<uid>`) are created with `0700` (`rwx------`). Existing directories must have the expected owner and no group/other write permission.
   - Binaries are opened exclusively using `unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK` to guarantee refusal of symlink traversal with `ELOOP`.
   - Execution operates directly on the verified file descriptor via `/proc/self/fd/<fd>`, ensuring validation and execution bind to the exact same VFS inode and preventing pathname replacement from redirecting execution to a different inode.
 - **Resource Boundary Defense**: Cgroup v1/v2 information informs extraction estimates and soft Go-runtime tuning. This does not guarantee freedom from OOM kills, CPU throttling or noisy-neighbor interference.
