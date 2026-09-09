@@ -47,6 +47,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
+          cache: false # Benchmark jobs execute checked-out code; do not restore or publish shared caches.
       - name: Install pinned load tool
         run: make benchmark-tools
       - name: Run interleaved base/head smoke and summarize
@@ -86,6 +87,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
+          cache: false # Base revision execution must not populate default-branch caches.
       - run: make benchmark-tools build
       - name: Run standard and heavy server workloads
         env:
@@ -138,6 +140,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
+          cache: false # Keep release measurements independent of workflow cache contents.
       - run: make benchmark-tools build
       - name: Run release measurement matrix
         env:
