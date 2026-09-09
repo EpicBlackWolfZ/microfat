@@ -1,0 +1,76 @@
+{
+  "schema_version": "v1",
+  "id": "synthetic-v1-fixture",
+  "title": "Synthetic schema compatibility fixture",
+  "description": "Not performance evidence",
+  "created_at": "2026-09-09T00:00:00Z",
+  "environment": {
+    "host": {
+      "os": "linux",
+      "arch": "amd64",
+      "kernel_release": "fixture",
+      "cpu": {
+        "model_name": "fixture",
+        "microarch_level": "v1",
+        "flags": []
+      },
+      "memory": {
+        "total_bytes": null,
+        "available_bytes": null
+      },
+      "cgroup": {
+        "version": "unavailable",
+        "memory_max_bytes": {
+          "state": "unavailable",
+          "value": null
+        },
+        "cpu_quota_us": {
+          "state": "unavailable",
+          "value": null
+        },
+        "cpu_period_us": null
+      }
+    },
+    "process": {
+      "pid": 1,
+      "executable_path": "/fixture",
+      "args": [],
+      "go_version": "go1.27.1",
+      "gomaxprocs_effective": 1,
+      "environment_variables": []
+    },
+    "warnings": []
+  },
+  "scenarios": [
+    {
+      "name": "synthetic",
+      "workload": "baseline",
+      "observations": [
+        {
+          "trial_index": 0,
+          "start_time": "2026-09-09T00:00:00Z",
+          "end_time": "2026-09-09T00:00:01Z",
+          "duration_ns": 1000000000,
+          "operations": 1,
+          "raw_samples_ns": [
+            1
+          ],
+          "metrics": {}
+        }
+      ],
+      "analysis": {
+        "algorithm_version": "v1",
+        "percentile_method": "linear_interpolation_r7",
+        "sample_count": 1,
+        "min_ns": 1,
+        "max_ns": 1,
+        "mean_ns": 1,
+        "std_dev_ns": 0,
+        "percentiles_ns": {
+          "p50": 1
+        },
+        "throughput_ops_per_sec": 1
+      }
+    }
+  ]
+}

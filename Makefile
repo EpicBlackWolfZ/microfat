@@ -168,7 +168,26 @@ demo-arm64: build-arm64 ## Build and package the ARM64 demonstration application
 
 benchmark: build ## Run canonical microfat benchmark suite and generate reproducible evidence
 	@echo "\033[34m==>\033[0m Running canonical microfat benchmark suite..."
+ifneq ($(BENCHMARK_CONFIG),)
+	@BENCHMARK_CONFIG="$(BENCHMARK_CONFIG)" bash scripts/benchmark-ci.sh
+else
 	@$(BIN_DIR)/microfat benchmark --trials 3 --trial-time 500ms --warmup 200ms
+endif
+
+.PHONY: benchmark-tools benchmark-smoke benchmark-matrix benchmark-integration
+
+benchmark-tools: ## Explicitly install and verify the pinned external Fortio tool
+	@GO="$(GO)" bash scripts/benchmark-tools.sh
+
+benchmark-smoke: build ## Run a paired server benchmark with the installed reference load tool
+	@bash scripts/benchmark-ci.sh
+
+benchmark-matrix: build ## Validate all supported format/profile/codec/mode combinations
+	@python3 scripts/benchmark-matrix.py compatibility
+
+benchmark-integration: ## Run benchmark integrations with the pinned external tool
+	@python3 scripts/benchmark_matrix_test.py
+	@MICROFAT_BENCH_FORTIO="$(CURDIR)/.work/benchmark-tools/fortio" $(GO) test -race ./benchmarks/...
 
 bench: build ## Run the standard benchmark suite in examples/demo (~110ms)
 	@echo "\033[34m==>\033[0m Running standard demo benchmark suite..."
@@ -196,6 +215,6 @@ bench-matrix: build ## Run comprehensive combinatorial latency matrix benchmark 
 
 clean: ## Remove build artifacts and coverage files
 	@echo "\033[34m==>\033[0m Cleaning build artifacts..."
-	@rm -rf $(BIN_DIR) dist $(COVERAGE_FILE) coverage.html unit-tests.xml results
+	@rm -rf $(BIN_DIR) dist $(COVERAGE_FILE) coverage.html unit-tests.xml
 	@$(MAKE) -C examples/demo clean 2>/dev/null || true
 	@echo "\033[32m✔\033[0m Clean complete"

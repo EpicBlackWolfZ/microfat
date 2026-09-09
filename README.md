@@ -35,6 +35,7 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 | :--- | :--- |
 | [**Production Roadmap**](docs/roadmap.md) | Release priorities, safety gates and experimental scope. |
 | 📊 [**Demo & Benchmark Suite**](examples/demo/README.md) | Multi-workload benchmark application testing SIMD vector math, JSON/Zstd processing, and concurrent workers. |
+| [**Reproducible Server Benchmarks**](docs/benchmarks/README.md) | Paired native/fat server trials, external Fortio load, resource telemetry, and verifiable evidence. |
 | 📖 [**Architecture & Binary Format**](docs/architecture.md) | Technical specification of the 56-byte trailer, Format v2 binary table layout, shared dictionaries, and `memfd_create` lifecycle. |
 | 💻 [**CLI & Launcher Stub Reference**](docs/cli-reference.md) | Complete reference for `microfat` CLI commands, flags, launcher stub meta-commands, exit codes, and environment variables. |
 | ⚙️ [**Container Resource Auto-Tuning**](docs/runtime-tuning.md) | Linux cgroup v1/v2 auto-tuning (`GOMEMLIMIT` / `GOMAXPROCS`), GC mechanics, and workload `GOGC` tuning recipes. |

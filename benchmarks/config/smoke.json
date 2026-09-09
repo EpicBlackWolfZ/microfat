@@ -1,0 +1,9 @@
+{
+  "version": "v1",
+  "name": "smoke",
+  "workload": "mixed",
+  "blocks": 5,
+  "duration_ms": 1000,
+  "warmup_ms": 200,
+  "seed": 1
+}
