@@ -69,13 +69,13 @@ Every contribution and release in `microfat` undergoes automated multi-layer sec
   - `F_SEAL_WRITE` prevents any modification of the decompressed ELF binary in memory.
   - `F_SEAL_SHRINK` and `F_SEAL_GROW` prevent resizing or truncation of the executable memory region.
   - `F_SEAL_SEAL` permanently locks the seal set, forbidding any further seals or unsealing.
-  - This mitigates local code injection, `/proc/self/mem` write races, and tampering prior to executing the process image via `/proc/self/fd/<fd>`.
+  - These seals protect the backing file contents; they do not provide general process-memory isolation or prevent a privileged debugger from modifying private mappings.
   - The launcher strictly treats unsealed descriptors as unsafe. If sealing is unsupported (`ENOSYS`, `EINVAL`) or blocked (`EPERM`), auto mode falls back cleanly to disk cache execution, while explicit memfd mode aborts immediately.
 - **Descriptor-Bound Cache Fallback & TOCTOU Defense**:
-  - Fallback binaries in `$XDG_CACHE_HOME/microfat` (or `/tmp/.microfat-<uid>`) are isolated with strict `0700` (`rwx------`) permissions per-user.
-  - Binaries are opened exclusively using `unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW` to guarantee refusal of symlink traversal with `ELOOP`.
-  - Execution operates directly on the verified file descriptor via `/proc/self/fd/<fd>`, ensuring validation and execution bind to the exact same VFS inode and completely eliminating Time-of-Check to Time-of-Use (TOCTOU) file replacement races.
-- **Resource Boundary Defense**: Automated cgroup v1 and v2 parsers enforce `GOMEMLIMIT` at a 90% container memory ceiling and bind `GOMAXPROCS` to CFS quotas to prevent noisy-neighbor Denial of Service (DoS).
+  - New cache directories in `$XDG_CACHE_HOME/microfat` (or `/tmp/.microfat-<uid>`) are created with `0700` (`rwx------`). Existing directories must have the expected owner and no group/other write permission.
+  - Binaries are opened exclusively using `unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK` to guarantee refusal of symlink traversal with `ELOOP`.
+  - Execution operates directly on the verified file descriptor via `/proc/self/fd/<fd>`, ensuring validation and execution bind to the exact same VFS inode and preventing pathname replacement from redirecting execution to a different inode.
+- **Resource Boundary Defense**: Cgroup v1/v2 information informs extraction estimates and soft Go-runtime tuning. This does not guarantee freedom from OOM kills, CPU throttling or noisy-neighbor interference.
 
 ---
 
@@ -89,10 +89,36 @@ An important security distinction exists between cryptographic integrity hashing
 - **What Microfat Guarantees (Integrity & Corruption Detection)**:
   - **Bit-Flip & Network Corruption Detection**: Embedded SHA-256 digests detect truncation, transmission corruption, and storage degradation across all embedded payloads and metadata indices.
   - **Tampering Detection Against Partial Modification**: If an attacker or untrusted process modifies an embedded variant without altering the trailer or index table, `microfat` detects the SHA-256 mismatch and aborts execution immediately with `ErrPayloadCorrupted`.
-  - **In-Memory Immutability**: Linux kernel memory seals (`F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL`) and descriptor-bound `O_NOFOLLOW` execution prevent post-decompression tampering and TOCTOU races.
+  - **In-Memory Immutability**: Linux memory seals protect memfd backing contents. Descriptor-bound cache execution binds validation and execution to one inode; it does not make that inode immutable.
 - **What Microfat Does NOT Guarantee (Authenticity & Origin Trust)**:
   - Microfat does **not** replace cryptographic digital signatures or public-key infrastructure (PKI).
   - An attacker with full write access to the fat binary file on disk could replace an embedded variant payload, recompute its SHA-256 digest, update the index manifest, and recalculate the 56-byte trailer checksum.
   - Hashing provides data integrity; it does not provide origin authenticity or proof that the binary was built by a trusted producer.
 - **Production Best Practice**:
   - For production CI/CD pipelines, container base images, and public distribution, always pair `microfat` with supply-chain signing tools such as **Sigstore Cosign**, **GPG**, or system-level digital signatures to sign the final composite executable.
+
+## 7. Launcher and cache deployment boundary
+
+Full and minimal launchers reject real/effective UID or GID mismatches, nonzero `AT_SECURE`, and
+executables carrying `security.capability`, before application file access, environment routing,
+meta-commands or cache writes. Ordinary same-ID root execution is supported when these elevation
+signals are absent. Missing/malformed secure-execution evidence fails closed. The probes assume the
+Linux kernel and `/proc` are trustworthy; Go runtime startup precedes the application-level guard.
+See Linux [auxiliary vector](https://man7.org/linux/man-pages/man3/getauxval.3.html) and
+[capability](https://man7.org/linux/man-pages/man7/capabilities.7.html) semantics.
+
+Cache entries must be regular files owned by the effective UID, without group/other write or special
+permission bits. Size and SHA-256 are checked on the descriptor used for execution. Nonblocking opens
+reject FIFO entries without waiting for a writer; special files and unsafe metadata are not repaired
+by blindly replacing them.
+
+Cache mode assumes **trusted same-UID writers** and local filesystem semantics for descriptors and
+atomic rename. The owner or a process holding an existing writable descriptor can modify the same
+inode after validation. Ownership/mode checks and an additional hash cannot establish immutability.
+Deployments requiring immutable extracted payload storage must request `MICROFAT_EXEC_MODE=memfd`;
+if creation or sealing is unavailable, that mode fails closed. Auto mode permits the weaker cache
+boundary on fallback. A hostile same-UID isolation design requires separate review.
+
+The kernel and privileged administrators are trusted. The ambient environment is configuration,
+not authenticated provenance. Embedded hashes do not authenticate a hostile whole artifact: verify
+publisher identity and exact artifact bytes externally **before first execution**.

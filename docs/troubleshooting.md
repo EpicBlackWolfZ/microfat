@@ -27,7 +27,7 @@ microfat doctor --json
 
 | Glyph | Meaning | Action Required |
 | :--- | :--- | :--- |
-| `[✔]` | **Pass**: Capability is fully available and optimal. | None. |
+| `[✔]` | **Pass**: Capability is available. | None. |
 | `[!]` | **Warning**: Functional, but running with sub-optimal configuration (e.g. AVX-512 downclock risk or disk cache fallback). | Review recommended settings below. |
 | `[✖]` | **Failure**: Execution is blocked (e.g. unwritable cache AND blocked `memfd_create`). | Follow remediation steps below. |
 
@@ -110,7 +110,7 @@ env:
 
 #### Root Cause:
 When running in hardened containers (`readOnlyRootFilesystem: true`) or distroless images without a home directory:
-- Microfat prefers `memfd_create` (which requires **zero disk writes**).
+- Microfat prefers `memfd_create`, which does not create a persistent extracted payload file.
 - However, if `memfd_create` is also blocked, the fallback to `$HOME/.cache/microfat` fails because the rootfs is read-only.
 
 #### Remediation: Mount a Writable `tmpfs`
@@ -170,10 +170,10 @@ export MICROFAT_CACHE_DIR="/tmp/microfat-$(id -u)"
 ### Symptom: `microfat doctor` emits `[!] Skylake-X / Cascade Lake detected`
 
 #### Root Cause:
-On Intel Xeon Family 6 Model 85 processors (Skylake-X, Cascade Lake), 512-bit vector instructions trigger CPU core power throttling (`License 2`), reducing clock frequencies by **15% to 25%** across all scalar threads on that core for ~2ms.
+On Intel Xeon Family 6 Model 85 processors (Skylake-X, Cascade Lake), sustained AVX-512 work can reduce core frequency. The amount and recovery period vary by processor and workload.
 
 #### Modern Architecture Status:
-- **AMD Zen 4 & Zen 5**: Native dual 256-bit or full 512-bit vector units with **zero downclock penalty**.
+- **AMD Zen 4 & Zen 5**: The Intel-specific protection rule does not target these processors; measure their actual workload behavior.
 - **Intel Sapphire Rapids / Emerald Rapids**: Frequency penalties are negligible.
 
 #### Remediation: Apply Safe AVX-512 Policy
@@ -200,7 +200,7 @@ microfat trim app.fat --max-level v3 --policy safe_avx512 -o app_safe.fat
 ### Symptom: High p99 Latency Spikes / High GC CPU Utilization (> 25%)
 
 #### Root Cause (The GC Thrashing Cliff):
-If steady-state live heap memory exceeds $\frac{\text{GOMEMLIMIT}}{1 + \text{GOGC}/100}$, Go enters continuous GC cycles, saturating the 33% GC CPU limiter.
+If steady-state live heap memory exceeds $\frac{\text{GOMEMLIMIT}}{1 + \text{GOGC}/100}$, Go enters continuous GC cycles, saturating the 50% GC CPU limiter.
 
 #### Diagnostic Log Inspection:
 Set `GODEBUG=gctrace=1` to observe runtime memory pacing:
@@ -253,17 +253,17 @@ export MICROFAT_LIVE_HEAP_ESTIMATE=150MB
 ## 8. Frequently Asked Questions (FAQ)
 
 ### Q1: Does Microfat add latency to long-running microservices?
-**No.** The ~1.5ms decompression overhead occurs **only once at process launch** when streaming into anonymous RAM (`memfd_create`). Once running, execution is 100% native machine code with zero wrapper daemon overhead.
+**No.** Decompression work occurs **only once at process launch** when streaming into anonymous RAM (`memfd_create`). The payload then executes as a native process without a resident launcher daemon.
 
 ### Q2: Why does `runtime.NumCPU()` still return the host core count?
-In Go, `runtime.NumCPU()` queries the host hardware. However, Microfat automatically sets `GOMAXPROCS` to match the container's CFS CPU quota (e.g. `2` cores for `cpu: 2000m`), preventing scheduler oversubscription and thread throttling.
+In Go, `runtime.NumCPU()` queries the host hardware. However, Microfat automatically sets `GOMAXPROCS` to match the container's CFS CPU quota (e.g. `2` cores for `cpu: 2000m`), reducing scheduler oversubscription; throttling remains possible.
 
 ### Q3: How do I eliminate startup overhead entirely for CLI tools?
 Use Raw Native ELF mode:
 ```bash
 ./my-cli --microfat:optimize
 ```
-This permanently replaces the file on disk with the raw uncompressed host-optimal ELF, giving **0.0ms launch overhead**.
+This permanently replaces the file on disk with the raw uncompressed selected compatible ELF, removing the microfat launcher stage; native process startup still has a cost.
 
 ---
 

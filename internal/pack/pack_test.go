@@ -3,6 +3,7 @@ package pack
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"encoding/binary"
 	"sync"
 	"testing"
 
@@ -2903,12 +2903,12 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected Pack to fail on missing variant with EnableDict")
 		}
-		if !strings.Contains(err.Error(), "sampling variants for dictionary training:") {
+		if !strings.Contains(err.Error(), "snapshot variant") {
 			t.Errorf("error %q does not contain sampling variants error", err.Error())
 		}
 	})
 
-	t.Run("Unreadable variant during sampling emits diagnostic under ProfileSize then fails in payload writer", func(t *testing.T) {
+	t.Run("Unreadable variant fails before sampling under ProfileSize", func(t *testing.T) {
 		t.Parallel()
 
 		var warnings []string
@@ -2931,18 +2931,15 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected Pack to fail on missing variant")
 		}
-		if len(warnings) != 1 {
-			t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
-		}
-		if !strings.Contains(warnings[0], "shared dictionary training failed (sampling variants:") {
-			t.Errorf("warning %q does not contain expected sampling failure message", warnings[0])
+		if len(warnings) != 0 {
+			t.Fatalf("input rejection must precede dictionary training: %v", warnings)
 		}
 		if !errors.Is(err, ErrVariantNotFound) {
 			t.Errorf("expected ErrVariantNotFound, got %v", err)
 		}
 	})
 
-	t.Run("Zero byte variants under ProfileSize emits no sample data warning and proceeds", func(t *testing.T) {
+	t.Run("Zero byte variants under ProfileSize fail before dictionary training", func(t *testing.T) {
 		t.Parallel()
 
 		emptyVar1 := filepath.Join(tempDir, "empty_v1")
@@ -2970,20 +2967,14 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 			},
 		}
 
-		idx, err := Pack(opts)
-		if err != nil {
-			t.Fatalf("expected Pack to succeed, got %v", err)
+		_, err := Pack(opts)
+		if !errors.Is(err, ErrInvalidELF) {
+			t.Fatalf("empty variant must fail: %v", err)
 		}
-		if idx.DictionarySize != 0 {
-			t.Errorf("expected 0 DictionarySize, got %d", idx.DictionarySize)
+		if len(warnings) != 0 {
+			t.Fatalf("empty input must fail before dictionary training: %v", warnings)
 		}
-		if len(warnings) != 1 {
-			t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
-		}
-		expectedMsg := "shared dictionary training failed (no sample data); proceeding with independent variant compression"
-		if !strings.Contains(warnings[0], expectedMsg) {
-			t.Errorf("warning %q does not contain %q", warnings[0], expectedMsg)
-		}
+
 	})
 
 	t.Run("Zero byte variants under EnableDict fails fast with no sample data error", func(t *testing.T) {
@@ -3014,7 +3005,7 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected Pack to fail on empty variants with EnableDict")
 		}
-		if !strings.Contains(err.Error(), "training shared dictionary: no sample data") {
+		if !strings.Contains(err.Error(), "nonempty regular file") {
 			t.Errorf("error %q does not contain expected message", err.Error())
 		}
 	})
@@ -3269,4 +3260,3 @@ func TestPrewarmVariantWithDict_SymlinkRejection(t *testing.T) {
 		}
 	})
 }
-

@@ -5,6 +5,7 @@ import (
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,7 +68,16 @@ type VariantConfig struct {
 // LoadManifest reads, unmarshals, and validates a YAML or JSON build manifest from the specified file path.
 func LoadManifest(manifestPath string) (*Manifest, error) {
 	cleanPath := filepath.Clean(manifestPath)
-	data, err := os.ReadFile(cleanPath)
+	file, err := os.Open(cleanPath)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s (%w)", ErrManifestNotFound, cleanPath, err)
+	}
+	defer func() { _ = file.Close() }()
+	const maxManifestBytes = 1024 * 1024
+	data, err := io.ReadAll(io.LimitReader(file, maxManifestBytes+1))
+	if len(data) > maxManifestBytes {
+		return nil, fmt.Errorf("manifest exceeds %d bytes", maxManifestBytes)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s (%w)", ErrManifestNotFound, cleanPath, err)
 	}

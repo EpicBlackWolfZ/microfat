@@ -50,13 +50,28 @@ flowchart TD
 
 ### A. `GOMEMLIMIT` (Memory Limit)
 
-Given a container hard memory ceiling $M$ in bytes:
+Given an effective cgroup memory ceiling $C$ and page-rounded retained memfd storage $S$, use $M = C - S$. Cache execution uses $S = 0$; cache pages still contribute to memory pressure. If storage exhausts the ceiling, no new runtime budget is injected.
 
 $$\text{GOMEMLIMIT} = \min(M \times \text{ratio}, M - \text{minHeadroom})$$
 
 - **Default Ratio**: `0.90` (90% of container memory limit)
 - **Minimum Headroom**: `64 MB` (`67,108,864` bytes reserved for thread stacks, runtime overhead, and OS file caches)
 - **Small Container Fallback**: For containers $< 64\text{ MB}$, allocates 50% of total memory to prevent integer underflow.
+
+`GOMEMLIMIT` excludes memory outside the Go runtime and may be exceeded to maintain progress.
+It does not bound total process or container memory. See the [Go GC guide](https://go.dev/doc/gc-guide#Memory_limit).
+
+Before cold extraction, the launcher estimates payload storage, dictionary bytes, decoder working
+memory, a copy buffer and 64 MiB headroom. Zstd currently uses its conservative 512 MiB decoder allowance;
+LZ4 uses a 12 MiB buffer allowance. These are planning estimates, not measured process-memory bounds.
+An insufficient detected ceiling rejects cold extraction. Auto mode may use an already validated warm
+cache entry; explicit memfd fails rather than changing execution mode. Cache extraction and page pressure
+are included in the estimate too. Missing/unlimited cgroups cannot establish sufficient headroom.
+
+The launcher derives payload size from the validated manifest. `runtimeinit` independently inspects
+its executable descriptor and seals; it never trusts inherited selected-size metadata for budgeting.
+Existing `GOMEMLIMIT` wins, including the launcher's injected value. Repeated runtime initialization
+recomputes from the raw ceiling and does not deduct storage twice.
 
 ### B. `GOMAXPROCS` (CPU Quota)
 
@@ -65,7 +80,7 @@ Given a CFS quota $Q$ and period $P$:
 $$\text{CPU Quota} = \frac{Q}{P}$$
 $$\text{GOMAXPROCS} = \max(1, \lfloor \text{CPU Quota} \rfloor)$$
 
-- **Floor Rounding**: Using $\lfloor \text{Quota} \rfloor$ ensures Go does not oversubscribe CFS scheduler periods, eliminating CPU throttling latency spikes.
+- **Floor Rounding**: Using $\lfloor \text{Quota} \rfloor$ ensures Go does not oversubscribe CFS scheduler periods, reducing oversubscription; CPU throttling and latency spikes remain possible.
 
 ---
 
@@ -93,13 +108,13 @@ flowchart TD
     Alloc["Heap Allocations Grow"] --> CheckLimit{"Heap Approach GOMEMLIMIT?"}
     
     CheckLimit -->|"No (Ample Headroom)"| StandardGC["Standard GOGC Pacing<br>Target = LiveHeap × (1 + GOGC/100)"]
-    CheckLimit -->|"Yes (Memory Pressure)"| LimitGC["GOMEMLIMIT Soft Limit Pacing<br>GC Triggers Continuously to Avoid OOM"]
+    CheckLimit -->|"Yes (Memory Pressure)"| LimitGC["GOMEMLIMIT Soft Limit Pacing<br>GC Paces Allocation Under Memory Pressure"]
     
     StandardGC --> RunGC["Execute Concurrent Mark & Sweep"]
     LimitGC --> CheckThrash{"Live Heap > Limit / (1 + GOGC/100)?"}
     
     CheckThrash -->|"No"| SmoothLimit["Smooth GC Pacing without Thrashing"]
-    CheckThrash -->|"Yes"| Limiter["33% CPU GC Limiter Engaged<br>Latency Tail Cliff / High CPU"]
+    CheckThrash -->|"Yes"| Limiter["50% CPU GC Limiter Engaged<br>Latency Tail Cliff / High CPU"]
     
     SmoothLimit --> RunGC
     Limiter --> RunGC
@@ -115,10 +130,10 @@ flowchart TD
    With the default `GOGC=100`, the GC triggers when heap allocations double the live heap size ($2\times$).
 
 2. **Memory Limit Pacing (`GOMEMLIMIT`)**:
-   When `GOMEMLIMIT` is configured, the Go runtime dynamically adjusts the next GC trigger point to ensure total memory (live heap + stacks + runtime metadata) stays below the limit. If the target heap calculated by `GOGC` exceeds `GOMEMLIMIT`, the runtime overrides `GOGC` and triggers GC earlier.
+   When `GOMEMLIMIT` is configured, the Go runtime dynamically adjusts the next GC trigger point to target a soft budget for Go-managed memory, including live heap, stacks and runtime metadata. If the target heap calculated by `GOGC` exceeds `GOMEMLIMIT`, the runtime overrides `GOGC` and triggers GC earlier.
 
-3. **The 33% CPU GC Limiter**:
-   To prevent a process from entering a death spiral where 100% of CPU time is spent garbage collecting, Go caps GC CPU consumption at **33%** of total process CPU capacity (across `GOMAXPROCS` threads). When allocations continue past this point, the runtime allows heap size to temporarily exceed `GOMEMLIMIT` rather than freezing execution.
+3. **The 50% CPU GC Limiter**:
+   To prevent a process from entering a death spiral where 100% of CPU time is spent garbage collecting, Go caps GC CPU consumption at **50%** of total process CPU capacity (across `GOMAXPROCS` threads). When allocations continue past this point, the runtime allows heap size to temporarily exceed `GOMEMLIMIT` rather than freezing execution.
 
 ---
 
@@ -131,7 +146,7 @@ When live heap $L$ exceeds the ratio $\frac{\text{GOMEMLIMIT}}{1 + \text{GOGC}/1
 
 $$\text{Live Heap} > \frac{\text{GOMEMLIMIT}}{1 + \frac{\text{GOGC}}{100}}$$
 
-For example, with `GOGC=100` and $\text{GOMEMLIMIT} = 1\text{ GB}$, if the live heap is $600\text{ MB}$, the calculated target heap is $1.2\text{ GB} > 1\text{ GB}$. The runtime triggers back-to-back GC cycles, saturating the 33% CPU limiter, creating high latency spikes (p99/p999 latency cliffs) and causing severe CPU starvation.
+For example, with `GOGC=100` and $\text{GOMEMLIMIT} = 1\text{ GB}$, if the live heap is $600\text{ MB}$, the calculated target heap is $1.2\text{ GB} > 1\text{ GB}$. The runtime triggers back-to-back GC cycles, saturating the 50% CPU limiter, creating high latency spikes (p99/p999 latency cliffs) and causing severe CPU starvation.
 
 #### Recommended `GOGC` Calculation Formula
 Given a container memory ceiling $M$ (in bytes) and an expected peak live heap $L$:

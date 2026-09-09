@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -61,38 +62,38 @@ const (
 	MaxDictionarySize = 1024 * 1024
 
 	// Environment variable names for telemetry and control.
-	EnvSelectedVariant  = "MICROFAT_SELECTED_VARIANT"
-	EnvHostArch         = "MICROFAT_HOST_ARCH"
-	EnvHostLevel        = "MICROFAT_HOST_LEVEL"
-	EnvExecMode         = "MICROFAT_EXEC_MODE"
-	EnvDispatchMode     = "MICROFAT_DISPATCH_MODE"
-	EnvSelectedSHA256   = "MICROFAT_SELECTED_SHA256"
-	EnvSelectedSize     = "MICROFAT_SELECTED_SIZE"
-	EnvCgroupVersion              = "MICROFAT_CGROUP_VERSION"
-	EnvCgroupGOMEMLIMIT           = "MICROFAT_CGROUP_GOMEMLIMIT"
-	EnvCgroupGOMAXPROCS           = "MICROFAT_CGROUP_GOMAXPROCS"
-	EnvCgroupLimitBytes           = "MICROFAT_CGROUP_LIMIT_BYTES"
-	EnvCgroupHighBytes            = "MICROFAT_CGROUP_HIGH_BYTES"
-	EnvCgroupEffectiveLimitBytes  = "MICROFAT_CGROUP_EFFECTIVE_LIMIT_BYTES"
-	EnvCgroupCPUs                 = "MICROFAT_CGROUP_CPUS"
-	EnvCgroupGOGC                 = "MICROFAT_CGROUP_GOGC"
-	EnvCgroupGCProfile            = "MICROFAT_CGROUP_GC_PROFILE"
-	EnvDebug                      = "MICROFAT_DEBUG"
-	EnvLog                        = "MICROFAT_LOG"
-	EnvAutotune                   = "MICROFAT_AUTOTUNE"
-	EnvDryRun                     = "MICROFAT_DRY_RUN"
-	EnvMemRatio                   = "MICROFAT_MEM_RATIO"
-	EnvGCProfile                  = "MICROFAT_GC_PROFILE"
-	EnvLiveHeapEstimate           = "MICROFAT_LIVE_HEAP_ESTIMATE"
-	EnvForceLevel                 = "MICROFAT_FORCE_LEVEL"
-	EnvMaxLevel                   = "MICROFAT_MAX_LEVEL"
-	EnvDisableVariants            = "MICROFAT_DISABLE_VARIANTS"
-	EnvPolicy                     = "MICROFAT_POLICY"
-	EnvAVX512DownclockProtection  = "MICROFAT_AVX512_DOWNCLOCK_PROTECTION"
-	EnvCacheDir                   = "MICROFAT_CACHE_DIR"
-	EnvVerifyCache                = "MICROFAT_VERIFY_CACHE"
-	EnvPolicyApplied              = "MICROFAT_POLICY_APPLIED"
-	EnvOverrideReason             = "MICROFAT_OVERRIDE_REASON"
+	EnvSelectedVariant           = "MICROFAT_SELECTED_VARIANT"
+	EnvHostArch                  = "MICROFAT_HOST_ARCH"
+	EnvHostLevel                 = "MICROFAT_HOST_LEVEL"
+	EnvExecMode                  = "MICROFAT_EXEC_MODE"
+	EnvDispatchMode              = "MICROFAT_DISPATCH_MODE"
+	EnvSelectedSHA256            = "MICROFAT_SELECTED_SHA256"
+	EnvSelectedSize              = "MICROFAT_SELECTED_SIZE"
+	EnvCgroupVersion             = "MICROFAT_CGROUP_VERSION"
+	EnvCgroupGOMEMLIMIT          = "MICROFAT_CGROUP_GOMEMLIMIT"
+	EnvCgroupGOMAXPROCS          = "MICROFAT_CGROUP_GOMAXPROCS"
+	EnvCgroupLimitBytes          = "MICROFAT_CGROUP_LIMIT_BYTES"
+	EnvCgroupHighBytes           = "MICROFAT_CGROUP_HIGH_BYTES"
+	EnvCgroupEffectiveLimitBytes = "MICROFAT_CGROUP_EFFECTIVE_LIMIT_BYTES"
+	EnvCgroupCPUs                = "MICROFAT_CGROUP_CPUS"
+	EnvCgroupGOGC                = "MICROFAT_CGROUP_GOGC"
+	EnvCgroupGCProfile           = "MICROFAT_CGROUP_GC_PROFILE"
+	EnvDebug                     = "MICROFAT_DEBUG"
+	EnvLog                       = "MICROFAT_LOG"
+	EnvAutotune                  = "MICROFAT_AUTOTUNE"
+	EnvDryRun                    = "MICROFAT_DRY_RUN"
+	EnvMemRatio                  = "MICROFAT_MEM_RATIO"
+	EnvGCProfile                 = "MICROFAT_GC_PROFILE"
+	EnvLiveHeapEstimate          = "MICROFAT_LIVE_HEAP_ESTIMATE"
+	EnvForceLevel                = "MICROFAT_FORCE_LEVEL"
+	EnvMaxLevel                  = "MICROFAT_MAX_LEVEL"
+	EnvDisableVariants           = "MICROFAT_DISABLE_VARIANTS"
+	EnvPolicy                    = "MICROFAT_POLICY"
+	EnvAVX512DownclockProtection = "MICROFAT_AVX512_DOWNCLOCK_PROTECTION"
+	EnvCacheDir                  = "MICROFAT_CACHE_DIR"
+	EnvVerifyCache               = "MICROFAT_VERIFY_CACHE"
+	EnvPolicyApplied             = "MICROFAT_POLICY_APPLIED"
+	EnvOverrideReason            = "MICROFAT_OVERRIDE_REASON"
 
 	// EnvOriginalExe specifies the informational asset-resolution hint indicating the
 	// original fat binary path prior to memfd/cache execution.
@@ -712,64 +713,23 @@ func parseJSONString(data []byte, pos int) (string, int, error) {
 	if pos >= len(data) || data[pos] != '"' {
 		return "", pos, fmt.Errorf("%w: expected string opening quote at byte %d", ErrInvalidJSONSyntax, pos)
 	}
-	pos++
 	start := pos
-	var sb strings.Builder
-	hasEscapes := false
-
+	pos++
 	for pos < len(data) {
-		c := data[pos]
-		if c == '"' {
-			if !hasEscapes {
-				return string(data[start:pos]), pos + 1, nil
-			}
-			return sb.String(), pos + 1, nil
-		}
-		if c == '\\' {
-			if !hasEscapes {
-				sb.Write(data[start:pos])
-				hasEscapes = true
-			}
-			pos++
-			if pos >= len(data) {
-				return "", pos, fmt.Errorf("%w: unterminated escape sequence", ErrInvalidJSONSyntax)
-			}
-			switch data[pos] {
-			case '"', '\\', '/':
-				sb.WriteByte(data[pos])
-			case 'b':
-				sb.WriteByte('\b')
-			case 'f':
-				sb.WriteByte('\f')
-			case 'n':
-				sb.WriteByte('\n')
-			case 'r':
-				sb.WriteByte('\r')
-			case 't':
-				sb.WriteByte('\t')
-			case 'u':
-				if pos+4 >= len(data) {
-					return "", pos, fmt.Errorf("%w: invalid unicode escape", ErrInvalidJSONSyntax)
-				}
-				r, err := strconv.ParseUint(string(data[pos+1:pos+5]), 16, 16)
-				if err != nil {
-					return "", pos, fmt.Errorf("%w: invalid unicode escape: %v", ErrInvalidJSONSyntax, err)
-				}
-				sb.WriteRune(rune(r))
-				pos += 5
-				continue
-			default:
-				return "", pos, fmt.Errorf("%w: invalid escape sequence \\%c at byte %d", ErrInvalidJSONSyntax, data[pos], pos)
-			}
-			pos++
+		switch data[pos] {
+		case '\\':
+			pos += 2 // json.Unmarshal validates the escape, including surrogate pairs.
 			continue
-		}
-		if hasEscapes {
-			sb.WriteByte(c)
+		case '"':
+			var value string
+			if err := json.Unmarshal(data[start:pos+1], &value); err != nil {
+				return "", pos, fmt.Errorf("%w: %v", ErrInvalidJSONSyntax, err)
+			}
+			return value, pos + 1, nil
 		}
 		pos++
 	}
-	return "", pos, fmt.Errorf("%w: unterminated string starting at byte %d", ErrInvalidJSONSyntax, start)
+	return "", pos, fmt.Errorf("%w: unterminated string at byte %d", ErrInvalidJSONSyntax, start)
 }
 
 func parseJSONInt64(data []byte, pos int) (int64, int, error) {
@@ -809,96 +769,71 @@ func parseJSONInt64(data []byte, pos int) (int64, int, error) {
 	return val, pos, nil
 }
 
+// MaxJSONDepth bounds legacy manifest nesting, including unknown fields.
+const MaxJSONDepth = 128
+
+// validateJSONSyntax uses the standard grammar and a linear, nonrecursive depth check.
+// The schema parser below intentionally restricts known numeric fields to int64.
+func validateJSONSyntax(data []byte) error {
+	depth := 0
+	quoted, escaped := false, false
+	for _, c := range data {
+		if quoted {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				quoted = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			quoted = true
+		case '{', '[':
+			depth++
+			if depth > MaxJSONDepth {
+				return fmt.Errorf("%w: nesting exceeds %d", ErrInvalidJSONSyntax, MaxJSONDepth)
+			}
+		case '}', ']':
+			depth--
+		}
+	}
+	if !json.Valid(data) {
+		return fmt.Errorf("%w: malformed JSON value", ErrInvalidJSONSyntax)
+	}
+	return nil
+}
+
 func skipJSONValue(data []byte, pos int) (int, error) {
 	pos = skipJSONWhitespace(data, pos)
 	if pos >= len(data) {
 		return pos, fmt.Errorf("%w: unexpected end of json", ErrInvalidJSONSyntax)
 	}
-	switch data[pos] {
-	case '"':
-		_, nextPos, err := parseJSONString(data, pos)
-		return nextPos, err
-	case '{':
-		return skipJSONObject(data, pos)
-	case '[':
-		return skipJSONArray(data, pos)
-	default:
-		return skipJSONPrimitive(data, pos)
+	// The complete manifest has already passed the depth and syntax checks. RawMessage
+	// validates the skipped value without interpreting its schema or converting numbers.
+	decoder := json.NewDecoder(bytes.NewReader(data[pos:]))
+	var value json.RawMessage
+	if err := decoder.Decode(&value); err != nil {
+		return pos, fmt.Errorf("%w: %v", ErrInvalidJSONSyntax, err)
 	}
+	if err := validateJSONSyntax(value); err != nil {
+		return pos, err
+	}
+	next := pos + int(decoder.InputOffset())
+	if next <= pos {
+		return pos, fmt.Errorf("%w: value did not advance", ErrInvalidJSONSyntax)
+	}
+	return next, nil
 }
 
-func skipJSONObject(data []byte, pos int) (int, error) {
-	pos++
-	for {
-		pos = skipJSONWhitespace(data, pos)
-		if pos >= len(data) {
-			return pos, fmt.Errorf("%w: unclosed object", ErrInvalidJSONSyntax)
-		}
-		if data[pos] == '}' {
-			return pos + 1, nil
-		}
-		_, nextPos, err := parseJSONString(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		pos = skipJSONWhitespace(data, nextPos)
-		if pos >= len(data) || pos < len(data) && data[pos] != ':' {
-			return pos, fmt.Errorf("%w: expected ':' in object", ErrInvalidJSONSyntax)
-		}
-		pos++
-		valPos, err := skipJSONValue(data, pos)
-		if err != nil {
-			return valPos, err
-		}
-		pos = skipJSONWhitespace(data, valPos)
-		if pos < len(data) && data[pos] == ',' {
-			pos++
-			continue
-		}
-		if pos < len(data) && data[pos] == '}' {
-			return pos + 1, nil
-		}
-	}
-}
-
-func skipJSONArray(data []byte, pos int) (int, error) {
-	pos++
-	for {
-		pos = skipJSONWhitespace(data, pos)
-		if pos >= len(data) {
-			return pos, fmt.Errorf("%w: unclosed array", ErrInvalidJSONSyntax)
-		}
-		if data[pos] == ']' {
-			return pos + 1, nil
-		}
-		elemPos, err := skipJSONValue(data, pos)
-		if err != nil {
-			return elemPos, err
-		}
-		pos = skipJSONWhitespace(data, elemPos)
-		if pos < len(data) && data[pos] == ',' {
-			pos++
-			continue
-		}
-		if pos < len(data) && data[pos] == ']' {
-			return pos + 1, nil
-		}
-	}
-}
-
-func skipJSONPrimitive(data []byte, pos int) (int, error) {
-	for pos < len(data) {
-		c := data[pos]
-		if c == ',' || c == '}' || c == ']' || c == ' ' || c == '\t' || c == '\r' || c == '\n' {
-			return pos, nil
-		}
-		pos++
-	}
-	return pos, nil
-}
-
-// unmarshalJSONIndex parses a Format v1 JSON index manifest without using Go reflection.
+// unmarshalJSONIndex validates JSON syntax and reads the legacy Format v1 manifest schema.
 func unmarshalJSONIndex(data []byte) (*Index, error) {
+	if err := validateJSONSyntax(data); err != nil {
+		return nil, err
+	}
 	pos := skipJSONWhitespace(data, 0)
 	if pos >= len(data) || data[pos] != '{' {
 		return nil, fmt.Errorf("%w: root must be object", ErrInvalidJSONSyntax)
@@ -1380,9 +1315,8 @@ func IsFatBinary(r io.ReaderAt, totalSize int64) bool {
 // On non-Unix platforms, dirFD is -1.
 // If dirFD >= 0, the caller is responsible for closing dirFD when finished.
 //
-// Targeting the effective UID (os.Geteuid()) is explicitly intended to support setuid execution
-// semantics, ensuring that cache directory validation and fallback paths (e.g. /tmp/.microfat-<euid>)
-// align with process file creation privileges and effective runtime ownership.
+// Cache ownership follows the effective UID of an ordinary, non-elevated process.
+// The launcher rejects setuid/setgid and secure execution before cache access.
 //
 // Precedence:
 //  1. customDir argument (if non-empty)
@@ -1471,5 +1405,3 @@ func ResolveCacheDir(customDir string) (string, error) {
 	}
 	return dir, nil
 }
-
-

@@ -109,6 +109,8 @@ const (
 
 // Limits contains resolved container memory and CPU limits.
 type Limits struct {
+	// RetainedExecutableBytes is trusted kernel-backed storage, not inherited environment metadata.
+	RetainedExecutableBytes   int64   `json:"retained_executable_bytes,omitempty"`
 	CgroupVersion             int     `json:"cgroup_version"`
 	MemoryLimitBytes          int64   `json:"memory_limit_bytes"`           // Hard OOM ceiling (memory.max in v2, memory.limit_in_bytes in v1)
 	MemoryHighBytes           int64   `json:"memory_high_bytes,omitempty"`  // Throttle watermark (memory.high in v2, 0 if unset/v1)
@@ -119,15 +121,15 @@ type Limits struct {
 
 // TuningPlan contains computed Go runtime tuning parameters derived from container resource limits.
 type TuningPlan struct {
-	GOMEMLIMITBytes   int64     `json:"gomemlimit_bytes"`             // Calculated memory limit in bytes (0 if unset/unlimited)
-	GOMEMLIMITStr     string    `json:"gomemlimit_str"`               // Formatted memory limit string (e.g. "966367641B", empty if unset)
+	GOMEMLIMITBytes int64  `json:"gomemlimit_bytes"` // Calculated memory limit in bytes (0 if unset/unlimited)
+	GOMEMLIMITStr   string `json:"gomemlimit_str"`   // Formatted memory limit string (e.g. "966367641B", empty if unset)
 	// ConstrainingLimit is the active memory constraint: "max" or "high" (empty if unlimited; ties resolve to "max").
 	ConstrainingLimit string    `json:"constraining_limit,omitempty"`
-	GOMAXPROCS        int       `json:"gomaxprocs"`                   // Calculated CPU quota core count (0 if unset/unlimited)
-	GOMAXPROCSStr     string    `json:"gomaxprocs_str"`               // Formatted GOMAXPROCS string (e.g. "4", empty if unset)
-	AppliedRatio      float64   `json:"applied_ratio"`                // Actual memory ratio applied (e.g. 0.90 or custom)
-	GOGC              int       `json:"gogc,omitempty"`               // Calculated GOGC target (-1 if off, 0 if unset/default)
-	GOGCStr           string    `json:"gogc_str,omitempty"`           // Formatted GOGC string (e.g. "75", "40", "off", empty if unset)
+	GOMAXPROCS        int       `json:"gomaxprocs"`         // Calculated CPU quota core count (0 if unset/unlimited)
+	GOMAXPROCSStr     string    `json:"gomaxprocs_str"`     // Formatted GOMAXPROCS string (e.g. "4", empty if unset)
+	AppliedRatio      float64   `json:"applied_ratio"`      // Actual memory ratio applied (e.g. 0.90 or custom)
+	GOGC              int       `json:"gogc,omitempty"`     // Calculated GOGC target (-1 if off, 0 if unset/default)
+	GOGCStr           string    `json:"gogc_str,omitempty"` // Formatted GOGC string (e.g. "75", "40", "off", empty if unset)
 	GCProfile         GCProfile `json:"gc_profile,omitempty"`
 	GOGCApplied       bool      `json:"gogc_applied"`
 }
@@ -890,6 +892,8 @@ func ResolveTuningPlanWithProfile(
 	if effectiveLimit <= 0 {
 		effectiveLimit = CalculateEffectiveMemoryLimit(limits.MemoryLimitBytes, limits.MemoryHighBytes)
 	}
+
+	effectiveLimit = RetainedMemoryLimit(effectiveLimit, limits.RetainedExecutableBytes)
 
 	if effectiveLimit > 0 {
 		if memLimit, ok := CalculateGOMEMLIMIT(effectiveLimit, ratio, minHeadroomBytes); ok {

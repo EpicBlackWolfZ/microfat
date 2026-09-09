@@ -32,15 +32,16 @@ const (
 )
 
 var (
-	setMemoryLimitFunc = debug.SetMemoryLimit
-	setMaxProcsFunc    = runtime.GOMAXPROCS
-	setGCPercentFunc   = debug.SetGCPercent
-	readLimitsFunc     = cgroup.ReadLimits
-	readLimitsFromFunc = cgroup.ReadLimitsFrom
-	getenvFunc         = os.Getenv
-	executableFunc     = os.Executable
-	absFunc            = filepath.Abs
-	stderrWriter       io.Writer = os.Stderr
+	retainedExecutableMemoryFunc           = cgroup.RetainedExecutableMemory
+	setMemoryLimitFunc                     = debug.SetMemoryLimit
+	setMaxProcsFunc                        = runtime.GOMAXPROCS
+	setGCPercentFunc                       = debug.SetGCPercent
+	readLimitsFunc                         = cgroup.ReadLimits
+	readLimitsFromFunc                     = cgroup.ReadLimitsFrom
+	getenvFunc                             = os.Getenv
+	executableFunc                         = os.Executable
+	absFunc                                = filepath.Abs
+	stderrWriter                 io.Writer = os.Stderr
 )
 
 // Executable returns the path of the original fat binary if executed via microfat,
@@ -163,6 +164,18 @@ func AutoTune(opts ...Option) Result {
 		EffectiveMemoryLimitBytes: limits.EffectiveMemoryLimitBytes,
 		CPUQuota:                  limits.CPUQuota,
 		DryRun:                    cfg.dryRun,
+	}
+
+	// Kernel-derived executable storage is deducted from the original cgroup ceiling
+	// on each calculation. Existing GOMEMLIMIT still wins, including launcher tuning.
+	retained, retainedErr := retainedExecutableMemoryFunc()
+	if retainedErr != nil {
+		// No reliable storage estimate: preserve CPU tuning but omit a new memory budget.
+		limits.MemoryLimitBytes = 0
+		limits.MemoryHighBytes = 0
+		limits.EffectiveMemoryLimitBytes = 0
+	} else {
+		limits.RetainedExecutableBytes = retained
 	}
 
 	// 3. Resolve active profile, live heap estimate, and tuning plan

@@ -61,7 +61,7 @@ The last 56 bytes of every Microfat fat binary contain fixed-width binary fields
 
 ## 3. Format v2: Reflection-Free Compact Binary Index Table
 
-**Format v2** (`IndexMagicV2 = "\x00\xFAM2"`) is the default metadata index format in Microfat. Designed for reflection-free zero-allocation decoding, it reduces index parsing time to **$< 800\text{ ns}$**.
+**Format v2** (`IndexMagicV2 = "\x00\xFAM2"`) is the default metadata index format in Microfat. It uses a compact binary table instead of the legacy JSON schema. Measure index parsing separately from process cold-start latency; parser microbenchmarks do not establish end-to-end launch cost.
 
 ### Binary Header Layout
 
@@ -101,11 +101,11 @@ The last 56 bytes of every Microfat fat binary contain fixed-width binary fields
 
 ## 4. Shared Inter-Variant Dictionary Mechanics (`--dict`)
 
-When packaging multi-variant matrices (e.g. `v1`, `v2`, `v3`, `v4`), embedded binaries share $> 70\%$ of identical Go runtime routines and symbol tables.
+When packaging multi-variant matrices (e.g. `v1`, `v2`, `v3`, `v4`), embedded binaries can share runtime routines and symbol tables; the fraction depends on the program and toolchain.
 
 1. **Dictionary Generation**: `microfat pack --dict` trains a custom 112 KB Zstandard dictionary across all variant ELF payloads.
-2. **Payload Compression**: Variants are compressed using the trained dictionary, boosting compression ratios from ~50% to **~75%**.
-3. **Payload Decompression**: At launch time, the launcher reads the dictionary once from `DictOffset` into memory and initializes decompression streams instantly.
+2. **Payload Compression**: Variants are compressed using the trained dictionary, which may reduce size when the variants share suitable byte sequences. Measure the dictionary benefit and extraction cost.
+3. **Payload Decompression**: At launch time, the launcher reads the dictionary once from `DictOffset` into memory and initializes bounded decompression streams.
 
 ---
 
@@ -153,7 +153,7 @@ For backward compatibility, Microfat can read and produce Format v1 JSON manifes
 
 ## 6. In-Memory Execution Pipeline & Kernel Memory Sealing (`memfd_create`)
 
-To provide zero-disk-I/O execution while preserving container PID 1, signal forwarding, and complete immunity against in-memory tampering:
+To execute from a sealed anonymous file while preserving process identity and signal behavior:
 
 ```mermaid
 sequenceDiagram
@@ -168,12 +168,12 @@ sequenceDiagram
     Stub->>Stub: Probe Cgroups (Auto GOMEMLIMIT, GOMAXPROCS)
     Stub->>OS: memfd_create("microfat_payload", MFD_CLOEXEC | MFD_ALLOW_SEALING)
     OS-->>Stub: fd=3
-    Stub->>RAM: Stream & Decompress Optimal Payload into fd=3 (~1.5ms)
+    Stub->>RAM: Stream and verify selected payload into fd=3
     Stub->>OS: fcntl(fd=3, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL)
     OS-->>Stub: 0 (sealed read-only and immutable)
     Stub->>OS: syscall.Exec("/proc/self/fd/3", args, env)
     Note over OS,App: Kernel replaces process image in-place (same PID 100)
-    OS->>App: Native Execution of optimal machine code
+    OS->>App: Native execution of selected machine code
 ```
 
 ### Memory Sealing Lifecycle & Threat Model

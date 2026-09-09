@@ -2,6 +2,7 @@
 package pack
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"debug/elf"
 	"encoding/hex"
@@ -107,35 +108,51 @@ const (
 )
 
 func sampleVariantPayloads(variantPaths map[string]string, levels []string) ([][]byte, error) {
+	const maxSampleBytes = 4 * 1024 * 1024
 	var samples [][]byte
+	remaining := maxSampleBytes
 	for _, lvl := range levels {
-		path := filepath.Clean(variantPaths[lvl])
-		data, err := os.ReadFile(path)
+		chunks, err := sampleInput(variantPaths[lvl], remaining)
 		if err != nil {
-			return nil, fmt.Errorf("reading variant %s for sample training: %w", lvl, err)
+			return nil, fmt.Errorf("sampling variant %s: %w", lvl, err)
 		}
+		for _, chunk := range chunks {
+			remaining -= len(chunk)
+		}
+		samples = append(samples, chunks...)
+	}
+	return samples, nil
+}
 
-		if len(data) == 0 {
-			continue
+func sampleInput(path string, budget int) ([][]byte, error) {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	stat, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !stat.Mode().IsRegular() || stat.Size() <= 0 {
+		return nil, ErrInvalidELF
+	}
+	if stat.Size() > format.MaxPayloadSize {
+		return nil, format.ErrPayloadTooLarge
+	}
+	step := max(stat.Size()/maxSamplesPerFile, sampleChunkSize)
+	var samples [][]byte
+	for offset := int64(0); offset < stat.Size() && len(samples) < maxSamplesPerFile; offset += step {
+		size := int(min(int64(sampleChunkSize), stat.Size()-offset))
+		if size > budget {
+			return nil, fmt.Errorf("%w: dictionary sample budget exceeded", format.ErrPayloadTooLarge)
 		}
-
-		if len(data) <= sampleChunkSize {
-			samples = append(samples, data)
-			continue
+		chunk := make([]byte, size)
+		if _, err := f.ReadAt(chunk, offset); err != nil {
+			return nil, err
 		}
-
-		step := len(data) / maxSamplesPerFile
-		if step < sampleChunkSize {
-			step = sampleChunkSize
-		}
-
-		count := 0
-		for offset := 0; offset+sampleChunkSize <= len(data) && count < maxSamplesPerFile; offset += step {
-			chunk := make([]byte, sampleChunkSize)
-			copy(chunk, data[offset:offset+sampleChunkSize])
-			samples = append(samples, chunk)
-			count++
-		}
+		samples = append(samples, chunk)
+		budget -= size
 	}
 	return samples, nil
 }
@@ -202,11 +219,20 @@ func prepareSharedDictionary(opts *Options, levels []string) ([]byte, string, er
 
 // Pack stitches the stub and compressed variant binaries into a complete microfat fat executable.
 func Pack(opts Options) (*format.Index, error) {
+	// Validate configuration first; validate ELF bytes only after pinning the inputs.
+	validateELF := !opts.SkipELFValidation
+	opts.SkipELFValidation = true
 	if err := validateOptions(&opts); err != nil {
 		return nil, err
 	}
+	opts.SkipELFValidation = !validateELF
+	cleanup, err := snapshotInputs(&opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
 
-	stubBytes, err := os.ReadFile(filepath.Clean(opts.StubPath))
+	stubBytes, err := readBoundedInput(opts.StubPath, format.MaxPayloadSize)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStubMissing, err)
 	}
@@ -371,7 +397,7 @@ func writeVariantPayload(
 	dict []byte,
 ) (format.VariantEntry, int64, error) {
 	variantPath := filepath.Clean(path)
-	variantBytes, err := os.ReadFile(variantPath)
+	variantBytes, err := readBoundedInput(variantPath, format.MaxPayloadSize)
 	if err != nil {
 		return format.VariantEntry{}, 0, fmt.Errorf("%w: %s (%w)", ErrVariantNotFound, variantPath, err)
 	}
@@ -646,7 +672,11 @@ func VerifyBinary(r io.ReaderAt, totalSize int64) (*format.Index, []Verification
 
 // ValidateELFBinary checks if the file at path is a valid 64-bit ELF binary matching targetOS and targetArch.
 func ValidateELFBinary(path string, targetOS, targetArch string) error {
-	f, err := elf.Open(filepath.Clean(path))
+	data, err := readBoundedInput(path, format.MaxPayloadSize)
+	if err != nil {
+		return err
+	}
+	f, err := elf.NewFile(bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("%w (%s): %v", ErrInvalidELF, path, err)
 	}
@@ -715,7 +745,7 @@ func PrewarmVariantWithDict(
 			_ = cache.CloseFD(vfd)
 			return cachedBinary, true, 0, nil
 		}
-		if cache.IsSymlinkErr(openErr) || errors.Is(openErr, cache.ErrNonRegularFile) {
+		if cache.IsSymlinkErr(openErr) || errors.Is(openErr, cache.ErrNonRegularFile) || errors.Is(openErr, cache.ErrUnsafeFile) {
 			return "", false, 0, fmt.Errorf("%w: refusal to prewarm over symlink or non-regular file at %s: %w",
 				format.ErrCacheWrite, cachedBinary, openErr)
 		}
@@ -906,4 +936,3 @@ func VerifyCacheBinary(
 
 	return idx, results, nil
 }
-

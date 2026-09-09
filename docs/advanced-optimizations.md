@@ -4,17 +4,17 @@
 
 ---
 
-This guide covers advanced tuning techniques that can be combined with Microfat packaging to achieve optimal throughput and latency in Go and CGO applications.
+This guide covers advanced tuning techniques that can be combined with Microfat packaging to explore throughput and latency trade-offs in Go and CGO applications.
 
 ---
 
 ## 1. AVX-512 Frequency Downclocking Protection
 
 ### The Challenge
-On older Intel microarchitectures (Intel Skylake-X, Cascade Lake Xeon), executing heavy 512-bit vector instructions causes the CPU core power license to switch from `License 0` to `License 2`. This reduces CPU core clock frequencies by **15% to 25%** for all scalar operations on that core for ~2 milliseconds after the vector instruction executes.
+On Intel Skylake-X and Cascade Lake Xeon, sustained AVX-512 work can reduce core frequency. The magnitude and recovery period depend on the processor and workload; measure throughput and tail latency before selecting a policy.
 
 ### Modern Architecture Status
-- **Modern AMD Zen 4 & Zen 5**: Uses native dual 256-bit or full 512-bit vector pipelines with **zero frequency penalty**.
+- **AMD Zen 4 & Zen 5**: The Intel-specific downclock protection rule does not target these processors. Measure their behavior with the intended workload.
 - **Modern Intel Sapphire Rapids / Emerald Rapids**: Frequency scaling penalties are negligible.
 
 ### Mitigation Strategies & Policy Controls in Microfat
@@ -43,8 +43,7 @@ Microfat provides runtime dispatch policies to automatically mitigate frequency 
 Profile-Guided Optimization (PGO) feeds runtime CPU profiling data (`default.pgo`) into the Go compiler to optimize inlining, register allocation, and branch probability.
 
 ### Performance Uplift
-- Standard Go: **+7% to +14%** throughput reduction in CPU cycles.
-- Microfat + PGO: Combined **+20% to +35%** latency improvements when PGO is combined with `GOAMD64=v3`/`v4`.
+PGO and ISA specialization may improve some workloads, but their gains are not fixed or additive. Compare identical source, dependencies and runtime settings with PGO on/off and specialization on/off; retain raw trials before publishing a percentage.
 
 ### Declarative Matrix Packaging with `microfat pgo-pack`
 
@@ -123,7 +122,7 @@ GOAMD64=v3 \
 CGO_LDFLAGS="-lmimalloc" \
 go build -o bin/app_v3 main.go
 ```
-Combined with `microfat-stub`'s automated `GOMEMLIMIT` pacing, memory fragmentation and OOM terminations are virtually eliminated.
+Allocator selection and `GOMEMLIMIT` tuning can change memory pressure, but neither prevents OOM termination. Measure the application's peak process and cgroup memory.
 
 ---
 
@@ -133,50 +132,25 @@ Combined with `microfat-stub`'s automated `GOMEMLIMIT` pacing, memory fragmentat
 
 ### Decision Matrix
 
-| Optimization Goal | Profile | Recommended Codec / Level | Binary Payload Size | Cold-Start Overhead | Typical Compression Ratio | Best-Fit Workload Archetypes |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Instant Launch / Zero Decompression** | `latency` | `none` (raw uncompressed) | `< 10 MB` | **< 80 µs** | 0% (full size) | Sub-millisecond serverless functions, low-latency CLI tools, node boot hooks |
-| **Ultra-Fast Decompression** | `latency` | `lz4` | `10 MB – 50 MB` | **< 350 µs** | ~40% – 48% | Latency-sensitive microservices, frequently restarted worker pods |
-| **General Purpose (Default)** | `balanced` | `zstd` (level 3 / better) | `10 MB – 50 MB` | **< 1.5 ms** | ~50% – 60% | Kubernetes daemon sets, general cloud microservices, CI/CD pipeline builds |
-| **Maximum Disk & Network Reduction** | `size` | `zstd:best` | `> 50 MB` | **< 4.5 ms** | ~62% – 70% | Bandwidth-constrained deployments, registry storage optimization, large monoliths |
-| **Multi-Architecture Matrix (Shared Dict)** | `size` + `--dict` | `zstd` + trained dictionary | `> 50 MB` (multi-variant) | **< 6.0 ms** | **~70% – 78%** | 4+ variant matrices (`v1`–`v4`, `v8.0`–`v9.5`), edge IoT gateways, golden VM images |
+| Goal | Profile / codec | Trade-off to measure |
+| --- | --- | --- |
+| Avoid decompression | `latency` / `none` | Larger artifact; hashing, copying and process startup still cost time |
+| Fast decompression | `latency` / `lz4` | Compare startup and size against zstd on the same payload |
+| General purpose | `balanced` / `zstd` | Default size/startup balance; workload-dependent |
+| Reduce transfer/storage | `size` / `zstd:best` | More packing effort; evaluate extraction memory and startup |
+| Similar variants | `size` + `--dict` | Measure dictionary benefit and its memory cost |
+
+These are configuration choices, not measured latency or compression guarantees. Use `make bench-matrix`
+for the supported format/profile/codec/mode combinations and preserve raw results with host and commit
+metadata before publishing numbers.
 
 ---
 
-## 5. Programmatic Go API Integration
+## 5. Programmatic CLI Integration
 
-When creating fat executables programmatically via the `pack` Go package, use `pack.DefaultOptions()` to obtain a safe baseline pre-configured for Format v2 and balanced Zstandard compression:
-
-```go
-package main
-
-import (
-	"log"
-
-	"github.com/EpicBlackWolfZ/microfat/internal/pack"
-)
-
-func main() {
-	// Initialize default configuration (Format v2, balanced Zstd, 0755 permissions, linux/amd64)
-	opts := pack.DefaultOptions()
-	opts.StubPath = "bin/microfat-stub"
-	opts.OutputPath = "bin/myapp-fat"
-	opts.AppName = "myapp"
-
-	// Register microarchitecture variant binaries
-	opts.Variants["v1"] = "dist/app_v1"
-	opts.Variants["v3"] = "dist/app_v3"
-	opts.Variants["v4"] = "dist/app_v4"
-
-	// Package universal executable
-	idx, err := pack.Pack(opts)
-	if err != nil {
-		log.Fatalf("Packaging failed: %v", err)
-	}
-
-	log.Printf("Successfully packaged %d variants into Format v%d fat binary", len(idx.Variants), idx.Version)
-}
-```
+External applications invoke `microfat pack` as a subprocess. See the tested
+[README example](../README.md#programmatic-cli-integration) for argument handling and error propagation.
+The repository's `internal/pack` package is not an externally importable API.
 
 ---
 

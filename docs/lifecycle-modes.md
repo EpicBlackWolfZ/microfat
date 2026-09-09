@@ -22,8 +22,8 @@ Microfat supports three distinct binary operational modes to accommodate differe
                     ▼                                             ▼
   ┌───────────────────────────────────┐         ┌───────────────────────────────────┐
   │   2. Trimmed Fat Binary (--trim)  │         │ 3. Raw Native ELF (--optimize)    │
-  │ Retains stub + single optimal v3  │         │ Strips stub; raw uncompressed v3  │
-  │     Size: ~6.3 MB (-50% disk)     │         │        Size: ~7.1 MB (Native)     │
+  │ Retains stub + single selected v3  │         │ Strips stub; raw uncompressed v3  │
+  │     Size: depends on codec     │         │        Size: native payload     │
   │ Auto-tunes cgroup & RAM memfd     │         │ Zero launcher overhead (mmap)     │
   └───────────────────────────────────┘         └───────────────────────────────────┘
 ```
@@ -35,12 +35,12 @@ Microfat supports three distinct binary operational modes to accommodate differe
 | Characteristic | 1. Universal Fat Binary | 2. Trimmed Fat Binary (`--trim`) | 3. Raw Native ELF (`--optimize`) |
 | :--- | :--- | :--- | :--- |
 | **Command** | Default build artifact | `./app --microfat:trim` or `microfat trim app` | `./app --microfat:optimize` |
-| **Disk Size** | `~12.6 MB` | `~6.3 MB` (**-50%**) | `~7.1 MB` |
+| **Disk Size** | Stub + all compressed variants | Stub + selected compressed variant | Selected uncompressed payload |
 | **Microarch Portability** | Runs on **any** machine (`v1`–`v4` or `v8.0`–`v9.5`) | Locked to chosen level (e.g. `v3`) | Locked to chosen level (e.g. `v3`) |
 | **Container Auto-Tuning** | ✅ Continuous `GOMEMLIMIT` & `GOMAXPROCS` | ✅ Continuous `GOMEMLIMIT` & `GOMAXPROCS` | ❌ Requires standalone `runtimeinit/autoload` import |
 | **In-Memory RAM Exec** | ✅ Anonymous RAM (`memfd_create`) | ✅ Anonymous RAM (`memfd_create`) | ❌ Standard OS disk `mmap` |
 | **Read-Only Rootfs** | ✅ Zero disk I/O | ✅ Zero disk I/O | ✅ Native disk read |
-| **Startup Latency** | `~1.5 ms` (zstd decompression) | `~1.5 ms` (zstd decompression) | `0.0 ms` (direct kernel execve) |
+| **Startup Work** | Select, verify, extract/cache and execute | Verify, extract/cache and execute | Native process startup |
 | **Runtime Execution** | Native hardware speed (AVX2/FMA/SVE) | Native hardware speed (AVX2/FMA/SVE) | Native hardware speed (AVX2/FMA/SVE) |
 
 ---
@@ -74,7 +74,7 @@ Microfat supports three distinct binary operational modes to accommodate differe
 ---
 
 ### Mode 3: Raw Native ELF (`--microfat:optimize`)
-- **Best For**: Developer workstations, sub-millisecond CLI utilities (like shell prompt generators), or fixed bare-metal servers where absolute zero launcher latency is desired.
+- **Best For**: Developer workstations, sub-millisecond CLI utilities (like shell prompt generators), or fixed bare-metal servers where a native executable without a launcher stage is desired.
 - **Workflow**:
   ```bash
   # In-place specialization:
@@ -130,7 +130,7 @@ In cold-start sensitive environments (e.g. serverless containers, Kubernetes `in
 
 ### CLI Command
 ```bash
-# Prewarm host-optimal variant into cache:
+# Prewarm selected compatible variant into cache:
 microfat prewarm /usr/local/bin/myapp
 
 # Prewarm all variants into cache (e.g. for shared multi-tenant cache partitions):
@@ -145,7 +145,7 @@ microfat prewarm --json /usr/local/bin/myapp
 
 ### Launcher Stub Hook
 ```bash
-# Decompress host-optimal variant and exit 0 immediately without running the app:
+# Decompress selected compatible variant and exit 0 immediately without running the app:
 /usr/local/bin/myapp --microfat:prewarm
 
 # Decompress all variants:

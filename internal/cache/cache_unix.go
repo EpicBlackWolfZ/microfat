@@ -22,12 +22,12 @@ const maxTempFileAttempts = 1000
 
 // OpenFileFunc defines the default file descriptor opener enforcing O_NOFOLLOW and O_CLOEXEC.
 var OpenFileFunc = func(path string) (int, error) {
-	return unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	return unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 }
 
 // OpenFileAtFunc defines the directory-relative descriptor opener enforcing O_NOFOLLOW and O_CLOEXEC.
 var OpenFileAtFunc = func(dirFD int, name string) (int, error) {
-	return unix.Openat(dirFD, name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	return unix.Openat(dirFD, name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 }
 
 var (
@@ -177,6 +177,11 @@ func validateOpenedDescriptor(fd int, label string, expectedSize int64, expected
 		return -1, fmt.Errorf("%w: %s (mode 0o%o)", ErrNonRegularFile, label, stat.Mode)
 	}
 
+	if err := validateCacheMetadata(stat, os.Geteuid()); err != nil {
+		_ = unix.Close(fd)
+		return -1, fmt.Errorf("%w: %s", err, label)
+	}
+
 	if stat.Size != expectedSize {
 		_ = unix.Close(fd)
 		if onCorrupt != nil {
@@ -194,6 +199,15 @@ func validateOpenedDescriptor(fd int, label string, expectedSize int64, expected
 	}
 
 	return fd, nil
+}
+
+// Ownership checks do not prevent mutation by a trusted same-UID writer.
+func validateCacheMetadata(stat unix.Stat_t, expectedUID int) error {
+	const unsafeBits = unix.S_IWGRP | unix.S_IWOTH | unix.S_ISUID | unix.S_ISGID | unix.S_ISVTX
+	if int64(stat.Uid) != int64(expectedUID) || stat.Mode&unsafeBits != 0 {
+		return ErrUnsafeFile
+	}
+	return nil
 }
 
 func verifyCachedFD(fd int, expectedHex string) bool {
