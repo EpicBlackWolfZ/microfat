@@ -303,7 +303,8 @@ func BestMatchingVariant(availableLevels []string) (string, error) {
 	}
 
 	info := Detect()
-	return BestMatchingVariantFor(info.Arch, info.Level, availableLevels)
+	res, err := SelectVariantForHost(info.Arch, info, availableLevels, Policy{})
+	return res.SelectedVariant, err
 }
 
 // BestMatchingVariantFor evaluates availableLevels against a target arch and host level.
@@ -318,6 +319,84 @@ func BestMatchingVariantFor(arch, hostLevel string, availableLevels []string) (s
 // SelectVariantWithPolicy selects the optimal variant from availableLevels considering host CPU capabilities,
 // explicit overrides, max level caps, denylisted variants, and CPU downclocking protection rules.
 func SelectVariantWithPolicy(arch, hostLevel string, availableLevels []string, policy Policy) (PolicyResult, error) {
+	host := Info{Arch: arch, Level: hostLevel}
+	if strings.EqualFold(arch, ArchARM64) || strings.EqualFold(arch, "aarch64") {
+		features := make(map[string]bool)
+		collectARM64Requirements(Normalize(hostLevel), features)
+		for feature := range features {
+			host.Features = append(host.Features, feature)
+		}
+	}
+	return SelectVariantForHost(arch, host, availableLevels, policy)
+}
+
+// SelectVariantForHost preserves detected feature information through compatibility filtering.
+// A level-only caller should use SelectVariantWithPolicy for conservative guaranteed features.
+func SelectVariantForHost(arch string, host Info, availableLevels []string, policy Policy) (PolicyResult, error) {
+	if canonicalArch(arch) != canonicalArch(host.Arch) {
+		return PolicyResult{}, fmt.Errorf("%w: host %s cannot execute %s", ErrNoMatchingVariant, host.Arch, arch)
+	}
+	if Rank(arch, host.Level) < 0 {
+		return PolicyResult{}, fmt.Errorf("%w: unknown host level %q", ErrNoMatchingVariant, host.Level)
+	}
+	compatible := make([]string, 0, len(availableLevels))
+	for _, level := range availableLevels {
+		if hostSupports(host, level) {
+			compatible = append(compatible, level)
+		}
+	}
+	if policy.ForceLevel != "" && !hostSupports(host, policy.ForceLevel) {
+		return PolicyResult{}, ErrIncompatibleForcedVariant
+	}
+	if len(availableLevels) > 0 && len(compatible) == 0 {
+		return PolicyResult{}, ErrNoMatchingVariant
+	}
+	return selectCompatibleVariant(arch, host.Level, compatible, policy)
+}
+
+func canonicalArch(arch string) string {
+	switch strings.ToLower(arch) {
+	case "aarch64":
+		return ArchARM64
+	case "x86_64":
+		return ArchAMD64
+	default:
+		return strings.ToLower(arch)
+	}
+}
+
+func collectARM64Requirements(level string, features map[string]bool) bool {
+	req, ok := arm64RequirementsMap[level]
+	if !ok {
+		return false
+	}
+	for _, prerequisite := range req.Prereqs {
+		if !collectARM64Requirements(prerequisite, features) {
+			return false
+		}
+	}
+	for _, feature := range req.RequiredFeatures {
+		features[feature] = true
+	}
+	return true
+}
+
+func hostSupports(host Info, level string) bool {
+	if canonicalArch(host.Arch) != ArchARM64 {
+		rank := Rank(host.Arch, level)
+		return rank >= 0 && rank <= Rank(host.Arch, host.Level)
+	}
+	required := make(map[string]bool)
+	if !collectARM64Requirements(Normalize(level), required) {
+		return false
+	}
+	for _, feature := range host.Features {
+		delete(required, feature)
+	}
+	return len(required) == 0
+}
+
+func selectCompatibleVariant(arch, hostLevel string, availableLevels []string, policy Policy) (PolicyResult, error) {
 	if len(availableLevels) == 0 {
 		return PolicyResult{}, ErrEmptyVariants
 	}
@@ -448,9 +527,7 @@ func filterAndRankCandidates(
 // IsSupported checks if the specified microarchitecture level can run on the current host.
 func IsSupported(level string) bool {
 	info := Detect()
-	reqRank := Rank(info.Arch, Normalize(level))
-	hostRank := Rank(info.Arch, info.Level)
-	return reqRank >= 0 && reqRank <= hostRank
+	return hostSupports(info, level)
 }
 
 // Normalize cleans up variant strings (e.g. "amd64_v3" -> "v3", "V3" -> "v3", "v8.0" -> "v8.0", "arm64-v8.2" -> "v8.2").

@@ -84,7 +84,7 @@ func runBinary(selfPath string) error {
 
 	hostInfo := microarch.Detect()
 	policy := microarch.ReadPolicyFromEnv()
-	policyRes, err := microarch.SelectVariantWithPolicy(idx.TargetArch, hostInfo.Level, idx.VariantLevels(), policy)
+	policyRes, err := microarch.SelectVariantForHost(idx.TargetArch, hostInfo, idx.VariantLevels(), policy)
 	if err != nil {
 		return fmt.Errorf("selecting compatible CPU microarchitecture variant: %w", err)
 	}

@@ -287,7 +287,14 @@ func newTrimCmd() *cobra.Command {
 			}
 
 			hostInfo := microarch.Detect()
-			policyRes, selErr := microarch.SelectVariantWithPolicy(idx.TargetArch, hostInfo.Level, idx.VariantLevels(), policy)
+			var policyRes microarch.PolicyResult
+			var selErr error
+			if targetLevel != "" {
+				// Explicit trimming transforms an artifact; it does not execute it on this host.
+				policyRes, selErr = microarch.SelectVariantWithPolicy(idx.TargetArch, targetLevel, idx.VariantLevels(), policy)
+			} else {
+				policyRes, selErr = microarch.SelectVariantForHost(idx.TargetArch, hostInfo, idx.VariantLevels(), policy)
+			}
 			if selErr != nil {
 				return fmt.Errorf("selecting optimal variant with policy: %w", selErr)
 			}
@@ -675,7 +682,7 @@ func newPrewarmCmd() *cobra.Command {
 			default:
 				hostInfo := microarch.Detect()
 				policy := microarch.ReadPolicyFromEnv()
-				policyRes, selErr := microarch.SelectVariantWithPolicy(idx.TargetArch, hostInfo.Level, idx.VariantLevels(), policy)
+				policyRes, selErr := microarch.SelectVariantForHost(idx.TargetArch, hostInfo, idx.VariantLevels(), policy)
 				if selErr != nil {
 					return fmt.Errorf("selecting optimal variant: %w", selErr)
 				}
@@ -775,4 +782,3 @@ func newPrewarmCmd() *cobra.Command {
 
 	return cmd
 }
-
