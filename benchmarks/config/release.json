@@ -1,0 +1,10 @@
+{
+  "version": "v1",
+  "name": "release-mixed",
+  "workload": "mixed",
+  "blocks": 20,
+  "duration_ms": 30000,
+  "warmup_ms": 10000,
+  "sample_ms": 250,
+  "seed": 1
+}

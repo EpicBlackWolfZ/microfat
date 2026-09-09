@@ -444,3 +444,28 @@ Whenever the launcher stub executes a payload variant, it exports runtime metada
 ---
 
 [**← Architecture Specification**](architecture.md) | [**Main Index**](../README.md#documentation-guide) | [**Container Runtime Tuning →**](runtime-tuning.md)
+
+### Paired server experiments
+
+`microfat benchmark` retains the legacy baseline suite. Its `run` subcommand builds
+identical native and packaged server payloads, drives them with pinned external Fortio,
+and records a counterbalanced trial schedule and resource evidence.
+
+```bash
+make benchmark-tools
+make benchmark-smoke
+bin/microfat benchmark run --config benchmarks/config/smoke.json \
+  --fortio .work/benchmark-tools/fortio --output-dir .work/server-evidence
+bin/microfat benchmark verify <bundle>
+bin/microfat benchmark report --input <bundle> --format markdown
+bin/microfat benchmark compare --input <bundle> --baseline native-specialized --json
+```
+
+For paired packer/stub revision comparisons, add `--base-repository <base-checkout>`
+to `run`; the native payload source remains fixed to the current checkout. `benchmark gate`
+evaluates those retained base/head pairs offline. Startup enforcement requires an explicit
+calibrated absolute floor; size enforcement uses the default 5% coarse threshold.
+
+See [server benchmark usage](benchmarks/README.md) for configuration fields, controls,
+CI tiers, and evidence replay, and [measurement methodology](benchmarks/methodology.md)
+for uncertainty, histogram, cache, tuning, and memory qualifications.

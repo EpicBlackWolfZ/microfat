@@ -135,6 +135,7 @@ hashed Evidence artifacts with non-volatile canonical JSON payloads.`,
 	cmd.Flags().DurationVar(&warmupTime, "warmup", defaultBenchmarkWarmup, "Warmup duration before trial measurements (e.g. 500ms, 0s)")
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Destination file path to save evidence envelope JSON")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit pure canonical JSON experiment payload to stdout")
+	addExperimentCommands(cmd)
 
 	return cmd
 }

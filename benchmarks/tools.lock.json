@@ -1,0 +1,12 @@
+{
+  "fortio": {
+    "module": "fortio.org/fortio",
+    "version": "v1.75.2",
+    "module_sum": "h1:TzBLdqgF9XOyBG4zt/uK8V2QoRbYRPvXM/Ju196nsGA=",
+    "go_mod_sum": "h1:GYmqFZ5uZxaSwRyNTZn1dO0UnmtzNgEeDtDzNZ8im1E=",
+    "source_commit": "630bfb3db6cf663b4e01524f9e9be945e44f8a20",
+    "source": "https://github.com/fortio/fortio/tree/v1.75.2",
+    "histogram": "Fortio variable-width histogram; uncorrected service-time observations",
+    "toolchain": "go1.27.1"
+  }
+}
