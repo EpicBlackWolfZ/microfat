@@ -91,6 +91,7 @@ fuzz: ## Run Go native fuzz testing targets across format, codec, cgroup, and pa
 	@echo "\033[34m==>\033[0m Running Go native fuzz targets ($(FUZZTIME) per target)..."
 	@$(GO) test -fuzz=^FuzzUnmarshalBinaryIndex$$ -fuzztime=$(FUZZTIME) ./internal/format
 	@$(GO) test -fuzz=^FuzzUnmarshalJSONIndex$$ -fuzztime=$(FUZZTIME) ./internal/format
+	@$(GO) test -fuzz=^FuzzLegacyJSONSyntax$$ -fuzztime=$(FUZZTIME) ./internal/format
 	@$(GO) test -fuzz=^FuzzReadTrailerAndIndex$$ -fuzztime=$(FUZZTIME) ./internal/format
 	@$(GO) test -fuzz=^FuzzDecompressZstd$$ -fuzztime=$(FUZZTIME) ./internal/codec
 	@$(GO) test -fuzz=^FuzzDecompressLZ4$$ -fuzztime=$(FUZZTIME) ./internal/codec
