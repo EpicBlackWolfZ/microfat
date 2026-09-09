@@ -275,6 +275,12 @@ func buildAutoTunedEnviron(
 	gcProfile, _ := cgroup.ParseGCProfile(os.Getenv(format.EnvGCProfile))
 	liveHeap, _ := cgroup.ParseByteSize(os.Getenv(format.EnvLiveHeapEstimate))
 
+	if execMode == format.ExecModeMemfd {
+		page := int64(os.Getpagesize())
+		if entry.UncompressedSize > 0 && entry.UncompressedSize <= format.MaxPayloadSize {
+			limits.RetainedExecutableBytes = (entry.UncompressedSize + page - 1) / page * page
+		}
+	}
 
 	plan := cgroup.ResolveTuningPlanWithProfile(
 		limits,
@@ -478,6 +484,9 @@ func executeViaMemfd(
 	policyRes microarch.PolicyResult,
 	startTime time.Time,
 ) error {
+	if err := checkExtractionBudget(entry, idx); err != nil {
+		return err
+	}
 
 	selfPath = strings.TrimSpace(selfPath)
 	if selfPath == "" && selfFile != nil {
@@ -574,6 +583,9 @@ func executeViaCache(
 	}
 
 	if openErr != nil {
+		if err := checkExtractionBudget(entry, idx); err != nil {
+			return fmt.Errorf("%w: %w", format.ErrCacheExtract, err)
+		}
 		decompStart := time.Now()
 		cachedBinary, matErr := cache.MaterializeVariantAtFD(dirFD, cacheDir, entry, func(w io.Writer) error {
 			return extractVariantToWriter(selfFile, entry, idx, w)
