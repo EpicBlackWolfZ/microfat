@@ -25,10 +25,10 @@ import (
 )
 
 const (
-	privateCacheDirMode  = 0o700
-	privateExecMode      = 0o700
-	extraEnvCapacity     = 16
-	maxTempFileAttempts  = 1000
+	privateCacheDirMode = 0o700
+	privateExecMode     = 0o700
+	extraEnvCapacity    = 16
+	maxTempFileAttempts = 1000
 	// memfdTargetSeals defines the mandatory Linux kernel memory file descriptor seals applied to
 	// anonymous RAM payloads prior to execution via /proc/self/fd/<fd>.
 	// - F_SEAL_WRITE: prevents any modification of the decompressed binary code in memory.
@@ -39,17 +39,17 @@ const (
 )
 
 var (
-	execveFunc           = syscall.Exec
-	memfdCreateFunc      = unix.MemfdCreate
-	memfdSealFunc        = func(fd int, seals int) error {
+	execveFunc      = syscall.Exec
+	memfdCreateFunc = unix.MemfdCreate
+	memfdSealFunc   = func(fd int, seals int) error {
 		_, err := unix.FcntlInt(uintptr(fd), unix.F_ADD_SEALS, seals)
 		return err
 	}
-	readCgroupLimitsFunc   = cgroup.ReadLimits
-	resolveCacheDirFunc    = format.ResolveCacheDirFD
-	userHomeDirFunc        = os.UserHomeDir
-	cryptoRandReader       = rand.Reader
-	openCachedBinaryFunc   = func(path string) (int, error) {
+	readCgroupLimitsFunc = cgroup.ReadLimits
+	resolveCacheDirFunc  = format.ResolveCacheDirFD
+	userHomeDirFunc      = os.UserHomeDir
+	cryptoRandReader     = rand.Reader
+	openCachedBinaryFunc = func(path string) (int, error) {
 		return cache.OpenFileFunc(path)
 	}
 	openCachedBinaryAtFunc = func(dirFD int, name string) (int, error) {
@@ -275,6 +275,7 @@ func buildAutoTunedEnviron(
 	gcProfile, _ := cgroup.ParseGCProfile(os.Getenv(format.EnvGCProfile))
 	liveHeap, _ := cgroup.ParseByteSize(os.Getenv(format.EnvLiveHeapEstimate))
 
+
 	plan := cgroup.ResolveTuningPlanWithProfile(
 		limits,
 		os.Getenv(format.EnvMemRatio),
@@ -477,6 +478,7 @@ func executeViaMemfd(
 	policyRes microarch.PolicyResult,
 	startTime time.Time,
 ) error {
+
 	selfPath = strings.TrimSpace(selfPath)
 	if selfPath == "" && selfFile != nil {
 		selfPath = selfFile.Name()
@@ -559,8 +561,14 @@ func executeViaCache(
 	var decompDuration time.Duration
 
 	fd, openErr := openAndValidateCacheAtFD(dirFD, cachedName, entry)
-	if openErr != nil && cache.IsSymlinkErr(openErr) {
-		errOut := fmt.Errorf("%w: refusal to execute symlink at %s: %w", format.ErrCacheWrite, cachedBinary, openErr)
+	if openErr != nil &&
+		(cache.IsSymlinkErr(openErr) || errors.Is(openErr, cache.ErrNonRegularFile) || errors.Is(openErr, cache.ErrUnsafeFile)) {
+		reason := "refusal to execute unsafe cache entry"
+		if cache.IsSymlinkErr(openErr) {
+			reason = "refusal to execute symlink"
+		}
+		errOut := fmt.Errorf("%w: %s at %s: %w (primary memfd error: %v)",
+			format.ErrCacheWrite, reason, cachedBinary, openErr, primaryErr)
 		logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "symlink detected in cache")
 		return errOut
 	}
@@ -678,4 +686,3 @@ func openAndValidateCacheFD(path string, entry *format.VariantEntry) (int, error
 	}
 	return fd, err
 }
-

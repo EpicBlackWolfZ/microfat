@@ -13,6 +13,8 @@ var (
 	// ErrNonRegularFile indicates that the cache entry is not a standard regular file (e.g. symlink or directory).
 	ErrNonRegularFile = errors.New("cached path is not a regular file")
 
+	ErrUnsafeFile = errors.New("cache file has unexpected owner or unsafe permissions")
+
 	// ErrSizeMismatch indicates that the cache file length does not match the expected uncompressed variant size.
 	ErrSizeMismatch = errors.New("cache file size mismatch")
 

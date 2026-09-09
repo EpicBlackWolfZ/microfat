@@ -715,7 +715,7 @@ func PrewarmVariantWithDict(
 			_ = cache.CloseFD(vfd)
 			return cachedBinary, true, 0, nil
 		}
-		if cache.IsSymlinkErr(openErr) || errors.Is(openErr, cache.ErrNonRegularFile) {
+		if cache.IsSymlinkErr(openErr) || errors.Is(openErr, cache.ErrNonRegularFile) || errors.Is(openErr, cache.ErrUnsafeFile) {
 			return "", false, 0, fmt.Errorf("%w: refusal to prewarm over symlink or non-regular file at %s: %w",
 				format.ErrCacheWrite, cachedBinary, openErr)
 		}
