@@ -65,7 +65,7 @@ jobs:
 
   nightly:
     name: Benchmark Sustained (${{ matrix.workload }})
-    if: github.event_name == 'schedule' || inputs.tier == 'nightly'
+    if: github.event_name == 'schedule' || (inputs.tier == 'nightly' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -77,13 +77,8 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
-      - id: base
-        run: echo "sha=$(git rev-parse HEAD^)" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ steps.base.outputs.sha }}
-          path: .work/benchmark-base
-          persist-credentials: false
+      - name: Prepare the parent of the trusted event revision
+        run: git worktree add --detach .work/benchmark-base HEAD^
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
