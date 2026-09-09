@@ -48,8 +48,11 @@ keeps startup, warmup, and steady-state sampled maxima separate from terminal pr
 
 `exec_diagnostics` adds a distinct ptrace pass with executable-transition events and samples grouped by exec stage.
 Tracing perturbs timing; those durations never enter primary performance comparisons. Trace permission failures
-are recorded as unavailable. Exec-stage samples and cumulative high-water counters help separate launcher and
-post-exec behavior without claiming exact allocation attribution. Missing extraction-only metrics remain unavailable.
+are recorded as unavailable. The tracer follows the initial thread; Go can execute the payload from another thread.
+If the helper, launcher, and payload entries are not all captured (helper and payload for native execution),
+the diagnostic is explicitly partial and its sample phases become unknown. Complete exec-stage observations and
+cumulative high-water counters help separate launcher and post-exec behavior without claiming exact allocation
+attribution. Missing extraction-only metrics remain unavailable. Complete thread-group tracing remains further work.
 
 ## Paired statistics and CI policy
 

@@ -455,11 +455,35 @@ func (c trialCleanup) diagnose() {
 	}
 	diagnostic := system.TraceExec(parentCtx, target.Wrap(opts.Helper,
 		process.Spec{Path: artifact.Path, Args: args, Env: environment}))
+	qualifyExecDiagnostic(&diagnostic, c.config.Mode)
 	if diagnostic.Status != "observed" {
 		trial.Warnings = append(trial.Warnings, "exec diagnostic: "+diagnostic.Reason)
 	}
 	if err := encodeExtra(files, "trials/"+trial.ID+"/exec-diagnostic.json", diagnostic); err != nil {
 		trial.Warnings = append(trial.Warnings, "exec diagnostic serialization: "+err.Error())
+	}
+}
+
+func qualifyExecDiagnostic(diagnostic *system.ExecDiagnostic, mode string) {
+	// The child helper precedes the native payload, or the launcher and its payload.
+	const nativeEntries, fatEntries = 2, 3
+	minimum := nativeEntries
+	if mode != nativeMode {
+		minimum = fatEntries
+	}
+	if diagnostic.Status != "observed" || len(diagnostic.Events) >= minimum {
+		return
+	}
+	diagnostic.Status = "partial"
+	diagnostic.Reason = "payload exec entry was not captured; exec transitions from other Go threads may be omitted"
+	// Retain observations without assigning them to a phase whose boundary is missing.
+	for i := range diagnostic.Samples {
+		sample := &diagnostic.Samples[i]
+		sample.Phase = "unknown-exec-stage"
+		for name, metric := range sample.Metrics {
+			metric.Phase = sample.Phase
+			sample.Metrics[name] = metric
+		}
 	}
 }
 
