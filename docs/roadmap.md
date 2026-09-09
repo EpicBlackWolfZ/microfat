@@ -2,7 +2,7 @@
 
 Updated 2026-09-09 against `main` at `0e7f296c1fae4d5f308eee9d62abdb2638d3ce58`.
 This records planned work, not fixes already shipped. GitHub issues hold acceptance criteria;
-[the implementation plan](implementation-plan.md) defines ordering and verification.
+the issue acceptance criteria define implementation and verification requirements.
 
 ## Release principles
 

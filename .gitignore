@@ -7,3 +7,6 @@ coverage.html
 .go/
 *.csv
 results/
+
+# Local implementation plans and verification evidence
+.work/

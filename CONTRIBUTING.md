@@ -59,6 +59,15 @@ make bench      # Run benchmark suite in examples/demo
 make clean      # Remove build artifacts and coverage files
 ```
 
+`make test` runs all default and minimal package tests with the race detector. `make coverage` uses
+the same profile definitions and includes `cmd`, `internal`, `runtimeinit` and `benchmarks` code.
+Example and E2E packages run in both profiles; their source is not included as production statements.
+Default/minimal profiles remain under ignored `.work/tests/`; `coverage.out` is their source-block
+union. Shared blocks count once, exclusive files count once, incompatible instrumentation fails,
+and the >=95% overall gate counts statements rather than averaging package percentages. JUnit
+artifacts use separate profile names. Temporary planning documents and verification evidence belong
+under ignored `.work/`, not published documentation directories.
+
 ---
 
 ## 5. Conventional Commits & Pull Request Format

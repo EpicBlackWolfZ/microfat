@@ -75,16 +75,8 @@ build-arm64: ## Cross-compile microfat CLI and stub for Linux ARM64
 
 build-all: build build-amd64 build-arm64 ## Build host and all cross-architecture binaries
 
-test: ## Run unit tests with race detection
-	@echo "\033[34m==>\033[0m Running unit tests with race detection..."
-ifdef GOTESTSUM
-	@gotestsum -- -race ./...
-	@gotestsum -- -race -tags minimal ./cmd/microfat-stub/...
-else
-	@$(GO) test -race ./...
-	@$(GO) test -race -tags minimal ./cmd/microfat-stub/...
-endif
-	@echo "\033[32m✔\033[0m Tests passed successfully"
+test: ## Run all default/minimal tests with race detection
+	@GO="$(GO)" bash scripts/test-profiles.sh test
 
 e2e: build ## Run end-to-end black-box integration test suite
 	@echo "\033[34m==>\033[0m Running end-to-end test suite..."
@@ -125,25 +117,10 @@ chaos: ## Run chaos and fault injection test suite
 
 test-all: tidy lint vuln test e2e chaos coverage build ## Run complete test suite including e2e, chaos and coverage gate
 
-COVERAGE_PKGS ?= ./cmd/... ./internal/... ./runtimeinit/... ./benchmarks/...
-
-coverage: ## Run tests with atomic coverage and enforce >= 95% threshold gate
-	@echo "\033[34m==>\033[0m Running tests and checking coverage..."
-ifdef GOTESTSUM
-	@gotestsum -- -race -coverprofile=$(COVERAGE_FILE) -covermode=atomic $(COVERAGE_PKGS)
-else
-	@$(GO) test -race -coverprofile=$(COVERAGE_FILE) -covermode=atomic $(COVERAGE_PKGS)
-endif
+coverage: ## Union default/minimal atomic coverage and enforce >= 95% overall
+	@GO="$(GO)" COVERAGE_FILE="$(COVERAGE_FILE)" COVERAGE_THRESHOLD="$(COVERAGE_THRESHOLD)" bash scripts/test-profiles.sh coverage
 	@echo "\033[34m==>\033[0m Total coverage breakdown:"
 	@$(GO) tool cover -func=$(COVERAGE_FILE)
-	@total=$$($(GO) tool cover -func=$(COVERAGE_FILE) | grep "total:" | awk '{print substr($$3, 1, length($$3)-1)}'); \
-	echo "\033[1mOverall Code Coverage:\033[0m $$total% (Required Gate: $(COVERAGE_THRESHOLD)%)"; \
-	if awk -v t="$$total" -v req="$(COVERAGE_THRESHOLD)" 'BEGIN {if (t >= req) exit 0; else exit 1}'; then \
-		echo "\033[32m✔ Coverage gate passed ($$total% >= $(COVERAGE_THRESHOLD)%)\033[0m"; \
-	else \
-		echo "\033[31m✖ Coverage gate failed: $$total% is below $(COVERAGE_THRESHOLD)%\033[0m"; \
-		exit 1; \
-	fi
 
 lint: ## Run golangci-lint across all packages
 	@echo "\033[34m==>\033[0m Running golangci-lint..."

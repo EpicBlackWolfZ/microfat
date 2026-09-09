@@ -90,7 +90,7 @@ jobs:
 
       - name: Run Unit Tests with Race Detection & Coverage
         run: |
-          gotestsum --junitfile junit.xml --format pkgname -- -race -coverprofile=coverage.out -covermode=atomic ./cmd/... ./internal/... ./runtimeinit/...
+          make coverage
 
       - name: Run Chaos and Fault Injection Test Suite
         run: |
@@ -106,10 +106,12 @@ jobs:
 
       - name: Publish Test Results to GitHub View
         uses: dorny/test-reporter@v3
-        if: success() || failure()
+        if: >-
+          (success() || failure()) &&
+          (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         with:
           name: Unit Test Results
-          path: junit.xml
+          path: .work/tests/junit-*.xml
           reporter: java-junit
           fail-on-error: false
 
@@ -124,22 +126,12 @@ jobs:
             pkg=$(echo "$line" | awk '{print $1}')
             pct=$(echo "$line" | awk '{print $NF}')
             if [ "$pkg" = "total:" ]; then
-              echo "| **Total (Core Packages)** | **$pct** |" >> $GITHUB_STEP_SUMMARY
+              echo "| **Total (Default/Minimal Source Union)** | **$pct** |" >> $GITHUB_STEP_SUMMARY
             else
               echo "| \`$pkg\` | $pct |" >> $GITHUB_STEP_SUMMARY
             fi
           done
 
-          TOTAL_COV=$(go tool cover -func=coverage.out | grep "total:" | awk '{print substr($3, 1, length($3)-1)}')
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Evaluated Coverage:** \`${TOTAL_COV}%\` | **Required Gate:** \`95.0%\`" >> $GITHUB_STEP_SUMMARY
-
-          if awk -v t="$TOTAL_COV" 'BEGIN {if (t >= 95.0) exit 0; else exit 1}'; then
-            echo "✅ **Coverage threshold gate passed!**" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ **Coverage threshold gate failed: ${TOTAL_COV}% is below 95.0% requirement.**" >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
 
   vulncheck:
     name: Vulnerability Scan (govulncheck)

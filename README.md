@@ -34,7 +34,6 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 | Guide | Description |
 | :--- | :--- |
 | [**Production Roadmap**](docs/roadmap.md) | Release priorities, safety gates and experimental scope. |
-| [**Implementation Plan**](docs/implementation-plan.md) | Dependency order, per-change implementation steps and validation requirements. |
 | 📊 [**Demo & Benchmark Suite**](examples/demo/README.md) | Multi-workload benchmark application testing SIMD vector math, JSON/Zstd processing, and concurrent workers. |
 | 📖 [**Architecture & Binary Format**](docs/architecture.md) | Technical specification of the 56-byte trailer, Format v2 binary table layout, shared dictionaries, and `memfd_create` lifecycle. |
 | 💻 [**CLI & Launcher Stub Reference**](docs/cli-reference.md) | Complete reference for `microfat` CLI commands, flags, launcher stub meta-commands, exit codes, and environment variables. |
