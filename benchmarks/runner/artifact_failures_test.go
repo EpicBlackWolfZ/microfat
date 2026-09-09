@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat/benchmarks/internal/testfixture"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +21,7 @@ func fixtureCompiler(t *testing.T, behavior string) string {
 	script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'go version go1.27.1 linux/amd64'; exit 0; fi\n" +
 		"while [ \"$#\" -gt 0 ]; do if [ \"$1\" = -o ]; then shift; output=$1; fi; shift; done\n" +
 		"case \"$output\" in\n" + behavior + "\n*/head-packer) cp /bin/false \"$output\"; exit 0;;\nesac\ncp '" + binary + "' \"$output\"\n"
-	require.NoError(t, os.WriteFile(path, []byte(script), 0o755))
+	require.NoError(t, testfixture.WriteExecutable(path, []byte(script)))
 	return path
 }
 

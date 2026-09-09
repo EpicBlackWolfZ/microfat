@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/benchmarks/internal/testfixture"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/load"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/process"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/report"
@@ -107,7 +108,7 @@ func TestExperimentEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	tool := filepath.Join(t.TempDir(), "fortio")
 	script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo " + load.Version + "; else cat '" + fixture + "'; fi\n"
-	require.NoError(t, os.WriteFile(tool, []byte(script), 0o755))
+	require.NoError(t, testfixture.WriteExecutable(tool, []byte(script)))
 	cfg := DefaultExperimentConfig()
 	cfg.Blocks = 1
 	options := RunOptions{Repository: repository, Fortio: tool, OutputDir: t.TempDir(), LogWriter: io.Discard}

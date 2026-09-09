@@ -210,7 +210,7 @@ func TestTargetHandshakeFailures(t *testing.T) {
 			root := t.TempDir()
 			target := filepath.Join(root, "target")
 			script := "#!/bin/sh\ntrap 'exit 0' TERM\necho '{\"url\":\"" + server.URL + "\"}'\nwhile :; do sleep 1; done\n"
-			require.NoError(t, os.WriteFile(target, []byte(script), 0o755))
+			require.NoError(t, testfixture.WriteExecutable(target, []byte(script)))
 			built := &builtArtifacts{
 				Configurations: []schema.Configuration{{ID: fixtureConfiguration, ArtifactID: "fat", Mode: "memfd", Level: "v1"}},
 				Artifacts:      []schema.Artifact{{ID: "fat", Path: target, Bytes: 1}, {ID: "native-v1", SHA256: "expected", Bytes: 1}}}
@@ -252,7 +252,7 @@ func TestHTTPFailuresRemainMeasurements(t *testing.T) {
 	fixture := filepath.Join(root, "errors.json")
 	require.NoError(t, os.WriteFile(fixture, raw, evidenceFilePerm))
 	tool := filepath.Join(root, "fortio")
-	require.NoError(t, os.WriteFile(tool, []byte("#!/bin/sh\ncat '"+fixture+"'\n"), 0o755))
+	require.NoError(t, testfixture.WriteExecutable(tool, []byte("#!/bin/sh\ncat '"+fixture+"'\n")))
 	helper, err := os.Executable()
 	require.NoError(t, err)
 	cfg := DefaultExperimentConfig()

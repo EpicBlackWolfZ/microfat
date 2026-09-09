@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/benchmarks/internal/testfixture"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/process"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/workloads/server"
 	"github.com/stretchr/testify/assert"
@@ -70,7 +71,7 @@ func fakeTool(t *testing.T, version, action string) string {
 	t.Helper()
 	file := filepath.Join(t.TempDir(), "fortio")
 	content := "#!/bin/sh\nif [ \"$1\" = version ]; then printf '%s\\n' '" + version + "'; exit; fi\n" + action + "\n"
-	require.NoError(t, os.WriteFile(file, []byte(content), 0o755))
+	require.NoError(t, testfixture.WriteExecutable(file, []byte(content)))
 	return file
 }
 
