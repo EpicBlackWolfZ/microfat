@@ -2,6 +2,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,6 +20,11 @@ var (
 
 func main() {
 	if err := run(); err != nil {
+		if errors.Is(err, errElevatedExecution) {
+			fmt.Fprintf(os.Stderr, "[microfat] error: %v\n", err)
+			exitFunc(1)
+			return
+		}
 		hint := format.DiagnoseError(format.StageLauncherMain, err)
 		if strings.EqualFold(os.Getenv(format.EnvLog), "json") {
 			e := format.ErrorTelemetry{
@@ -39,6 +45,9 @@ func main() {
 }
 
 func run() error {
+	if err := checkLauncherPrivilegeFunc(); err != nil {
+		return err
+	}
 	selfPath, err := getSelfExecutablePathFunc()
 	if err != nil {
 		return fmt.Errorf("resolving executable path: %w", err)
@@ -47,6 +56,9 @@ func run() error {
 }
 
 func runBinary(selfPath string) error {
+	if err := checkLauncherPrivilegeFunc(); err != nil {
+		return err
+	}
 	launcherStart := time.Now()
 
 	// #nosec G304 -- launcher opens its own binary image to read payload index

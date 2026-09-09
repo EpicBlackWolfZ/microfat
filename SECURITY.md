@@ -96,3 +96,13 @@ An important security distinction exists between cryptographic integrity hashing
   - Hashing provides data integrity; it does not provide origin authenticity or proof that the binary was built by a trusted producer.
 - **Production Best Practice**:
   - For production CI/CD pipelines, container base images, and public distribution, always pair `microfat` with supply-chain signing tools such as **Sigstore Cosign**, **GPG**, or system-level digital signatures to sign the final composite executable.
+
+## 7. Launcher deployment boundary
+
+Full and minimal launchers reject real/effective UID or GID mismatches, nonzero `AT_SECURE`, and
+executables carrying `security.capability`, before application file access, environment routing,
+meta-commands or cache writes. Ordinary same-ID root execution is supported when these elevation
+signals are absent. Missing/malformed secure-execution evidence fails closed. The probes assume the
+Linux kernel and `/proc` are trustworthy; Go runtime startup precedes the application-level guard.
+See Linux [auxiliary vector](https://man7.org/linux/man-pages/man3/getauxval.3.html) and
+[capability](https://man7.org/linux/man-pages/man7/capabilities.7.html) semantics.

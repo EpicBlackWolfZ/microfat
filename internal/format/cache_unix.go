@@ -35,9 +35,8 @@ var (
 //  2. Target is owned by the current process effective UID (os.Geteuid()).
 //  3. Target does not grant group or world write access (mode & 0o022 == 0).
 //
-// Targeting the effective UID (os.Geteuid()) is explicitly intended to support setuid execution
-// semantics, ensuring that cache directory validation and fallback paths align with process file creation
-// privileges and effective runtime ownership.
+// Cache ownership follows the effective UID of an ordinary, non-elevated process.
+// The launcher rejects setuid/setgid and secure execution before cache access.
 //
 // If allowRemediate is true and the directory is owned by the current effective UID but has group/world
 // write bits, it remediates the descriptor directly via fchmod to 0700, completely eliminating pathname TOCTOU.

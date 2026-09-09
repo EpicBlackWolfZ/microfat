@@ -1315,9 +1315,8 @@ func IsFatBinary(r io.ReaderAt, totalSize int64) bool {
 // On non-Unix platforms, dirFD is -1.
 // If dirFD >= 0, the caller is responsible for closing dirFD when finished.
 //
-// Targeting the effective UID (os.Geteuid()) is explicitly intended to support setuid execution
-// semantics, ensuring that cache directory validation and fallback paths (e.g. /tmp/.microfat-<euid>)
-// align with process file creation privileges and effective runtime ownership.
+// Cache ownership follows the effective UID of an ordinary, non-elevated process.
+// The launcher rejects setuid/setgid and secure execution before cache access.
 //
 // Precedence:
 //  1. customDir argument (if non-empty)
