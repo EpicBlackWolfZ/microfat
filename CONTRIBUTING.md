@@ -68,6 +68,11 @@ and the >=95% overall gate counts statements rather than averaging package perce
 artifacts use separate profile names. Temporary planning documents and verification evidence belong
 under ignored `.work/`, not published documentation directories.
 
+Workflow actions are pinned to upstream commit SHAs with version comments; Dependabot maintains
+these pins. Publishing/OIDC permissions belong only to the release publisher. Fork PRs retain read-only
+tokens, skip checks-write reporting, and still enforce test failures through the test job. The release
+verification job does not inherit publishing permissions. No action-pinning exceptions are intended.
+
 ---
 
 ## 5. Conventional Commits & Pull Request Format
