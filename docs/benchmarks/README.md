@@ -162,10 +162,10 @@ Dispatch `benchmarks.yml` with `tier=calibration` to collect 20 training and 10 
 runner class. The candidate absolute floor is twice the largest absolute no-change training median difference;
 all holdout jobs must pass the coarse gate. The workflow verifies every bundle and produces a candidate policy
 for review, without automatically committing it. A class lacking enough independent jobs stays report-only.
-A policy records job identities and checksum-manifest digests so its inputs can be audited. The initial
-[30-job calibration](https://github.com/EpicBlackWolfZ/microfat/actions/runs/34450243438) split across nine CPU/image
-classes; none met both per-class sample counts, so the committed policy keeps startup enforcement report-only.
-All input bundles were verified and replayed offline after correcting the CLI newline framing in the aggregator.
+A policy records job identities and checksum-manifest digests so its inputs can be audited. The current
+[30-job calibration](https://github.com/EpicBlackWolfZ/microfat/actions/runs/34452570611) split across six CPU/image
+classes. None met both per-class sample counts, so the committed policy keeps startup enforcement report-only.
+Independent offline verification reproduced the workflow's candidate policy byte-for-byte.
 
 Dispatch `tier=release` on a repository branch for a nonpublishing rehearsal; `tier=compatibility` runs the
 compatibility checks alone. Completed rehearsal bundles are downloaded into a fresh verification job, checked
