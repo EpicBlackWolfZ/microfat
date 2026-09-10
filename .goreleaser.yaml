@@ -190,6 +190,7 @@ archives:
     files:
       - README.md
       - LICENSE
+      - SECURITY.md
       - docs/*
 
   - id: microfat-arm64-v8.0
@@ -201,6 +202,7 @@ archives:
     files:
       - README.md
       - LICENSE
+      - SECURITY.md
       - docs/*
 
   - id: microfat-arm64-v8.2
@@ -212,6 +214,7 @@ archives:
     files:
       - README.md
       - LICENSE
+      - SECURITY.md
       - docs/*
 
   - id: microfat-arm64-v9.0
@@ -223,6 +226,7 @@ archives:
     files:
       - README.md
       - LICENSE
+      - SECURITY.md
       - docs/*
 
   - id: microfat-stub-amd64
@@ -234,6 +238,7 @@ archives:
     files:
       - README.md
       - LICENSE
+      - SECURITY.md
       - docs/*
 
   - id: microfat-stub-minimal-amd64
@@ -245,6 +250,7 @@ archives:
     files:
       - README.md
       - LICENSE
+      - SECURITY.md
       - docs/*
 
   - id: microfat-stub-arm64
@@ -256,6 +262,7 @@ archives:
     files:
       - README.md
       - LICENSE
+      - SECURITY.md
       - docs/*
 
   - id: microfat-stub-minimal-arm64
@@ -267,6 +274,7 @@ archives:
     files:
       - README.md
       - LICENSE
+      - SECURITY.md
       - docs/*
 
 sboms:
@@ -289,6 +297,8 @@ signs:
       - "${artifact}"
 
 release:
+  # Evidence is attached before publishing because published releases are immutable.
+  draft: true
   github:
     owner: EpicBlackWolfZ
     name: microfat

@@ -18,6 +18,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Require versioned release notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9.-]+)?$ ]]
+          test -s "docs/releases/$RELEASE_TAG.md"
+
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -47,7 +54,7 @@ jobs:
         run: make chaos
 
   goreleaser:
-    name: Build, Smoke Test & Publish Release
+    name: Build, Smoke Test & Stage Release Draft
     runs-on: ubuntu-latest
     needs: gate
     permissions:
@@ -76,6 +83,7 @@ jobs:
         with:
           distribution: goreleaser
           version: 'v2.18.0'
-          args: release --clean
+          args: release --clean --release-notes=docs/releases/${{ github.ref_name }}.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MICROFAT_REQUIRE_SBOM: '1'

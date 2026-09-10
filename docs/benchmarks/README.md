@@ -170,10 +170,13 @@ Independent offline verification reproduced the workflow's candidate policy byte
 Dispatch `tier=release` on a repository branch for a nonpublishing rehearsal; `tier=compatibility` runs the
 compatibility checks alone. Completed rehearsal bundles are downloaded into a fresh verification job, checked
 again, replayed byte-for-byte, and audited for all 12 sustained shards before an archive is prepared. Only a
-trusted tag run attaches the archive and checksum to the release, without replacing previous assets. Failed
+trusted tag run attaches the archive and checksum to a release draft, without replacing previous assets.
+It requires the same tag/commit Release workflow to have succeeded before publishing the complete immutable release.
+GoReleaser stages signed binaries and SBOMs as a draft; failed evidence leaves that draft unpublished. Failed
 or interrupted evidence remains diagnostic and cannot pass matrix publication. Artifacts are scoped to the run
 attempt; rerun all jobs when retrying a complete matrix so evidence from different attempts cannot be mixed.
-Maintainers control tags/releases.
+Maintainers initiate releases by pushing tags. If finalization fails, inspect both workflow results and
+rerun the failed publication job after correcting the cause; never publish a draft with missing evidence.
 
 If archive delivery fails after successful measurements, dispatch `benchmark-evidence.yml`
 with its exact `source_run` and `source_attempt`. A fresh standard hosted runner resolves the original source

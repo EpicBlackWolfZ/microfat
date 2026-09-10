@@ -6,7 +6,7 @@
 
 ## 1. Supported Versions
 
-Only the latest release stream of `microfat` receives active security updates, bug fixes, and vulnerability patches.
+The release streams marked supported below receive security updates and bug fixes. Use the latest patch in your stream.
 
 | Version | Supported | Notes |
 | :--- | :--- | :--- |
@@ -52,9 +52,9 @@ Every contribution and release in `microfat` undergoes automated multi-layer sec
 - **Secret Scanning & Push Protection**: Automated server-side push protection actively blocks commits containing API tokens, private keys, or credentials.
 - **Supply-Chain Dependency Auditing**:
   - **`govulncheck`**: Scans the complete Go dependency graph against the official Go Vulnerability Database on every pull request.
-  - **Dependabot**: Automated security updates with malware detection and grouped security pull requests.
+  - **Dependabot**: Automated security updates for known vulnerable dependencies.
 - **Git Secrets Detection**: **`gitleaks`** audits all repository commits and PR diffs in CI pipelines.
-- **Release Immutability**: All published release assets and `v*` release tags are permanently protected and immutable via Repository Rulesets.
+- **Release Immutability**: Published immutable releases lock their assets; an active tag ruleset separately protects release tags. All assets must be attached while the release is still a draft.
 
 ---
 
@@ -62,7 +62,7 @@ Every contribution and release in `microfat` undergoes automated multi-layer sec
 
 `microfat` enforces strict runtime defense-in-depth:
 
-- **Trailer & Payload Integrity Verification (SHA-256)**: Fixed 56-byte trailers (`\x00\xFA\x7FMICRO` magic) require matching SHA-256 index and payload checksums prior to decompression or execution.
+- **Trailer & Payload Integrity Verification (SHA-256)**: Fixed 56-byte trailers (`\x00\xFA\x7FMICRO` magic) require a matching SHA-256 index before metadata use. Extracted payload bytes must match their SHA-256 digest before execution.
 - **Mandatory Kernel Memory Sealing (`memfd_create`)**:
   - In-memory execution creates an anonymous RAM descriptor via `memfd_create("microfat_payload", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)`.
   - Once variant payloads are extracted and validated against their embedded SHA-256 digests, the descriptor is sealed using `F_ADD_SEALS` with `F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL`.
