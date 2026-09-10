@@ -1,0 +1,90 @@
+name: Benchmark Evidence Archive
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/benchmark-evidence.yml
+      - scripts/benchmark-evidence.py
+      - scripts/benchmark_evidence_test.py
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: Completed successful benchmark workflow run to verify
+        type: string
+        required: true
+      source_attempt:
+        description: Exact measurement attempt (never combine attempts)
+        type: string
+        required: true
+        default: '1'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: benchmark-evidence-${{ github.ref }}-${{ inputs.source_run }}-${{ inputs.source_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  contracts:
+    name: Archive verification contracts
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 scripts/benchmark_evidence_test.py
+
+  verify:
+    name: Verify and archive completed measurement cohort
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Resolve immutable measurement provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_RUN: ${{ inputs.source_run }}
+          SOURCE_ATTEMPT: ${{ inputs.source_attempt }}
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ && "$SOURCE_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          mkdir -p .work
+          gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN/attempts/$SOURCE_ATTEMPT" > .work/source-run.json
+          jq -e --arg run "$SOURCE_RUN" --arg attempt "$SOURCE_ATTEMPT" '
+            (.id | tostring) == $run and (.run_attempt | tostring) == $attempt and
+            .path == ".github/workflows/benchmarks.yml" and .status == "completed" and .conclusion == "success"
+          ' .work/source-run.json
+          source=$(jq -r .head_sha .work/source-run.json)
+          [[ "$source" =~ ^[0-9a-f]{40}$ ]]
+          echo "SOURCE_SHA=$source" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - run: make build
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run }}
+          pattern: benchmark-release-*-${{ inputs.source_run }}-${{ inputs.source_attempt }}
+          path: .work/release-evidence
+      - name: Reverify exact cohort and create immutable archive
+        env:
+          EVIDENCE_RUN_ID: ${{ inputs.source_run }}
+          EVIDENCE_RUN_ATTEMPT: ${{ inputs.source_attempt }}
+        run: python3 scripts/benchmark-evidence.py .work/release-evidence --archive
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-hosted-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .work/benchmark-evidence-*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

@@ -33,6 +33,8 @@ def main():
         parser.error('no completed evidence bundles')
     observed = set()
     verified = []
+    measurement_run = os.environ.get('EVIDENCE_RUN_ID', os.environ.get('GITHUB_RUN_ID'))
+    measurement_attempt = os.environ.get('EVIDENCE_RUN_ATTEMPT', os.environ.get('GITHUB_RUN_ATTEMPT', '1'))
     for bundle in bundles:
         execute('verify', bundle)
         for fmt, name in (('json', 'report.json'), ('markdown', 'report.md')):
@@ -51,6 +53,9 @@ def main():
             observed.add(key)
             if exp['source_sha'] != os.environ.get('SOURCE_SHA', os.environ.get('GITHUB_SHA', exp['source_sha'])):
                 raise SystemExit('source revision differs from requested workflow revision')
+            runner = exp.get('runner', {})
+            if measurement_run and (runner.get('run_id'), runner.get('attempt')) != (measurement_run, measurement_attempt):
+                raise SystemExit('measurement run or attempt differs from the requested evidence cohort')
         verified.append(dict(bundle=str(bundle), source=exp['source_sha'],
                              checksum_manifest=hashlib.sha256((bundle / 'SHA256SUMS').read_bytes()).hexdigest()))
     if args.calibration:
@@ -66,6 +71,10 @@ def main():
         archive = Path('.work') / ('benchmark-evidence-' + os.environ['SOURCE_SHA'] + '-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ.get('GITHUB_RUN_ATTEMPT', '1') + '.tar.gz')
         manifest = args.root / 'verified-manifest.json'
         manifest.write_text(json.dumps(dict(evidence_class='hosted-comparative',
+                            measurement_run_id=measurement_run, measurement_attempt=measurement_attempt,
+                            verification_run_id=os.environ['GITHUB_RUN_ID'],
+                            verification_attempt=os.environ.get('GITHUB_RUN_ATTEMPT', '1'),
+                            verification_source_sha=os.environ.get('GITHUB_SHA', os.environ['SOURCE_SHA']),
                             limitation='Shared hosted VMs; no dedicated-hardware performance certification.', bundles=verified), indent=2)+'\n')
         with tarfile.open(archive, 'x:gz') as output:
             output.add(manifest, arcname='verified-manifest.json')

@@ -31,6 +31,7 @@ class EvidenceTests(unittest.TestCase):
             (bundle / 'report.json').write_bytes(b'json')
             (bundle / 'report.md').write_bytes(b'markdown')
             (bundle / 'raw.json').write_text(json.dumps(dict(source_sha='source', release_eligible=False,
+                runner=dict(run_id='1', attempt='1'),
                 environment=dict(host=dict(arch=arch)), config=dict(workload=workload, iterations=intensity))))
         return root
 
@@ -42,9 +43,11 @@ class EvidenceTests(unittest.TestCase):
             return b'{"publishable":true}'
         return b''
 
-    def invoke(self, root):
+    def invoke(self, root, **environment):
+        env = dict(SOURCE_SHA='source', GITHUB_RUN_ID='1')
+        env.update(environment)
         with patch.object(sys, 'argv', ['benchmark-evidence.py', str(root), '--archive']), \
-             patch.dict(os.environ, dict(SOURCE_SHA='source', GITHUB_RUN_ID='1'), clear=True), \
+             patch.dict(os.environ, env, clear=True), \
              patch.object(EVIDENCE, 'execute', side_effect=self.execute):
             EVIDENCE.main()
 
@@ -61,7 +64,7 @@ class EvidenceTests(unittest.TestCase):
                 self.invoke(root)
 
     def test_missing_and_invalid_evidence(self):
-        for failure in ('missing', 'replay', 'newline', 'source', 'duplicate', 'strict-claim'):
+        for failure in ('missing', 'replay', 'newline', 'source', 'duplicate', 'strict-claim', 'run', 'attempt'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary, contextlib.chdir(temporary):
                 Path('.work').mkdir()
                 root = self.setup_bundles(11 if failure == 'missing' else 12)
@@ -77,10 +80,27 @@ class EvidenceTests(unittest.TestCase):
                     exp['release_eligible'] = True
                 if failure == 'duplicate':
                     exp = json.loads((root / '1/raw.json').read_text())
+                if failure == 'run':
+                    exp['runner']['run_id'] = 'other'
+                if failure == 'attempt':
+                    exp['runner']['attempt'] = '2'
                 raw.write_text(json.dumps(exp))
                 with self.assertRaises(SystemExit):
                     self.invoke(root)
                 self.assertFalse(list(Path('.work').glob('*.tar.gz')))
+
+    def test_reverification_preserves_measurement_cohort(self):
+        with tempfile.TemporaryDirectory() as temporary, contextlib.chdir(temporary):
+            Path('.work').mkdir()
+            root = self.setup_bundles()
+            self.invoke(root, GITHUB_RUN_ID='2', GITHUB_SHA='verifier', EVIDENCE_RUN_ID='1', EVIDENCE_RUN_ATTEMPT='1')
+            archive = next(Path('.work').glob('*-2-1.tar.gz'))
+            with tarfile.open(archive) as data:
+                manifest = json.load(data.extractfile('verified-manifest.json'))
+            self.assertEqual('1', manifest['measurement_run_id'])
+            self.assertEqual('1', manifest['measurement_attempt'])
+            self.assertEqual('2', manifest['verification_run_id'])
+            self.assertEqual('verifier', manifest['verification_source_sha'])
 
     def test_empty_evidence(self):
         with tempfile.TemporaryDirectory() as temporary, contextlib.redirect_stderr(io.StringIO()):

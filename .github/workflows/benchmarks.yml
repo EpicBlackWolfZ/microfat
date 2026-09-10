@@ -190,6 +190,8 @@ jobs:
         with:
           name: calibration-policy-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/calibration-policy.json
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 14
 
   compatibility:
@@ -245,6 +247,8 @@ jobs:
         with:
           name: verified-hosted-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/benchmark-evidence-*
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 14
 
   publish-evidence:
