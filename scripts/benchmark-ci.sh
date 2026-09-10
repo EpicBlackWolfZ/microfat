@@ -18,15 +18,23 @@ if [[ -d "$benchmark_bundle" ]]; then
   "$BENCHMARK_BINARY" benchmark verify "$benchmark_bundle"
   if [[ -n "${BENCHMARK_BASE:-}" ]]; then
     benchmark_gate_args=(benchmark gate --input "$benchmark_bundle")
-    if [[ -n "${BENCHMARK_STARTUP_FLOOR_NS:-}" ]]; then
-      benchmark_gate_args+=(--startup-calibrated --startup-floor-ns "$BENCHMARK_STARTUP_FLOOR_NS")
+    if [[ -n "${BENCHMARK_CALIBRATION:-}" ]]; then
+      benchmark_gate_args+=(--calibration "$BENCHMARK_CALIBRATION")
     fi
-    "$BENCHMARK_BINARY" "${benchmark_gate_args[@]}" > "$BENCHMARK_OUTPUT/summary.md" || benchmark_status=$?
+    gate_status=0
+    "$BENCHMARK_BINARY" "${benchmark_gate_args[@]}" > "$BENCHMARK_OUTPUT/summary.md" || gate_status=$?
+    if [[ "$gate_status" != 0 && "${BENCHMARK_HOSTED_RELEASE:-0}" != 1 ]]; then
+      benchmark_status="$gate_status"
+    fi
   else
     "$BENCHMARK_BINARY" benchmark report --input "$benchmark_bundle" --format markdown > "$BENCHMARK_OUTPUT/summary.md"
   fi
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     cat "$BENCHMARK_OUTPUT/summary.md" >> "$GITHUB_STEP_SUMMARY"
   fi
+fi
+if [[ "${BENCHMARK_HOSTED_RELEASE:-0}" == 1 && -d "$benchmark_bundle" ]]; then
+  "$BENCHMARK_BINARY" benchmark qualify --policy hosted-release --input "$benchmark_bundle" \
+    > "$BENCHMARK_OUTPUT/qualification.json" || benchmark_status=$?
 fi
 exit "$benchmark_status"

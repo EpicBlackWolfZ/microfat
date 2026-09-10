@@ -38,6 +38,7 @@ type Table struct {
 	Configurations  []schema.Configuration     `json:"configurations"`
 	Artifacts       []schema.Artifact          `json:"artifacts"`
 	HostTelemetry   map[string]string          `json:"host_telemetry"`
+	Runner          *schema.RunnerInfo         `json:"runner,omitempty"`
 }
 
 type Row struct {
@@ -56,7 +57,7 @@ func Build(exp *schema.ExperimentV2) (*Table, error) {
 	}
 	table := &Table{Experiment: exp.ID, SourceSHA: exp.SourceSHA, Environment: exp.Environment,
 		Complete: exp.Complete, ReleaseEligible: exp.ReleaseEligible, Warnings: exp.Warnings, Comparisons: exp.Comparisons,
-		Configurations: exp.Configurations, Artifacts: exp.Artifacts, HostTelemetry: exp.HostTelemetry}
+		Configurations: exp.Configurations, Artifacts: exp.Artifacts, HostTelemetry: exp.HostTelemetry, Runner: exp.Runner}
 	for index, trial := range exp.Trials {
 		reference := "raw.json#/trials/" + strconv.Itoa(index)
 		keys := make([]string, 0, len(trial.Metrics))
@@ -95,6 +96,14 @@ func Render(exp *schema.ExperimentV2, format string) ([]byte, error) {
 		exp.Environment.Host.CPU.ModelName, exp.Environment.Host.KernelRelease, exp.Environment.Process.GoVersion, exp.Seed)
 	for _, warning := range exp.Warnings {
 		_, _ = fmt.Fprintf(&output, "Qualification: %s\n", clean(warning))
+	}
+	if exp.Runner != nil {
+		_, _ = fmt.Fprintf(&output, "Runner: %s; image: %s/%s; run: %s/%s; protocol: %s\n",
+			clean(exp.Runner.Provider), clean(exp.Runner.Image), clean(exp.Runner.ImageVersion), clean(exp.Runner.RunID),
+			clean(exp.Runner.Attempt), clean(exp.Runner.Protocol))
+		if exp.Runner.Provider == schema.HostedProvider {
+			_, _ = fmt.Fprintln(&output, "Hosted comparative evidence: physical hardware and host noise are not controlled.")
+		}
 	}
 	_, _ = fmt.Fprintln(&output, "\nLatency percentiles are histogram estimates; intervals use paired trial bootstrap.")
 	_, _ = fmt.Fprintln(&output, "See raw.json for controls, failures, cache/tuning state, artifacts and native histograms.")

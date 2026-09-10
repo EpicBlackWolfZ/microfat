@@ -12,6 +12,8 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
 )
 
+const unitBytes = "bytes"
+
 const kibibyte = 1024
 
 // ReadProcess records kernel counters separately from sampled current memory values.
@@ -20,7 +22,7 @@ func ReadProcess(procRoot string, pid int, phase string) map[string]schema.Measu
 	// #nosec G304 -- explicit proc root, numeric PID, fixed status filename.
 	status, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "status"))
 	if err != nil {
-		result["rss_bytes"] = schema.Unavailable("bytes", phase, "proc/status", err.Error())
+		result["rss_bytes"] = schema.Unavailable(unitBytes, phase, "proc/status", err.Error())
 		return result
 	}
 	fields := ParseFields(string(status))
@@ -28,10 +30,10 @@ func ReadProcess(procRoot string, pid int, phase string) map[string]schema.Measu
 		key, name, unit string
 		scale           float64
 	}{
-		{"VmRSS", "rss_bytes", "bytes", kibibyte}, {"VmSize", "vss_bytes", "bytes", kibibyte},
-		{"VmHWM", "lifetime_peak_rss_bytes", "bytes", kibibyte},
-		{"voluntary_ctxt_switches", "voluntary_context_switches", "count", 1},
-		{"nonvoluntary_ctxt_switches", "involuntary_context_switches", "count", 1},
+		{"VmRSS", "rss_bytes", unitBytes, kibibyte}, {"VmSize", "vss_bytes", unitBytes, kibibyte},
+		{"VmHWM", "lifetime_peak_rss_bytes", unitBytes, kibibyte},
+		{"voluntary_ctxt_switches", "leader_voluntary_context_switches", "count", 1},
+		{"nonvoluntary_ctxt_switches", "leader_involuntary_context_switches", "count", 1},
 	} {
 		value, err := firstNumber(fields[field.key])
 		if err != nil {
@@ -74,7 +76,8 @@ func firstNumber(value string) (float64, error) {
 func (s *Sandbox) Read(phase string) map[string]schema.Measurement {
 	result := make(map[string]schema.Measurement)
 	for _, root := range s.Paths {
-		for _, file := range []string{"memory.current", "memory.peak", "memory.usage_in_bytes", "memory.max_usage_in_bytes"} {
+		for _, file := range []string{"memory.current", "memory.peak", "memory.usage_in_bytes", "memory.max_usage_in_bytes",
+			"cpuacct.usage", "memory.failcnt"} {
 			// #nosec G304 -- benchmark-owned cgroup root and fixed controller filename.
 			data, err := os.ReadFile(filepath.Join(root, file))
 			if err != nil {
@@ -82,10 +85,16 @@ func (s *Sandbox) Read(phase string) map[string]schema.Measurement {
 			}
 			value, err := firstNumber(string(data))
 			if err != nil {
-				result[file] = schema.Unavailable("bytes", phase, "cgroup/"+file, err.Error())
+				result[file] = schema.Unavailable(unitBytes, phase, "cgroup/"+file, err.Error())
 				continue
 			}
-			result[file] = schema.Measured(value, "bytes", phase, "cgroup/"+file)
+			unit := unitBytes
+			if file == "cpuacct.usage" {
+				unit = "ns"
+			} else if file == "memory.failcnt" {
+				unit = "count"
+			}
+			result[file] = schema.Measured(value, unit, phase, "cgroup/"+file)
 		}
 		for _, file := range []string{"cpu.stat", "memory.stat", "memory.events"} {
 			// #nosec G304 -- benchmark-owned cgroup root and fixed controller filename.
@@ -100,7 +109,7 @@ func (s *Sandbox) Read(phase string) map[string]schema.Measurement {
 				}
 				unit := "count"
 				if file == "memory.stat" && isMemoryBytes(key) {
-					unit = "bytes"
+					unit = unitBytes
 				}
 				if strings.HasSuffix(key, "_usec") {
 					unit = "us"
@@ -113,7 +122,7 @@ func (s *Sandbox) Read(phase string) map[string]schema.Measurement {
 		}
 	}
 	if len(result) == 0 {
-		result["cgroup_memory_bytes"] = schema.Unavailable("bytes", phase, "cgroup", "target cgroup telemetry unavailable")
+		result["cgroup_memory_bytes"] = schema.Unavailable(unitBytes, phase, "cgroup", "target cgroup telemetry unavailable")
 	}
 	return result
 }

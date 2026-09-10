@@ -1,0 +1,64 @@
+name: Benchmark Kernel Controls
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kernel:
+    name: Kernel enforcement (${{ matrix.mode }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {mode: v2-amd64, runner: ubuntu-24.04}
+          - {mode: v2-arm64, runner: ubuntu-24.04-arm}
+          - {mode: v1-tcg, runner: ubuntu-24.04}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Prepare native delegation
+        if: matrix.mode != 'v1-tcg'
+        run: bash scripts/benchmark-controls.sh .work/kernel-controls.json
+      - name: Test native enforcement
+        if: matrix.mode != 'v1-tcg'
+        run: |
+          set -o pipefail
+          go test -v ./benchmarks/system -run '^Test(KernelControls|RealCgroupIntegration)$' -count=1 | tee .work/kernel-native.log
+      - name: Install guest tools
+        if: matrix.mode == 'v1-tcg'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-x86 busybox-static cpio
+      - name: Test guest enforcement
+        if: matrix.mode == 'v1-tcg'
+        run: bash scripts/benchmark-kernel.sh
+      - name: Retain kernel evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: kernel-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          path: |
+            .work/kernel-native.log
+            .work/kernel-controls.json
+            .work/kernel-v1/*.txt
+            .work/kernel-v1/*.json
+            .work/kernel-v1/*.log
+            .work/kernel-v1/InRelease
+      - name: Remove native delegation
+        if: always() && matrix.mode != 'v1-tcg'
+        run: |
+          if [ -n "${MICROFAT_BENCH_CGROUP_ROOT:-}" ]; then
+            sudo rmdir "$MICROFAT_BENCH_CGROUP_ROOT"
+          fi

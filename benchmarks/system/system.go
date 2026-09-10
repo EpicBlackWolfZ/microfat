@@ -84,7 +84,14 @@ func Prepare(options Options) (*Sandbox, error) {
 			Reason: "no delegated cgroup root configured; inherited limits are observed only"})
 		return sandbox, nil
 	}
-	if err := sandbox.prepareCgroups(); err != nil {
+	setupErr := CheckCgroupRoot(options.CgroupRoot, options.Version)
+	if setupErr == nil && options.Version == "v1" {
+		setupErr = CheckCgroupRoot(options.MemoryRoot, options.Version)
+	}
+	if setupErr == nil {
+		setupErr = sandbox.prepareCgroups()
+	}
+	if err := setupErr; err != nil {
 		cleanupErr := sandbox.Close()
 		for i := range sandbox.Controls {
 			if sandbox.Controls[i].Name != "affinity" {
@@ -158,13 +165,26 @@ func (s *Sandbox) createGroup(root string, values map[string]string) error {
 		if err != nil {
 			return err
 		}
-		if strings.TrimSpace(string(effective)) != values[key] {
+		if !effectiveLimit(key, values[key], strings.TrimSpace(string(effective)), int64(os.Getpagesize())) {
 			return fmt.Errorf("control %s did not take effect", key)
 		}
-		s.Controls = append(s.Controls, schema.Control{Name: key, Requested: values[key], Effective: values[key], State: "applied"})
+		s.Controls = append(s.Controls, schema.Control{Name: key, Requested: values[key],
+			Effective: strings.TrimSpace(string(effective)), State: "applied"})
 	}
 	s.Procs = append(s.Procs, filepath.Join(dir, "cgroup.procs"))
 	return nil
+}
+
+func effectiveLimit(name, requested, effective string, page int64) bool {
+	if requested == effective {
+		return true
+	}
+	if name != "memory.limit_in_bytes" && name != "memory.max" {
+		return false
+	}
+	want, wantErr := strconv.ParseInt(requested, 10, 64)
+	got, gotErr := strconv.ParseInt(effective, 10, 64)
+	return wantErr == nil && gotErr == nil && want > 0 && page > 0 && got == want/page*page
 }
 
 func (s *Sandbox) Close() error {

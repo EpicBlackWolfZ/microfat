@@ -180,6 +180,7 @@ type ExperimentV2 struct {
 	Complete        bool                `json:"complete"`
 	ReleaseEligible bool                `json:"release_eligible"`
 	Warnings        []string            `json:"warnings"`
+	Runner          *RunnerInfo         `json:"runner,omitempty"`
 }
 
 func Digest(data []byte) string {

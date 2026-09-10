@@ -7,6 +7,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -45,11 +46,34 @@ func ExecChild(cfg ChildConfig) error {
 		if err := unix.SchedSetaffinity(0, &set); err != nil {
 			return err
 		}
+		var effective unix.CPUSet
+		if err := unix.SchedGetaffinity(0, &effective); err != nil {
+			return err
+		}
+		if effective != set {
+			return fmt.Errorf("effective affinity differs from requested mask")
+		}
 	}
 	for _, file := range cfg.Procs {
 		if err := os.WriteFile(file, []byte(strconv.Itoa(os.Getpid())), controlMode); err != nil {
 			return err
 		}
+		data, err := os.ReadFile(file) // #nosec G304 -- validated explicit cgroup.procs attachment.
+		if err != nil {
+			return err
+		}
+		if !containsPID(string(data), os.Getpid()) {
+			return fmt.Errorf("child membership was not established")
+		}
 	}
 	return unix.Exec(cfg.Path, append([]string{cfg.Path}, cfg.Args...), cfg.Env)
+}
+
+func containsPID(data string, pid int) bool {
+	for _, value := range strings.Fields(data) {
+		if value == strconv.Itoa(pid) {
+			return true
+		}
+	}
+	return false
 }
