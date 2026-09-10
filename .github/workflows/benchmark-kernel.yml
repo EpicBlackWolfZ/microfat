@@ -36,7 +36,7 @@ jobs:
         if: matrix.mode != 'v1-tcg'
         run: |
           set -o pipefail
-          go test -v ./benchmarks/system -run '^Test(KernelControls|RealCgroupIntegration)$' -count=1 | tee .work/kernel-native.log
+          bash scripts/benchmark-enter.sh "$MICROFAT_BENCH_CGROUP_ROOT" make benchmark-kernel | tee .work/kernel-native.log
       - name: Install guest tools
         if: matrix.mode == 'v1-tcg'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-x86 busybox-static cpio
@@ -60,5 +60,5 @@ jobs:
         if: always() && matrix.mode != 'v1-tcg'
         run: |
           if [ -n "${MICROFAT_BENCH_CGROUP_ROOT:-}" ]; then
-            sudo rmdir "$MICROFAT_BENCH_CGROUP_ROOT"
+            sudo rmdir "$MICROFAT_BENCH_CGROUP_ROOT/manager" "$MICROFAT_BENCH_CGROUP_ROOT"
           fi

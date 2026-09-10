@@ -8,6 +8,7 @@ sudo mkdir "$root"
 trap 'sudo rmdir "$root" 2>/dev/null || true' ERR
 printf '+cpu +memory\n' | sudo tee "$root/cgroup.subtree_control" >/dev/null
 sudo chown "$(id -u):$(id -g)" "$root" "$root/cgroup.procs" "$root/cgroup.subtree_control"
+sudo mkdir "$root/manager"
 python3 - "$root" "$output" <<'PY'
 import json,os,pathlib,sys
 root,out=sys.argv[1:]

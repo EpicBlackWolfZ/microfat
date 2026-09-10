@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Independently verify downloaded bundles, replay reports, and audit the declared matrix."""
+import argparse
+import hashlib
+import itertools
+import json
+import os
+from pathlib import Path
+import subprocess
+import tarfile
+
+
+def execute(*args):
+    return subprocess.check_output([str(Path('bin/microfat').resolve()), 'benchmark', *map(str, args)])
+
+
+def scenario(exp):
+    config = exp['config']
+    intensity = {4: 'standard', 32: 'heavy'}.get(config['iterations'])
+    return exp['environment']['host']['arch'], config['workload'], intensity
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('root', type=Path)
+    modes = parser.add_mutually_exclusive_group(required=True)
+    modes.add_argument('--calibration', action='store_true')
+    modes.add_argument('--archive', action='store_true')
+    modes.add_argument('--shard', action='store_true')
+    args = parser.parse_args()
+    bundles = sorted(path.parent for path in args.root.rglob('SHA256SUMS'))
+    if not bundles:
+        parser.error('no completed evidence bundles')
+    observed = set()
+    verified = []
+    for bundle in bundles:
+        execute('verify', bundle)
+        for fmt, name in (('json', 'report.json'), ('markdown', 'report.md')):
+            if execute('report', '--input', bundle, '--format', fmt) != (bundle / name).read_bytes():
+                raise SystemExit(f'offline report replay differs: {bundle}/{name}')
+        exp = json.loads((bundle / 'raw.json').read_text())
+        if not args.calibration:
+            verdict = json.loads(execute('qualify', '--input', bundle, '--policy', 'hosted-release'))
+            if not verdict['publishable'] or exp['release_eligible']:
+                raise SystemExit('hosted qualification failed')
+            key = scenario(exp)
+            if key in observed:
+                raise SystemExit(f'duplicate release shard: {key}')
+            observed.add(key)
+            if exp['source_sha'] != os.environ.get('SOURCE_SHA', os.environ.get('GITHUB_SHA', exp['source_sha'])):
+                raise SystemExit('source revision differs from requested workflow revision')
+        verified.append(dict(bundle=str(bundle), source=exp['source_sha'],
+                             checksum_manifest=hashlib.sha256((bundle / 'SHA256SUMS').read_bytes()).hexdigest()))
+    if args.calibration:
+        paths = Path('.work/calibration-bundles.json')
+        paths.write_text(json.dumps([str(p.resolve()) for p in bundles]))
+        policy = execute('calibrate', '--input', paths)
+        Path('.work/calibration-policy.json').write_bytes(policy + b'\n')
+        print(policy.decode())
+    elif args.archive:
+        expected = set(itertools.product(('amd64', 'arm64'), ('mixed', 'cpu', 'memory'), ('standard', 'heavy')))
+        if observed != expected:
+            raise SystemExit(f'release matrix mismatch; missing={expected-observed}, unexpected={observed-expected}')
+        archive = Path('.work') / ('benchmark-evidence-' + os.environ['SOURCE_SHA'] + '-' + os.environ['GITHUB_RUN_ID'] + '.tar.gz')
+        manifest = args.root / 'verified-manifest.json'
+        manifest.write_text(json.dumps(dict(evidence_class='hosted-comparative',
+                            limitation='Shared hosted VMs; no dedicated-hardware performance certification.', bundles=verified), indent=2)+'\n')
+        with tarfile.open(archive, 'x:gz') as output:
+            output.add(manifest, arcname='verified-manifest.json')
+            for index, bundle in enumerate(bundles):
+                output.add(bundle, arcname=f'bundles/{index:02d}')
+        archive.with_suffix(archive.suffix + '.sha256').write_text(hashlib.sha256(archive.read_bytes()).hexdigest()+'  '+archive.name+'\n')
+    if summary := os.environ.get('GITHUB_STEP_SUMMARY'):
+        with open(summary, 'a') as output:
+            output.write(f'\nVerified {len(bundles)} evidence bundles with byte-identical offline report replay.\n')
+            if not args.calibration:
+                output.write('Hosted comparative evidence; dedicated-hardware qualification remains false.\n')
+
+
+if __name__ == '__main__':
+    main()

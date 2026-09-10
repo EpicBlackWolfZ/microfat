@@ -112,7 +112,7 @@ func kernelChild(t *testing.T, ctx context.Context, s *Sandbox, mode string) *pr
 	})
 	line, _, err := child.FirstLine(ctx)
 	require.NoError(t, err, string(child.Stderr()))
-	require.Equal(t, "ready", string(line))
+	require.Equal(t, "ready", string(line), "stdout: %s; stderr: %s", child.Stdout(), child.Stderr())
 	return child
 }
 

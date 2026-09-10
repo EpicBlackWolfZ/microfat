@@ -5,6 +5,7 @@ root="$PWD/.work/kernel-v1"
 mkdir -p "$root/rootfs/bin" "$root/rootfs/proc" "$root/rootfs/sys" "$root/rootfs/dev" "$root/rootfs/tmp"
 python3 scripts/benchmark-kernel-lock.py "$root"
 dpkg-deb -x "$root/kernel.deb" "$root/kernel"
+dpkg-deb -x "$root/modules.deb" "$root/kernel"
 cp /bin/busybox "$root/rootfs/bin/busybox"
 CGO_ENABLED=0 go test -c -o "$root/rootfs/system.test" ./benchmarks/system
 cat > "$root/rootfs/init" <<'INIT'

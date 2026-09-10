@@ -32,13 +32,14 @@ def main():
     blocks = gzip.decompress(packages.read_bytes()).decode().split('\n\n')
     entries = [dict(line.split(': ', 1) for line in block.splitlines() if ': ' in line and not line.startswith(' '))
                for block in blocks]
-    package = next(entry for entry in entries if entry.get('Package') == lock['package'] and entry.get('Version') == lock['version'])
-    if package['SHA256'] != lock['sha256'] or base + package['Filename'] != lock['url']:
-        raise SystemExit('kernel lock differs from signed metadata')
-    archive = output / 'kernel.deb'
-    download(lock['url'], archive)
-    if hashlib.sha256(archive.read_bytes()).hexdigest() != lock['sha256']:
-        raise SystemExit('kernel package checksum mismatch')
+    for record, name in ((lock, 'kernel.deb'), (lock['modules'], 'modules.deb')):
+        package = next(entry for entry in entries if entry.get('Package') == record['package'] and entry.get('Version') == record['version'])
+        if package['SHA256'] != record['sha256'] or base + package['Filename'] != record['url']:
+            raise SystemExit('kernel lock differs from signed metadata')
+        archive = output / name
+        download(record['url'], archive)
+        if hashlib.sha256(archive.read_bytes()).hexdigest() != record['sha256']:
+            raise SystemExit('kernel package checksum mismatch')
 
 
 if __name__ == '__main__':

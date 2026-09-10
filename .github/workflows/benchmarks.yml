@@ -13,25 +13,25 @@ on:
   workflow_dispatch:
     inputs:
       tier:
-        description: Benchmark tier
+        description: Benchmark tier (branch dispatch never publishes)
         type: choice
-        options: [smoke, nightly, release]
+        options: [smoke, nightly, release, calibration, compatibility]
         default: smoke
 
 permissions:
   contents: read
 
 concurrency:
-  group: benchmarks-${{ github.ref }}-${{ github.event_name }}
-  cancel-in-progress: true
+  group: benchmarks-${{ github.ref }}-${{ github.event_name }}-${{ inputs.tier || 'default' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   smoke:
     name: Benchmark Smoke
     if: >-
-      github.event_name != 'schedule' && inputs.tier != 'nightly' && inputs.tier != 'release' &&
+      github.event_name != 'schedule' && (inputs.tier == '' || inputs.tier == 'smoke') &&
       !startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -47,87 +47,100 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: false # Benchmark jobs execute checked-out code; do not restore or publish shared caches.
-      - name: Install pinned load tool
-        run: make benchmark-tools
-      - name: Run interleaved base/head smoke and summarize
+          cache: false
+      - run: make benchmark-tools
+      - name: Run paired smoke with trusted baseline policy
         env:
           BENCHMARK_BASE: ${{ github.workspace }}/.work/benchmark-base
-          BENCHMARK_STARTUP_FLOOR_NS: ${{ vars.BENCHMARK_STARTUP_FLOOR_NS }}
-        run: make benchmark-smoke
-      - name: Preserve raw smoke evidence
+        run: |
+          if [ -f "$BENCHMARK_BASE/benchmarks/config/calibration.json" ]; then
+            export BENCHMARK_CALIBRATION="$BENCHMARK_BASE/benchmarks/config/calibration.json"
+          fi
+          make benchmark-smoke
+      - name: Preserve smoke evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: benchmark-smoke-${{ github.sha }}
+          name: benchmark-smoke-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/benchmark-ci
-          retention-days: 30
+          retention-days: 7
 
-  nightly:
-    name: Benchmark Sustained (${{ matrix.workload }})
-    if: github.event_name == 'schedule' || (inputs.tier == 'nightly' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+  sustained:
+    name: Benchmark sustained (${{ matrix.arch }}, ${{ matrix.workload }}, ${{ matrix.intensity }})
+    if: >-
+      github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v') ||
+      inputs.tier == 'nightly' || inputs.tier == 'release'
+    runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 210
     strategy:
       fail-fast: false
+      max-parallel: 6
       matrix:
+        arch: [amd64, arm64]
         workload: [mixed, cpu, memory]
+        intensity: [standard, heavy]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
-      - name: Prepare the parent of the trusted event revision
-        run: git worktree add --detach .work/benchmark-base HEAD^
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: false # Base revision execution must not populate default-branch caches.
-      - run: make benchmark-tools build
-      - name: Run standard and heavy server workloads
+          cache: false
+      - name: Select immutable baseline
         env:
-          BENCHMARK_WORKLOAD: ${{ matrix.workload }}
-          BENCHMARK_BASE: ${{ github.workspace }}/.work/benchmark-base
-        run: python3 scripts/benchmark-matrix.py nightly --workload "$BENCHMARK_WORKLOAD"
+          REQUESTED_TIER: ${{ inputs.tier }}
+          EVENT_REF: ${{ github.ref }}
+        run: |
+          tier=nightly
+          if [[ "$REQUESTED_TIER" == release || "$EVENT_REF" == refs/tags/v* ]]; then
+            tier=release
+            base=$(python3 scripts/benchmark-baseline.py)
+          else
+            base=$(git rev-parse HEAD^)
+          fi
+          git worktree add --detach .work/benchmark-base "$base"
+          echo "BENCHMARK_BASE=$GITHUB_WORKSPACE/.work/benchmark-base" >> "$GITHUB_ENV"
+          echo "BENCHMARK_TIER=$tier" >> "$GITHUB_ENV"
+      - run: make benchmark-tools build
+      - name: Prepare hosted resource controls
+        run: bash scripts/benchmark-controls.sh .work/controls.json
+      - name: Measure paired revisions
+        env:
+          WORKLOAD: ${{ matrix.workload }}
+          INTENSITY: ${{ matrix.intensity }}
+        run: >-
+          bash scripts/benchmark-enter.sh "$MICROFAT_BENCH_CGROUP_ROOT"
+          python3 scripts/benchmark-matrix.py "$BENCHMARK_TIER" --workload "$WORKLOAD"
+          --intensity "$INTENSITY" --controls .work/controls.json
+      - name: Verify successful hosted shard
+        if: success() && env.BENCHMARK_TIER == 'release'
+        run: python3 scripts/benchmark-evidence.py .work/benchmark-matrix --shard
       - name: Preserve sustained evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: benchmark-nightly-${{ matrix.workload }}-${{ github.sha }}
+          name: benchmark-${{ env.BENCHMARK_TIER }}-${{ matrix.arch }}-${{ matrix.workload }}-${{ matrix.intensity }}-${{ github.run_id }}
           path: .work/benchmark-matrix
-          retention-days: 90
-
-  release-prerequisites:
-    name: Benchmark Release Prerequisites
-    if: startsWith(github.ref, 'refs/tags/v') || (inputs.tier == 'release' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
-    outputs:
-      configured: ${{ steps.check.outputs.configured }}
-    steps:
-      - id: check
-        env:
-          RUNNER_LABELS: ${{ vars.BENCHMARK_RELEASE_RUNNER_LABELS }}
-          RESOURCE_CONTROLS: ${{ vars.BENCHMARK_RELEASE_CONTROLS }}
+          retention-days: 14
+      - name: Remove delegation
+        if: always()
         run: |
-          if [ -z "$RUNNER_LABELS" ] || [ -z "$RESOURCE_CONTROLS" ]; then
-            echo 'configured=false' >> "$GITHUB_OUTPUT"
-            echo 'Release benchmark evidence unavailable: configure dedicated runner labels and delegated controls.' >> "$GITHUB_STEP_SUMMARY"
-            exit 1
+          if [ -n "${MICROFAT_BENCH_CGROUP_ROOT:-}" ]; then
+            sudo rmdir "$MICROFAT_BENCH_CGROUP_ROOT/manager" "$MICROFAT_BENCH_CGROUP_ROOT"
           fi
-          python3 -c 'import json,os; assert isinstance(json.loads(os.environ["RUNNER_LABELS"]),list); assert isinstance(json.loads(os.environ["RESOURCE_CONTROLS"]),dict)'
-          echo 'configured=true' >> "$GITHUB_OUTPUT"
 
-  release-evidence:
-    name: Benchmark Release Evidence (${{ matrix.workload }})
-    needs: release-prerequisites
-    if: needs.release-prerequisites.outputs.configured == 'true'
-    runs-on: ${{ fromJSON(vars.BENCHMARK_RELEASE_RUNNER_LABELS || '["self-hosted"]') }}
-    timeout-minutes: 360
+  calibration:
+    name: Independent calibration (${{ matrix.repetition }})
+    if: inputs.tier == 'calibration'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 6
       matrix:
-        workload: [mixed, cpu, memory]
+        repetition: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -135,29 +148,106 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: false # Keep release measurements independent of workflow cache contents.
-      - run: make benchmark-tools build
-      - name: Run release measurement matrix
+          cache: false
+      - run: git worktree add --detach .work/benchmark-base HEAD
+      - run: make benchmark-tools
+      - name: Measure unchanged revision
         env:
-          BENCHMARK_WORKLOAD: ${{ matrix.workload }}
-          RESOURCE_CONTROLS: ${{ vars.BENCHMARK_RELEASE_CONTROLS }}
-        run: |
-          mkdir -p .work
-          python3 -c 'import json,os,pathlib; pathlib.Path(".work/controls.json").write_text(json.dumps(json.loads(os.environ["RESOURCE_CONTROLS"])))'
-          python3 scripts/benchmark-matrix.py release --workload "$BENCHMARK_WORKLOAD" --controls .work/controls.json
-      - name: Preserve release bundle for maintainer publication
+          BENCHMARK_BASE: ${{ github.workspace }}/.work/benchmark-base
+          BENCHMARK_REPETITION: ${{ matrix.repetition }}
+        run: make benchmark-smoke
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: benchmark-release-${{ matrix.workload }}-${{ github.sha }}
+          name: calibration-${{ matrix.repetition }}-${{ github.run_id }}
+          path: .work/benchmark-ci
+          retention-days: 14
+
+  calibration-policy:
+    name: Verify calibration and prepare candidate policy
+    needs: calibration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - run: make build
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: calibration-*
+          path: .work/calibration
+      - name: Verify all independent bundles and derive policy
+        run: python3 scripts/benchmark-evidence.py .work/calibration --calibration
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: calibration-policy-${{ github.run_id }}
+          path: .work/calibration-policy.json
+          retention-days: 14
+
+  compatibility:
+    name: Benchmark compatibility (${{ matrix.runner }})
+    if: inputs.tier == 'compatibility' || inputs.tier == 'release' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - run: make benchmark-tools benchmark-matrix
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: compatibility-${{ matrix.runner }}-${{ github.run_id }}
           path: .work/benchmark-matrix
-          retention-days: 90
+          retention-days: 7
+
+  verify-release:
+    name: Independently verify hosted release matrix
+    needs: [sustained, compatibility]
+    if: inputs.tier == 'release' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - run: make build
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: benchmark-release-*
+          path: .work/release-evidence
+      - name: Verify complete matrix and prepare checksummed archive
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: python3 scripts/benchmark-evidence.py .work/release-evidence --archive
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-hosted-evidence-${{ github.run_id }}
+          path: .work/benchmark-evidence-*
+          retention-days: 14
 
   publish-evidence:
-    name: Attach Immutable Benchmark Evidence
-    needs: release-evidence
+    name: Attach verified hosted evidence
+    needs: verify-release
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
@@ -165,28 +255,22 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: benchmark-release-*
+          name: verified-hosted-evidence-${{ github.run_id }}
           path: evidence
-      - name: Prepare checksummed archive
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-          RUN_ID: ${{ github.run_id }}
-        run: |
-          archive="benchmark-evidence-${SOURCE_SHA}-${RUN_ID}.tar.gz"
-          tar -czf "$archive" evidence
-          sha256sum "$archive" > "$archive.sha256"
-      - name: Attach evidence after the release publisher creates the tag release
+      - name: Check archive and attach after release publication
+        working-directory: evidence
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
+          sha256sum -c ./*.sha256
           for attempt in $(seq 1 30); do
             if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-              gh release upload "$RELEASE_TAG" benchmark-evidence-*.tar.gz benchmark-evidence-*.tar.gz.sha256
+              gh release upload "$RELEASE_TAG" ./*.tar.gz ./*.sha256
               exit 0
             fi
             sleep 10
           done
-          echo 'Release was not created in time; evidence remains in workflow artifacts for maintainer publication.' >&2
+          echo 'Release not yet published; verified evidence remains available for maintainer attachment.' >&2
           exit 1
