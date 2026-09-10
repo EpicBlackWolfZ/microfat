@@ -6,6 +6,7 @@ import itertools
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tarfile
 
@@ -20,6 +21,22 @@ def scenario(exp):
     return exp['environment']['host']['arch'], config['workload'], intensity
 
 
+def source_revision(run, jobs, run_id, attempt):
+    if not all(re.fullmatch(r'[1-9][0-9]*', value) for value in (run_id, attempt)) or \
+       str(run.get('id')) != run_id or str(run.get('run_attempt')) != attempt or \
+       run.get('path') != '.github/workflows/benchmarks.yml' or run.get('status') != 'completed' or \
+       not re.fullmatch(r'[0-9a-f]{40}', run.get('head_sha', '')):
+        raise SystemExit('invalid completed measurement run provenance')
+    expected = {f'Benchmark sustained ({arch}, {workload}, {intensity})'
+                for arch, workload, intensity in itertools.product(('amd64', 'arm64'), ('mixed', 'cpu', 'memory'), ('standard', 'heavy'))}
+    expected.update(f'Benchmark compatibility ({runner})' for runner in ('ubuntu-24.04', 'ubuntu-24.04-arm'))
+    measured = [job for job in jobs.get('jobs', []) if job.get('name') in expected]
+    if len(measured) != len(expected) or {job['name'] for job in measured} != expected or \
+       any(job.get('conclusion') != 'success' for job in measured):
+        raise SystemExit('all 12 measurement and both compatibility jobs must pass in the requested attempt')
+    return run['head_sha']
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('root', type=Path)
@@ -27,7 +44,12 @@ def main():
     modes.add_argument('--calibration', action='store_true')
     modes.add_argument('--archive', action='store_true')
     modes.add_argument('--shard', action='store_true')
+    modes.add_argument('--source-cohort', nargs=2, metavar=('RUN', 'ATTEMPT'))
     args = parser.parse_args()
+    if args.source_cohort:
+        print(source_revision(json.loads((args.root / 'source-run.json').read_text()),
+                              json.loads((args.root / 'source-jobs.json').read_text()), *args.source_cohort))
+        return
     bundles = sorted(path.parent for path in args.root.rglob('SHA256SUMS'))
     if not bundles:
         parser.error('no completed evidence bundles')

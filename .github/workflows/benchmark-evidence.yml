@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       source_run:
-        description: Completed successful benchmark workflow run to verify
+        description: Completed benchmark workflow run with successful measurements
         type: string
         required: true
       source_attempt:
@@ -21,7 +21,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: benchmark-evidence-${{ github.ref }}-${{ inputs.source_run }}-${{ inputs.source_attempt }}
@@ -44,6 +43,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -58,13 +60,9 @@ jobs:
           [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ && "$SOURCE_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           mkdir -p .work
           gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN/attempts/$SOURCE_ATTEMPT" > .work/source-run.json
-          jq -e --arg run "$SOURCE_RUN" --arg attempt "$SOURCE_ATTEMPT" '
-            (.id | tostring) == $run and (.run_attempt | tostring) == $attempt and
-            .path == ".github/workflows/benchmarks.yml" and .status == "completed" and .conclusion == "success"
-          ' .work/source-run.json
-          source=$(jq -r .head_sha .work/source-run.json)
-          [[ "$source" =~ ^[0-9a-f]{40}$ ]]
-          echo "SOURCE_SHA=$source" >> "$GITHUB_ENV"
+          gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN/attempts/$SOURCE_ATTEMPT/jobs?per_page=100" > .work/source-jobs.json
+          benchmark_source=$(python3 scripts/benchmark-evidence.py .work --source-cohort "$SOURCE_RUN" "$SOURCE_ATTEMPT")
+          echo "SOURCE_SHA=$benchmark_source" >> "$GITHUB_ENV"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'

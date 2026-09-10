@@ -175,9 +175,10 @@ or interrupted evidence remains diagnostic and cannot pass matrix publication. A
 attempt; rerun all jobs when retrying a complete matrix so evidence from different attempts cannot be mixed.
 Maintainers control tags/releases.
 
-If archive delivery fails after a complete successful measurement run, dispatch `benchmark-evidence.yml`
+If archive delivery fails after successful measurements, dispatch `benchmark-evidence.yml`
 with its exact `source_run` and `source_attempt`. A fresh standard hosted runner resolves the original source
-from GitHub, downloads only that attempt, and repeats every checksum, report replay, qualification and matrix
+from GitHub, requires all 12 measurement jobs and both compatibility jobs to have passed, downloads only that
+attempt, and repeats every checksum, report replay, qualification and matrix
 check. The manifest records measurement and verification identities separately. This workflow creates an
 immutable Actions artifact and never attaches release assets. It cannot recover missing or failed measurements.
 Archive uploads include the `.work` path explicitly and fail when files are missing.

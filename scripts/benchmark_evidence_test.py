@@ -102,6 +102,36 @@ class EvidenceTests(unittest.TestCase):
             self.assertEqual('2', manifest['verification_run_id'])
             self.assertEqual('verifier', manifest['verification_source_sha'])
 
+    def test_source_cohort_requires_successful_measurements(self):
+        run = dict(id=1, run_attempt=2, head_sha='a' * 40, status='completed', conclusion='failure',
+                   path='.github/workflows/benchmarks.yml')
+        names = [f'Benchmark sustained ({arch}, {workload}, {intensity})' for arch, workload, intensity in
+                 itertools.product(('amd64', 'arm64'), ('mixed', 'cpu', 'memory'), ('standard', 'heavy'))]
+        names.extend(f'Benchmark compatibility ({runner})' for runner in ('ubuntu-24.04', 'ubuntu-24.04-arm'))
+        jobs = dict(jobs=[dict(name=name, conclusion='success') for name in names])
+        jobs['jobs'].append(dict(name='Independently verify hosted release matrix', conclusion='failure'))
+        self.assertEqual(run['head_sha'], EVIDENCE.source_revision(run, jobs, '1', '2'))
+        for field, value in (('id', 9), ('run_attempt', 3), ('head_sha', 'bad'), ('status', 'in_progress'), ('path', 'other')):
+            with self.subTest(field=field), self.assertRaises(SystemExit):
+                EVIDENCE.source_revision(dict(run, **{field: value}), jobs, '1', '2')
+        for failure in ('missing', 'duplicate', 'failed', 'compatibility'):
+            changed = json.loads(json.dumps(jobs))
+            if failure == 'missing':
+                changed['jobs'].pop(0)
+            elif failure == 'duplicate':
+                changed['jobs'].append(changed['jobs'][0])
+            else:
+                changed['jobs'][12 if failure == 'compatibility' else 0]['conclusion'] = 'failure'
+            with self.subTest(failure=failure), self.assertRaises(SystemExit):
+                EVIDENCE.source_revision(run, changed, '1', '2')
+        with tempfile.TemporaryDirectory() as temporary, contextlib.redirect_stdout(io.StringIO()) as output:
+            root = Path(temporary)
+            (root / 'source-run.json').write_text(json.dumps(run))
+            (root / 'source-jobs.json').write_text(json.dumps(jobs))
+            with patch.object(sys, 'argv', ['benchmark-evidence.py', str(root), '--source-cohort', '1', '2']):
+                EVIDENCE.main()
+            self.assertEqual(run['head_sha'] + '\n', output.getvalue())
+
     def test_empty_evidence(self):
         with tempfile.TemporaryDirectory() as temporary, contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
