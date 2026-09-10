@@ -187,7 +187,15 @@ benchmark-matrix: build ## Validate all supported format/profile/codec/mode comb
 
 benchmark-integration: ## Run benchmark integrations with the pinned external tool
 	@python3 scripts/benchmark_matrix_test.py
+	@python3 scripts/benchmark_evidence_test.py
 	@MICROFAT_BENCH_FORTIO="$(CURDIR)/.work/benchmark-tools/fortio" $(GO) test -race ./benchmarks/...
+
+.PHONY: benchmark-kernel benchmark-kernel-v1
+benchmark-kernel: ## Prove native kernel enforcement in an explicitly delegated cgroup
+	@MICROFAT_BENCH_REQUIRE_CONTROLS=1 $(GO) test -v ./benchmarks/system -run '^Test(KernelControls|RealCgroupIntegration)$$' -count=1
+
+benchmark-kernel-v1: ## Prove cgroup v1 enforcement in a networkless QEMU TCG guest
+	@bash scripts/benchmark-kernel.sh
 
 bench: build ## Run the standard benchmark suite in examples/demo (~110ms)
 	@echo "\033[34m==>\033[0m Running standard demo benchmark suite..."

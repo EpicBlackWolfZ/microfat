@@ -469,3 +469,13 @@ calibrated absolute floor; size enforcement uses the default 5% coarse threshold
 See [server benchmark usage](benchmarks/README.md) for configuration fields, controls,
 CI tiers, and evidence replay, and [measurement methodology](benchmarks/methodology.md)
 for uncertainty, histogram, cache, tuning, and memory qualifications.
+
+
+### Hosted benchmark evidence and calibration
+
+- `microfat benchmark qualify --policy hosted-release --input <bundle>`: JSON publication verdict; nonzero for
+  incomplete, uncontrolled or invalid hosted evidence. This never grants dedicated-hardware qualification.
+- `microfat benchmark calibrate --input <bundle-list.json>`: verify listed no-change bundles and generate a
+  candidate runner-class policy from independent training/holdout jobs.
+- `microfat benchmark gate --input <bundle> --calibration <trusted-policy.json>`: retain coarse size gating and
+  enable startup gating only for a matching validated runner class. Unmatched startup results remain report-only.

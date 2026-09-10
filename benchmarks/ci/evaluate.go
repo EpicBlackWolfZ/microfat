@@ -9,6 +9,8 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
 )
 
+const startupMetric = "startup_ns"
+
 const (
 	StartupThresholdPercent = 15.0
 	SizeThresholdPercent    = 5.0
@@ -48,7 +50,7 @@ func Evaluate(comparisons []schema.Comparison, policy Policy) ([]Decision, bool,
 			RelativePercent: c.RelativePercent, Reason: "metric has no calibrated PR gate"}
 		if c.Status != "complete" {
 			d.Status, d.Reason = "inconclusive", c.Reason
-		} else if c.Metric == "artifact_bytes" || c.Metric == "startup_ns" {
+		} else if c.Metric == "artifact_bytes" || c.Metric == startupMetric {
 			d = coarseDecision(c, policy, d)
 		}
 		regression = regression || d.Status == "regression"
@@ -63,7 +65,7 @@ func coarseDecision(c schema.Comparison, policy Policy, d Decision) Decision {
 		return d
 	}
 	threshold, floor := policy.SizePercent, 0.0
-	if c.Metric == "startup_ns" {
+	if c.Metric == startupMetric {
 		if !policy.Calibrated {
 			d.Status, d.Reason = "report_only", "startup gate awaits repeated no-change calibration"
 			return d

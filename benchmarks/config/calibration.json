@@ -1,0 +1,134 @@
+{
+  "version": "v1",
+  "classes": [
+    {
+      "key": "0f8b4ce0b70646e18a06536427fc47f2d6244eaeaeecd191f89452b01bed3616",
+      "floor_ns": 12646662,
+      "status": "report_only",
+      "reason": "insufficient independent jobs",
+      "training": [
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/1",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/10",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/11",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/14"
+      ],
+      "holdout": [],
+      "bundle_digests": [
+        "b55599087fd66f67830f856981dee44f2d606bb67159735ec20871bad95d5adc",
+        "bb3de44062bb88428fde8de90e54f6f5b5c9b8084375f70cb8b1fd518ab6fe4b",
+        "182f3539291c8085807dba0d3877cb32b0f2ff8417b6c883f52ec2ad36f94030",
+        "c5d0ac83fbda86d51af2ab7308b1df9dad3d1677b82ee51e772195681f55d190"
+      ]
+    },
+    {
+      "key": "2829198b5ed7a3d7b5130fc26fff88f6e805c14a9b452dbedb52b0991b8fcd06",
+      "floor_ns": 2465284,
+      "status": "report_only",
+      "reason": "insufficient independent jobs",
+      "training": [
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/2",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/7"
+      ],
+      "holdout": [
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/22",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/29"
+      ],
+      "bundle_digests": [
+        "a27cd4f83b2f475e9dd82f48ca84c2c2daf6430db137e6c41a493f3db8dc4f10",
+        "a35c474b4e1e147034a9d08494e0c9dd1b048cf081a5e8617162c0cdfb92c1ec",
+        "04db08c87f1deec1c2c58c66e25e0b79a4d5f1638a2adca0971a2edea8209e01",
+        "ab369a11b27c7700cecb74f03a3ad4bf1cab1782b4d3efc96810fd13e53e2279"
+      ]
+    },
+    {
+      "key": "2a6b552015cdad6743e619d9d97dccb99d02fbf06b2bb24db066459dcfbdd37f",
+      "floor_ns": 5685742,
+      "status": "report_only",
+      "reason": "insufficient independent jobs",
+      "training": [
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/0",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/15",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/4",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/6",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/9"
+      ],
+      "holdout": [
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/20",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/21",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/25",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/28"
+      ],
+      "bundle_digests": [
+        "9b02d17fa1b31e5467aa6d63959d18d1fda321c3454b6d1f10b1e8deb02ffe59",
+        "fab89a5859bfbae78d847f989b88b2ed4754479056d88b39aa1c18f056373ed3",
+        "23bfa95d86b654ccd9ac55430afd39dfafa75a196dc2f6cc4d4d425c52d5a206",
+        "146e9a675e9b9666a7dcc9309d78ad1e3338c2a9b4169a9d3c62ff27462a4ae6",
+        "e9454eb7d68abed66348f927c69d0162e53dbb5dc80f49370c6a558420d8a44b",
+        "acd6636ae02deb4fe50bb5ef6933909604ac12b7274888e4648e68f29cb7fc3c",
+        "01fd8d26865f4adeaff9378f9952a97b3de95d7dd7cd167987dd3242c92882f5",
+        "988e36b3c38f7a1883991ddbe0dfbd5591c956c3ccb7500db282e911ec059c7f",
+        "ee1cf6a1b55f1a708648824b5568042d77ebc5451fc268834ed709a32a41ae9e"
+      ]
+    },
+    {
+      "key": "2cb6fbfae00a9933e450d71b0ac9be24cbbf5a4a182282f58c6771f45ef47583",
+      "floor_ns": 3279216,
+      "status": "report_only",
+      "reason": "insufficient independent jobs",
+      "training": [
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/12",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/16",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/17",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/19",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/3"
+      ],
+      "holdout": [
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/23",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/24",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/26",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/27"
+      ],
+      "bundle_digests": [
+        "85c624b3ff9d2653a15fa104bd7bac2bf8b17f82c04780a9e3b80fb21e53b45e",
+        "b70252a26035c617a1bd32de09d97b7403cc12567ecb26f61443c57178a9bf62",
+        "15d52c614fc3be941573dbd39b0005620798e4a37e17bd7ea668a33f259e8b32",
+        "284ab943d57e8ed199b94ed269eb74f6dc198097eb2e093a61464906c8d394c1",
+        "acca5cb02722afd558201dcfcea4f9165053fe7bb1f5697d0ec695c6a278e72a",
+        "3dfdabf777985d727d862b5c6137d098db0f9f5863c2762c3c577e9c9dfeaf1f",
+        "d8ad4c39869a520130f633b4e39d34bafc8db5d73b501e546c23f42a16493b1a",
+        "310f6fbd8d5f1bf45b6e1d248982e49f5746468a2b0dc0bb1a3bd72fc7b7276f",
+        "468ce7bae1a8e9c706ebbd616e509eeefa2a7a63b8adb9e36b9a4d9f8a849554"
+      ]
+    },
+    {
+      "key": "af7ea7da7e8a1b89ab961bd02053b29d6598bb5ee36dd43884b751fff22a3ec8",
+      "floor_ns": 2717614,
+      "status": "report_only",
+      "reason": "insufficient independent jobs",
+      "training": [
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/13"
+      ],
+      "holdout": [],
+      "bundle_digests": [
+        "29877325d7cc4d43a756ca13a023477c088e0e55daf5ee3e7f81b2194e685776"
+      ]
+    },
+    {
+      "key": "f608348e97c610896af7250a0abc9b024984aaf0a51bd5f9933faa095d984e6f",
+      "floor_ns": 34088834,
+      "status": "report_only",
+      "reason": "insufficient independent jobs",
+      "training": [
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/18",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/5",
+        "EpicBlackWolfZ/microfat/34452570611/1/calibration/8"
+      ],
+      "holdout": [],
+      "bundle_digests": [
+        "575419ce7b8faf3f793ffdb42adf0fe155ee8c5baff2656a40aa655a1b24f540",
+        "c183edd19cda8dcec8c2e27f8a531940d3ab3b9c6a822eaded4728b4b2e59b6c",
+        "449d1bef8ae0e7db6fae1859b05a7eeece23e1b164f7d1e1ae1e137e3ddffc0c"
+      ]
+    }
+  ]
+}

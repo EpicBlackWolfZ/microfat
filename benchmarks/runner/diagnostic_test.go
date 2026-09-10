@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+const diagnosticPartial = "partial"
+
 func TestMissingPayloadExecDoesNotAttributePhases(t *testing.T) {
 	t.Parallel()
 	const observed, memfd = "observed", "memfd"
@@ -16,10 +18,10 @@ func TestMissingPayloadExecDoesNotAttributePhases(t *testing.T) {
 		entries                  int
 	}{
 		{"native payload captured", nativeMode, observed, observed, 2},
-		{"native helper only", nativeMode, observed, "partial", 1},
+		{"native helper only", nativeMode, observed, diagnosticPartial, 1},
 		{"memfd payload captured", memfd, observed, observed, 3},
-		{"memfd launcher only", memfd, observed, "partial", 2},
-		{"cache launcher only", "cache", observed, "partial", 2},
+		{"memfd launcher only", memfd, observed, diagnosticPartial, 2},
+		{"cache launcher only", "cache", observed, diagnosticPartial, 2},
 		{"trace unavailable", memfd, "unavailable", "unavailable", 0},
 		{"failed child", memfd, "failed", "failed", 1},
 	} {

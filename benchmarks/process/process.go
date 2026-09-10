@@ -26,11 +26,13 @@ type Spec struct {
 }
 
 type Buffer struct {
-	mu       sync.Mutex
-	data     bytes.Buffer
-	limit    int
-	overflow bool
-	cancel   context.CancelFunc
+	mu          sync.Mutex
+	data        bytes.Buffer
+	limit       int
+	overflow    bool
+	cancel      context.CancelFunc
+	changed     chan struct{}
+	firstLineAt time.Time
 }
 
 func (b *Buffer) Write(data []byte) (int, error) {
@@ -41,7 +43,17 @@ func (b *Buffer) Write(data []byte) (int, error) {
 		b.cancel()
 		return 0, ErrOutputLimit
 	}
-	return b.data.Write(data)
+	n, err := b.data.Write(data)
+	if b.firstLineAt.IsZero() && bytes.IndexByte(b.data.Bytes(), '\n') >= 0 {
+		b.firstLineAt = time.Now()
+	}
+	if b.changed != nil {
+		select {
+		case b.changed <- struct{}{}:
+		default:
+		}
+	}
+	return n, err
 }
 
 func (b *Buffer) Bytes() []byte {
@@ -74,7 +86,7 @@ func Start(ctx context.Context, spec Spec) (*Child, error) {
 	cmd.Dir, cmd.Env, cmd.WaitDelay = spec.Dir, spec.Env, WaitDelay
 	configureGroup(cmd)
 	cmd.Cancel = func() error { return signalGroup(cmd.Process, true) }
-	out := &Buffer{limit: MaxOutput, cancel: cancel}
+	out := &Buffer{limit: MaxOutput, cancel: cancel, changed: make(chan struct{}, 1)}
 	errOut := &Buffer{limit: MaxOutput, cancel: cancel}
 	cmd.Stdout, cmd.Stderr = out, errOut
 	if err := cmd.Start(); err != nil {
@@ -101,6 +113,33 @@ func (c *Child) Stderr() []byte          { return c.stderr.Bytes() }
 func (c *Child) Done() <-chan struct{}   { return c.done }
 func (c *Child) Wait() error             { <-c.done; return c.err }
 func (c *Child) State() *os.ProcessState { <-c.done; return c.cmd.ProcessState }
+
+// FirstLine returns the bounded first stdout line and the time the collector received its newline.
+func (c *Child) FirstLine(ctx context.Context) ([]byte, time.Time, error) {
+	for {
+		c.stdout.mu.Lock()
+		line, _, found := bytes.Cut(c.stdout.data.Bytes(), []byte{'\n'})
+		at := c.stdout.firstLineAt
+		line = bytes.Clone(line)
+		c.stdout.mu.Unlock()
+		if found {
+			return line, at, nil
+		}
+		select {
+		case <-c.stdout.changed:
+		case <-ctx.Done():
+			return nil, time.Time{}, ctx.Err()
+		case <-c.done:
+			// Drain the final write notification before deciding stdout ended without a line.
+			select {
+			case <-c.stdout.changed:
+				continue
+			default:
+			}
+			return nil, time.Time{}, errors.Join(errors.New("child exited before readiness"), c.err)
+		}
+	}
+}
 
 func (c *Child) Stop(ctx context.Context) error {
 	select {

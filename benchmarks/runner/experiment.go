@@ -74,7 +74,7 @@ func RunExperiment(ctx context.Context, cfg ExperimentConfig, opts RunOptions) (
 	exp := &schema.ExperimentV2{SchemaVersion: schema.VersionV2, ID: cfg.Name + "-" + now.Format("20060102T150405.000000000Z"),
 		CreatedAt: now.Format(time.RFC3339Nano), SourceSHA: built.SourceSHA, Dirty: built.Dirty,
 		ConfigSHA256: configDigest, Config: configData, Environment: *environment, Artifacts: built.Artifacts,
-		Configurations: built.Configurations, Schedule: schedule, Seed: cfg.Seed,
+		Configurations: built.Configurations, Schedule: schedule, Seed: cfg.Seed, Runner: env.Runner(),
 		Warnings: []string{"filesystem page-cache state is uncontrolled"}}
 	if cfg.RunnerIdentity == "" {
 		exp.Warnings = append(exp.Warnings, "release hardware qualification has not been established")
@@ -128,6 +128,9 @@ func RunExperiment(ctx context.Context, cfg ExperimentConfig, opts RunOptions) (
 
 func releaseEligible(cfg ExperimentConfig, exp *schema.ExperimentV2) bool {
 	const releaseMinimumBlocks = 20
+	if exp.Runner != nil && exp.Runner.Provider == schema.HostedProvider {
+		return false
+	}
 	if cfg.RunnerIdentity == "" || cfg.DisableObserver || cfg.Blocks < releaseMinimumBlocks || !exp.Complete || exp.Dirty ||
 		len(exp.Trials) == 0 || len(cfg.Target.Affinity) == 0 || len(cfg.Generator.Affinity) == 0 ||
 		cfg.Target.CgroupRoot == "" || cfg.Generator.CgroupRoot == "" {
@@ -153,7 +156,8 @@ func releaseEligible(cfg ExperimentConfig, exp *schema.ExperimentV2) bool {
 }
 
 func encodeExtra(files map[string][]byte, path string, value any) error {
-	data, err := schema.CanonicalV2(value)
+	// Keep raw telemetry deterministic without the repeated indentation cost of full cgroup counters.
+	data, err := json.Marshal(value, json.Deterministic(true))
 	if err != nil {
 		return err
 	}
@@ -233,8 +237,12 @@ func executeSchedule(ctx context.Context, cfg ExperimentConfig, opts RunOptions,
 	return nil
 }
 
+// A release shard retains 200 trials with roughly 160 full cgroup samples each,
+// plus up to two seconds of millisecond exec-diagnostic samples per trial.
+// Keep both within a finite bound; reports have a separate bundle limit.
+const maxRetainedBytes = 1024 * 1024 * 1024
+
 func retainRaw(files, raw map[string][]byte, retainedBytes *int) error {
-	const maxRetainedBytes = 256 * 1024 * 1024
 	additional := 0
 	for _, data := range raw {
 		if len(data) > schema.MaxEvidenceBytes || len(data) > maxRetainedBytes-*retainedBytes-additional {

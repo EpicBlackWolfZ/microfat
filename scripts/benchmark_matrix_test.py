@@ -36,11 +36,11 @@ class MatrixTests(unittest.TestCase):
                     self.assertEqual({4, 32}, {case["iterations"] for case in cases})
                     self.assertTrue(all(case["workload"] == workload for case in cases))
 
-    def test_release_requires_explicit_runner(self):
+    def test_release_requires_explicit_controls(self):
         result = subprocess.run(["python3", "scripts/benchmark-matrix.py", "release"],
                                 cwd=REPOSITORY, capture_output=True, text=True, check=False)
         self.assertNotEqual(0, result.returncode)
-        self.assertIn("runner_identity", result.stderr)
+        self.assertIn("target and generator controls", result.stderr)
         result = subprocess.run(["python3", "scripts/benchmark-matrix.py", "release", "--list"],
                                 cwd=REPOSITORY, capture_output=True, text=True, check=True)
         self.assertEqual(2, len(json.loads(result.stdout)))

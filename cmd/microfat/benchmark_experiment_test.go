@@ -19,6 +19,8 @@ import (
 )
 
 const experimentInputFlag = "--input"
+const experimentMissing = "/missing"
+const experimentGate = "gate"
 
 func cliExperiment(t *testing.T) string {
 	t.Helper()
@@ -46,7 +48,7 @@ func TestExperimentReadCommands(t *testing.T) {
 	for _, args := range [][]string{
 		{cmdBenchmark, "verify", bundle}, {cmdBenchmark, "report", experimentInputFlag, bundle, "--format", "markdown"},
 		{cmdBenchmark, "report", experimentInputFlag, bundle, flagJSON}, {cmdBenchmark, "compare", experimentInputFlag, bundle, flagJSON},
-		{cmdBenchmark, "compare", experimentInputFlag, bundle}, {cmdBenchmark, "gate", experimentInputFlag, bundle},
+		{cmdBenchmark, "compare", experimentInputFlag, bundle}, {cmdBenchmark, experimentGate, experimentInputFlag, bundle},
 	} {
 		cmd := newRootCmd()
 		var stdout bytes.Buffer
@@ -57,12 +59,12 @@ func TestExperimentReadCommands(t *testing.T) {
 		assert.NotEmpty(t, stdout.String())
 	}
 	for _, args := range [][]string{
-		{cmdBenchmark, "report"}, {cmdBenchmark, "report", experimentInputFlag, "/missing"},
+		{cmdBenchmark, "report"}, {cmdBenchmark, "report", experimentInputFlag, experimentMissing},
 		{cmdBenchmark, "compare", experimentInputFlag, bundle, "--baseline", "missing"},
 		{cmdBenchmark, "compare", experimentInputFlag, bundle, "--format", "invalid"},
-		{cmdBenchmark, "verify", "/missing"}, {cmdBenchmark, "gate", experimentInputFlag, "/missing"},
-		{cmdBenchmark, "gate", experimentInputFlag, bundle, "--startup-calibrated"},
-		{cmdBenchmark, "child", "{}"}, {cmdBenchmark, "child", `{"path":"/missing"}`},
+		{cmdBenchmark, "verify", experimentMissing}, {cmdBenchmark, experimentGate, experimentInputFlag, experimentMissing},
+		{cmdBenchmark, experimentGate, experimentInputFlag, bundle, "--startup-calibrated"},
+		{cmdBenchmark, "child", "{}"}, {cmdBenchmark, "child", `{"path":experimentMissing}`},
 		{cmdBenchmark, "observe", "{"}, {cmdBenchmark, "observe", "{}"},
 	} {
 		cmd := newRootCmd()
@@ -93,7 +95,7 @@ func TestExperimentRunCommand(t *testing.T) {
 	executeExperiment = func(context.Context, runner.ExperimentConfig, runner.RunOptions) (*runner.ExperimentResult, error) {
 		return nil, errors.New("execution failed")
 	}
-	for _, args := range [][]string{{cmdBenchmark, "run"}, {cmdBenchmark, "run", "--config", "/missing"},
+	for _, args := range [][]string{{cmdBenchmark, "run"}, {cmdBenchmark, "run", "--config", experimentMissing},
 		{cmdBenchmark, "run", "--config", config}} {
 		cmd := newRootCmd()
 		cmd.SetOut(io.Discard)

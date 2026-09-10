@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/ci"
@@ -21,7 +22,7 @@ var executeExperiment = runner.RunExperiment
 
 func addExperimentCommands(parent *cobra.Command) {
 	parent.AddCommand(newExperimentRunCmd(), newExperimentReadCmd("report"), newExperimentReadCmd("compare"), newExperimentVerifyCmd())
-	parent.AddCommand(newExperimentGateCmd())
+	parent.AddCommand(newExperimentGateCmd(), newExperimentQualifyCmd(), newExperimentCalibrateCmd())
 	parent.AddCommand(&cobra.Command{Use: "observe <configuration>", Hidden: true, Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var cfg system.ObserverConfig
@@ -40,6 +41,32 @@ func addExperimentCommands(parent *cobra.Command) {
 			}
 			return system.ExecChild(cfg)
 		}})
+}
+
+func newExperimentQualifyCmd() *cobra.Command {
+	var input, policy string
+	cmd := &cobra.Command{Use: "qualify --policy hosted-release --input <bundle>",
+		Short: "Verify hosted release publication requirements without claiming dedicated hardware", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if policy != ci.HostedRelease {
+				return errors.New("unsupported publication policy")
+			}
+			exp, err := report.ReadBundle(input)
+			if err != nil {
+				return err
+			}
+			q := ci.QualifyHosted(exp)
+			if err := json.MarshalWrite(cmd.OutOrStdout(), q); err != nil {
+				return err
+			}
+			if !q.Publishable {
+				return errors.New("hosted publication requirements not met")
+			}
+			return nil
+		}}
+	cmd.Flags().StringVar(&input, "input", "", "Verified paired evidence bundle")
+	cmd.Flags().StringVar(&policy, "policy", ci.HostedRelease, "Publication policy")
+	return cmd
 }
 
 func newExperimentRunCmd() *cobra.Command {
@@ -74,13 +101,28 @@ func newExperimentRunCmd() *cobra.Command {
 }
 
 func newExperimentGateCmd() *cobra.Command {
-	var input string
+	var input, calibrationPath string
 	policy := ci.DefaultPolicy()
 	cmd := &cobra.Command{Use: "gate --input <bundle>", Short: "Evaluate coarse base/head regression policy", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			exp, err := report.ReadBundle(input)
 			if err != nil {
 				return err
+			}
+			if calibrationPath != "" {
+				data, err := report.ReadBounded(calibrationPath)
+				if err != nil {
+					return err
+				}
+				var calibration ci.Calibration
+				if err := json.Unmarshal(data, &calibration, json.RejectUnknownMembers(true)); err != nil {
+					return err
+				}
+				var reason string
+				policy, reason = calibration.Policy(exp)
+				if _, err := fmt.Fprintln(cmd.OutOrStdout(), "Startup calibration:", reason); err != nil {
+					return err
+				}
 			}
 			comparisons, err := compare.Revisions(exp)
 			if err != nil {
@@ -107,8 +149,56 @@ func newExperimentGateCmd() *cobra.Command {
 			return nil
 		}}
 	cmd.Flags().StringVar(&input, "input", "", "Verified paired base/head evidence bundle")
+	cmd.Flags().StringVar(&calibrationPath, "calibration", "", "Trusted base revision calibration policy")
 	cmd.Flags().BoolVar(&policy.Calibrated, "startup-calibrated", false, "Enable a previously calibrated startup threshold")
 	cmd.Flags().Float64Var(&policy.StartupFloorNS, "startup-floor-ns", 0, "Absolute startup regression floor from no-change calibration")
+	return cmd
+}
+
+func newExperimentCalibrateCmd() *cobra.Command {
+	var input string
+	cmd := &cobra.Command{Use: "calibrate --input <bundle-list.json>", Short: "Build an independent no-change calibration policy",
+		Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+			data, err := report.ReadBounded(input)
+			if err != nil {
+				return err
+			}
+			var paths []string
+			if err := json.Unmarshal(data, &paths); err != nil {
+				return err
+			}
+			const maxCalibrationBundles = 1000
+			if len(paths) == 0 || len(paths) > maxCalibrationBundles {
+				return errors.New("invalid calibration bundle count")
+			}
+			var experiments []*schema.ExperimentV2
+			digests := make(map[string][]string)
+			for _, path := range paths {
+				exp, err := report.ReadBundle(path)
+				if err != nil {
+					return err
+				}
+				key, err := ci.ClassKey(exp)
+				if err != nil {
+					return err
+				}
+				sums, err := report.ReadBounded(filepath.Join(path, "SHA256SUMS"))
+				if err != nil {
+					return err
+				}
+				digests[key] = append(digests[key], schema.Digest(sums))
+				experiments = append(experiments, exp)
+			}
+			policy, err := ci.Calibrate(experiments)
+			if err != nil {
+				return err
+			}
+			for i := range policy.Classes {
+				policy.Classes[i].Bundles = digests[policy.Classes[i].Key]
+			}
+			return json.MarshalWrite(cmd.OutOrStdout(), policy, json.Deterministic(true))
+		}}
+	cmd.Flags().StringVar(&input, "input", "", "JSON list of independently verified no-change bundle directories")
 	return cmd
 }
 

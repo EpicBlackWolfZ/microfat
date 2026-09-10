@@ -34,7 +34,9 @@ must not be inferred from them. Percentiles retain the source histogram's resolu
 
 ## Time and memory scope
 
-Primary startup is helper-spawn-to-server-readiness wall time. It includes helper bootstrap, launcher extraction,
+Primary startup is helper-spawn-to-server-readiness wall time. Protocol `helper-spawn-to-ready-line-v2`
+timestamps the first complete stdout readiness line in the bounded collector, before later parsing or observer
+setup. It removes the former 5 ms polling quantization; startup comparisons across protocol versions are invalid. It includes helper bootstrap, launcher extraction,
 kernel execution, and application initialization; it is not an isolated dispatch microbenchmark. Native and fat
 arms use the same helper/control path. Primary throughput and latency come from the subsequent measurement window.
 
@@ -115,3 +117,28 @@ never substitutes the packer linked into a potentially older harness executable.
 harness's own VCS revision and dirty state come from its build information; an unknown
 or dirty harness prevents release eligibility. A dirty base packer/stub also marks the
 experiment dirty.
+
+
+## Hosted publication and calibration
+
+Evidence schema v2 optionally records runner provider, image/build, run/attempt/job/repetition and startup protocol.
+Legacy bundles without this block remain readable and retain their original rendering. The metadata describes
+reported VM identity rather than independently attesting physical hardware. Hosted runs always retain
+`release_eligible=false`; a separate hosted publication policy verifies successful measurement and evidence
+completeness. Its verdict does not mean absence of regression or dedicated-hardware certification.
+
+Same-revision calibration uses independent hosted jobs, with repetitions 0-19 assigned to training and 20-29 to
+holdout before measurements are observed. Group by architecture, CPU model, kernel, image build, Go version,
+startup protocol and measurement settings; exclude only revision-independent names and transient cgroup paths.
+Choose twice the largest absolute training median startup difference as the absolute floor. Require 20 training
+and 10 holdout jobs in a class, no duplicate job identities, and no holdout coarse-gate failures. Other classes
+remain report-only. Do not automatically loosen floors, trim outliers, or rerun only unfavorable observations.
+
+Process lifetime CPU/fault/context-switch totals come from terminal wait4 accounting. Sampled /proc/status context
+switch counters are explicitly labelled as thread-leader counters. V1 CPU-accounting time uses nanoseconds;
+memory failure counts and throttled periods are counters. These remain distinct from sampled memory maxima,
+process RSS and cgroup memory charges. Functional OOM probes run in separate small groups with the harness outside.
+
+Cgroup memory amounts use byte units, including v1 hierarchical `total_*` fields and v2 slab/THP/cache fields.
+Event and page-fault counters remain counts, following the [kernel v2 memory.stat reference](https://docs.kernel.org/admin-guide/cgroup-v2.html#memory)
+and [v1 stat reference](https://docs.kernel.org/admin-guide/cgroup-v1/memory.html#stat-file).

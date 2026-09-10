@@ -12,6 +12,8 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
 )
 
+const unitBytes = "bytes"
+
 const kibibyte = 1024
 
 // ReadProcess records kernel counters separately from sampled current memory values.
@@ -20,7 +22,7 @@ func ReadProcess(procRoot string, pid int, phase string) map[string]schema.Measu
 	// #nosec G304 -- explicit proc root, numeric PID, fixed status filename.
 	status, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "status"))
 	if err != nil {
-		result["rss_bytes"] = schema.Unavailable("bytes", phase, "proc/status", err.Error())
+		result["rss_bytes"] = schema.Unavailable(unitBytes, phase, "proc/status", err.Error())
 		return result
 	}
 	fields := ParseFields(string(status))
@@ -28,10 +30,10 @@ func ReadProcess(procRoot string, pid int, phase string) map[string]schema.Measu
 		key, name, unit string
 		scale           float64
 	}{
-		{"VmRSS", "rss_bytes", "bytes", kibibyte}, {"VmSize", "vss_bytes", "bytes", kibibyte},
-		{"VmHWM", "lifetime_peak_rss_bytes", "bytes", kibibyte},
-		{"voluntary_ctxt_switches", "voluntary_context_switches", "count", 1},
-		{"nonvoluntary_ctxt_switches", "involuntary_context_switches", "count", 1},
+		{"VmRSS", "rss_bytes", unitBytes, kibibyte}, {"VmSize", "vss_bytes", unitBytes, kibibyte},
+		{"VmHWM", "lifetime_peak_rss_bytes", unitBytes, kibibyte},
+		{"voluntary_ctxt_switches", "leader_voluntary_context_switches", "count", 1},
+		{"nonvoluntary_ctxt_switches", "leader_involuntary_context_switches", "count", 1},
 	} {
 		value, err := firstNumber(fields[field.key])
 		if err != nil {
@@ -74,7 +76,14 @@ func firstNumber(value string) (float64, error) {
 func (s *Sandbox) Read(phase string) map[string]schema.Measurement {
 	result := make(map[string]schema.Measurement)
 	for _, root := range s.Paths {
-		for _, file := range []string{"memory.current", "memory.peak", "memory.usage_in_bytes", "memory.max_usage_in_bytes"} {
+		for _, file := range []string{"memory.current", "memory.peak", "memory.usage_in_bytes", "memory.max_usage_in_bytes",
+			"cpuacct.usage", "memory.failcnt"} {
+			unit := unitBytes
+			if file == "cpuacct.usage" {
+				unit = "ns"
+			} else if file == "memory.failcnt" {
+				unit = "count"
+			}
 			// #nosec G304 -- benchmark-owned cgroup root and fixed controller filename.
 			data, err := os.ReadFile(filepath.Join(root, file))
 			if err != nil {
@@ -82,10 +91,10 @@ func (s *Sandbox) Read(phase string) map[string]schema.Measurement {
 			}
 			value, err := firstNumber(string(data))
 			if err != nil {
-				result[file] = schema.Unavailable("bytes", phase, "cgroup/"+file, err.Error())
+				result[file] = schema.Unavailable(unit, phase, "cgroup/"+file, err.Error())
 				continue
 			}
-			result[file] = schema.Measured(value, "bytes", phase, "cgroup/"+file)
+			result[file] = schema.Measured(value, unit, phase, "cgroup/"+file)
 		}
 		for _, file := range []string{"cpu.stat", "memory.stat", "memory.events"} {
 			// #nosec G304 -- benchmark-owned cgroup root and fixed controller filename.
@@ -100,7 +109,7 @@ func (s *Sandbox) Read(phase string) map[string]schema.Measurement {
 				}
 				unit := "count"
 				if file == "memory.stat" && isMemoryBytes(key) {
-					unit = "bytes"
+					unit = unitBytes
 				}
 				if strings.HasSuffix(key, "_usec") {
 					unit = "us"
@@ -113,14 +122,18 @@ func (s *Sandbox) Read(phase string) map[string]schema.Measurement {
 		}
 	}
 	if len(result) == 0 {
-		result["cgroup_memory_bytes"] = schema.Unavailable("bytes", phase, "cgroup", "target cgroup telemetry unavailable")
+		result["cgroup_memory_bytes"] = schema.Unavailable(unitBytes, phase, "cgroup", "target cgroup telemetry unavailable")
 	}
 	return result
 }
 
 func isMemoryBytes(key string) bool {
+	key = strings.TrimPrefix(key, "total_") // v1 hierarchical counters preserve the base field's unit.
 	for _, name := range []string{"anon", "file", "shmem", "kernel", "kernel_stack", "pagetables", "sock", "slab",
-		"rss", "cache", "mapped_file", "swap", "total_rss", "total_cache", "active_anon", "inactive_anon", "active_file", "inactive_file"} {
+		"sec_pagetables", "percpu", "vmalloc", "zswap", "zswapped", "file_mapped", "file_dirty", "file_writeback", "swapcached",
+		"anon_thp", "file_thp", "shmem_thp", "unevictable", "slab_reclaimable", "slab_unreclaimable", "hugetlb",
+		"rss", "rss_huge", "cache", "mapped_file", "swap", "dirty", "writeback", "hierarchical_memory_limit", "hierarchical_memsw_limit",
+		"active_anon", "inactive_anon", "active_file", "inactive_file"} {
 		if key == name {
 			return true
 		}

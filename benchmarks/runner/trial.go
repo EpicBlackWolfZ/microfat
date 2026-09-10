@@ -27,7 +27,6 @@ import (
 const (
 	readyTimeout       = 15 * time.Second
 	stopTimeout        = 5 * time.Second
-	readyPoll          = 5 * time.Millisecond
 	diagnosticTimeout  = 2 * time.Second
 	trialGrace         = 30 * time.Second
 	maxDiagnosticBytes = 1024 * 1024
@@ -113,12 +112,12 @@ func runProcessTrial(ctx context.Context, cfg ExperimentConfig, opts RunOptions,
 		trial.Reason = sampleErr.Error()
 		return trial, files
 	}
-	url, err := awaitReady(ctx, child)
+	url, readyAt, err := awaitReadyAt(ctx, child)
 	if err != nil {
 		trial.Reason = err.Error()
 		return trial, files
 	}
-	trial.Metrics["startup_ns"] = schema.Measured(float64(time.Since(launch).Nanoseconds()), "ns", "startup", "helper-spawn-to-ready")
+	trial.Metrics["startup_ns"] = schema.Measured(float64(readyAt.Sub(launch).Nanoseconds()), "ns", "startup", schema.StartupProtocol)
 	trial.Metrics["artifact_bytes"] = schema.Measured(float64(artifact.Bytes), "bytes", "artifact", "file-stat")
 	addArtifactMetrics(config, artifact, built, &trial)
 	trial.Metrics["extraction_peak_bytes"] = schema.Unavailable("bytes", "extraction", "observer",
@@ -172,32 +171,27 @@ func prewarm(path, level, cache string) error {
 }
 
 func awaitReady(ctx context.Context, child *process.Child) (string, error) {
+	url, _, err := awaitReadyAt(ctx, child)
+	return url, err
+}
+
+func awaitReadyAt(ctx context.Context, child *process.Child) (string, time.Time, error) {
 	ctx, cancel := context.WithTimeout(ctx, readyTimeout)
 	defer cancel()
-	ticker := time.NewTicker(readyPoll)
-	defer ticker.Stop()
-	for {
-		line, _, found := bytes.Cut(child.Stdout(), []byte{'\n'})
-		if found {
-			var message struct {
-				URL string `json:"url"`
-			}
-			if err := json.Unmarshal(line, &message); err != nil {
-				return "", err
-			}
-			if !strings.HasPrefix(message.URL, "http://127.0.0.1:") {
-				return "", errors.New("invalid readiness URL")
-			}
-			return message.URL, nil
-		}
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-child.Done():
-			return "", fmt.Errorf("target exited before readiness: %w: %s", child.Wait(), child.Stderr())
-		case <-ticker.C:
-		}
+	line, at, err := child.FirstLine(ctx)
+	if err != nil {
+		return "", at, fmt.Errorf("target readiness: %w: %s", err, child.Stderr())
 	}
+	var message struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(line, &message); err != nil {
+		return "", at, err
+	}
+	if !strings.HasPrefix(message.URL, "http://127.0.0.1:") {
+		return "", at, errors.New("invalid readiness URL")
+	}
+	return message.URL, at, nil
 }
 
 func diagnostics(ctx context.Context, url string) (map[string]string, error) {

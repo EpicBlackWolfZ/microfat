@@ -131,14 +131,18 @@ func TestTelemetryAndAvailability(t *testing.T) {
 	}
 	cgroup := t.TempDir()
 	for name, data := range map[string]string{"memory.current": "2048", "memory.peak": "bad",
-		"cpu.stat":    "usage_usec 10\nnr_throttled 1\nthrottled_time 2\ninvalid text\n",
-		"memory.stat": "shmem 100\npgfault 4\n", "memory.events": "oom 0\n"} {
+		"cpu.stat":      "usage_usec 10\nnr_throttled 1\nthrottled_time 2\ninvalid text\n",
+		"memory.stat":   "shmem 100\npgfault 4\nslab_reclaimable 8192\ntotal_rss_huge 4096\ntotal_pgfault 7\n",
+		"memory.events": "oom 0\n"} {
 		require.NoError(t, os.WriteFile(filepath.Join(cgroup, name), []byte(data), controlMode))
 	}
 	s := &Sandbox{Paths: []string{cgroup}}
 	values := s.Read("steady_state")
 	assert.Equal(t, "count", values["memory.stat/pgfault"].Unit)
 	assert.Equal(t, "bytes", values["memory.stat/shmem"].Unit)
+	assert.Equal(t, "bytes", values["memory.stat/slab_reclaimable"].Unit)
+	assert.Equal(t, "bytes", values["memory.stat/total_rss_huge"].Unit)
+	assert.Equal(t, "count", values["memory.stat/total_pgfault"].Unit)
 	assert.Equal(t, "us", values["cpu.stat/usage_usec"].Unit)
 	assert.Nil(t, values["memory.peak"].Value)
 	assert.Nil(t, (&Sandbox{}).Read("startup")["cgroup_memory_bytes"].Value)

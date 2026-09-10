@@ -34,14 +34,19 @@ def main():
     parser.add_argument("--workload", choices=("mixed", "cpu", "memory"), default="mixed")
     parser.add_argument("--output", type=Path, default=Path(".work/benchmark-matrix"))
     parser.add_argument("--controls", type=Path, help="JSON object with explicit target/generator control settings")
+    parser.add_argument("--intensity", choices=("standard", "heavy"), help="Run one sustained shard")
     parser.add_argument("--list", action="store_true", help="Print the complete matrix without execution")
     args = parser.parse_args()
     matrix = list(cases(args.tier, args.workload))
+    if args.intensity:
+        matrix = [case for case in matrix if case['name'].endswith('-' + args.intensity)]
     controls = json.loads(args.controls.read_text()) if args.controls else {}
+    if not isinstance(controls, dict):
+        parser.error("control file must contain a JSON object")
     if set(controls) - {"target", "generator", "runner_identity"}:
         parser.error("control file may contain only target, generator and runner_identity settings")
-    if args.tier == "release" and not args.list and not controls.get("runner_identity"):
-        parser.error("release measurement requires an explicit qualified runner_identity and resource controls")
+    if args.tier == "release" and not args.list and not all(controls.get(role) for role in ('target', 'generator')):
+        parser.error("hosted release measurement requires explicit target and generator controls")
     if args.list:
         print(json.dumps(matrix, indent=2))
         return 0
@@ -53,7 +58,8 @@ def main():
         config = args.output / (scenario["name"] + ".json")
         config.write_text(json.dumps(scenario, indent=2) + "\n")
         env = dict(os.environ, BENCHMARK_CONFIG=str(config.resolve()),
-                   BENCHMARK_OUTPUT=str((args.output / scenario["name"]).resolve()))
+                   BENCHMARK_OUTPUT=str((args.output / scenario["name"]).resolve()),
+                   BENCHMARK_HOSTED_RELEASE='1' if args.tier == 'release' else '0')
         try:
             with subprocess.Popen(["bash", "scripts/benchmark-ci.sh"], env=env, start_new_session=True) as run:
                 try:
@@ -69,12 +75,13 @@ def main():
                     raise
             outcome = {"scenario": scenario["name"], "exit_code": status}
             if args.tier == "release" and status == 0:
-                bundle = Path((args.output / scenario["name"] / "latest-bundle.txt").read_text().strip())
-                evidence = json.loads((bundle / "raw.json").read_text())
-                if not evidence["release_eligible"]:
+                evidence = json.loads((args.output / scenario["name"] / 'qualification.json').read_text())
+                if not evidence["publishable"]:
                     outcome.update(exit_code=1, reason="experiment did not meet release qualification")
         except subprocess.TimeoutExpired:
             outcome = {"scenario": scenario["name"], "exit_code": 1, "reason": "matrix case timeout"}
+        except (OSError, ValueError, KeyError) as error:
+            outcome = {"scenario": scenario["name"], "exit_code": 1, "reason": str(error)}
         outcomes.append(outcome)
         (args.output / "outcomes.json").write_text(json.dumps(outcomes, indent=2) + "\n")
     return int(any(item["exit_code"] != 0 for item in outcomes))
