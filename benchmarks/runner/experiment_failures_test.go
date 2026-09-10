@@ -3,6 +3,8 @@ package runner
 import (
 	"bytes"
 	"context"
+	json "encoding/json/v2"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -302,4 +304,46 @@ func TestRetainedEvidenceBudget(t *testing.T) {
 	total = maxRetainedBytes
 	require.Error(t, retainRaw(files, map[string][]byte{"trials/two": []byte("two")}, &total))
 	assert.NotContains(t, files, "trials/two")
+}
+
+func TestReleaseEvidenceCapacity(t *testing.T) {
+	t.Parallel()
+	// Include both full-controller telemetry and the separate two-second exec trace.
+	// Reuse sample maps/encoded bytes to test the entire schedule without allocating a GiB.
+	const trials, observedSamples, traceSamples, counters = 200, 165, 2100, 100
+	metrics := make(map[string]schema.Measurement)
+	for i := range counters {
+		name := fmt.Sprintf("memory.stat/workingset_refault_anon_%03d", i)
+		metrics[name] = schema.Measured(123456789012, "count", "steady_state", "cgroup/memory.stat")
+	}
+	samples := make([]schema.ResourceSample, observedSamples)
+	for i := range samples {
+		samples[i] = schema.ResourceSample{ElapsedNS: int64(i) * 250000000, Phase: "steady_state", Metrics: metrics}
+	}
+	traceMetrics := make(map[string]schema.Measurement)
+	for _, name := range []string{"rss_bytes", "vss_bytes", "lifetime_peak_rss_bytes",
+		"leader_voluntary_context_switches", "leader_involuntary_context_switches"} {
+		traceMetrics[name] = schema.Measured(123456789012, "bytes", "unknown-exec-stage", "proc/status")
+	}
+	trace := system.ExecDiagnostic{Status: diagnosticPartial, Samples: make([]schema.ResourceSample, traceSamples)}
+	for i := range trace.Samples {
+		trace.Samples[i] = schema.ResourceSample{ElapsedNS: int64(i) * 1000000, Phase: "unknown-exec-stage", Metrics: traceMetrics}
+	}
+	raw := make(map[string][]byte)
+	require.NoError(t, encodeExtra(raw, "telemetry.json", samples))
+	require.NoError(t, encodeExtra(raw, "exec-diagnostic.json", trace))
+	var restored []schema.ResourceSample
+	require.NoError(t, json.Unmarshal(raw["telemetry.json"], &restored))
+	require.Equal(t, samples, restored)
+	retained := make(map[string][]byte)
+	total := 0
+	for i := range trials {
+		files := make(map[string][]byte)
+		for name, data := range raw {
+			files[fmt.Sprintf("trials/%06d/%s", i, name)] = data
+		}
+		require.NoError(t, retainRaw(retained, files, &total))
+	}
+	assert.Greater(t, total, 512*1024*1024, "exercise the capacity that failed before trace data was accounted for")
+	assert.Len(t, retained, trials*len(raw))
 }

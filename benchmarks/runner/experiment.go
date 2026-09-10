@@ -237,9 +237,10 @@ func executeSchedule(ctx context.Context, cfg ExperimentConfig, opts RunOptions,
 	return nil
 }
 
-// A release shard retains 200 trials with roughly 160 full cgroup samples each.
-// Keep a finite bound with room for that declared schedule; reports have a separate bundle limit.
-const maxRetainedBytes = 512 * 1024 * 1024
+// A release shard retains 200 trials with roughly 160 full cgroup samples each,
+// plus up to two seconds of millisecond exec-diagnostic samples per trial.
+// Keep both within a finite bound; reports have a separate bundle limit.
+const maxRetainedBytes = 1024 * 1024 * 1024
 
 func retainRaw(files, raw map[string][]byte, retainedBytes *int) error {
 	additional := 0
