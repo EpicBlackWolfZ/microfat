@@ -32,7 +32,7 @@ flowchart TD
         Dispatch -->|--microfat:info| Info["Host & Binary Diagnostics"]
         Dispatch -->|--microfat:prewarm| Cache["Node Cache Prewarm"]
         Dispatch -->|--microfat:trim| InPlaceTrim["Trim in-place (-50% disk)"]
-        Dispatch -->|--microfat:optimize| NativeELF["Raw Native ELF (0.0ms)"]
+        Dispatch -->|--microfat:optimize| NativeELF["Raw Native ELF (no launcher)"]
     end
 ```
 
@@ -409,7 +409,7 @@ Every fat binary built with standard `microfat-stub` supports built-in meta-comm
 | `MICROFAT_DISABLE_VARIANTS` | `string` | *(unset)* | Comma-separated list of variant levels to exclude from selection (e.g. `v4,v9.2`). |
 | `MICROFAT_POLICY` | `string` | *(unset)* | Preset dispatch policy name (`safe_avx512`, `no_downclock`). |
 | `MICROFAT_AVX512_DOWNCLOCK_PROTECTION` | `bool` | `0` | Enable Intel Skylake-X/Cascade Lake Xeon downclocking mitigation. |
-| `MICROFAT_EXEC_MODE` | `string` | `memfd` | Dispatch mechanism: `memfd` (in-RAM execution) or `cache` (from node cache). |
+| `MICROFAT_EXEC_MODE` | `string` | *(unset: auto)* | Auto tries sealed memfd, then cache. Explicit `memfd` fails closed; `cache` uses verified disk materialization. |
 | `MICROFAT_CACHE_DIR` | `string` | *(unset)* | Custom node cache directory path (defaults to `$XDG_CACHE_HOME/microfat`). |
 | `MICROFAT_LOG` | `string` | `text` | Logging mode: `text` or `json` (structured JSON telemetry on stderr). |
 | `MICROFAT_DEBUG` | `bool` | `0` | Enable detailed microsecond startup and dispatch logging on stderr. |

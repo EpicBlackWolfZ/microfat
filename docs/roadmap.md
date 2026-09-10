@@ -1,8 +1,8 @@
 # Production roadmap
 
-Updated 2026-09-09 against `main` at `0e7f296c1fae4d5f308eee9d62abdb2638d3ce58`.
-This records planned work, not fixes already shipped. GitHub issues hold acceptance criteria;
-the issue acceptance criteria define implementation and verification requirements.
+Updated 2026-09-10 after the v0.2.3 milestone readiness check on merged `main` at `cc589b1`.
+The v0.2.3 work below is implemented and verified; later milestones remain planned work.
+GitHub issues hold acceptance criteria and verification requirements.
 
 ## Release principles
 
@@ -20,7 +20,7 @@ the issue acceptance criteria define implementation and verification requirement
 
 [Milestone](https://github.com/EpicBlackWolfZ/microfat/milestone/7)
 
-The patch release prioritizes the following safety work:
+All 18 milestone issues are closed. The patch includes the following completed safety work:
 
 | Scope | Issue |
 | --- | --- |
@@ -35,9 +35,12 @@ The patch release prioritizes the following safety work:
 | Action pinning and job-scoped permissions | [#176](https://github.com/EpicBlackWolfZ/microfat/issues/176) |
 | Supported integration examples and qualified claims | [#177](https://github.com/EpicBlackWolfZ/microfat/issues/177) |
 
-Measurement work continues through #88–#93, building on merged #87. It is a separate track,
-not a dependency for releasing the safety fixes. At release cut, unfinished measurement issues
-move to a subsequent patch milestone; do not mark them complete or hold a security patch for them.
+Measurement work #87–#93 is also merged. Native amd64/arm64 compatibility and hosted release
+rehearsals, cgroup v1/v2 enforcement, archive checksums and report replay passed. See the
+[benchmark documentation](benchmarks/README.md) and [v0.2.3 release notes](releases/v0.2.3.md).
+Hosted results remain comparative evidence with `release_eligible=false`; startup enforcement
+is report-only for the current calibration classes. Dedicated hardware certification remains
+separate future work in [#182](https://github.com/EpicBlackWolfZ/microfat/issues/182).
 
 Exit: targeted regressions, shared race/coverage checks, applicable execution matrix and release
 verification pass. Document any unavailable privileged or architecture-specific validation.

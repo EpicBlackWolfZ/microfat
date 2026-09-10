@@ -6,7 +6,7 @@
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/EpicBlackWolfZ/microfat/codeql.yml?branch=main&logo=github&label=CodeQL)](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/codeql.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Microfat** combines multiple CPU microarchitecture-specific ELF binaries (`v1`, `v2`, `v3`, `v4` or `v8.0`..`v9.5`) into a single, self-dispatching Linux executable without a persistent launcher process, automatic container resource auto-tuning (`GOMEMLIMIT` & `GOMAXPROCS`), and payload integrity verification.
+**Microfat** combines multiple CPU microarchitecture-specific ELF binaries (`v1`, `v2`, `v3`, `v4` or `v8.0`..`v9.5`) into a single, self-dispatching Linux executable with no persistent launcher process, automatic container resource tuning (`GOMEMLIMIT` & `GOMAXPROCS`), and payload integrity verification.
 
 ---
 
@@ -16,14 +16,14 @@
 - ⚡ **Zero Persistent Process Overhead**: Dispatches via Linux `memfd_create` and `syscall.Exec` directly from anonymous RAM (no wrapper daemon, PID 1 preserved in containers).
 - 🛡️ **Container Auto-Tuning**: Automatically parses Linux cgroup v1 & v2 limits to set a soft Go-runtime memory budget (`GOMEMLIMIT`) and CPU parallelism (`GOMAXPROCS`); neither guarantees freedom from OOM kills or CPU throttling.
 - ✂️ **Flexible Lifecycle Modes**:
-  - **Universal Fat Binary**: Distribute a single executable that runs everywhere (`v1`–`v4` or `v8.0`–`v9.5`).
+  - **Universal Fat Binary**: Distribute one Linux executable per architecture, selecting among the included compatible variants.
   - **Trimmed Fat Binary (`--microfat:trim` / `microfat trim`)**: Discard unneeded variants on disk while retaining launcher auto-tuning and RAM execution.
-  - **Raw Native ELF (`--microfat:optimize`)**: Permanently specialize to raw uncompressed ELF machine code with 0.0ms launch overhead.
+  - **Raw Native ELF (`--microfat:optimize`)**: Permanently specialize to raw uncompressed ELF machine code with no microfat launcher or decompression stage; normal ELF startup still applies.
 - 🔒 **Payload Integrity Verification**: 56-byte trailer with SHA-256 index hashing and variant checksum validation.
 - 📦 **Shared Inter-Variant Dictionary**: Multi-variant compression with trained Zstandard dictionaries; measure size savings on your own variants.
 
 > [!NOTE]
-> **Payload Integrity vs Producer Authenticity**: Embedded SHA-256 digests provide payload integrity verification; they do not authenticate the producer of the fat binary. To establish provenance and origin authenticity in production pipelines, sign fat executables with external tools such as Sigstore Cosign or GPG. See [SECURITY.md](SECURITY.md#payload-integrity-vs-producer-authenticity-hashing-vs-signing) for security architecture details.
+> **Payload Integrity vs Producer Authenticity**: Embedded SHA-256 digests provide payload integrity verification; they do not authenticate the producer of the fat binary. To establish provenance and origin authenticity in production pipelines, sign fat executables with external tools such as Sigstore Cosign or GPG. See [SECURITY.md](SECURITY.md#6-payload-integrity-vs-producer-authenticity-hashing-vs-signing) for security architecture details.
 
 ---
 
@@ -33,6 +33,7 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 
 | Guide | Description |
 | :--- | :--- |
+| [**v0.2.3 Release Notes**](docs/releases/v0.2.3.md) | Safety fixes, benchmark scope and release limitations. |
 | [**Production Roadmap**](docs/roadmap.md) | Release priorities, safety gates and experimental scope. |
 | 📊 [**Demo & Benchmark Suite**](examples/demo/README.md) | Multi-workload benchmark application testing SIMD vector math, JSON/Zstd processing, and concurrent workers. |
 | [**Reproducible Server Benchmarks**](docs/benchmarks/README.md) | Paired native/fat server trials, external Fortio load, resource telemetry, and verifiable evidence. |
@@ -66,6 +67,8 @@ microfat doctor
 # Machine-readable JSON output for CI/CD gating
 microfat doctor --json
 ```
+
+Illustrative output (values depend on the host and installed version):
 
 ```text
 === Microfat Host Environment Doctor ===
@@ -246,7 +249,7 @@ configPath := filepath.Join(filepath.Dir(exePath), "config.yaml")
 
 ## Runtime Meta-Commands
 
-Every fat executable supports reserved meta-commands for diagnostics and disk specialization:
+Fat executables using the full launcher support reserved meta-commands for diagnostics and disk specialization:
 
 ```bash
 # View host capabilities, cgroup limits, and embedded variants
@@ -282,7 +285,7 @@ Every fat executable supports reserved meta-commands for diagnostics and disk sp
 | `MICROFAT_DISABLE_VARIANTS` | *(unset)* | Comma-separated list of variant levels to exclude from selection (e.g. `v4`). |
 | `MICROFAT_POLICY` | *(unset)* | Preset policy name (`safe_avx512`, `no_downclock`). |
 | `MICROFAT_AVX512_DOWNCLOCK_PROTECTION` | `0` / `false` | Enable automatic Intel Skylake-X / Cascade Lake Xeon downclocking mitigation. |
-| `MICROFAT_EXEC_MODE` | `memfd` | Execution mechanism: `memfd` (in-RAM) or `cache` (from prewarmed cache). |
+| `MICROFAT_EXEC_MODE` | *(unset: auto)* | Auto tries sealed memfd, then cache. Explicit `memfd` fails closed; `cache` uses verified disk materialization. |
 | `MICROFAT_CACHE_DIR` | *(unset)* | Custom node cache directory (defaults to `$XDG_CACHE_HOME/microfat` or `~/.cache/microfat`). |
 | `GOMEMLIMIT` | *(unset)* | If already set by the user or Kubernetes YAML, `microfat` **never** overrides it. |
 | `GOMAXPROCS` | *(unset)* | If already set by the user or Kubernetes YAML, `microfat` **never** overrides it. |

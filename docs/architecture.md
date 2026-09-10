@@ -206,7 +206,7 @@ If `memfd_create` or memory sealing is restricted by a locked-down seccomp polic
 5. **TOCTOU Immunity via `/proc/self/fd/<fd>`**:
    - The verified file descriptor is executed directly via `/proc/self/fd/<fd>`.
    - Validation and execution are descriptor-bound to the exact same VFS inode via `/proc/self/fd/<fd>`, completely eliminating Time-of-Check to Time-of-Use (TOCTOU) file replacement races.
-6. **Zero-Overhead Re-execution**: Subsequent launches directly invoke the cached binary descriptor with **0.0ms decompression overhead**.
+6. **Warm-cache execution**: Subsequent launches verify and execute the cached binary descriptor without decompression. Hashing, launcher work, and normal ELF startup still apply.
 
 ---
 

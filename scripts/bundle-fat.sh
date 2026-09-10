@@ -29,7 +29,7 @@ package_fat_archive() {
     rm -rf "$stage_dir"
     mkdir -p "$stage_dir"
     cp "$fat_bin" "$stage_dir/microfat"
-    cp README.md LICENSE "$stage_dir/"
+    cp README.md LICENSE SECURITY.md "$stage_dir/"
     if [[ -d docs ]]; then
         cp -r docs "$stage_dir/"
     fi
@@ -40,9 +40,12 @@ package_fat_archive() {
 
     if command -v syft &> /dev/null; then
         echo "==> Generating SBOMs for ${out_tar}..."
-        syft "$out_tar" -o spdx-json > "${out_tar}.spdx.json" 2>/dev/null || true
-        syft "$out_tar" -o cyclonedx-json > "${out_tar}.cyclonedx.json" 2>/dev/null || true
+        syft "$out_tar" -o spdx-json > "${out_tar}.spdx.json"
+        syft "$out_tar" -o cyclonedx-json > "${out_tar}.cyclonedx.json"
         echo "✔ Generated SBOMs for ${out_tar}"
+    elif [[ "${MICROFAT_REQUIRE_SBOM:-0}" == 1 ]]; then
+        echo "ERROR: syft is required for release SBOMs" >&2
+        exit 1
     fi
 }
 

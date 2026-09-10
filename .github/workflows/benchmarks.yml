@@ -265,20 +265,13 @@ jobs:
         with:
           name: verified-hosted-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence
-      - name: Check archive and attach after release publication
-        working-directory: evidence
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: source
+          persist-credentials: false
+      - name: Attach evidence and publish complete immutable release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          sha256sum -c ./*.sha256
-          for attempt in $(seq 1 30); do
-            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-              gh release upload "$RELEASE_TAG" ./*.tar.gz ./*.sha256
-              exit 0
-            fi
-            sleep 10
-          done
-          echo 'Release not yet published; verified evidence remains available for maintainer attachment.' >&2
-          exit 1
+        run: python3 source/scripts/release-finalize.py evidence
