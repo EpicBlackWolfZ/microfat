@@ -418,23 +418,34 @@ func TestGoReleaserSnapshotArtifacts(t *testing.T) {
 		if !hasSyft {
 			t.Skip("syft not installed in PATH, skipping SBOM inspection")
 		}
-		spdxFiles, err := filepath.Glob(filepath.Join(distDir, "*.spdx.json"))
+		archives, err := filepath.Glob(filepath.Join(distDir, "*.tar.gz"))
 		if err != nil {
-			t.Fatalf("globbing spdx files: %v", err)
+			t.Fatal(err)
 		}
-		if len(spdxFiles) == 0 {
-			t.Errorf("expected .spdx.json files in dist, found none")
-		}
-		for _, sf := range spdxFiles {
-			data, err := os.ReadFile(sf)
-			if err != nil {
-				t.Errorf("reading SBOM %s: %v", sf, err)
-				continue
-			}
-			var parsed map[string]any
-			if err := json.Unmarshal(data, &parsed); err != nil {
-				t.Errorf("parsing SBOM %s as JSON: %v", sf, err)
-			}
+		for _, tc := range []struct{ suffix, key, value string }{
+			{".spdx.json", "spdxVersion", "SPDX-2.3"},
+			{".cyclonedx.json", "bomFormat", "CycloneDX"},
+		} {
+			t.Run(tc.key, func(t *testing.T) {
+				files, globErr := filepath.Glob(filepath.Join(distDir, "*"+tc.suffix))
+				if globErr != nil || len(files) != len(archives) || len(files) == 0 {
+					t.Fatalf("expected one %s SBOM per archive: files=%d archives=%d error=%v",
+						tc.suffix, len(files), len(archives), globErr)
+				}
+				for _, file := range files {
+					data, readErr := os.ReadFile(file)
+					if readErr != nil {
+						t.Fatal(readErr)
+					}
+					var parsed map[string]any
+					if parseErr := json.Unmarshal(data, &parsed); parseErr != nil {
+						t.Fatal(parseErr)
+					}
+					if parsed[tc.key] != tc.value {
+						t.Errorf("SBOM %s: expected %s=%s, got %v", file, tc.key, tc.value, parsed[tc.key])
+					}
+				}
+			})
 		}
 	})
 

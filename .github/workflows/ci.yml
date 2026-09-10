@@ -185,7 +185,9 @@ jobs:
           cache: true
 
       - name: Verify release publication contracts
-        run: python3 scripts/release_finalize_test.py
+        run: |
+          python3 scripts/release_finalize_test.py
+          python3 scripts/repair_v023_sboms_test.py
 
       - name: Compile Standard Binaries
         run: make build

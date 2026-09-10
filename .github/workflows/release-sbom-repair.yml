@@ -1,0 +1,34 @@
+name: Repair unpublished v0.2.3 SBOM metadata
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: v023-sbom-repair
+  cancel-in-progress: false
+jobs:
+  repair:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+      - name: Verify original publisher, correct draft metadata and re-sign
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 scripts/repair-v023-sboms.py .work-sbom-repair
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: v023-sbom-correction-${{ github.run_id }}
+          path: .work-sbom-repair
+          include-hidden-files: true
+          retention-days: 14
