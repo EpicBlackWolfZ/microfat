@@ -29,7 +29,10 @@ bin/microfat benchmark compare --input <bundle-directory> --json
 ```
 
 The run command prints the resulting bundle path on stdout; progress and diagnostics go to stderr.
-Failed trials produce evidence and a nonzero exit status. Report, comparison, and verification commands operate offline.
+Failed trials produce evidence and a nonzero exit status. Interrupted journals are included in CI artifacts.
+Raw trial JSON is deterministic and compact; the harness bounds retained trial data to 512 MiB and complete
+bundles to 768 MiB, allowing full cgroup telemetry for a 200-trial release shard. Per-file limits still apply.
+Report, comparison, and verification commands operate offline.
 `report` and `verify` also accept original v1 evidence files. For a raw v1 payload without its envelope, verification
 explicitly reports structural validation only; it cannot establish an absent checksum.
 

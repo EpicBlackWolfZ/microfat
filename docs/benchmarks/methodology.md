@@ -138,3 +138,7 @@ Process lifetime CPU/fault/context-switch totals come from terminal wait4 accoun
 switch counters are explicitly labelled as thread-leader counters. V1 CPU-accounting time uses nanoseconds;
 memory failure counts and throttled periods are counters. These remain distinct from sampled memory maxima,
 process RSS and cgroup memory charges. Functional OOM probes run in separate small groups with the harness outside.
+
+Cgroup memory amounts use byte units, including v1 hierarchical `total_*` fields and v2 slab/THP/cache fields.
+Event and page-fault counters remain counts, following the [kernel v2 memory.stat reference](https://docs.kernel.org/admin-guide/cgroup-v2.html#memory)
+and [v1 stat reference](https://docs.kernel.org/admin-guide/cgroup-v1/memory.html#stat-file).

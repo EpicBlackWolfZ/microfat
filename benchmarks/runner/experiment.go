@@ -156,7 +156,8 @@ func releaseEligible(cfg ExperimentConfig, exp *schema.ExperimentV2) bool {
 }
 
 func encodeExtra(files map[string][]byte, path string, value any) error {
-	data, err := schema.CanonicalV2(value)
+	// Keep raw telemetry deterministic without the repeated indentation cost of full cgroup counters.
+	data, err := json.Marshal(value, json.Deterministic(true))
 	if err != nil {
 		return err
 	}
@@ -236,8 +237,11 @@ func executeSchedule(ctx context.Context, cfg ExperimentConfig, opts RunOptions,
 	return nil
 }
 
+// A release shard retains 200 trials with roughly 160 full cgroup samples each.
+// Keep a finite bound with room for that declared schedule; reports have a separate bundle limit.
+const maxRetainedBytes = 512 * 1024 * 1024
+
 func retainRaw(files, raw map[string][]byte, retainedBytes *int) error {
-	const maxRetainedBytes = 256 * 1024 * 1024
 	additional := 0
 	for _, data := range raw {
 		if len(data) > schema.MaxEvidenceBytes || len(data) > maxRetainedBytes-*retainedBytes-additional {

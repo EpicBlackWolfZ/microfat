@@ -160,9 +160,9 @@ func TestEvidenceResourceBounds(t *testing.T) {
 		files[strconv.Itoa(i)] = nil
 	}
 	require.ErrorContains(t, writeFiles(t.TempDir(), files), "too many")
-	// Reuse one backing allocation to check aggregate bounds without allocating 512 MiB.
+	// Reuse one backing allocation to check aggregate bounds without allocating the entire budget.
 	files = make(map[string][]byte)
-	for i := 0; i < 10; i++ {
+	for i := 0; i <= maxBundleBytes/schema.MaxEvidenceBytes; i++ {
 		files[strconv.Itoa(i)] = data[:schema.MaxEvidenceBytes]
 	}
 	require.ErrorContains(t, writeFiles(t.TempDir(), files), "byte limit")

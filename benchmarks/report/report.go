@@ -21,7 +21,7 @@ const (
 	tablePadding   = 2
 	fileMode       = 0o600
 	dirMode        = 0o700
-	maxBundleBytes = 512 * 1024 * 1024
+	maxBundleBytes = 768 * 1024 * 1024 // Retained trial bytes plus raw metadata and rendered reports.
 	maxBundleFiles = 50000
 	checksumName   = "SHA256SUMS"
 )

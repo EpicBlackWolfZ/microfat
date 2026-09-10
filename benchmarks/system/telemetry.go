@@ -128,8 +128,12 @@ func (s *Sandbox) Read(phase string) map[string]schema.Measurement {
 }
 
 func isMemoryBytes(key string) bool {
+	key = strings.TrimPrefix(key, "total_") // v1 hierarchical counters preserve the base field's unit.
 	for _, name := range []string{"anon", "file", "shmem", "kernel", "kernel_stack", "pagetables", "sock", "slab",
-		"rss", "cache", "mapped_file", "swap", "total_rss", "total_cache", "active_anon", "inactive_anon", "active_file", "inactive_file"} {
+		"sec_pagetables", "percpu", "vmalloc", "zswap", "zswapped", "file_mapped", "file_dirty", "file_writeback", "swapcached",
+		"anon_thp", "file_thp", "shmem_thp", "unevictable", "slab_reclaimable", "slab_unreclaimable", "hugetlb",
+		"rss", "rss_huge", "cache", "mapped_file", "swap", "dirty", "writeback", "hierarchical_memory_limit", "hierarchical_memsw_limit",
+		"active_anon", "inactive_anon", "active_file", "inactive_file"} {
 		if key == name {
 			return true
 		}

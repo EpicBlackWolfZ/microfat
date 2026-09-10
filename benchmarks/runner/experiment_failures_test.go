@@ -299,7 +299,7 @@ func TestRetainedEvidenceBudget(t *testing.T) {
 	total := 0
 	require.NoError(t, retainRaw(files, map[string][]byte{"trials/one": []byte("one")}, &total))
 	assert.Equal(t, 3, total)
-	total = 256 * 1024 * 1024
+	total = maxRetainedBytes
 	require.Error(t, retainRaw(files, map[string][]byte{"trials/two": []byte("two")}, &total))
 	assert.NotContains(t, files, "trials/two")
 }

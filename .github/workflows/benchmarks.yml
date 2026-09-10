@@ -63,6 +63,7 @@ jobs:
         with:
           name: benchmark-smoke-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/benchmark-ci
+          include-hidden-files: true
           retention-days: 7
 
   sustained:
@@ -123,6 +124,7 @@ jobs:
         with:
           name: benchmark-${{ env.BENCHMARK_TIER }}-${{ matrix.arch }}-${{ matrix.workload }}-${{ matrix.intensity }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/benchmark-matrix
+          include-hidden-files: true
           retention-days: 14
       - name: Remove delegation
         if: always()
@@ -161,6 +163,7 @@ jobs:
         with:
           name: calibration-${{ matrix.repetition }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/benchmark-ci
+          include-hidden-files: true
           retention-days: 14
 
   calibration-policy:
@@ -212,6 +215,7 @@ jobs:
         with:
           name: compatibility-${{ matrix.runner }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/benchmark-matrix
+          include-hidden-files: true
           retention-days: 7
 
   verify-release:
