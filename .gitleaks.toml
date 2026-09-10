@@ -1,0 +1,14 @@
+title = "microfat secret detection"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Calibration class keys are SHA-256 measurement identities produced by ci.ClassKey, not credentials"
+condition = "AND"
+paths = ['''(^|/)benchmarks/config/calibration\.json$''']
+regexTarget = "line"
+regexes = ['''^\s*"key": "[a-f0-9]{64}",?\s*$''']
