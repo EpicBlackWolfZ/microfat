@@ -11,10 +11,12 @@ CGO_ENABLED=0 go test -c -o "$root/rootfs/system.test" ./benchmarks/system
 cat > "$root/rootfs/init" <<'INIT'
 #!/bin/busybox sh
 export PATH=/bin
-busybox --install -s /bin
+/bin/busybox --install -s /bin
+set -e
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev
+mount -t tmpfs tmpfs /sys/fs/cgroup
 mkdir -p /sys/fs/cgroup/cpu /sys/fs/cgroup/memory
 mount -t cgroup -o cpu,cpuacct cpu /sys/fs/cgroup/cpu || poweroff -f
 mount -t cgroup -o memory memory /sys/fs/cgroup/memory || poweroff -f
@@ -24,8 +26,8 @@ export MICROFAT_BENCH_CGROUP_VERSION=v1
 export MICROFAT_BENCH_REQUIRE_CONTROLS=1
 uname -a
 cat /proc/cgroups
-/system.test -test.v -test.run='^Test(KernelControls|RealCgroupIntegration)$' -test.timeout=180s
-status=$?
+status=0
+/system.test -test.v -test.run='^Test(KernelControls|RealCgroupIntegration)$' -test.timeout=180s || status=$?
 echo "MICROFAT_KERNEL_RESULT=$status"
 sync
 poweroff -f
