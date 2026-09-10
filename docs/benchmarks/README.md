@@ -191,3 +191,13 @@ fourteen days. Archives omit temporary build files and guest images. Published c
 release archive, checksum, source/baseline, runner details and limitations. This documentation makes no speedup claim.
 
 See [methodology](methodology.md) for scope, statistical assumptions, and interpretation limits.
+
+### Recover final publication
+
+If the tag workflow completed all measurements and independent archive verification but its
+publication step failed, dispatch `release-finalize.yml` from `main` with the exact benchmark run
+and attempt. Recovery verifies all 12 sustained jobs, both native compatibility jobs, archive
+verification, the unchanged tag source and its successful Release build. It downloads only that
+attempt's verified archive and publishes only a complete draft. Missing or failed measurements
+cannot be recovered this way. Draft metadata is resolved by release ID because the by-tag API
+only returns published releases. Existing evidence assets must have matching digests.

@@ -1,0 +1,57 @@
+name: Finalize verified release draft
+on:
+  workflow_dispatch:
+    inputs:
+      benchmark_run:
+        description: Completed tag benchmark run with successful measurements and archive verification
+        type: string
+        required: true
+      benchmark_attempt:
+        description: Exact successful measurement attempt
+        type: string
+        default: '1'
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: release-finalize-${{ inputs.benchmark_run }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate exact completed measurement cohort before download
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BENCHMARK_RUN: ${{ inputs.benchmark_run }}
+          BENCHMARK_ATTEMPT: ${{ inputs.benchmark_attempt }}
+        run: |
+          python3 - <<'PY'
+          import importlib.util, os
+          spec = importlib.util.spec_from_file_location('finalize', 'scripts/release-finalize.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          module.recovery_source(os.environ['GH_REPO'], os.environ['BENCHMARK_RUN'], os.environ['BENCHMARK_ATTEMPT'])
+          PY
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.benchmark_run }}
+          name: verified-hosted-evidence-${{ inputs.benchmark_run }}-${{ inputs.benchmark_attempt }}
+          path: evidence
+      - name: Attach exact verified evidence and publish the complete draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BENCHMARK_RUN: ${{ inputs.benchmark_run }}
+          BENCHMARK_ATTEMPT: ${{ inputs.benchmark_attempt }}
+        run: python3 scripts/release-finalize.py evidence --recovery-run "$BENCHMARK_RUN" --recovery-attempt "$BENCHMARK_ATTEMPT"

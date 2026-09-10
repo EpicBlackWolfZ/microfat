@@ -49,7 +49,8 @@ def main(root):
     if os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch' or os.environ.get('GITHUB_REF') != 'refs/heads/main':
         raise SystemExit('Repair requires explicit dispatch from the trusted main branch')
     repo = os.environ['GH_REPO']
-    endpoint = f'repos/{repo}/releases/tags/{TAG}'
+    release_id = int(run('gh', 'release', 'view', TAG, '--json', 'databaseId', '--jq', '.databaseId'))
+    endpoint = f'repos/{repo}/releases/{release_id}'
     release = json.loads(run('gh', 'api', endpoint))
     require_draft(release)
     commit = json.loads(run('gh', 'api', f'repos/{repo}/commits/{TAG}'))

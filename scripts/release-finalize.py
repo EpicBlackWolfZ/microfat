@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Publish only after the tag build and verified hosted evidence are complete."""
+import argparse
+import importlib.util
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
-import sys
 
 
 def gh(*args):
@@ -38,15 +39,44 @@ def validate_assets(release):
         raise SystemExit(f'Missing archives or SBOMs: {sorted(required - names)}')
 
 
-def finalize(root):
-    tag, source, repo = os.environ['RELEASE_TAG'], os.environ['GITHUB_SHA'], os.environ['GH_REPO']
+def recovery_source(repo, run_id, attempt):
+    if os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch' or os.environ.get('GITHUB_REF') != 'refs/heads/main':
+        raise SystemExit('Recovery requires explicit dispatch from trusted main')
+    if not re.fullmatch(r'[1-9][0-9]*', run_id) or not re.fullmatch(r'[1-9][0-9]*', attempt):
+        raise SystemExit('Invalid measurement run or attempt')
+    endpoint = f'repos/{repo}/actions/runs/{run_id}/attempts/{attempt}'
+    run = json.loads(gh('api', endpoint))
+    jobs = json.loads(gh('api', endpoint + '/jobs?per_page=100'))
+    spec = importlib.util.spec_from_file_location('evidence', Path(__file__).with_name('benchmark-evidence.py'))
+    evidence = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(evidence)
+    source = evidence.source_revision(run, jobs, run_id, attempt)
+    verified = [job for job in jobs['jobs'] if job['name'] == 'Independently verify hosted release matrix']
+    if len(verified) != 1 or verified[0].get('conclusion') != 'success':
+        raise SystemExit('Independent archive verification must have succeeded')
+    tag = run['head_branch']
+    if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?', tag):
+        raise SystemExit('Recovery source must be a release tag')
+    commit = json.loads(gh('api', f'repos/{repo}/commits/{tag}'))
+    if commit['sha'] != source:
+        raise SystemExit('Tag differs from verified measurement source')
+    return tag, source
+
+
+def finalize(root, recovery_run=None, recovery_attempt='1'):
+    repo = os.environ['GH_REPO']
+    if recovery_run:
+        tag, source = recovery_source(repo, recovery_run, recovery_attempt)
+    else:
+        tag, source = os.environ['RELEASE_TAG'], os.environ['GITHUB_SHA']
     if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?', tag):
         raise SystemExit('Invalid release tag')
-    if os.environ.get('GITHUB_EVENT_NAME') != 'push' or os.environ.get('GITHUB_REF') != 'refs/tags/' + tag:
+    if not recovery_run and (os.environ.get('GITHUB_EVENT_NAME') != 'push' or os.environ.get('GITHUB_REF') != 'refs/tags/' + tag):
         raise SystemExit('Publication requires a tag push')
     runs = json.loads(gh('api', f'repos/{repo}/actions/workflows/release.yml/runs?event=push&head_sha={source}&per_page=100'))
     validate_build(runs['workflow_runs'], tag, source)
-    release = json.loads(gh('api', f'repos/{repo}/releases/tags/{tag}'))
+    release_id = int(gh('release', 'view', tag, '--json', 'databaseId', '--jq', '.databaseId'))
+    release = json.loads(gh('api', f'repos/{repo}/releases/{release_id}'))
     if release.get('tag_name') != tag:
         raise SystemExit('Release tag mismatch')
     validate_assets(release)
@@ -73,4 +103,9 @@ def finalize(root):
 
 
 if __name__ == '__main__':
-    finalize(Path(sys.argv[1]))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('root', type=Path)
+    parser.add_argument('--recovery-run')
+    parser.add_argument('--recovery-attempt', default='1')
+    args = parser.parse_args()
+    finalize(args.root, args.recovery_run, args.recovery_attempt)

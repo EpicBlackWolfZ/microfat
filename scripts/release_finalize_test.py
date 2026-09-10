@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import itertools
 import os
 import sys
 import subprocess
@@ -29,6 +30,42 @@ def assets():
 
 
 class PublicationTests(unittest.TestCase):
+    def test_recovery_requires_successful_exact_tag_cohort(self):
+        run = dict(id=1, run_attempt=1, head_sha='a' * 40, head_branch='v0.2.3', status='completed',
+                   path='.github/workflows/benchmarks.yml')
+        names = [f'Benchmark sustained ({a}, {w}, {i})' for a, w, i in
+                 itertools.product(('amd64', 'arm64'), ('mixed', 'cpu', 'memory'), ('standard', 'heavy'))]
+        names += [f'Benchmark compatibility ({r})' for r in ('ubuntu-24.04', 'ubuntu-24.04-arm')]
+        names += ['Independently verify hosted release matrix']
+        for failure in (None, 'measurement', 'verification', 'tag', 'branch', 'event', 'attempt'):
+            with self.subTest(failure=failure):
+                jobs = dict(jobs=[dict(name=name, conclusion='success') for name in names])
+                source = dict(run)
+                if failure == 'measurement':
+                    jobs['jobs'][0]['conclusion'] = 'failure'
+                if failure == 'verification':
+                    jobs['jobs'][-1]['conclusion'] = 'failure'
+                if failure == 'branch':
+                    source['head_branch'] = 'main'
+                if failure == 'attempt':
+                    source['run_attempt'] = 2
+
+                def gh(*args):
+                    if '/jobs?' in args[1]:
+                        return json.dumps(jobs)
+                    if '/commits/' in args[1]:
+                        return json.dumps(dict(sha='b' * 40 if failure == 'tag' else 'a' * 40))
+                    return json.dumps(source)
+
+                env = dict(GITHUB_EVENT_NAME='push' if failure == 'event' else 'workflow_dispatch',
+                           GITHUB_REF='refs/heads/main')
+                with patch.dict(os.environ, env), patch.object(RELEASE, 'gh', side_effect=gh):
+                    if failure:
+                        with self.assertRaises(SystemExit):
+                            RELEASE.recovery_source('owner/repo', '1', '1')
+                    else:
+                        self.assertEqual(('v0.2.3', 'a' * 40), RELEASE.recovery_source('owner/repo', '1', '1'))
+
     def test_fat_sbom_failure_stops_packaging(self):
         functions = Path(__file__).with_name('bundle-fat.sh').read_text().split('# 1. AMD64 Fat Binary Assembly')[0]
         with tempfile.TemporaryDirectory() as temporary:
@@ -78,6 +115,8 @@ class PublicationTests(unittest.TestCase):
 
                 def gh(*args):
                     calls.append(args)
+                    if args[:2] == ('release', 'view'):
+                        return '123'
                     if args[0] == 'api':
                         return json.dumps(dict(workflow_runs=[run]) if '/actions/' in args[1] else release)
                     if args[:2] == ('release', 'upload') and failure == 'upload':
