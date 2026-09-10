@@ -32,8 +32,10 @@ type CalibrationClass struct {
 
 // ClassKey excludes revision, names and transient cgroup paths, but includes measurement settings.
 func ClassKey(exp *schema.ExperimentV2) (string, error) {
-	if exp.Runner == nil || exp.Runner.Provider != schema.HostedProvider || exp.Runner.Protocol != schema.StartupProtocol ||
-		exp.Runner.Image == "" || exp.Runner.ImageVersion == "" {
+	if exp == nil || exp.Runner == nil || exp.Runner.Provider != schema.HostedProvider ||
+		exp.Runner.Protocol != schema.StartupProtocol || exp.Runner.Image == "" || exp.Runner.ImageVersion == "" ||
+		exp.Environment.Host.Arch == "" || exp.Environment.Host.CPU.ModelName == "" ||
+		exp.Environment.Host.KernelRelease == "" || exp.Environment.Process.GoVersion == "" {
 		return "", errors.New("runner class unavailable")
 	}
 	var config map[string]any

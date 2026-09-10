@@ -36,7 +36,9 @@ def main():
     for bundle in bundles:
         execute('verify', bundle)
         for fmt, name in (('json', 'report.json'), ('markdown', 'report.md')):
-            if execute('report', '--input', bundle, '--format', fmt) != (bundle / name).read_bytes():
+            # The CLI appends exactly one output newline to the renderer bytes.
+            # Compare that framing explicitly; never strip or normalize report content.
+            if execute('report', '--input', bundle, '--format', fmt) != (bundle / name).read_bytes() + b'\n':
                 raise SystemExit(f'offline report replay differs: {bundle}/{name}')
         exp = json.loads((bundle / 'raw.json').read_text())
         if not args.calibration:
@@ -61,7 +63,7 @@ def main():
         expected = set(itertools.product(('amd64', 'arm64'), ('mixed', 'cpu', 'memory'), ('standard', 'heavy')))
         if observed != expected:
             raise SystemExit(f'release matrix mismatch; missing={expected-observed}, unexpected={observed-expected}')
-        archive = Path('.work') / ('benchmark-evidence-' + os.environ['SOURCE_SHA'] + '-' + os.environ['GITHUB_RUN_ID'] + '.tar.gz')
+        archive = Path('.work') / ('benchmark-evidence-' + os.environ['SOURCE_SHA'] + '-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ.get('GITHUB_RUN_ATTEMPT', '1') + '.tar.gz')
         manifest = args.root / 'verified-manifest.json'
         manifest.write_text(json.dumps(dict(evidence_class='hosted-comparative',
                             limitation='Shared hosted VMs; no dedicated-hardware performance certification.', bundles=verified), indent=2)+'\n')

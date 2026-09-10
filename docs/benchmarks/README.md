@@ -148,7 +148,8 @@ Release trials use 20 blocks, 10-second warmup and 30-second measurement. The co
 16 format/profile/codec/dictionary cases with native, memfd, cold-cache and warm-cache configurations.
 
 `microfat benchmark qualify --policy hosted-release --input <bundle>` verifies publication completeness:
-clean matching harness/source, successful complete pairs, effective target/generator controls, core measurements,
+clean matching harness/source, 20 paired blocks with at least 10-second warmup and 30-second measurement,
+sampling at most every 250 ms, effective target/generator controls, core measurements,
 and valid telemetry. It prints a JSON verdict and exits nonzero on failure. `release_eligible` retains its strict
 controlled-hardware meaning and is always false on hosted runners. A measured regression can still be published
 as evidence; the publication verdict does not claim improved performance. Partial exec diagnostics and host noise
@@ -158,13 +159,18 @@ Dispatch `benchmarks.yml` with `tier=calibration` to collect 20 training and 10 
 runner class. The candidate absolute floor is twice the largest absolute no-change training median difference;
 all holdout jobs must pass the coarse gate. The workflow verifies every bundle and produces a candidate policy
 for review, without automatically committing it. A class lacking enough independent jobs stays report-only.
-A policy records job identities and checksum-manifest digests so its inputs can be audited.
+A policy records job identities and checksum-manifest digests so its inputs can be audited. The initial
+[30-job calibration](https://github.com/EpicBlackWolfZ/microfat/actions/runs/34450243438) split across nine CPU/image
+classes; none met both per-class sample counts, so the committed policy keeps startup enforcement report-only.
+All input bundles were verified and replayed offline after correcting the CLI newline framing in the aggregator.
 
 Dispatch `tier=release` on a repository branch for a nonpublishing rehearsal; `tier=compatibility` runs the
 compatibility checks alone. Completed rehearsal bundles are downloaded into a fresh verification job, checked
 again, replayed byte-for-byte, and audited for all 12 sustained shards before an archive is prepared. Only a
 trusted tag run attaches the archive and checksum to the release, without replacing previous assets. Failed
-or interrupted evidence remains diagnostic and cannot pass matrix publication. Maintainers control tags/releases.
+or interrupted evidence remains diagnostic and cannot pass matrix publication. Artifacts are scoped to the run
+attempt; rerun all jobs when retrying a complete matrix so evidence from different attempts cannot be mixed.
+Maintainers control tags/releases.
 
 Smoke and integration artifacts expire after seven days; sustained, calibration and rehearsal artifacts after
 fourteen days. Archives omit temporary build files and guest images. Published claims must reference the durable

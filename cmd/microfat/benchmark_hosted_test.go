@@ -31,6 +31,8 @@ func TestHostedCLI(t *testing.T) {
 	}
 	exp.Runner = &schema.RunnerInfo{Provider: schema.HostedProvider, Image: "ubuntu24", ImageVersion: "one",
 		RunID: "1", Attempt: "1", Job: "calibration", Repetition: "0", Protocol: schema.StartupProtocol}
+	exp.Environment.Host.Arch, exp.Environment.Host.CPU.ModelName = "amd64", "fixture CPU"
+	exp.Environment.Host.KernelRelease, exp.Environment.Process.GoVersion = "fixture kernel", "go1.27.1"
 	exp.Artifacts[0].SourceSHA = exp.SourceSHA
 	exp.Configurations[0].ID, exp.Configurations[1].ID = "base-app", "head-app"
 	for i := range exp.Trials {

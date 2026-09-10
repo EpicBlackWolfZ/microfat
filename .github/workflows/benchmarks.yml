@@ -74,7 +74,7 @@ jobs:
     timeout-minutes: 210
     strategy:
       fail-fast: false
-      max-parallel: 6
+      max-parallel: 12
       matrix:
         arch: [amd64, arm64]
         workload: [mixed, cpu, memory]
@@ -121,7 +121,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: benchmark-${{ env.BENCHMARK_TIER }}-${{ matrix.arch }}-${{ matrix.workload }}-${{ matrix.intensity }}-${{ github.run_id }}
+          name: benchmark-${{ env.BENCHMARK_TIER }}-${{ matrix.arch }}-${{ matrix.workload }}-${{ matrix.intensity }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/benchmark-matrix
           retention-days: 14
       - name: Remove delegation
@@ -159,7 +159,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: calibration-${{ matrix.repetition }}-${{ github.run_id }}
+          name: calibration-${{ matrix.repetition }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/benchmark-ci
           retention-days: 14
 
@@ -179,13 +179,13 @@ jobs:
       - run: make build
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: calibration-*
+          pattern: calibration-*-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/calibration
       - name: Verify all independent bundles and derive policy
         run: python3 scripts/benchmark-evidence.py .work/calibration --calibration
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: calibration-policy-${{ github.run_id }}
+          name: calibration-policy-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/calibration-policy.json
           retention-days: 14
 
@@ -210,7 +210,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: compatibility-${{ matrix.runner }}-${{ github.run_id }}
+          name: compatibility-${{ matrix.runner }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/benchmark-matrix
           retention-days: 7
 
@@ -231,7 +231,7 @@ jobs:
       - run: make build
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: benchmark-release-*
+          pattern: benchmark-release-*-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/release-evidence
       - name: Verify complete matrix and prepare checksummed archive
         env:
@@ -239,7 +239,7 @@ jobs:
         run: python3 scripts/benchmark-evidence.py .work/release-evidence --archive
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: verified-hosted-evidence-${{ github.run_id }}
+          name: verified-hosted-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/benchmark-evidence-*
           retention-days: 14
 
@@ -255,7 +255,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: verified-hosted-evidence-${{ github.run_id }}
+          name: verified-hosted-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence
       - name: Check archive and attach after release publication
         working-directory: evidence

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/internal/testfixture"
@@ -14,8 +15,11 @@ import (
 
 func hostedFixture() *schema.ExperimentV2 {
 	exp := testfixture.Experiment()
-	exp.Config = []byte(`{"blocks":20,"name":"fixture","target":{"cgroup_root":"/one","memory_root":"/two"}}`)
+	exp.Config = []byte(`{"blocks":20,"duration_ms":30000,"warmup_ms":10000,"sample_ms":250,
+		"name":"fixture","target":{"cgroup_root":"/one","memory_root":"/two"}}`)
 	exp.ConfigSHA256, _ = schema.ConfigDigest(exp.Config)
+	exp.Environment.Host.Arch, exp.Environment.Host.CPU.ModelName = "amd64", "fixture CPU"
+	exp.Environment.Host.KernelRelease, exp.Environment.Process.GoVersion = "fixture kernel", "go1.27.1"
 	exp.Runner = &schema.RunnerInfo{Provider: schema.HostedProvider, Image: "ubuntu24", ImageVersion: "image1",
 		RunID: "1", Attempt: "1", Job: "calibration", Repetition: "0", Repository: "owner/repo", Protocol: schema.StartupProtocol}
 	exp.Artifacts[0].SourceSHA = exp.SourceSHA
@@ -62,6 +66,18 @@ func TestHostedQualification(t *testing.T) {
 		"dirty":        func(e *schema.ExperimentV2) { e.Dirty = true },
 		"blocks": func(e *schema.ExperimentV2) {
 			e.Config = []byte(`{"blocks":1}`)
+			e.ConfigSHA256, _ = schema.ConfigDigest(e.Config)
+		},
+		"short window": func(e *schema.ExperimentV2) {
+			e.Config = []byte(strings.ReplaceAll(string(e.Config), `"duration_ms":30000`, `"duration_ms":1000`))
+			e.ConfigSHA256, _ = schema.ConfigDigest(e.Config)
+		},
+		"no warmup": func(e *schema.ExperimentV2) {
+			e.Config = []byte(strings.ReplaceAll(string(e.Config), `"warmup_ms":10000`, `"warmup_ms":0`))
+			e.ConfigSHA256, _ = schema.ConfigDigest(e.Config)
+		},
+		"slow sampling": func(e *schema.ExperimentV2) {
+			e.Config = []byte(strings.ReplaceAll(string(e.Config), `"sample_ms":250`, `"sample_ms":1000`))
 			e.ConfigSHA256, _ = schema.ConfigDigest(e.Config)
 		},
 		"artifact":  func(e *schema.ExperimentV2) { e.Artifacts[0].SourceSHA = "unknown" },
@@ -123,6 +139,7 @@ func TestCalibration(t *testing.T) {
 	for _, mutate := range []func(*schema.ExperimentV2){
 		func(e *schema.ExperimentV2) { e.Runner = nil }, func(e *schema.ExperimentV2) { e.Config = []byte("bad") },
 		func(e *schema.ExperimentV2) { e.Runner.Repetition = "bad" }, func(e *schema.ExperimentV2) { e.Dirty = true },
+		func(e *schema.ExperimentV2) { e.Environment.Host.CPU.ModelName = "" },
 		func(e *schema.ExperimentV2) { e.Artifacts[0].SourceSHA = "other" },
 		func(e *schema.ExperimentV2) {
 			e.Trials[0].Metrics["startup_ns"] = schema.Measured(1, "ns", "startup", "old")

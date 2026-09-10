@@ -37,7 +37,7 @@ class EvidenceTests(unittest.TestCase):
     @staticmethod
     def execute(*args):
         if args[0] == 'report':
-            return args[-1].encode()
+            return args[-1].encode() + b'\n'
         if args[0] == 'qualify':
             return b'{"publishable":true}'
         return b''
@@ -61,7 +61,7 @@ class EvidenceTests(unittest.TestCase):
                 self.invoke(root)
 
     def test_missing_and_invalid_evidence(self):
-        for failure in ('missing', 'replay', 'source', 'duplicate', 'strict-claim'):
+        for failure in ('missing', 'replay', 'newline', 'source', 'duplicate', 'strict-claim'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary, contextlib.chdir(temporary):
                 Path('.work').mkdir()
                 root = self.setup_bundles(11 if failure == 'missing' else 12)
@@ -69,6 +69,8 @@ class EvidenceTests(unittest.TestCase):
                 exp = json.loads(raw.read_text())
                 if failure == 'replay':
                     (root / '0/report.json').write_text('corrupted')
+                if failure == 'newline':
+                    (root / '0/report.json').write_text('json\n')
                 if failure == 'source':
                     exp['source_sha'] = 'wrong'
                 if failure == 'strict-claim':

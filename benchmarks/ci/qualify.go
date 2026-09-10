@@ -13,6 +13,9 @@ import (
 
 const HostedRelease = "hosted-release"
 const ReleaseBlocks = 20
+const releaseDurationMS = 30000
+const releaseWarmupMS = 10000
+const releaseSampleMS = 250
 
 type Qualification struct {
 	Policy      string   `json:"policy"`
@@ -38,9 +41,13 @@ func QualifyHosted(exp *schema.ExperimentV2) Qualification {
 	}
 	var cfg struct {
 		Blocks          int  `json:"blocks"`
+		DurationMS      int  `json:"duration_ms"`
+		WarmupMS        int  `json:"warmup_ms"`
+		SampleMS        int  `json:"sample_ms"`
 		DisableObserver bool `json:"disable_observer"`
 	}
 	if err := json.Unmarshal(exp.Config, &cfg); err != nil || cfg.Blocks < ReleaseBlocks || cfg.DisableObserver ||
+		cfg.DurationMS < releaseDurationMS || cfg.WarmupMS < releaseWarmupMS || cfg.SampleMS <= 0 || cfg.SampleMS > releaseSampleMS ||
 		!exp.Complete || exp.Dirty || exp.SourceSHA == "" || exp.SourceSHA == "unknown" {
 		q.Reasons = append(q.Reasons, "release schedule or clean source requirements not met")
 	}
