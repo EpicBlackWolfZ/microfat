@@ -41,6 +41,8 @@ def main():
     if args.intensity:
         matrix = [case for case in matrix if case['name'].endswith('-' + args.intensity)]
     controls = json.loads(args.controls.read_text()) if args.controls else {}
+    if not isinstance(controls, dict):
+        parser.error("control file must contain a JSON object")
     if set(controls) - {"target", "generator", "runner_identity"}:
         parser.error("control file may contain only target, generator and runner_identity settings")
     if args.tier == "release" and not args.list and not all(controls.get(role) for role in ('target', 'generator')):
@@ -73,12 +75,13 @@ def main():
                     raise
             outcome = {"scenario": scenario["name"], "exit_code": status}
             if args.tier == "release" and status == 0:
-                bundle = Path((args.output / scenario["name"] / "latest-bundle.txt").read_text().strip())
                 evidence = json.loads((args.output / scenario["name"] / 'qualification.json').read_text())
                 if not evidence["publishable"]:
                     outcome.update(exit_code=1, reason="experiment did not meet release qualification")
         except subprocess.TimeoutExpired:
             outcome = {"scenario": scenario["name"], "exit_code": 1, "reason": "matrix case timeout"}
+        except (OSError, ValueError, KeyError) as error:
+            outcome = {"scenario": scenario["name"], "exit_code": 1, "reason": str(error)}
         outcomes.append(outcome)
         (args.output / "outcomes.json").write_text(json.dumps(outcomes, indent=2) + "\n")
     return int(any(item["exit_code"] != 0 for item in outcomes))

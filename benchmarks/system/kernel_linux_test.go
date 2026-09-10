@@ -7,6 +7,7 @@ import (
 	json "encoding/json/v2"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 
 const kernelAbove = "above"
 const kernelWait = "wait"
+const kernelInherit = "inherit"
 const kernelLimit = 64 * 1024 * 1024
 const kernelTimeout = 30 * time.Second
 
@@ -35,6 +37,16 @@ func TestKernelWorkerHelper(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, ExecChild(cfg))
 		return
+	}
+	if mode == kernelInherit {
+		executable, err := os.Executable()
+		require.NoError(t, err)
+		child := exec.Command(executable, "-test.run=^TestKernelWorkerHelper$")
+		child.Env = append(os.Environ(), "MICROFAT_KERNEL_WORKER=leaf", "MICROFAT_KERNEL_BOOTSTRAP=")
+		require.NoError(t, child.Start())
+		fmt.Println("ready", child.Process.Pid)
+		require.NoError(t, child.Wait())
+		os.Exit(0)
 	}
 	fmt.Println("ready")
 	switch mode {
@@ -59,6 +71,8 @@ func TestKernelWorkerHelper(t *testing.T) {
 		require.NoError(t, unix.Munmap(data))
 	case kernelWait:
 		time.Sleep(kernelTimeout)
+	case "leaf":
+		time.Sleep(4 * time.Second)
 	default:
 		t.Fatal("unknown kernel worker")
 	}
@@ -112,26 +126,35 @@ func kernelChild(t *testing.T, ctx context.Context, s *Sandbox, mode string) *pr
 	})
 	line, _, err := child.FirstLine(ctx)
 	require.NoError(t, err, string(child.Stderr()))
-	require.Equal(t, "ready", string(line), "stdout: %s; stderr: %s", child.Stdout(), child.Stderr())
+	require.NotEmpty(t, strings.Fields(string(line)))
+	require.Equal(t, "ready", strings.Fields(string(line))[0], "stdout: %s; stderr: %s", child.Stdout(), child.Stderr())
 	return child
 }
 
 func TestKernelControls(t *testing.T) {
-	for _, mode := range []string{"cpu", "below", kernelAbove, kernelWait} {
+	for _, mode := range []string{"cpu", "below", kernelAbove, kernelWait, kernelInherit} {
 		t.Run(mode, func(t *testing.T) {
 			s := kernelSandbox(t)
 			ctx, cancel := context.WithTimeout(context.Background(), kernelTimeout)
 			defer cancel()
 			before := s.Read("before")
 			child := kernelChild(t, ctx, s, mode)
-			if mode == "cpu" || mode == kernelWait {
+			if mode == "cpu" || mode == kernelWait || mode == kernelInherit {
+				pid := child.PID()
+				if mode == kernelInherit {
+					fields := strings.Fields(string(child.Stdout()))
+					require.GreaterOrEqual(t, len(fields), 2)
+					parsed, err := strconv.Atoi(fields[1])
+					require.NoError(t, err)
+					pid = parsed
+				}
 				for _, file := range s.Procs {
 					data, err := os.ReadFile(file)
 					require.NoError(t, err)
-					require.True(t, containsPID(string(data), child.PID()))
+					require.True(t, containsPID(string(data), pid))
 				}
 				var effective unix.CPUSet
-				require.NoError(t, unix.SchedGetaffinity(child.PID(), &effective))
+				require.NoError(t, unix.SchedGetaffinity(pid, &effective))
 				require.Equal(t, 1, effective.Count())
 				require.True(t, effective.IsSet(s.Options.Affinity[0]))
 			}
@@ -145,7 +168,9 @@ func TestKernelControls(t *testing.T) {
 				require.NoError(t, err, string(child.Stderr()))
 			}
 			after := s.Read("after")
-			t.Logf("before=%+v after=%+v usage=%+v", before, after, Usage(child.State()))
+			counters, err := json.Marshal(map[string]any{"before": before, "after": after, "usage": Usage(child.State())})
+			require.NoError(t, err)
+			t.Logf("kernel counters: %s", counters)
 			if mode == "cpu" {
 				metric := after["cpu.stat/nr_throttled"]
 				require.NotNil(t, metric.Value)

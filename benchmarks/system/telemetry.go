@@ -78,6 +78,12 @@ func (s *Sandbox) Read(phase string) map[string]schema.Measurement {
 	for _, root := range s.Paths {
 		for _, file := range []string{"memory.current", "memory.peak", "memory.usage_in_bytes", "memory.max_usage_in_bytes",
 			"cpuacct.usage", "memory.failcnt"} {
+			unit := unitBytes
+			if file == "cpuacct.usage" {
+				unit = "ns"
+			} else if file == "memory.failcnt" {
+				unit = "count"
+			}
 			// #nosec G304 -- benchmark-owned cgroup root and fixed controller filename.
 			data, err := os.ReadFile(filepath.Join(root, file))
 			if err != nil {
@@ -85,14 +91,8 @@ func (s *Sandbox) Read(phase string) map[string]schema.Measurement {
 			}
 			value, err := firstNumber(string(data))
 			if err != nil {
-				result[file] = schema.Unavailable(unitBytes, phase, "cgroup/"+file, err.Error())
+				result[file] = schema.Unavailable(unit, phase, "cgroup/"+file, err.Error())
 				continue
-			}
-			unit := unitBytes
-			if file == "cpuacct.usage" {
-				unit = "ns"
-			} else if file == "memory.failcnt" {
-				unit = "count"
 			}
 			result[file] = schema.Measured(value, unit, phase, "cgroup/"+file)
 		}

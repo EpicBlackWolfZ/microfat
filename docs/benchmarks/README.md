@@ -111,27 +111,63 @@ trial block. Native controls use those same payloads. This measures packaging/la
 not silently change the workload source when comparing a base that predates this benchmark suite.
 
 PR CI reports coarse startup/size regressions and retains raw evidence without posting comments. Size growth
-above 5% is gated; startup gating requires a maintainer-calibrated absolute floor through
-`BENCHMARK_STARTUP_FLOOR_NS`, in addition to the 15% relative threshold. Uncalibrated timing remains report-only.
-Inconclusive results are visible and do not establish absence of regression. Other metrics are reported separately.
+above 5% is gated. Startup enforcement requires both a 15% increase and an independently calibrated absolute
+floor. CI reads `benchmarks/config/calibration.json` from the trusted baseline checkout. Unknown runner classes,
+image updates, changed measurement settings, and insufficient or unstable calibration remain explicitly report-only.
+The local `--startup-calibrated` / `--startup-floor-ns` flags remain available for an explicitly supplied policy;
+workflow execution uses `benchmark gate --calibration <trusted-policy.json>` instead of an unversioned variable.
 
-Real delegated cgroup integrations are opt-in through `MICROFAT_BENCH_CGROUP_ROOT`,
-`MICROFAT_BENCH_CGROUP_VERSION`, and, for v1, `MICROFAT_BENCH_MEMORY_ROOT`. Missing environments are reported as skips.
+## Real kernel controls
 
-## Release evidence
+`make benchmark-kernel` requires `MICROFAT_BENCH_CGROUP_ROOT`, `MICROFAT_BENCH_CGROUP_VERSION`, and for v1,
+`MICROFAT_BENCH_MEMORY_ROOT`. It fails if required controls are unavailable. Ordinary unit tests still skip
+privileged integration when no root is configured; normal benchmark runs retain explicit uncontrolled fallbacks.
 
-Configure repository variables `BENCHMARK_RELEASE_RUNNER_LABELS` (a JSON label array) and
-`BENCHMARK_RELEASE_CONTROLS` (the target/generator settings plus `runner_identity`) before requesting release
-measurement. A prerequisite job fails explicitly when this configuration is absent. Fork PRs use hosted runners;
-they never execute on dedicated measurement hardware. Trusted tags/main can run the qualified release tier.
+Hosted v2 jobs run natively on amd64 and arm64. `scripts/benchmark-controls.sh <controls.json>` creates a private
+empty delegated subtree plus a manager leaf. `scripts/benchmark-enter.sh "$MICROFAT_BENCH_CGROUP_ROOT" <command>`
+moves only the new command into that leaf and immediately drops back to the runner user. This keeps child
+migrations inside a writable common ancestor without changing the workflow runner's own cgroup or its ownership.
+Cleanup removes only the empty benchmark-created groups.
 
-Release qualification requires complete successful trials, the configured minimum blocks, a clean source tree,
-the declared runner identity, and successfully applied target/generator controls. It is a measurement eligibility
-label, not independent attestation of the operator's hardware declaration. Method limitations still accompany evidence.
+`make benchmark-kernel-v1` boots a networkless QEMU TCG guest. The kernel and matching modules package are locked
+in `benchmarks/kernel.lock.json`, checked against Ubuntu-signed metadata, and checked again after download.
+The guest records kernel configuration, binary/initramfs hashes, controls, counters, and serial test results.
+Missing completion, test skips, or timeout fail validation. Emulation proves kernel behavior and is never used
+as performance evidence. No KVM or nested virtualization support is required.
 
-Successful tag runs attach a checksummed archive to the release through a separate job with publishing permissions.
-Raw bundles use date, full commit, and unique experiment IDs. Uploads do not overwrite prior assets. Actions artifacts
-are intermediate storage with finite retention, so a published claim must reference the release asset and its checksum.
-Manual runs prepare bundles for maintainer publication. `make clean` preserves `results/`.
+## Hosted release evidence
+
+All configured benchmark jobs use standard public GitHub-hosted runners. No paid runner, cloud account, homelab,
+or self-hosted registration is required. CPU masks select separate available vCPUs; physical cores, hypervisor
+neighbors, host frequency, and filesystem page-cache state remain outside the experiment's control.
+
+Nightly and release runs compare base/head inside the same VM and shard by amd64/arm64, mixed/CPU/memory,
+and standard/heavy intensity. Nightly compares the trusted parent. Release runs resolve the previous stable
+release ancestor, excluding the current revision; absence of such an ancestor fails rather than substituting.
+Release trials use 20 blocks, 10-second warmup and 30-second measurement. The compatibility tier exercises
+16 format/profile/codec/dictionary cases with native, memfd, cold-cache and warm-cache configurations.
+
+`microfat benchmark qualify --policy hosted-release --input <bundle>` verifies publication completeness:
+clean matching harness/source, successful complete pairs, effective target/generator controls, core measurements,
+and valid telemetry. It prints a JSON verdict and exits nonzero on failure. `release_eligible` retains its strict
+controlled-hardware meaning and is always false on hosted runners. A measured regression can still be published
+as evidence; the publication verdict does not claim improved performance. Partial exec diagnostics and host noise
+remain visible qualifications. Dedicated hardware certification is future work in issue #182.
+
+Dispatch `benchmarks.yml` with `tier=calibration` to collect 20 training and 10 holdout jobs, grouped by actual
+runner class. The candidate absolute floor is twice the largest absolute no-change training median difference;
+all holdout jobs must pass the coarse gate. The workflow verifies every bundle and produces a candidate policy
+for review, without automatically committing it. A class lacking enough independent jobs stays report-only.
+A policy records job identities and checksum-manifest digests so its inputs can be audited.
+
+Dispatch `tier=release` on a repository branch for a nonpublishing rehearsal; `tier=compatibility` runs the
+compatibility checks alone. Completed rehearsal bundles are downloaded into a fresh verification job, checked
+again, replayed byte-for-byte, and audited for all 12 sustained shards before an archive is prepared. Only a
+trusted tag run attaches the archive and checksum to the release, without replacing previous assets. Failed
+or interrupted evidence remains diagnostic and cannot pass matrix publication. Maintainers control tags/releases.
+
+Smoke and integration artifacts expire after seven days; sustained, calibration and rehearsal artifacts after
+fourteen days. Archives omit temporary build files and guest images. Published claims must reference the durable
+release archive, checksum, source/baseline, runner details and limitations. This documentation makes no speedup claim.
 
 See [methodology](methodology.md) for scope, statistical assumptions, and interpretation limits.
