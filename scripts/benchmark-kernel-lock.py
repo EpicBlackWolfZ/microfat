@@ -26,7 +26,9 @@ def main():
     signed = release.read_text().split('SHA256:\n', 1)[1].split('\nSHA', 1)[0]
     expected = next(line.split()[0] for line in signed.splitlines() if line.split() and line.split()[-1] == relative)
     packages = output / 'Packages.gz'
-    download(distribution + relative, packages)
+    # Bind the index URL to the signed digest so mirror updates cannot race InRelease.
+    by_hash = relative.rsplit('/', 1)[0] + '/by-hash/SHA256/' + expected
+    download(distribution + by_hash, packages)
     if hashlib.sha256(packages.read_bytes()).hexdigest() != expected:
         raise SystemExit('repository index checksum mismatch')
     blocks = gzip.decompress(packages.read_bytes()).decode().split('\n\n')
