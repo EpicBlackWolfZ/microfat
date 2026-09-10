@@ -39,15 +39,7 @@ func QualifyHosted(exp *schema.ExperimentV2) Qualification {
 		r.ImageVersion == "" || r.RunID == "" || r.Attempt == "" || r.Repository == "" || exp.ReleaseEligible {
 		q.Reasons = append(q.Reasons, "missing or contradictory hosted runner provenance")
 	}
-	var cfg struct {
-		Blocks          int  `json:"blocks"`
-		DurationMS      int  `json:"duration_ms"`
-		WarmupMS        int  `json:"warmup_ms"`
-		SampleMS        int  `json:"sample_ms"`
-		DisableObserver bool `json:"disable_observer"`
-	}
-	if err := json.Unmarshal(exp.Config, &cfg); err != nil || cfg.Blocks < ReleaseBlocks || cfg.DisableObserver ||
-		cfg.DurationMS < releaseDurationMS || cfg.WarmupMS < releaseWarmupMS || cfg.SampleMS <= 0 || cfg.SampleMS > releaseSampleMS ||
+	if !qualifiedSchedule(exp.Config) ||
 		!exp.Complete || exp.Dirty || exp.SourceSHA == "" || exp.SourceSHA == "unknown" {
 		q.Reasons = append(q.Reasons, "release schedule or clean source requirements not met")
 	}
@@ -69,6 +61,18 @@ func QualifyHosted(exp *schema.ExperimentV2) Qualification {
 	q.Reasons = slices.Compact(q.Reasons)
 	q.Publishable = len(q.Reasons) == 0
 	return q
+}
+
+func qualifiedSchedule(config []byte) bool {
+	var cfg struct {
+		Blocks          int  `json:"blocks"`
+		DurationMS      int  `json:"duration_ms"`
+		WarmupMS        int  `json:"warmup_ms"`
+		SampleMS        int  `json:"sample_ms"`
+		DisableObserver bool `json:"disable_observer"`
+	}
+	return json.Unmarshal(config, &cfg) == nil && cfg.Blocks >= ReleaseBlocks && !cfg.DisableObserver &&
+		cfg.DurationMS >= releaseDurationMS && cfg.WarmupMS >= releaseWarmupMS && cfg.SampleMS > 0 && cfg.SampleMS <= releaseSampleMS
 }
 
 func coreMetrics() []string {
