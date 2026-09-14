@@ -54,62 +54,51 @@ func defaultReadAndHashProcSelfExe() (int64, string, error) {
 //
 // Security boundary: Matching payload bytes establishes consistency of the location hint for stub
 // discovery; it does NOT establish producer authenticity or a new privileged trust boundary.
+func resolveNativeInstallationDirectory() (string, error) {
+	exePath, err := osExecutableFunc()
+	if err != nil {
+		return "", fmt.Errorf("resolving executable path: %w", err)
+	}
+	realPath, err := evalSymlinksFunc(exePath)
+	if err != nil {
+		realPath = exePath
+	}
+	return filepath.Dir(realPath), nil
+}
+
+func isDispatchedTarget(target string) bool {
+	if strings.HasPrefix(target, "memfd:") || strings.HasPrefix(target, "/memfd:") ||
+		strings.Contains(target, "memfd:") || strings.Contains(target, "(deleted)") {
+		return true
+	}
+
+	dirFD, cacheDir, cacheErr := resolveCacheDirFDFunc("")
+	if cacheErr == nil {
+		if dirFD >= 0 {
+			_ = os.NewFile(uintptr(dirFD), "cacheDir").Close()
+		}
+		if cacheDir != "" && strings.HasPrefix(target, cacheDir) {
+			return true
+		}
+	}
+	return false
+}
+
 func ResolveInstallationDirectory() (string, error) {
 	if runtime.GOOS != "linux" {
-		exePath, err := osExecutableFunc()
-		if err != nil {
-			return "", fmt.Errorf("resolving executable path: %w", err)
-		}
-		realPath, err := evalSymlinksFunc(exePath)
-		if err != nil {
-			realPath = exePath
-		}
-		return filepath.Dir(realPath), nil
+		return resolveNativeInstallationDirectory()
 	}
 
 	target, err := readlinkProcSelfExe()
 	if err != nil {
 		// Fallback to os.Executable if /proc/self/exe cannot be read
-		exePath, err := osExecutableFunc()
-		if err != nil {
-			return "", fmt.Errorf("resolving executable path: %w", err)
-		}
-		realPath, err := evalSymlinksFunc(exePath)
-		if err != nil {
-			realPath = exePath
-		}
-		return filepath.Dir(realPath), nil
-	}
-
-	// Determine if the process is running as a dispatched payload
-	isMemfd := strings.HasPrefix(target, "memfd:") || strings.HasPrefix(target, "/memfd:") ||
-		strings.Contains(target, "memfd:") || strings.Contains(target, "(deleted)")
-
-	var isCache bool
-	if !isMemfd {
-		dirFD, cacheDir, cacheErr := resolveCacheDirFDFunc("")
-		if cacheErr == nil {
-			if dirFD >= 0 {
-				_ = os.NewFile(uintptr(dirFD), "cacheDir").Close()
-			}
-			if cacheDir != "" && strings.HasPrefix(target, cacheDir) {
-				isCache = true
-			}
-		}
+		return resolveNativeInstallationDirectory()
 	}
 
 	// If execution is native (neither memfd nor cache dispatch), use the real executable location.
 	// Inherited MICROFAT_* environment variables must not override native execution.
-	if !isMemfd && !isCache {
-		exePath, err := osExecutableFunc()
-		if err != nil {
-			return "", fmt.Errorf("resolving executable path: %w", err)
-		}
-		realPath, err := evalSymlinksFunc(exePath)
-		if err != nil {
-			realPath = exePath
-		}
-		return filepath.Dir(realPath), nil
+	if !isDispatchedTarget(target) {
+		return resolveNativeInstallationDirectory()
 	}
 
 	// Dispatched execution: validate the original executable location hint

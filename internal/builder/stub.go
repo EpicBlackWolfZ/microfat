@@ -15,68 +15,72 @@ import (
 //
 // Note: microfat-stub-minimal is never automatically selected; it requires explicit selection via --stub or stub:.
 // Implicit repository-relative lookups (such as bin/microfat-stub or ../bin/microfat-stub) are strictly forbidden.
-func ResolveStubPath(cliStub, manifestStub, manifestDir string) (string, error) {
-	// 1. Explicit CLI flag `--stub`
-	if cliStub != "" {
-		resolved := cliStub
-		if !filepath.IsAbs(resolved) {
+func resolveExplicitStub(stubPath, baseDir, sourceDesc string) (string, error) {
+	resolved := stubPath
+	if !filepath.IsAbs(resolved) {
+		if baseDir != "" {
+			resolved = filepath.Join(baseDir, resolved)
+		} else {
 			cwd, err := os.Getwd()
 			if err != nil {
 				return "", fmt.Errorf("resolving working directory for --stub: %w", err)
 			}
 			resolved = filepath.Join(cwd, resolved)
 		}
-		clean := filepath.Clean(resolved)
-		realFile, err := filepath.EvalSymlinks(clean)
-		if err != nil {
-			return "", fmt.Errorf("%w: %s (specified via --stub): %w", ErrStubNotFound, cliStub, err)
-		}
-		stat, err := os.Stat(realFile)
-		if err != nil || stat.IsDir() || !stat.Mode().IsRegular() {
-			return "", fmt.Errorf("%w: %s (specified via --stub)", ErrStubNotFound, cliStub)
-		}
-		f, err := os.Open(realFile)
-		if err != nil {
-			return "", fmt.Errorf("%w: %s cannot be read: %w", ErrStubNotFound, cliStub, err)
-		}
-		_ = f.Close()
-		return clean, nil
+	}
+	clean := filepath.Clean(resolved)
+	realFile, err := filepath.EvalSymlinks(clean)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s (%s): %w", ErrStubNotFound, stubPath, sourceDesc, err)
+	}
+	stat, err := os.Stat(realFile)
+	if err != nil || stat.IsDir() || !stat.Mode().IsRegular() {
+		return "", fmt.Errorf("%w: %s (%s)", ErrStubNotFound, stubPath, sourceDesc)
+	}
+	f, err := os.Open(realFile)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s cannot be read: %w", ErrStubNotFound, stubPath, err)
+	}
+	_ = f.Close()
+	return clean, nil
+}
+
+func findSiblingStub() (string, error) {
+	installDir, err := ResolveInstallationDirectory()
+	if err != nil || installDir == "" {
+		return "", ErrStubNotFound
+	}
+	candidate := filepath.Join(installDir, "microfat-stub")
+	realCandidate, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", ErrStubNotFound
+	}
+	stat, err := os.Stat(realCandidate)
+	if err != nil || stat.IsDir() || !stat.Mode().IsRegular() {
+		return "", ErrStubNotFound
+	}
+	f, err := os.Open(realCandidate)
+	if err != nil {
+		return "", ErrStubNotFound
+	}
+	_ = f.Close()
+	return filepath.Clean(candidate), nil
+}
+
+func ResolveStubPath(cliStub, manifestStub, manifestDir string) (string, error) {
+	// 1. Explicit CLI flag `--stub`
+	if cliStub != "" {
+		return resolveExplicitStub(cliStub, "", "specified via --stub")
 	}
 
 	// 2. Manifest field `stub:`
 	if manifestStub != "" {
-		resolved := manifestStub
-		if !filepath.IsAbs(resolved) && manifestDir != "" {
-			resolved = filepath.Join(manifestDir, resolved)
-		}
-		clean := filepath.Clean(resolved)
-		realFile, err := filepath.EvalSymlinks(clean)
-		if err != nil {
-			return "", fmt.Errorf("%w: %s (specified in manifest): %w", ErrStubNotFound, manifestStub, err)
-		}
-		stat, err := os.Stat(realFile)
-		if err != nil || stat.IsDir() || !stat.Mode().IsRegular() {
-			return "", fmt.Errorf("%w: %s (specified in manifest)", ErrStubNotFound, manifestStub)
-		}
-		f, err := os.Open(realFile)
-		if err != nil {
-			return "", fmt.Errorf("%w: %s cannot be read: %w", ErrStubNotFound, manifestStub, err)
-		}
-		_ = f.Close()
-		return clean, nil
+		return resolveExplicitStub(manifestStub, manifestDir, "specified in manifest")
 	}
 
 	// 3. Sibling microfat-stub beside original installed CLI
-	if installDir, err := ResolveInstallationDirectory(); err == nil && installDir != "" {
-		candidate := filepath.Join(installDir, "microfat-stub")
-		if realCandidate, err := filepath.EvalSymlinks(candidate); err == nil {
-			if stat, err := os.Stat(realCandidate); err == nil && !stat.IsDir() && stat.Mode().IsRegular() {
-				if f, err := os.Open(realCandidate); err == nil {
-					_ = f.Close()
-					return filepath.Clean(candidate), nil
-				}
-			}
-		}
+	if siblingStub, err := findSiblingStub(); err == nil {
+		return siblingStub, nil
 	}
 
 	// 4. Sibling microfat-stub in caller's PATH (absolute entries only)

@@ -52,10 +52,21 @@ func createDummyELF(t *testing.T, dir, name string, arch string) string {
 	return p
 }
 
-func TestResolveStubPath_Precedence(t *testing.T) {
-	// Note: We avoid t.Parallel() when modifying process environment variables (PATH).
+type stubTestFixture struct {
+	tmpDir        string
+	cliStub       string
+	manifestStub  string
+	trustedBinDir string
+	pathStub      string
+	siblingDir    string
+	siblingStub   string
+	mockNativeDir func(dir string)
+}
+
+func setupStubTestFixture(t *testing.T) *stubTestFixture {
+	t.Helper()
 	origPath := os.Getenv("PATH")
-	defer func() { _ = os.Setenv("PATH", origPath) }()
+	t.Cleanup(func() { _ = os.Setenv("PATH", origPath) })
 
 	tmpDir := t.TempDir()
 	cliStub := createDummyELF(t, tmpDir, "cli-stub.elf", testArchAMD64)
@@ -76,13 +87,12 @@ func TestResolveStubPath_Precedence(t *testing.T) {
 	}
 	siblingStub := createDummyELF(t, siblingDir, "microfat-stub", testArchAMD64)
 
-	// Mock ResolveInstallationDirectory via osExecutableFunc
 	origOsExecutable := osExecutableFunc
 	origReadlink := readlinkProcSelfExe
-	defer func() {
+	t.Cleanup(func() {
 		osExecutableFunc = origOsExecutable
 		readlinkProcSelfExe = origReadlink
-	}()
+	})
 
 	mockNativeDir := func(dir string) {
 		dummyExe := filepath.Join(dir, "microfat")
@@ -94,25 +104,40 @@ func TestResolveStubPath_Precedence(t *testing.T) {
 		}
 	}
 
-	t.Run("Case1_AllSourcesExist_CLIPathSupplied_CLIWins", func(t *testing.T) {
-		mockNativeDir(siblingDir)
-		_ = os.Setenv("PATH", trustedBinDir)
+	return &stubTestFixture{
+		tmpDir:        tmpDir,
+		cliStub:       cliStub,
+		manifestStub:  manifestStub,
+		trustedBinDir: trustedBinDir,
+		pathStub:      pathStub,
+		siblingDir:    siblingDir,
+		siblingStub:   siblingStub,
+		mockNativeDir: mockNativeDir,
+	}
+}
 
-		res, err := ResolveStubPath(cliStub, manifestStub, tmpDir)
+func TestResolveStubPath_ExplicitStubs(t *testing.T) {
+	f := setupStubTestFixture(t)
+
+	t.Run("Case1_AllSourcesExist_CLIPathSupplied_CLIWins", func(t *testing.T) {
+		f.mockNativeDir(f.siblingDir)
+		_ = os.Setenv("PATH", f.trustedBinDir)
+
+		res, err := ResolveStubPath(f.cliStub, f.manifestStub, f.tmpDir)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res != cliStub {
-			t.Fatalf("expected CLI stub %q, got %q", cliStub, res)
+		if res != f.cliStub {
+			t.Fatalf("expected CLI stub %q, got %q", f.cliStub, res)
 		}
 	})
 
 	t.Run("Case2_InvalidCLIPath_ValidFallbacksExist_ErrorNoFallback", func(t *testing.T) {
-		mockNativeDir(siblingDir)
-		_ = os.Setenv("PATH", trustedBinDir)
+		f.mockNativeDir(f.siblingDir)
+		_ = os.Setenv("PATH", f.trustedBinDir)
 
-		invalidCLI := filepath.Join(tmpDir, "does-not-exist.elf")
-		_, err := ResolveStubPath(invalidCLI, manifestStub, tmpDir)
+		invalidCLI := filepath.Join(f.tmpDir, "does-not-exist.elf")
+		_, err := ResolveStubPath(invalidCLI, f.manifestStub, f.tmpDir)
 		if err == nil {
 			t.Fatalf("expected error for invalid CLI stub, got nil")
 		}
@@ -122,23 +147,23 @@ func TestResolveStubPath_Precedence(t *testing.T) {
 	})
 
 	t.Run("Case3_CLIOmitted_ExplicitManifestStub_ManifestWins", func(t *testing.T) {
-		mockNativeDir(siblingDir)
-		_ = os.Setenv("PATH", trustedBinDir)
+		f.mockNativeDir(f.siblingDir)
+		_ = os.Setenv("PATH", f.trustedBinDir)
 
-		res, err := ResolveStubPath("", "manifest-stub.elf", tmpDir)
+		res, err := ResolveStubPath("", "manifest-stub.elf", f.tmpDir)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res != manifestStub {
-			t.Fatalf("expected manifest stub %q, got %q", manifestStub, res)
+		if res != f.manifestStub {
+			t.Fatalf("expected manifest stub %q, got %q", f.manifestStub, res)
 		}
 	})
 
 	t.Run("Case4_InvalidManifestStub_ValidAutomaticCandidates_ErrorNoFallback", func(t *testing.T) {
-		mockNativeDir(siblingDir)
-		_ = os.Setenv("PATH", trustedBinDir)
+		f.mockNativeDir(f.siblingDir)
+		_ = os.Setenv("PATH", f.trustedBinDir)
 
-		_, err := ResolveStubPath("", "nonexistent-manifest.elf", tmpDir)
+		_, err := ResolveStubPath("", "nonexistent-manifest.elf", f.tmpDir)
 		if err == nil {
 			t.Fatalf("expected error for invalid manifest stub, got nil")
 		}
@@ -147,33 +172,59 @@ func TestResolveStubPath_Precedence(t *testing.T) {
 		}
 	})
 
+	t.Run("Case9_ExplicitProjectLocalStubSupplied_Allowed", func(t *testing.T) {
+		res, err := ResolveStubPath(f.cliStub, "", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res != f.cliStub {
+			t.Fatalf("expected %q, got %q", f.cliStub, res)
+		}
+	})
+
+	t.Run("Case10_DirectoryOrSpecialFileCandidate_Rejected", func(t *testing.T) {
+		dirCandidate := filepath.Join(f.tmpDir, "a-directory")
+		_ = os.MkdirAll(dirCandidate, 0o755)
+
+		_, err := ResolveStubPath(dirCandidate, "", "")
+		if err == nil {
+			t.Fatalf("expected error for directory candidate, got nil")
+		}
+		if !errors.Is(err, ErrStubNotFound) {
+			t.Fatalf("expected ErrStubNotFound, got %v", err)
+		}
+	})
+}
+
+func TestResolveStubPath_AutomaticFallbacks(t *testing.T) {
+	f := setupStubTestFixture(t)
+
 	t.Run("Case4b_CLIOmitted_ManifestOmitted_SiblingStubWins", func(t *testing.T) {
-		mockNativeDir(siblingDir)
-		_ = os.Setenv("PATH", trustedBinDir)
+		f.mockNativeDir(f.siblingDir)
+		_ = os.Setenv("PATH", f.trustedBinDir)
 
 		res, err := ResolveStubPath("", "", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res != siblingStub {
-			t.Fatalf("expected sibling stub %q, got %q", siblingStub, res)
+		if res != f.siblingStub {
+			t.Fatalf("expected sibling stub %q, got %q", f.siblingStub, res)
 		}
 	})
 
 	t.Run("Case5_RepoRelativeBinAndParentBinExist_TrustedPATHWins", func(t *testing.T) {
-		// Switch CWD to a test sandbox with bin/microfat-stub and ../bin/microfat-stub
 		cwd, err := os.Getwd()
 		if err != nil {
 			t.Fatalf("getwd: %v", err)
 		}
 		defer func() { _ = os.Chdir(cwd) }()
 
-		sandbox := filepath.Join(tmpDir, "sandbox", "sub")
+		sandbox := filepath.Join(f.tmpDir, "sandbox", "sub")
 		if err := os.MkdirAll(sandbox, 0o755); err != nil {
 			t.Fatalf("mkdir sandbox: %v", err)
 		}
 		localBin := filepath.Join(sandbox, "bin")
-		parentBin := filepath.Join(tmpDir, "sandbox", "bin")
+		parentBin := filepath.Join(f.tmpDir, "sandbox", "bin")
 		_ = os.MkdirAll(localBin, 0o755)
 		_ = os.MkdirAll(parentBin, 0o755)
 		createDummyELF(t, localBin, "microfat-stub", testArchAMD64)
@@ -183,20 +234,18 @@ func TestResolveStubPath_Precedence(t *testing.T) {
 			t.Fatalf("chdir: %v", err)
 		}
 
-		// Sibling directory has NO stub
-		emptyDir := filepath.Join(tmpDir, "empty-sibling")
+		emptyDir := filepath.Join(f.tmpDir, "empty-sibling")
 		_ = os.MkdirAll(emptyDir, 0o755)
-		mockNativeDir(emptyDir)
+		f.mockNativeDir(emptyDir)
 
-		// Trusted PATH contains pathStub
-		_ = os.Setenv("PATH", trustedBinDir)
+		_ = os.Setenv("PATH", f.trustedBinDir)
 
 		res, err := ResolveStubPath("", "", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res != pathStub {
-			t.Fatalf("expected PATH stub %q, got %q (repo-relative candidate must not be selected)", pathStub, res)
+		if res != f.pathStub {
+			t.Fatalf("expected PATH stub %q, got %q (repo-relative candidate must not be selected)", f.pathStub, res)
 		}
 	})
 
@@ -207,7 +256,7 @@ func TestResolveStubPath_Precedence(t *testing.T) {
 		}
 		defer func() { _ = os.Chdir(cwd) }()
 
-		sandbox := filepath.Join(tmpDir, "sandbox2")
+		sandbox := filepath.Join(f.tmpDir, "sandbox2")
 		localBin := filepath.Join(sandbox, "bin")
 		_ = os.MkdirAll(localBin, 0o755)
 		createDummyELF(t, localBin, "microfat-stub", testArchAMD64)
@@ -216,11 +265,10 @@ func TestResolveStubPath_Precedence(t *testing.T) {
 			t.Fatalf("chdir: %v", err)
 		}
 
-		emptyDir := filepath.Join(tmpDir, "empty-sibling2")
+		emptyDir := filepath.Join(f.tmpDir, "empty-sibling2")
 		_ = os.MkdirAll(emptyDir, 0o755)
-		mockNativeDir(emptyDir)
+		f.mockNativeDir(emptyDir)
 
-		// PATH is empty
 		_ = os.Setenv("PATH", "")
 
 		_, err = ResolveStubPath("", "", "")
@@ -233,27 +281,26 @@ func TestResolveStubPath_Precedence(t *testing.T) {
 	})
 
 	t.Run("Case7_PATHContainsEmptyAndRelativeEntries_RelativeIgnoredTrustedWins", func(t *testing.T) {
-		emptyDir := filepath.Join(tmpDir, "empty-sibling3")
+		emptyDir := filepath.Join(f.tmpDir, "empty-sibling3")
 		_ = os.MkdirAll(emptyDir, 0o755)
-		mockNativeDir(emptyDir)
+		f.mockNativeDir(emptyDir)
 
-		// Relative entries like ".", "bin", "../bin" before trustedBinDir
-		craftedPath := strings.Join([]string{".", "bin", "", "../bin", trustedBinDir}, string(os.PathListSeparator))
+		craftedPath := strings.Join([]string{".", "bin", "", "../bin", f.trustedBinDir}, string(os.PathListSeparator))
 		_ = os.Setenv("PATH", craftedPath)
 
 		res, err := ResolveStubPath("", "", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res != pathStub {
-			t.Fatalf("expected trusted absolute PATH stub %q, got %q", pathStub, res)
+		if res != f.pathStub {
+			t.Fatalf("expected trusted absolute PATH stub %q, got %q", f.pathStub, res)
 		}
 	})
 
 	t.Run("Case8_PATHEmpty_NoSibling_ClearError", func(t *testing.T) {
-		emptyDir := filepath.Join(tmpDir, "empty-sibling4")
+		emptyDir := filepath.Join(f.tmpDir, "empty-sibling4")
 		_ = os.MkdirAll(emptyDir, 0o755)
-		mockNativeDir(emptyDir)
+		f.mockNativeDir(emptyDir)
 		_ = os.Setenv("PATH", "")
 
 		_, err := ResolveStubPath("", "", "")
@@ -265,34 +312,11 @@ func TestResolveStubPath_Precedence(t *testing.T) {
 		}
 	})
 
-	t.Run("Case9_ExplicitProjectLocalStubSupplied_Allowed", func(t *testing.T) {
-		res, err := ResolveStubPath(cliStub, "", "")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if res != cliStub {
-			t.Fatalf("expected %q, got %q", cliStub, res)
-		}
-	})
-
-	t.Run("Case10_DirectoryOrSpecialFileCandidate_Rejected", func(t *testing.T) {
-		dirCandidate := filepath.Join(tmpDir, "a-directory")
-		_ = os.MkdirAll(dirCandidate, 0o755)
-
-		_, err := ResolveStubPath(dirCandidate, "", "")
-		if err == nil {
-			t.Fatalf("expected error for directory candidate, got nil")
-		}
-		if !errors.Is(err, ErrStubNotFound) {
-			t.Fatalf("expected ErrStubNotFound, got %v", err)
-		}
-	})
-
 	t.Run("Case11_SiblingMinimalStubPresent_FullAbsent_NoSilentSwitch", func(t *testing.T) {
-		onlyMinimalDir := filepath.Join(tmpDir, "only-minimal")
+		onlyMinimalDir := filepath.Join(f.tmpDir, "only-minimal")
 		_ = os.MkdirAll(onlyMinimalDir, 0o755)
 		createDummyELF(t, onlyMinimalDir, "microfat-stub-minimal", testArchAMD64)
-		mockNativeDir(onlyMinimalDir)
+		f.mockNativeDir(onlyMinimalDir)
 		_ = os.Setenv("PATH", "")
 
 		_, err := ResolveStubPath("", "", "")
@@ -305,21 +329,27 @@ func TestResolveStubPath_Precedence(t *testing.T) {
 	})
 }
 
-func TestResolveInstallationDirectory(t *testing.T) {
+func setupOriginMocks(t *testing.T) string {
+	t.Helper()
 	origOsExecutable := osExecutableFunc
 	origEvalSymlinks := evalSymlinksFunc
 	origReadlink := readlinkProcSelfExe
 	origReadAndHash := readAndHashSelfExe
 	origOpenFile := openFileFunc
-	defer func() {
+	origResolveCache := resolveCacheDirFDFunc
+	t.Cleanup(func() {
 		osExecutableFunc = origOsExecutable
 		evalSymlinksFunc = origEvalSymlinks
 		readlinkProcSelfExe = origReadlink
 		readAndHashSelfExe = origReadAndHash
 		openFileFunc = origOpenFile
-	}()
+		resolveCacheDirFDFunc = origResolveCache
+	})
+	return t.TempDir()
+}
 
-	tmpDir := t.TempDir()
+func TestResolveInstallationDirectory_NativeExecution(t *testing.T) {
+	tmpDir := setupOriginMocks(t)
 
 	t.Run("NativeExecution_ReturnsDir_IgnoresForgedOriginalExe", func(t *testing.T) {
 		binDir := filepath.Join(tmpDir, "app-bin")
@@ -342,6 +372,62 @@ func TestResolveInstallationDirectory(t *testing.T) {
 			t.Fatalf("expected native dir %q, got %q", binDir, dir)
 		}
 	})
+
+	t.Run("NativeExecution_ReadlinkFails_FallsBackToExecutable", func(t *testing.T) {
+		binDir := filepath.Join(tmpDir, "fallback-bin")
+		_ = os.MkdirAll(binDir, 0o755)
+		appExe := filepath.Join(binDir, "microfat")
+		_ = os.WriteFile(appExe, []byte("dummy-exe"), 0o755)
+
+		readlinkProcSelfExe = func() (string, error) {
+			return "", errors.New("readlink denied")
+		}
+		osExecutableFunc = func() (string, error) {
+			return appExe, nil
+		}
+
+		dir, err := ResolveInstallationDirectory()
+		if err != nil {
+			t.Fatalf("unexpected error on fallback: %v", err)
+		}
+		if dir != binDir {
+			t.Fatalf("expected fallback dir %q, got %q", binDir, dir)
+		}
+
+		// Test osExecutableFunc error branch
+		osExecutableFunc = func() (string, error) {
+			return "", errors.New("executable fail")
+		}
+		_, err = ResolveInstallationDirectory()
+		if err == nil {
+			t.Fatalf("expected error when osExecutableFunc fails")
+		}
+	})
+
+	t.Run("NativeExecution_SymlinkEvalError", func(t *testing.T) {
+		binDir := filepath.Join(tmpDir, "symlink-err-bin")
+		_ = os.MkdirAll(binDir, 0o755)
+		appExe := filepath.Join(binDir, "microfat")
+		_ = os.WriteFile(appExe, []byte("dummy-exe"), 0o755)
+
+		osExecutableFunc = func() (string, error) { return appExe, nil }
+		readlinkProcSelfExe = func() (string, error) { return appExe, nil }
+		evalSymlinksFunc = func(string) (string, error) {
+			return "", errors.New("cannot eval symlinks")
+		}
+
+		dir, err := ResolveInstallationDirectory()
+		if err != nil {
+			t.Fatalf("unexpected error when eval symlinks fails: %v", err)
+		}
+		if dir != binDir {
+			t.Fatalf("expected %q, got %q", binDir, dir)
+		}
+	})
+}
+
+func TestResolveInstallationDirectory_DispatchedModes(t *testing.T) {
+	tmpDir := setupOriginMocks(t)
 
 	t.Run("DispatchedExecution_Memfd_ValidConsistency_ReturnsParentDir", func(t *testing.T) {
 		installDir := filepath.Join(tmpDir, "installed-fat with spaces")
@@ -396,6 +482,114 @@ func TestResolveInstallationDirectory(t *testing.T) {
 			t.Fatalf("expected install dir %q, got %q", installDir, dir)
 		}
 	})
+
+	t.Run("DispatchedExecution_CacheMode", func(t *testing.T) {
+		cacheDir := filepath.Join(tmpDir, "cache-dispatch-dir")
+		_ = os.MkdirAll(cacheDir, 0o755)
+		resolveCacheDirFDFunc = func(string) (int, string, error) {
+			return -1, cacheDir, nil
+		}
+		readlinkProcSelfExe = func() (string, error) {
+			return filepath.Join(cacheDir, "dispatched_payload"), nil
+		}
+		v1Path := createDummyELF(t, tmpDir, "app_v1_cache", testArchAMD64)
+		v1Bytes, _ := os.ReadFile(v1Path)
+		v1Hash := sha256.Sum256(v1Bytes)
+		v1Digest := hex.EncodeToString(v1Hash[:])
+
+		stubPath := createDummyELF(t, tmpDir, "stub_cache.elf", testArchAMD64)
+		fatPath := filepath.Join(cacheDir, "app-fat")
+		packOpts := pack.DefaultOptions()
+		packOpts.StubPath = stubPath
+		packOpts.OutputPath = fatPath
+		packOpts.AppName = "app-cache"
+		packOpts.Variants = map[string]string{"v1": v1Path}
+		packOpts.SkipELFValidation = true
+		_, err := pack.Pack(packOpts)
+		if err != nil {
+			t.Fatalf("pack: %v", err)
+		}
+
+		readAndHashSelfExe = func() (int64, string, error) {
+			return int64(len(v1Bytes)), v1Digest, nil
+		}
+
+		_ = os.Setenv(format.EnvExecMode, format.ExecModeCache)
+		_ = os.Setenv(format.EnvSelectedVariant, "v1")
+		_ = os.Setenv(format.EnvSelectedSize, strconv.FormatInt(int64(len(v1Bytes)), 10))
+		_ = os.Setenv(format.EnvSelectedSHA256, v1Digest)
+		_ = os.Setenv(format.EnvOriginalExe, fatPath)
+		defer func() {
+			_ = os.Unsetenv(format.EnvExecMode)
+			_ = os.Unsetenv(format.EnvSelectedVariant)
+			_ = os.Unsetenv(format.EnvSelectedSize)
+			_ = os.Unsetenv(format.EnvSelectedSHA256)
+			_ = os.Unsetenv(format.EnvOriginalExe)
+		}()
+
+		dir, err := ResolveInstallationDirectory()
+		if err != nil {
+			t.Fatalf("cache mode unexpected error: %v", err)
+		}
+		if dir != cacheDir {
+			t.Fatalf("expected cache dir %q, got %q", cacheDir, dir)
+		}
+	})
+
+	t.Run("DispatchedExecution_DispatchModeFallback", func(t *testing.T) {
+		binDir := filepath.Join(tmpDir, "fallback-mode-bin")
+		_ = os.MkdirAll(binDir, 0o755)
+		v1Path := createDummyELF(t, tmpDir, "app_v1_fallback", testArchAMD64)
+		v1Bytes, _ := os.ReadFile(v1Path)
+		v1Hash := sha256.Sum256(v1Bytes)
+		v1Digest := hex.EncodeToString(v1Hash[:])
+
+		stubPath := createDummyELF(t, tmpDir, "stub_fallback.elf", testArchAMD64)
+		fatPath := filepath.Join(binDir, "app-fat")
+		packOpts := pack.DefaultOptions()
+		packOpts.StubPath = stubPath
+		packOpts.OutputPath = fatPath
+		packOpts.AppName = "app-fallback"
+		packOpts.Variants = map[string]string{"v1": v1Path}
+		packOpts.SkipELFValidation = true
+		_, err := pack.Pack(packOpts)
+		if err != nil {
+			t.Fatalf("pack: %v", err)
+		}
+
+		readlinkProcSelfExe = func() (string, error) {
+			return mockMemfdTarget, nil
+		}
+		readAndHashSelfExe = func() (int64, string, error) {
+			return int64(len(v1Bytes)), v1Digest, nil
+		}
+
+		_ = os.Unsetenv(format.EnvExecMode)
+		_ = os.Setenv(format.EnvDispatchMode, format.ExecModeMemfd)
+		_ = os.Setenv(format.EnvSelectedVariant, "v1")
+		_ = os.Setenv(format.EnvSelectedSize, strconv.FormatInt(int64(len(v1Bytes)), 10))
+		_ = os.Setenv(format.EnvSelectedSHA256, v1Digest)
+		_ = os.Setenv(format.EnvOriginalExe, fatPath)
+		defer func() {
+			_ = os.Unsetenv(format.EnvDispatchMode)
+			_ = os.Unsetenv(format.EnvSelectedVariant)
+			_ = os.Unsetenv(format.EnvSelectedSize)
+			_ = os.Unsetenv(format.EnvSelectedSHA256)
+			_ = os.Unsetenv(format.EnvOriginalExe)
+		}()
+
+		dir, err := ResolveInstallationDirectory()
+		if err != nil {
+			t.Fatalf("dispatch mode fallback unexpected error: %v", err)
+		}
+		if dir != binDir {
+			t.Fatalf("expected binDir %q, got %q", binDir, dir)
+		}
+	})
+}
+
+func TestResolveInstallationDirectory_DispatchedValidationErrors(t *testing.T) {
+	tmpDir := setupOriginMocks(t)
 
 	t.Run("DispatchedExecution_MismatchedPayloadDigest_ReturnsError", func(t *testing.T) {
 		installDir := filepath.Join(tmpDir, "installed-fat-tampered")
@@ -577,90 +771,10 @@ func TestResolveInstallationDirectory(t *testing.T) {
 			t.Fatalf("expected error when original exe is a directory")
 		}
 	})
+}
 
-	t.Run("NativeExecution_ReadlinkFails_FallsBackToExecutable", func(t *testing.T) {
-		binDir := filepath.Join(tmpDir, "fallback-bin")
-		_ = os.MkdirAll(binDir, 0o755)
-		appExe := filepath.Join(binDir, "microfat")
-		_ = os.WriteFile(appExe, []byte("dummy-exe"), 0o755)
-
-		readlinkProcSelfExe = func() (string, error) {
-			return "", errors.New("readlink denied")
-		}
-		osExecutableFunc = func() (string, error) {
-			return appExe, nil
-		}
-
-		dir, err := ResolveInstallationDirectory()
-		if err != nil {
-			t.Fatalf("unexpected error on fallback: %v", err)
-		}
-		if dir != binDir {
-			t.Fatalf("expected fallback dir %q, got %q", binDir, dir)
-		}
-
-		// Test osExecutableFunc error branch
-		osExecutableFunc = func() (string, error) {
-			return "", errors.New("executable fail")
-		}
-		_, err = ResolveInstallationDirectory()
-		if err == nil {
-			t.Fatalf("expected error when osExecutableFunc fails")
-		}
-	})
-
-	t.Run("DispatchedExecution_CacheMode", func(t *testing.T) {
-		cacheDir := filepath.Join(tmpDir, "cache-dispatch-dir")
-		_ = os.MkdirAll(cacheDir, 0o755)
-		resolveCacheDirFDFunc = func(string) (int, string, error) {
-			return -1, cacheDir, nil
-		}
-		readlinkProcSelfExe = func() (string, error) {
-			return filepath.Join(cacheDir, "dispatched_payload"), nil
-		}
-		v1Path := createDummyELF(t, tmpDir, "app_v1_cache", testArchAMD64)
-		v1Bytes, _ := os.ReadFile(v1Path)
-		v1Hash := sha256.Sum256(v1Bytes)
-		v1Digest := hex.EncodeToString(v1Hash[:])
-
-		stubPath := createDummyELF(t, tmpDir, "stub_cache.elf", testArchAMD64)
-		fatPath := filepath.Join(cacheDir, "app-fat")
-		packOpts := pack.DefaultOptions()
-		packOpts.StubPath = stubPath
-		packOpts.OutputPath = fatPath
-		packOpts.AppName = "app-cache"
-		packOpts.Variants = map[string]string{"v1": v1Path}
-		packOpts.SkipELFValidation = true
-		_, err := pack.Pack(packOpts)
-		if err != nil {
-			t.Fatalf("pack: %v", err)
-		}
-
-		readAndHashSelfExe = func() (int64, string, error) {
-			return int64(len(v1Bytes)), v1Digest, nil
-		}
-
-		_ = os.Setenv(format.EnvExecMode, format.ExecModeCache)
-		_ = os.Setenv(format.EnvSelectedVariant, "v1")
-		_ = os.Setenv(format.EnvSelectedSize, strconv.FormatInt(int64(len(v1Bytes)), 10))
-		_ = os.Setenv(format.EnvSelectedSHA256, v1Digest)
-		_ = os.Setenv(format.EnvOriginalExe, fatPath)
-		defer func() {
-			_ = os.Unsetenv(format.EnvExecMode)
-			_ = os.Unsetenv(format.EnvSelectedVariant)
-			_ = os.Unsetenv(format.EnvSelectedSize)
-			_ = os.Unsetenv(format.EnvSelectedSHA256)
-			_ = os.Unsetenv(format.EnvOriginalExe)
-		}()
-
-		dir, err := ResolveInstallationDirectory()
-		if err != nil {
-			t.Fatalf("cache mode unexpected error: %v", err)
-		}
-		if dir != cacheDir {
-			t.Fatalf("expected cache dir %q, got %q", cacheDir, dir)
-		}
-	})
+func TestResolveInstallationDirectory_IndexAndIOErrors(t *testing.T) {
+	tmpDir := setupOriginMocks(t)
 
 	t.Run("DispatchedExecution_IndexMismatchErrors", func(t *testing.T) {
 		fatDir := filepath.Join(tmpDir, "mismatched-fat-dir")
@@ -727,58 +841,10 @@ func TestResolveInstallationDirectory(t *testing.T) {
 		}
 	})
 
-	t.Run("DispatchedExecution_DispatchModeFallback", func(t *testing.T) {
-		binDir := filepath.Join(tmpDir, "fallback-mode-bin")
-		_ = os.MkdirAll(binDir, 0o755)
-		v1Path := createDummyELF(t, tmpDir, "app_v1_fallback", testArchAMD64)
-		v1Bytes, _ := os.ReadFile(v1Path)
-		v1Hash := sha256.Sum256(v1Bytes)
-		v1Digest := hex.EncodeToString(v1Hash[:])
-
-		stubPath := createDummyELF(t, tmpDir, "stub_fallback.elf", testArchAMD64)
-		fatPath := filepath.Join(binDir, "app-fat")
-		packOpts := pack.DefaultOptions()
-		packOpts.StubPath = stubPath
-		packOpts.OutputPath = fatPath
-		packOpts.AppName = "app-fallback"
-		packOpts.Variants = map[string]string{"v1": v1Path}
-		packOpts.SkipELFValidation = true
-		_, err := pack.Pack(packOpts)
-		if err != nil {
-			t.Fatalf("pack: %v", err)
-		}
-
-		readlinkProcSelfExe = func() (string, error) {
-			return mockMemfdTarget, nil
-		}
-		readAndHashSelfExe = func() (int64, string, error) {
-			return int64(len(v1Bytes)), v1Digest, nil
-		}
-
-		_ = os.Unsetenv(format.EnvExecMode)
-		_ = os.Setenv(format.EnvDispatchMode, format.ExecModeMemfd)
-		_ = os.Setenv(format.EnvSelectedVariant, "v1")
-		_ = os.Setenv(format.EnvSelectedSize, strconv.FormatInt(int64(len(v1Bytes)), 10))
-		_ = os.Setenv(format.EnvSelectedSHA256, v1Digest)
-		_ = os.Setenv(format.EnvOriginalExe, fatPath)
-		defer func() {
-			_ = os.Unsetenv(format.EnvDispatchMode)
-			_ = os.Unsetenv(format.EnvSelectedVariant)
-			_ = os.Unsetenv(format.EnvSelectedSize)
-			_ = os.Unsetenv(format.EnvSelectedSHA256)
-			_ = os.Unsetenv(format.EnvOriginalExe)
-		}()
-
-		dir, err := ResolveInstallationDirectory()
-		if err != nil {
-			t.Fatalf("dispatch mode fallback unexpected error: %v", err)
-		}
-		if dir != binDir {
-			t.Fatalf("expected binDir %q, got %q", binDir, dir)
-		}
-	})
-
 	t.Run("DispatchedExecution_EvalSymlinksError", func(t *testing.T) {
+		origEval := evalSymlinksFunc
+		defer func() { evalSymlinksFunc = origEval }()
+
 		readlinkProcSelfExe = func() (string, error) {
 			return mockMemfdTarget, nil
 		}
@@ -788,9 +854,6 @@ func TestResolveInstallationDirectory(t *testing.T) {
 		evalSymlinksFunc = func(string) (string, error) {
 			return "", errors.New("symlink evaluation failed")
 		}
-		defer func() {
-			evalSymlinksFunc = origEvalSymlinks
-		}()
 
 		_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
 		_ = os.Setenv(format.EnvSelectedVariant, "v1")
@@ -812,6 +875,9 @@ func TestResolveInstallationDirectory(t *testing.T) {
 	})
 
 	t.Run("DispatchedExecution_StatError", func(t *testing.T) {
+		origEval := evalSymlinksFunc
+		defer func() { evalSymlinksFunc = origEval }()
+
 		readlinkProcSelfExe = func() (string, error) {
 			return mockMemfdTarget, nil
 		}
@@ -821,9 +887,6 @@ func TestResolveInstallationDirectory(t *testing.T) {
 		evalSymlinksFunc = func(p string) (string, error) {
 			return p, nil
 		}
-		defer func() {
-			evalSymlinksFunc = origEvalSymlinks
-		}()
 
 		_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
 		_ = os.Setenv(format.EnvSelectedVariant, "v1")
@@ -845,6 +908,9 @@ func TestResolveInstallationDirectory(t *testing.T) {
 	})
 
 	t.Run("DispatchedExecution_OpenFileError", func(t *testing.T) {
+		origOpen := openFileFunc
+		defer func() { openFileFunc = origOpen }()
+
 		existingFile := filepath.Join(tmpDir, "existing_file")
 		_ = os.WriteFile(existingFile, []byte("content"), 0o755)
 
@@ -857,9 +923,6 @@ func TestResolveInstallationDirectory(t *testing.T) {
 		openFileFunc = func(string) (*os.File, error) {
 			return nil, errors.New("permission denied open")
 		}
-		defer func() {
-			openFileFunc = origOpenFile
-		}()
 
 		_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
 		_ = os.Setenv(format.EnvSelectedVariant, "v1")
@@ -1088,30 +1151,6 @@ func TestResolveInstallationDirectory(t *testing.T) {
 		_ = os.Unsetenv(format.EnvSelectedVariant)
 		_ = os.Unsetenv(format.EnvSelectedSize)
 		_ = os.Unsetenv(format.EnvSelectedSHA256)
-	})
-
-	t.Run("NativeExecution_SymlinkEvalError", func(t *testing.T) {
-		binDir := filepath.Join(tmpDir, "symlink-err-bin")
-		_ = os.MkdirAll(binDir, 0o755)
-		appExe := filepath.Join(binDir, "microfat")
-		_ = os.WriteFile(appExe, []byte("dummy-exe"), 0o755)
-
-		osExecutableFunc = func() (string, error) { return appExe, nil }
-		readlinkProcSelfExe = func() (string, error) { return appExe, nil }
-		evalSymlinksFunc = func(string) (string, error) {
-			return "", errors.New("cannot eval symlinks")
-		}
-		defer func() {
-			evalSymlinksFunc = origEvalSymlinks
-		}()
-
-		dir, err := ResolveInstallationDirectory()
-		if err != nil {
-			t.Fatalf("unexpected error when eval symlinks fails: %v", err)
-		}
-		if dir != binDir {
-			t.Fatalf("expected %q, got %q", binDir, dir)
-		}
 	})
 }
 

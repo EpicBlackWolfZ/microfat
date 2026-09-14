@@ -94,6 +94,55 @@ func parseArgs(args []string) (archivePath, outputPath, formatName string, err e
 	return archivePath, outputPath, formatName, nil
 }
 
+func validateArchiveEntryPath(name, targetDir string) (string, error) {
+	cleanName := filepath.Clean(name)
+	if strings.HasPrefix(cleanName, "/") || strings.HasPrefix(cleanName, "\\") || strings.Contains(cleanName, "..") {
+		return "", fmt.Errorf("illegal relative or absolute path in archive: %s", name)
+	}
+
+	cleanTargetDir := filepath.Clean(targetDir) + string(filepath.Separator)
+	destPath := filepath.Join(targetDir, cleanName)
+	if !strings.HasPrefix(destPath, cleanTargetDir) {
+		return "", fmt.Errorf("path escapes target directory: %s", destPath)
+	}
+	return destPath, nil
+}
+
+func extractArchiveFileEntry(tr io.Reader, hdr *tar.Header, destPath string, totalExtracted *int64) error {
+	if err := os.MkdirAll(filepath.Dir(destPath), dirPerms); err != nil {
+		return fmt.Errorf("creating parent directory for %s: %w", destPath, err)
+	}
+	if hdr.Size > maxSingleFileBytes {
+		return fmt.Errorf("file %s exceeds maximum size limit of %d bytes", hdr.Name, maxSingleFileBytes)
+	}
+	*totalExtracted += hdr.Size
+	if *totalExtracted > maxTotalExtractBytes {
+		return fmt.Errorf("archive exceeds total uncompressed size limit of %d bytes", maxTotalExtractBytes)
+	}
+
+	perms := os.FileMode(filePerms)
+	if hdr.Mode&0o111 != 0 {
+		perms = execPerms
+	}
+	// #nosec G304 -- destPath validated against target directory
+	outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perms)
+	if err != nil {
+		return fmt.Errorf("creating output file %s: %w", destPath, err)
+	}
+	written, err := io.Copy(outFile, io.LimitReader(tr, maxSingleFileBytes))
+	closeErr := outFile.Close()
+	if err != nil {
+		return fmt.Errorf("extracting file %s: %w", destPath, err)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("closing file %s: %w", destPath, closeErr)
+	}
+	if written != hdr.Size {
+		return fmt.Errorf("size mismatch for %s: header %d, written %d", hdr.Name, hdr.Size, written)
+	}
+	return nil
+}
+
 func extractArchiveSafely(archivePath, targetDir string) error {
 	// #nosec G304,G703 -- archive path provided by user or GoReleaser
 	f, err := os.Open(archivePath)
@@ -109,7 +158,6 @@ func extractArchiveSafely(archivePath, targetDir string) error {
 	defer func() { _ = gzr.Close() }()
 
 	tr := tar.NewReader(gzr)
-	cleanTargetDir := filepath.Clean(targetDir) + string(filepath.Separator)
 	var totalExtracted int64
 
 	for {
@@ -121,14 +169,9 @@ func extractArchiveSafely(archivePath, targetDir string) error {
 			return fmt.Errorf("reading tar header: %w", err)
 		}
 
-		cleanName := filepath.Clean(hdr.Name)
-		if strings.HasPrefix(cleanName, "/") || strings.HasPrefix(cleanName, "\\") || strings.Contains(cleanName, "..") {
-			return fmt.Errorf("illegal relative or absolute path in archive: %s", hdr.Name)
-		}
-
-		destPath := filepath.Join(targetDir, cleanName)
-		if !strings.HasPrefix(destPath, cleanTargetDir) {
-			return fmt.Errorf("path escapes target directory: %s", destPath)
+		destPath, err := validateArchiveEntryPath(hdr.Name, targetDir)
+		if err != nil {
+			return err
 		}
 
 		switch hdr.Typeflag {
@@ -137,40 +180,79 @@ func extractArchiveSafely(archivePath, targetDir string) error {
 				return fmt.Errorf("creating directory %s: %w", destPath, err)
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(destPath), dirPerms); err != nil {
-				return fmt.Errorf("creating parent directory for %s: %w", destPath, err)
-			}
-			if hdr.Size > maxSingleFileBytes {
-				return fmt.Errorf("file %s exceeds maximum size limit of %d bytes", hdr.Name, maxSingleFileBytes)
-			}
-			totalExtracted += hdr.Size
-			if totalExtracted > maxTotalExtractBytes {
-				return fmt.Errorf("archive exceeds total uncompressed size limit of %d bytes", maxTotalExtractBytes)
-			}
-
-			perms := os.FileMode(filePerms)
-			if hdr.Mode&0o111 != 0 {
-				perms = execPerms
-			}
-			// #nosec G304 -- destPath validated against target directory
-			outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perms)
-			if err != nil {
-				return fmt.Errorf("creating output file %s: %w", destPath, err)
-			}
-			written, err := io.Copy(outFile, io.LimitReader(tr, maxSingleFileBytes))
-			closeErr := outFile.Close()
-			if err != nil {
-				return fmt.Errorf("extracting file %s: %w", destPath, err)
-			}
-			if closeErr != nil {
-				return fmt.Errorf("closing file %s: %w", destPath, closeErr)
-			}
-			if written != hdr.Size {
-				return fmt.Errorf("size mismatch for %s: header %d, written %d", hdr.Name, hdr.Size, written)
+			if err := extractArchiveFileEntry(tr, hdr, destPath, &totalExtracted); err != nil {
+				return err
 			}
 		default:
 			return fmt.Errorf("refusing to extract unsafe archive entry %s of type %v", hdr.Name, hdr.Typeflag)
 		}
+	}
+	return nil
+}
+
+func readSharedDictionary(f *os.File, idx *format.Index) ([]byte, error) {
+	if idx.DictionarySize <= 0 {
+		return nil, nil
+	}
+	if idx.DictionarySize > format.MaxDictionarySize || idx.DictionaryOffset < 0 {
+		return nil, fmt.Errorf("%w: dictionary size %d or offset %d out of bounds",
+			format.ErrInvalidDictionary, idx.DictionarySize, idx.DictionaryOffset)
+	}
+	if idx.DictionarySHA256 == "" || !format.ValidateChecksum(idx.DictionarySHA256) {
+		return nil, fmt.Errorf("%w: dictionary missing or invalid sha256 checksum", format.ErrInvalidChecksum)
+	}
+	dictBytes := make([]byte, idx.DictionarySize)
+	if _, err := f.ReadAt(dictBytes, idx.DictionaryOffset); err != nil {
+		return nil, fmt.Errorf("reading shared dictionary: %w", err)
+	}
+	dictHash := sha256.Sum256(dictBytes)
+	if hex.EncodeToString(dictHash[:]) != idx.DictionarySHA256 {
+		return nil, fmt.Errorf("%w: dictionary hash mismatch", format.ErrInvalidChecksum)
+	}
+	return dictBytes, nil
+}
+
+func extractSingleVariant(f *os.File, v format.VariantEntry, dictBytes []byte, stagingDir string) error {
+	if v.SHA256 == "" || !format.ValidateChecksum(v.SHA256) {
+		return fmt.Errorf("%w: invalid checksum for variant %s", format.ErrInvalidChecksum, v.Level)
+	}
+	if v.UncompressedSize <= 0 || v.UncompressedSize > format.MaxPayloadSize {
+		return fmt.Errorf("%w: invalid uncompressed size %d for variant %s",
+			format.ErrPayloadTooLarge, v.UncompressedSize, v.Level)
+	}
+	if v.Offset < 0 || v.CompressedSize <= 0 {
+		return fmt.Errorf("invalid offset %d or compressed size %d for variant %s",
+			v.Offset, v.CompressedSize, v.Level)
+	}
+
+	c, err := codec.Get(v.Compression)
+	if err != nil {
+		return fmt.Errorf("getting codec %s for variant %s: %w", v.Compression, v.Level, err)
+	}
+
+	variantPath := filepath.Join(stagingDir, fmt.Sprintf("microfat-variant-%s", v.Level))
+	// #nosec G304 -- variantPath within temporary staging dir
+	outFile, err := os.OpenFile(variantPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, execPerms)
+	if err != nil {
+		return fmt.Errorf("creating file for variant %s: %w", v.Level, err)
+	}
+
+	hasher := sha256.New()
+	mw := io.MultiWriter(outFile, hasher)
+	secReader := io.NewSectionReader(f, v.Offset, v.CompressedSize)
+
+	if err := codec.DecompressWithOptionalDict(c, mw, secReader, v.UncompressedSize, dictBytes); err != nil {
+		_ = outFile.Close()
+		return fmt.Errorf("decompressing variant %s: %w", v.Level, err)
+	}
+
+	if err := outFile.Close(); err != nil {
+		return fmt.Errorf("closing extracted variant %s: %w", v.Level, err)
+	}
+
+	actualHash := hex.EncodeToString(hasher.Sum(nil))
+	if actualHash != v.SHA256 {
+		return fmt.Errorf("checksum mismatch for variant %s: expected %s, got %s", v.Level, v.SHA256, actualHash)
 	}
 	return nil
 }
@@ -197,23 +279,9 @@ func extractVariantsFromFatBinary(fatBinaryPath, stagingDir string) error {
 		return fmt.Errorf("fat binary index in %s contains no variants", fatBinaryPath)
 	}
 
-	var dictBytes []byte
-	if idx.DictionarySize > 0 {
-		if idx.DictionarySize > format.MaxDictionarySize || idx.DictionaryOffset < 0 {
-			return fmt.Errorf("%w: dictionary size %d or offset %d out of bounds",
-				format.ErrInvalidDictionary, idx.DictionarySize, idx.DictionaryOffset)
-		}
-		if idx.DictionarySHA256 == "" || !format.ValidateChecksum(idx.DictionarySHA256) {
-			return fmt.Errorf("%w: dictionary missing or invalid sha256 checksum", format.ErrInvalidChecksum)
-		}
-		dictBytes = make([]byte, idx.DictionarySize)
-		if _, err := f.ReadAt(dictBytes, idx.DictionaryOffset); err != nil {
-			return fmt.Errorf("reading shared dictionary: %w", err)
-		}
-		dictHash := sha256.Sum256(dictBytes)
-		if hex.EncodeToString(dictHash[:]) != idx.DictionarySHA256 {
-			return fmt.Errorf("%w: dictionary hash mismatch", format.ErrInvalidChecksum)
-		}
+	dictBytes, err := readSharedDictionary(f, idx)
+	if err != nil {
+		return err
 	}
 
 	if err := os.MkdirAll(stagingDir, dirPerms); err != nil {
@@ -221,46 +289,8 @@ func extractVariantsFromFatBinary(fatBinaryPath, stagingDir string) error {
 	}
 
 	for _, v := range idx.Variants {
-		if v.SHA256 == "" || !format.ValidateChecksum(v.SHA256) {
-			return fmt.Errorf("%w: invalid checksum for variant %s", format.ErrInvalidChecksum, v.Level)
-		}
-		if v.UncompressedSize <= 0 || v.UncompressedSize > format.MaxPayloadSize {
-			return fmt.Errorf("%w: invalid uncompressed size %d for variant %s",
-				format.ErrPayloadTooLarge, v.UncompressedSize, v.Level)
-		}
-		if v.Offset < 0 || v.CompressedSize <= 0 {
-			return fmt.Errorf("invalid offset %d or compressed size %d for variant %s",
-				v.Offset, v.CompressedSize, v.Level)
-		}
-
-		c, err := codec.Get(v.Compression)
-		if err != nil {
-			return fmt.Errorf("getting codec %s for variant %s: %w", v.Compression, v.Level, err)
-		}
-
-		variantPath := filepath.Join(stagingDir, fmt.Sprintf("microfat-variant-%s", v.Level))
-		// #nosec G304 -- variantPath within temporary staging dir
-		outFile, err := os.OpenFile(variantPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, execPerms)
-		if err != nil {
-			return fmt.Errorf("creating file for variant %s: %w", v.Level, err)
-		}
-
-		hasher := sha256.New()
-		mw := io.MultiWriter(outFile, hasher)
-		secReader := io.NewSectionReader(f, v.Offset, v.CompressedSize)
-
-		if err := codec.DecompressWithOptionalDict(c, mw, secReader, v.UncompressedSize, dictBytes); err != nil {
-			_ = outFile.Close()
-			return fmt.Errorf("decompressing variant %s: %w", v.Level, err)
-		}
-
-		if err := outFile.Close(); err != nil {
-			return fmt.Errorf("closing extracted variant %s: %w", v.Level, err)
-		}
-
-		actualHash := hex.EncodeToString(hasher.Sum(nil))
-		if actualHash != v.SHA256 {
-			return fmt.Errorf("checksum mismatch for variant %s: expected %s, got %s", v.Level, v.SHA256, actualHash)
+		if err := extractSingleVariant(f, v, dictBytes, stagingDir); err != nil {
+			return err
 		}
 	}
 
@@ -268,11 +298,6 @@ func extractVariantsFromFatBinary(fatBinaryPath, stagingDir string) error {
 }
 
 func runSyft(scanDir, formatName string) ([]byte, error) {
-	syftPath, err := exec.LookPath("syft")
-	if err != nil {
-		return nil, fmt.Errorf("syft executable not found in PATH: %w", err)
-	}
-
 	var syftFormat string
 	switch formatName {
 	case "spdx", "spdx-json":
@@ -281,6 +306,11 @@ func runSyft(scanDir, formatName string) ([]byte, error) {
 		syftFormat = "cyclonedx-json"
 	default:
 		return nil, fmt.Errorf("unsupported SBOM format %q (expected spdx-json or cyclonedx-json)", formatName)
+	}
+
+	syftPath, err := exec.LookPath("syft")
+	if err != nil {
+		return nil, fmt.Errorf("syft executable not found in PATH: %w", err)
 	}
 
 	// #nosec G204 -- syftPath resolved via LookPath, formatName validated against allowlist

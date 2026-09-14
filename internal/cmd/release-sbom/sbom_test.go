@@ -445,6 +445,14 @@ func TestRunSyft_UnsupportedFormat(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported SBOM format")
 }
 
+func TestRunSyft_MissingSyftExecutable(t *testing.T) {
+	t.Setenv("PATH", "")
+	tempDir := t.TempDir()
+	_, err := runSyft(tempDir, "spdx-json")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "syft executable not found in PATH")
+}
+
 func TestWriteAtomic_InvalidDirectory(t *testing.T) {
 	t.Parallel()
 	// Create a regular file and try to write into a subpath of it
