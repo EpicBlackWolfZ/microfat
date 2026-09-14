@@ -196,7 +196,7 @@ func TestResolveStubPath_ExplicitStubs(t *testing.T) {
 	})
 }
 
-func TestResolveStubPath_AutomaticFallbacks(t *testing.T) {
+func TestResolveStubPath_SiblingAndRepoRelative(t *testing.T) {
 	f := setupStubTestFixture(t)
 
 	t.Run("Case4b_CLIOmitted_ManifestOmitted_SiblingStubWins", func(t *testing.T) {
@@ -279,6 +279,10 @@ func TestResolveStubPath_AutomaticFallbacks(t *testing.T) {
 			t.Fatalf("expected ErrStubNotFound, got %v", err)
 		}
 	})
+}
+
+func TestResolveStubPath_PATHFilteringAndMinimal(t *testing.T) {
+	f := setupStubTestFixture(t)
 
 	t.Run("Case7_PATHContainsEmptyAndRelativeEntries_RelativeIgnoredTrustedWins", func(t *testing.T) {
 		emptyDir := filepath.Join(f.tmpDir, "empty-sibling3")
@@ -773,73 +777,8 @@ func TestResolveInstallationDirectory_DispatchedValidationErrors(t *testing.T) {
 	})
 }
 
-func TestResolveInstallationDirectory_IndexAndIOErrors(t *testing.T) {
+func TestResolveInstallationDirectory_FileSystemErrors(t *testing.T) {
 	tmpDir := setupOriginMocks(t)
-
-	t.Run("DispatchedExecution_IndexMismatchErrors", func(t *testing.T) {
-		fatDir := filepath.Join(tmpDir, "mismatched-fat-dir")
-		_ = os.MkdirAll(fatDir, 0o755)
-
-		wrongArch := "arm64"
-		wrongLevel := "v8.0"
-		if runtime.GOARCH == "arm64" {
-			wrongArch = "amd64"
-			wrongLevel = "v1"
-		}
-
-		fatWrongArch := filepath.Join(fatDir, "wrong_arch.fat")
-		idx := &format.Index{
-			Version:    format.FormatVersion2,
-			TargetArch: wrongArch,
-			Variants: []format.VariantEntry{
-				{
-					Level:            wrongLevel,
-					Offset:           10,
-					CompressedSize:   10,
-					UncompressedSize: 10,
-					SHA256:           strings.Repeat("a", 64),
-					Compression:      "none",
-				},
-			},
-		}
-		var buf bytes.Buffer
-		buf.Write(make([]byte, 20))
-		_, err := format.WriteIndexAndTrailer(&buf, idx, 20)
-		if err != nil {
-			t.Fatalf("writing index: %v", err)
-		}
-		if err := os.WriteFile(fatWrongArch, buf.Bytes(), 0o755); err != nil {
-			t.Fatalf("write file: %v", err)
-		}
-
-		readlinkProcSelfExe = func() (string, error) {
-			return mockMemfdTarget, nil
-		}
-		readAndHashSelfExe = func() (int64, string, error) {
-			return 10, strings.Repeat("a", 64), nil
-		}
-
-		_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
-		_ = os.Setenv(format.EnvSelectedVariant, wrongLevel)
-		_ = os.Setenv(format.EnvSelectedSize, "10")
-		_ = os.Setenv(format.EnvSelectedSHA256, strings.Repeat("a", 64))
-		_ = os.Setenv(format.EnvOriginalExe, fatWrongArch)
-		defer func() {
-			_ = os.Unsetenv(format.EnvExecMode)
-			_ = os.Unsetenv(format.EnvSelectedVariant)
-			_ = os.Unsetenv(format.EnvSelectedSize)
-			_ = os.Unsetenv(format.EnvSelectedSHA256)
-			_ = os.Unsetenv(format.EnvOriginalExe)
-		}()
-
-		_, err = ResolveInstallationDirectory()
-		if err == nil {
-			t.Fatalf("expected error for mismatched target arch")
-		}
-		if !strings.Contains(err.Error(), "does not match host") {
-			t.Fatalf("expected error containing 'does not match host', got: %v", err)
-		}
-	})
 
 	t.Run("DispatchedExecution_EvalSymlinksError", func(t *testing.T) {
 		origEval := evalSymlinksFunc
@@ -970,6 +909,111 @@ func TestResolveInstallationDirectory_IndexAndIOErrors(t *testing.T) {
 		_, err := ResolveInstallationDirectory()
 		if err == nil || !strings.Contains(err.Error(), "reading index") {
 			t.Fatalf("expected index read error, got: %v", err)
+		}
+	})
+
+	t.Run("DispatchedExecution_ReadSelfExeAndPayloadLimits", func(t *testing.T) {
+		readlinkProcSelfExe = func() (string, error) {
+			return mockMemfdTarget, nil
+		}
+
+		// Error reading self exe
+		readAndHashSelfExe = func() (int64, string, error) {
+			return 0, "", errors.New("read self failed")
+		}
+		_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+		_ = os.Setenv(format.EnvSelectedVariant, "v1")
+		_ = os.Setenv(format.EnvSelectedSize, "10")
+		_ = os.Setenv(format.EnvSelectedSHA256, strings.Repeat("a", 64))
+
+		_, err := ResolveInstallationDirectory()
+		if err == nil || !strings.Contains(err.Error(), "reading running payload") {
+			t.Fatalf("expected reading running payload error, got: %v", err)
+		}
+
+		// Claimed size exceeds max payload size
+		readAndHashSelfExe = func() (int64, string, error) {
+			return 10, strings.Repeat("a", 64), nil
+		}
+		_ = os.Setenv(format.EnvSelectedSize, strconv.FormatInt(format.MaxPayloadSize+1, 10))
+
+		_, err = ResolveInstallationDirectory()
+		if err == nil || !strings.Contains(err.Error(), "invalid claimed payload size") {
+			t.Fatalf("expected claimed size too large error, got: %v", err)
+		}
+
+		_ = os.Unsetenv(format.EnvExecMode)
+		_ = os.Unsetenv(format.EnvSelectedVariant)
+		_ = os.Unsetenv(format.EnvSelectedSize)
+		_ = os.Unsetenv(format.EnvSelectedSHA256)
+	})
+}
+
+func TestResolveInstallationDirectory_IndexValidationErrors(t *testing.T) {
+	tmpDir := setupOriginMocks(t)
+
+	t.Run("DispatchedExecution_IndexMismatchErrors", func(t *testing.T) {
+		fatDir := filepath.Join(tmpDir, "mismatched-fat-dir")
+		_ = os.MkdirAll(fatDir, 0o755)
+
+		wrongArch := "arm64"
+		wrongLevel := "v8.0"
+		if runtime.GOARCH == "arm64" {
+			wrongArch = "amd64"
+			wrongLevel = "v1"
+		}
+
+		fatWrongArch := filepath.Join(fatDir, "wrong_arch.fat")
+		idx := &format.Index{
+			Version:    format.FormatVersion2,
+			TargetArch: wrongArch,
+			Variants: []format.VariantEntry{
+				{
+					Level:            wrongLevel,
+					Offset:           10,
+					CompressedSize:   10,
+					UncompressedSize: 10,
+					SHA256:           strings.Repeat("a", 64),
+					Compression:      "none",
+				},
+			},
+		}
+		var buf bytes.Buffer
+		buf.Write(make([]byte, 20))
+		_, err := format.WriteIndexAndTrailer(&buf, idx, 20)
+		if err != nil {
+			t.Fatalf("writing index: %v", err)
+		}
+		if err := os.WriteFile(fatWrongArch, buf.Bytes(), 0o755); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+
+		readlinkProcSelfExe = func() (string, error) {
+			return mockMemfdTarget, nil
+		}
+		readAndHashSelfExe = func() (int64, string, error) {
+			return 10, strings.Repeat("a", 64), nil
+		}
+
+		_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+		_ = os.Setenv(format.EnvSelectedVariant, wrongLevel)
+		_ = os.Setenv(format.EnvSelectedSize, "10")
+		_ = os.Setenv(format.EnvSelectedSHA256, strings.Repeat("a", 64))
+		_ = os.Setenv(format.EnvOriginalExe, fatWrongArch)
+		defer func() {
+			_ = os.Unsetenv(format.EnvExecMode)
+			_ = os.Unsetenv(format.EnvSelectedVariant)
+			_ = os.Unsetenv(format.EnvSelectedSize)
+			_ = os.Unsetenv(format.EnvSelectedSHA256)
+			_ = os.Unsetenv(format.EnvOriginalExe)
+		}()
+
+		_, err = ResolveInstallationDirectory()
+		if err == nil {
+			t.Fatalf("expected error for mismatched target arch")
+		}
+		if !strings.Contains(err.Error(), "does not match host") {
+			t.Fatalf("expected error containing 'does not match host', got: %v", err)
 		}
 	})
 
@@ -1115,42 +1159,6 @@ func TestResolveInstallationDirectory_IndexAndIOErrors(t *testing.T) {
 		_ = os.Unsetenv(format.EnvSelectedSize)
 		_ = os.Unsetenv(format.EnvSelectedSHA256)
 		_ = os.Unsetenv(format.EnvOriginalExe)
-	})
-
-	t.Run("DispatchedExecution_ReadSelfExeAndPayloadLimits", func(t *testing.T) {
-		readlinkProcSelfExe = func() (string, error) {
-			return mockMemfdTarget, nil
-		}
-
-		// Error reading self exe
-		readAndHashSelfExe = func() (int64, string, error) {
-			return 0, "", errors.New("read self failed")
-		}
-		_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
-		_ = os.Setenv(format.EnvSelectedVariant, "v1")
-		_ = os.Setenv(format.EnvSelectedSize, "10")
-		_ = os.Setenv(format.EnvSelectedSHA256, strings.Repeat("a", 64))
-
-		_, err := ResolveInstallationDirectory()
-		if err == nil || !strings.Contains(err.Error(), "reading running payload") {
-			t.Fatalf("expected reading running payload error, got: %v", err)
-		}
-
-		// Claimed size exceeds max payload size
-		readAndHashSelfExe = func() (int64, string, error) {
-			return 10, strings.Repeat("a", 64), nil
-		}
-		_ = os.Setenv(format.EnvSelectedSize, strconv.FormatInt(format.MaxPayloadSize+1, 10))
-
-		_, err = ResolveInstallationDirectory()
-		if err == nil || !strings.Contains(err.Error(), "invalid claimed payload size") {
-			t.Fatalf("expected claimed size too large error, got: %v", err)
-		}
-
-		_ = os.Unsetenv(format.EnvExecMode)
-		_ = os.Unsetenv(format.EnvSelectedVariant)
-		_ = os.Unsetenv(format.EnvSelectedSize)
-		_ = os.Unsetenv(format.EnvSelectedSHA256)
 	})
 }
 
