@@ -54,6 +54,37 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 #### Pre-compiled Universal Fat Archives (Recommended)
 Download the universal fat archive for your architecture (`microfat_<version>_linux_amd64.tar.gz` or `microfat_<version>_linux_arm64.tar.gz`) from the [GitHub Releases](https://github.com/EpicBlackWolfZ/microfat/releases) page. Each archive bundles the self-dispatching `microfat` CLI binary alongside both launcher stubs (`microfat-stub` and `microfat-stub-minimal`).
 
+```bash
+VERSION="0.2.3"
+ARCH="amd64" # or "arm64"
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+# 1. Download archive, checksums, and signature bundle
+curl -sSL -o "$WORK_DIR/microfat_${VERSION}_linux_${ARCH}.tar.gz" \
+  "https://github.com/EpicBlackWolfZ/microfat/releases/download/v${VERSION}/microfat_${VERSION}_linux_${ARCH}.tar.gz"
+curl -sSL -o "$WORK_DIR/checksums.txt" \
+  "https://github.com/EpicBlackWolfZ/microfat/releases/download/v${VERSION}/checksums.txt"
+curl -sSL -o "$WORK_DIR/checksums.txt.sig" \
+  "https://github.com/EpicBlackWolfZ/microfat/releases/download/v${VERSION}/checksums.txt.sig"
+
+# 2. Verify keyless Cosign signature against official release identity
+cosign verify-blob \
+  --bundle "$WORK_DIR/checksums.txt.sig" \
+  --certificate-identity "https://github.com/EpicBlackWolfZ/microfat/.github/workflows/release.yml@refs/tags/v${VERSION}" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "$WORK_DIR/checksums.txt"
+
+# 3. Verify SHA-256 archive checksum
+(cd "$WORK_DIR" && grep "microfat_${VERSION}_linux_${ARCH}.tar.gz" checksums.txt | sha256sum --check --status)
+
+# 4. Extract and install the 3 executables to /usr/local/bin
+tar -xzf "$WORK_DIR/microfat_${VERSION}_linux_${ARCH}.tar.gz" -C "$WORK_DIR"
+sudo install -m 0755 "$WORK_DIR/microfat" /usr/local/bin/microfat
+sudo install -m 0755 "$WORK_DIR/microfat-stub" /usr/local/bin/microfat-stub
+sudo install -m 0755 "$WORK_DIR/microfat-stub-minimal" /usr/local/bin/microfat-stub-minimal
+```
+
 #### Via Go Toolchain
 ```bash
 go install github.com/EpicBlackWolfZ/microfat/cmd/microfat@latest

@@ -136,28 +136,29 @@ func newInspectCmd() *cobra.Command {
 			}
 
 			if jsonOutput {
-				if err := json.MarshalWrite(os.Stdout, idx, jsontext.WithIndent("  ")); err != nil {
+				if err := json.MarshalWrite(cmd.OutOrStdout(), idx, jsontext.WithIndent("  ")); err != nil {
 					return fmt.Errorf("encoding json: %w", err)
 				}
-				fmt.Println()
+				_, _ = fmt.Fprintln(cmd.OutOrStdout())
 				return nil
 			}
 
-			fmt.Printf("Binary Path:       %s\n", path)
-			fmt.Printf("App Name:          %s\n", idx.AppName)
-			fmt.Printf("Format Version:    v%d (%s)\n", idx.Version, formatVersionName(idx.Version))
-			fmt.Printf("Target Platform:   %s/%s\n", idx.TargetOS, idx.TargetArch)
-			fmt.Printf("Total Size:        %d bytes\n", stat.Size())
+			out := cmd.OutOrStdout()
+			_, _ = fmt.Fprintf(out, "Binary Path:       %s\n", path)
+			_, _ = fmt.Fprintf(out, "App Name:          %s\n", idx.AppName)
+			_, _ = fmt.Fprintf(out, "Format Version:    v%d (%s)\n", idx.Version, formatVersionName(idx.Version))
+			_, _ = fmt.Fprintf(out, "Target Platform:   %s/%s\n", idx.TargetOS, idx.TargetArch)
+			_, _ = fmt.Fprintf(out, "Total Size:        %d bytes\n", stat.Size())
 			if idx.DictionarySize > 0 {
-				fmt.Printf("Shared Dictionary: %d bytes (offset %d, sha256: %.12s...)\n",
+				_, _ = fmt.Fprintf(out, "Shared Dictionary: %d bytes (offset %d, sha256: %.12s...)\n",
 					idx.DictionarySize, idx.DictionaryOffset, idx.DictionarySHA256)
 			}
-			fmt.Printf("Created At:        %s\n\n", time.Unix(idx.CreatedUnix, 0).Format(time.RFC3339))
+			_, _ = fmt.Fprintf(out, "Created At:        %s\n\n", time.Unix(idx.CreatedUnix, 0).Format(time.RFC3339))
 
-			fmt.Printf("Embedded Variants (%d total):\n", len(idx.Variants))
+			_, _ = fmt.Fprintf(out, "Embedded Variants (%d total):\n", len(idx.Variants))
 			for _, v := range idx.Variants {
 				ratio := float64(v.CompressedSize) / float64(v.UncompressedSize) * percentMultiplier
-				fmt.Printf("  • %-6s [%s] offset: %10d | comp: %10d B | raw: %10d B (%.1f%%) | sha256: %.12s...\n",
+				_, _ = fmt.Fprintf(out, "  • %-6s [%s] offset: %10d | comp: %10d B | raw: %10d B (%.1f%%) | sha256: %.12s...\n",
 					v.Level, v.Compression, v.Offset, v.CompressedSize, v.UncompressedSize, ratio, v.SHA256)
 			}
 			return nil
@@ -210,27 +211,28 @@ func newVerifyCmd() *cobra.Command {
 						break
 					}
 				}
-				if err := json.MarshalWrite(os.Stdout, out, jsontext.WithIndent("  ")); err != nil {
+				if err := json.MarshalWrite(cmd.OutOrStdout(), out, jsontext.WithIndent("  ")); err != nil {
 					return fmt.Errorf("encoding json: %w", err)
 				}
-				fmt.Println()
+				_, _ = fmt.Fprintln(cmd.OutOrStdout())
 				return nil
 			}
 
-			fmt.Printf("Verifying '%s' (%s - %s/%s)...\n\n", path, idx.AppName, idx.TargetOS, idx.TargetArch)
+			out := cmd.OutOrStdout()
+			_, _ = fmt.Fprintf(out, "Verifying '%s' (%s - %s/%s)...\n\n", path, idx.AppName, idx.TargetOS, idx.TargetArch)
 			allValid := true
 			for _, r := range results {
 				if r.Valid {
-					fmt.Printf("  [PASS] Variant %-6s (size: %d B, sha256: %.16s...)\n", r.Level, r.UncompressedSize, r.ActualSHA256)
+					_, _ = fmt.Fprintf(out, "  [PASS] Variant %-6s (size: %d B, sha256: %.16s...)\n", r.Level, r.UncompressedSize, r.ActualSHA256)
 				} else {
 					allValid = false
-					fmt.Printf("  [FAIL] Variant %-6s: %v\n", r.Level, r.Error)
+					_, _ = fmt.Fprintf(out, "  [FAIL] Variant %-6s: %v\n", r.Level, r.Error)
 				}
 			}
 
-			fmt.Println()
+			_, _ = fmt.Fprintln(out)
 			if allValid {
-				fmt.Println("Result: All embedded variants verified successfully with matching SHA-256 checksums.")
+				_, _ = fmt.Fprintln(out, "Result: All embedded variants verified successfully with matching SHA-256 checksums.")
 				return nil
 			}
 			return fmt.Errorf("one or more variants failed checksum/integrity verification")
@@ -438,13 +440,14 @@ func newPackCmd() *cobra.Command {
 				return nil
 			}
 
-			if stubPath == "" {
+			actualStubPath := stubPath
+			if actualStubPath == "" {
 				resolvedStub, err := builder.ResolveStubPath("", "", "")
 				if err != nil {
 					return fmt.Errorf("launcher stub resolution failed: %w (provide --stub flag or specify --manifest)", err)
 				}
-				stubPath = resolvedStub
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Using auto-discovered launcher stub: %s\n", stubPath)
+				actualStubPath = resolvedStub
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Using auto-discovered launcher stub: %s\n", actualStubPath)
 			}
 			if outputPath == "" {
 				return errors.New("required flag(s) \"output\" not set (or specify --manifest)")
@@ -467,7 +470,7 @@ func newPackCmd() *cobra.Command {
 			}
 
 			opts := pack.DefaultOptions()
-			opts.StubPath = stubPath
+			opts.StubPath = actualStubPath
 			opts.OutputPath = outputPath
 			opts.AppName = appName
 			if targetOS != "" {

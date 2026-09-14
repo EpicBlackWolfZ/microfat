@@ -257,7 +257,7 @@ microfat pack --manifest pgo.yaml -o bin/myapp
 #### Flags
 | Flag | Shorthand | Type | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `--stub` | *(none)* | `string` | `""` | Path to `microfat-stub`. If omitted, automatically discovers `microfat-stub` in the executable's directory or `$PATH`. |
+| `--stub` | *(none)* | `string` | `""` | Path to launcher stub binary. If omitted, evaluates strict precedence: manifest `stub:`, sibling `microfat-stub`, then absolute PATH directories. |
 | `--output` | `-o` | `string` | `""` | Destination output path for the packaged fat executable. |
 | `--name` | *(none)* | `string` | `""` | Application name string embedded in manifest. |
 | `--os` | *(none)* | `string` | `"linux"` | Target operating system. |

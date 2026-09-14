@@ -76,6 +76,19 @@ func runStandardSyscallCheck() error {
 	return unix.Close(fd)
 }
 
+func classifySeccompResult(r1 uintptr, errno syscall.Errno) (action string, err error) {
+	if errno == 0 {
+		if r1 == 0 {
+			return "success", nil
+		}
+		return "thread_error", fmt.Errorf("seccomp TSYNC failed on thread %d", r1)
+	}
+	if errno == unix.ENOSYS || errno == unix.EINVAL {
+		return "fallback_permitted", fmt.Errorf("seccomp TSYNC unsupported: %w", errno)
+	}
+	return "hard_error", fmt.Errorf("seccomp filter installation failed: %w", errno)
+}
+
 func installStrictMemfdDenialFilter() error {
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return fmt.Errorf("prctl PR_SET_NO_NEW_PRIVS: %w", err)
@@ -99,26 +112,36 @@ func installStrictMemfdDenialFilter() error {
 	}
 
 	// Prefer modern SYS_SECCOMP with TSYNC so all threads in the Go runtime process are synchronized
-	_, _, errno := syscall.RawSyscall(
+	r1, _, errno := syscall.RawSyscall(
 		unix.SYS_SECCOMP,
 		uintptr(unix.SECCOMP_SET_MODE_FILTER),
 		uintptr(unix.SECCOMP_FILTER_FLAG_TSYNC),
 		uintptr(unsafe.Pointer(&prog)),
 	)
-	if errno != 0 {
-		// Fallback to prctl(PR_SET_SECCOMP) for older kernels or restricted environments
-		_, _, errno = syscall.RawSyscall(
+	action, err := classifySeccompResult(r1, errno)
+	switch action {
+	case "success":
+		return nil
+	case "thread_error":
+		return err
+	case "fallback_permitted":
+		// Fallback to prctl(PR_SET_SECCOMP) for older kernels (ENOSYS) or environments rejecting TSYNC (EINVAL)
+		r1Fallback, _, errnoFallback := syscall.RawSyscall(
 			syscall.SYS_PRCTL,
 			uintptr(unix.PR_SET_SECCOMP),
 			uintptr(unix.SECCOMP_MODE_FILTER),
 			uintptr(unsafe.Pointer(&prog)),
 		)
-		if errno != 0 {
-			return fmt.Errorf("seccomp filter installation failed: %w", errno)
+		if errnoFallback != 0 || r1Fallback != 0 {
+			if errnoFallback != 0 {
+				return fmt.Errorf("prctl seccomp fallback failed: %w", errnoFallback)
+			}
+			return fmt.Errorf("prctl seccomp fallback failed on thread %d", r1Fallback)
 		}
+		return nil
+	default:
+		return err
 	}
-
-	return nil
 }
 
 func verifySingleInjectedFailureInvariant() error {

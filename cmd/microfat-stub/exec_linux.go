@@ -135,7 +135,6 @@ func executeVariant(
 	policyRes microarch.PolicyResult,
 	startTime time.Time,
 ) error {
-	selfPath = strings.TrimSpace(selfPath)
 	if selfPath == "" && selfFile != nil {
 		selfPath = selfFile.Name()
 	}
@@ -236,11 +235,11 @@ func buildAutoTunedEnviron(
 		}
 	}
 
-	trimmedSelfPath := strings.TrimSpace(selfPath)
-	if trimmedSelfPath != "" {
-		absPath, err := filepath.Abs(trimmedSelfPath)
+	trimmedSelf := strings.TrimSpace(selfPath)
+	if trimmedSelf != "" {
+		absPath, err := filepath.Abs(trimmedSelf)
 		if err != nil {
-			absPath = filepath.Clean(trimmedSelfPath)
+			absPath = filepath.Clean(trimmedSelf)
 		}
 		env = upsertEnv(env, keyIndex, format.EnvOriginalExe, absPath)
 	}
@@ -540,7 +539,6 @@ func executeViaCache(
 	primaryErr error,
 	startTime time.Time,
 ) error {
-	selfPath = strings.TrimSpace(selfPath)
 	if selfPath == "" && selfFile != nil {
 		selfPath = selfFile.Name()
 	}
