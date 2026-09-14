@@ -59,7 +59,7 @@ jobs:
           make benchmark-smoke
       - name: Preserve smoke evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: benchmark-smoke-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/benchmark-ci
@@ -120,7 +120,7 @@ jobs:
         run: python3 scripts/benchmark-evidence.py .work/benchmark-matrix --shard
       - name: Preserve sustained evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: benchmark-${{ env.BENCHMARK_TIER }}-${{ matrix.arch }}-${{ matrix.workload }}-${{ matrix.intensity }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/benchmark-matrix
@@ -158,7 +158,7 @@ jobs:
           BENCHMARK_BASE: ${{ github.workspace }}/.work/benchmark-base
           BENCHMARK_REPETITION: ${{ matrix.repetition }}
         run: make benchmark-smoke
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: calibration-${{ matrix.repetition }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -180,13 +180,13 @@ jobs:
           go-version: '1.27.1'
           cache: false
       - run: make build
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: calibration-*-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/calibration
       - name: Verify all independent bundles and derive policy
         run: python3 scripts/benchmark-evidence.py .work/calibration --calibration
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: calibration-policy-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/calibration-policy.json
@@ -212,7 +212,7 @@ jobs:
           go-version: '1.27.1'
           cache: false
       - run: make benchmark-tools benchmark-matrix
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: compatibility-${{ matrix.runner }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -235,7 +235,7 @@ jobs:
           go-version: '1.27.1'
           cache: false
       - run: make build
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: benchmark-release-*-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/release-evidence
@@ -243,7 +243,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ github.sha }}
         run: python3 scripts/benchmark-evidence.py .work/release-evidence --archive
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: verified-hosted-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/benchmark-evidence-*
@@ -261,7 +261,7 @@ jobs:
       contents: write
       actions: read
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: verified-hosted-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence
