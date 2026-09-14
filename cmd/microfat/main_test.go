@@ -1069,3 +1069,122 @@ func TestTrim_DestinationInNewDirectory(t *testing.T) {
 	}
 }
 
+func TestInspect_FormatV1DeprecationWarning(t *testing.T) {
+	tempDir := t.TempDir()
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("STUB_BIN"), 0o755)
+	v1Path := filepath.Join(tempDir, "v1")
+	_ = os.WriteFile(v1Path, []byte("PAYLOAD_V1"), 0o755)
+	fatV1Path := filepath.Join(tempDir, "app_v1.fat")
+
+	packCmd := newPackCmd()
+	packCmd.SetArgs([]string{
+		flagStub, stubPath,
+		flagOutput, fatV1Path,
+		flagName, "v1-app",
+		"-v", "v1=" + v1Path,
+		flagSkipELF,
+		"--format-version", "1",
+	})
+	if err := packCmd.Execute(); err != nil {
+		t.Fatalf("pack format v1 failed: %v", err)
+	}
+
+	var stderrBuf bytes.Buffer
+	inspectCmd := newInspectCmd()
+	inspectCmd.SetErr(&stderrBuf)
+	inspectCmd.SetArgs([]string{fatV1Path})
+	if err := inspectCmd.Execute(); err != nil {
+		t.Fatalf("inspect format v1 failed: %v", err)
+	}
+
+	output := stderrBuf.String()
+	if !strings.Contains(output, "[microfat:warn]") || !strings.Contains(output, "Format v1 is deprecated") {
+		t.Errorf("expected Format v1 deprecation warning in stderr, got: %q", output)
+	}
+
+	// Verify info alias also triggers inspect and prints warning
+	rootCmd := newRootCmd()
+	stderrBuf.Reset()
+	rootCmd.SetErr(&stderrBuf)
+	rootCmd.SetArgs([]string{"info", fatV1Path})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("info alias failed: %v", err)
+	}
+	if !strings.Contains(stderrBuf.String(), "[microfat:warn]") {
+		t.Errorf("expected deprecation warning when calling 'microfat info', got: %q", stderrBuf.String())
+	}
+
+	// Verify Format v2 binary does not emit deprecation warning
+	fatV2Path := filepath.Join(tempDir, "app_v2.fat")
+	packV2Cmd := newPackCmd()
+	packV2Cmd.SetArgs([]string{
+		flagStub, stubPath,
+		flagOutput, fatV2Path,
+		flagName, "v2-app",
+		"-v", "v1=" + v1Path,
+		flagSkipELF,
+		"--format-version", "2",
+	})
+	if err := packV2Cmd.Execute(); err != nil {
+		t.Fatalf("pack format v2 failed: %v", err)
+	}
+
+	stderrBuf.Reset()
+	inspectV2Cmd := newInspectCmd()
+	inspectV2Cmd.SetErr(&stderrBuf)
+	inspectV2Cmd.SetArgs([]string{fatV2Path})
+	if err := inspectV2Cmd.Execute(); err != nil {
+		t.Fatalf("inspect format v2 failed: %v", err)
+	}
+	if strings.Contains(stderrBuf.String(), "Format v1 is deprecated") {
+		t.Errorf("Format v2 binary should not emit deprecation warning, got: %q", stderrBuf.String())
+	}
+}
+
+func TestStubAutoDiscovery(t *testing.T) {
+	tempDir := t.TempDir()
+	v1Path := filepath.Join(tempDir, "v1")
+	_ = os.WriteFile(v1Path, []byte("PAYLOAD_V1"), 0o755)
+	fatPath := filepath.Join(tempDir, "app.fat")
+
+	// 1. Without any stub in PATH or adjacent dir, pack without --stub should fail
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", t.TempDir()) // empty PATH
+
+	packCmd := newPackCmd()
+	packCmd.SetArgs([]string{
+		flagOutput, fatPath,
+		flagName, "autodiscover-app",
+		"-v", "v1=" + v1Path,
+		flagSkipELF,
+	})
+	if err := packCmd.Execute(); err == nil {
+		t.Fatalf("expected pack without stub to fail when no stub is discoverable")
+	}
+
+	// 2. Put microfat-stub into a directory on PATH
+	binDir := filepath.Join(tempDir, "fakebin")
+	_ = os.MkdirAll(binDir, 0o755)
+	fakeStub := filepath.Join(binDir, "microfat-stub")
+	_ = os.WriteFile(fakeStub, []byte("FAKE_STUB_ELF"), 0o755)
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+origPath)
+
+	var stdoutBuf bytes.Buffer
+	packDiscoverCmd := newPackCmd()
+	packDiscoverCmd.SetOut(&stdoutBuf)
+	packDiscoverCmd.SetArgs([]string{
+		flagOutput, fatPath,
+		flagName, "autodiscover-app",
+		"-v", "v1=" + v1Path,
+		flagSkipELF,
+	})
+	if err := packDiscoverCmd.Execute(); err != nil {
+		t.Fatalf("expected pack with auto-discovered stub to succeed, got: %v", err)
+	}
+	if !strings.Contains(stdoutBuf.String(), "Using auto-discovered launcher stub") {
+		t.Errorf("expected auto-discovery notice in stdout, got: %q", stdoutBuf.String())
+	}
+}
+

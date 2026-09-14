@@ -18,46 +18,16 @@ resolve_variant_with_wait() {
     echo ""
 }
 
-# Helper to package fat binary into tar.gz with docs and generate SBOMs
-package_fat_archive() {
-    local fat_bin="$1"
-    local arch_name="$2"
-    local out_tar="dist/microfat_linux_${arch_name}_fat.tar.gz"
-    local stage_dir="dist/.stage_microfat_linux_${arch_name}_fat"
-
-    echo "==> Packaging ${arch_name} fat binary into ${out_tar}..."
-    rm -rf "$stage_dir"
-    mkdir -p "$stage_dir"
-    cp "$fat_bin" "$stage_dir/microfat"
-    cp README.md LICENSE SECURITY.md "$stage_dir/"
-    if [[ -d docs ]]; then
-        cp -r docs "$stage_dir/"
-    fi
-
-    tar -czf "$out_tar" -C "$stage_dir" .
-    rm -rf "$stage_dir"
-    echo "✔ Created fat archive: ${out_tar}"
-
-    if command -v syft &> /dev/null; then
-        echo "==> Generating SBOMs for ${out_tar}..."
-        syft "$out_tar" -o spdx-json > "${out_tar}.spdx.json"
-        syft "$out_tar" -o cyclonedx-json > "${out_tar}.cyclonedx.json"
-        echo "✔ Generated SBOMs for ${out_tar}"
-    elif [[ "${MICROFAT_REQUIRE_SBOM:-0}" == 1 ]]; then
-        echo "ERROR: syft is required for release SBOMs" >&2
-        exit 1
-    fi
-}
-
 # 1. AMD64 Fat Binary Assembly
 V1=$(resolve_variant_with_wait "dist/microfat-amd64_linux_amd64_v1/microfat" "dist/microfat-amd64_linux_amd64/microfat")
 V2=$(resolve_variant_with_wait "dist/microfat-amd64_linux_amd64_v2/microfat" "dist/microfat-amd64_linux_amd64/microfat")
 V3=$(resolve_variant_with_wait "dist/microfat-amd64_linux_amd64_v3/microfat" "dist/microfat-amd64_linux_amd64/microfat")
 V4=$(resolve_variant_with_wait "dist/microfat-amd64_linux_amd64_v4/microfat" "dist/microfat-amd64_linux_amd64/microfat")
 STUB_AMD64=$(resolve_variant_with_wait "dist/microfat-stub-amd64_linux_amd64_v1/microfat-stub" "dist/microfat-stub-amd64_linux_amd64/microfat-stub")
+STUB_MINIMAL_AMD64=$(resolve_variant_with_wait "dist/microfat-stub-minimal-amd64_linux_amd64_v1/microfat-stub-minimal" "dist/microfat-stub-minimal-amd64_linux_amd64/microfat-stub-minimal")
 OUT_AMD64="dist/microfat_linux_amd64_fat"
 
-if [[ -n "$V1" && -n "$V2" && -n "$V3" && -n "$V4" && -n "$STUB_AMD64" ]]; then
+if [[ -n "$V1" && -n "$V2" && -n "$V3" && -n "$V4" && -n "$STUB_AMD64" && -n "$STUB_MINIMAL_AMD64" ]]; then
     echo "==> Bundling microfat AMD64 universal fat binary using GoReleaser-built variants..."
     go run ./cmd/microfat pack --stub "$STUB_AMD64" --arch amd64 -v v1="$V1" -v v2="$V2" -v v3="$V3" -v v4="$V4" -o "$OUT_AMD64"
     
@@ -69,8 +39,6 @@ if [[ -n "$V1" && -n "$V2" && -n "$V3" && -n "$V4" && -n "$STUB_AMD64" ]]; then
         "$OUT_AMD64" verify "$OUT_AMD64"
     fi
     echo "✔ Microfat AMD64 universal fat binary successfully bundled: $OUT_AMD64"
-
-    package_fat_archive "$OUT_AMD64" "amd64"
 else
     echo "ERROR: Missing required AMD64 build artifacts" >&2
     exit 1
@@ -81,9 +49,10 @@ ARM_V80=$(resolve_variant_with_wait "dist/microfat-arm64-v8.0_linux_arm64_v8.0/m
 ARM_V82=$(resolve_variant_with_wait "dist/microfat-arm64-v8.2_linux_arm64_v8.2/microfat" "dist/microfat-arm64-v8.2_linux_arm64/microfat")
 ARM_V90=$(resolve_variant_with_wait "dist/microfat-arm64-v9.0_linux_arm64_v9.0/microfat" "dist/microfat-arm64-v9.0_linux_arm64/microfat")
 STUB_ARM64=$(resolve_variant_with_wait "dist/microfat-stub-arm64_linux_arm64_v8.0/microfat-stub" "dist/microfat-stub-arm64_linux_arm64/microfat-stub")
+STUB_MINIMAL_ARM64=$(resolve_variant_with_wait "dist/microfat-stub-minimal-arm64_linux_arm64_v8.0/microfat-stub-minimal" "dist/microfat-stub-minimal-arm64_linux_arm64/microfat-stub-minimal")
 OUT_ARM64="dist/microfat_linux_arm64_fat"
 
-if [[ -n "$ARM_V80" && -n "$ARM_V82" && -n "$ARM_V90" && -n "$STUB_ARM64" ]]; then
+if [[ -n "$ARM_V80" && -n "$ARM_V82" && -n "$ARM_V90" && -n "$STUB_ARM64" && -n "$STUB_MINIMAL_ARM64" ]]; then
     echo "==> Bundling microfat ARM64 universal fat binary using GoReleaser-built variants..."
     go run ./cmd/microfat pack --stub "$STUB_ARM64" --arch arm64 -v v8.0="$ARM_V80" -v v8.2="$ARM_V82" -v v9.0="$ARM_V90" -o "$OUT_ARM64"
     
@@ -95,8 +64,6 @@ if [[ -n "$ARM_V80" && -n "$ARM_V82" && -n "$ARM_V90" && -n "$STUB_ARM64" ]]; th
         "$OUT_ARM64" verify "$OUT_ARM64"
     fi
     echo "✔ Microfat ARM64 universal fat binary successfully bundled: $OUT_ARM64"
-
-    package_fat_archive "$OUT_ARM64" "arm64"
 else
     echo "ERROR: Missing required ARM64 build artifacts" >&2
     exit 1

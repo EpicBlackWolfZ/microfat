@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"syscall"
 	"unsafe"
 
@@ -22,6 +23,10 @@ const (
 	exitCodeSelfTestFailure = 99
 	exitCodeExecFailure     = 127
 )
+
+func init() {
+	runtime.LockOSThread()
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -93,14 +98,24 @@ func installStrictMemfdDenialFilter() error {
 		Filter: &filter[0],
 	}
 
+	// Prefer modern SYS_SECCOMP with TSYNC so all threads in the Go runtime process are synchronized
 	_, _, errno := syscall.RawSyscall(
-		syscall.SYS_PRCTL,
-		uintptr(unix.PR_SET_SECCOMP),
-		uintptr(unix.SECCOMP_MODE_FILTER),
+		unix.SYS_SECCOMP,
+		uintptr(unix.SECCOMP_SET_MODE_FILTER),
+		uintptr(unix.SECCOMP_FILTER_FLAG_TSYNC),
 		uintptr(unsafe.Pointer(&prog)),
 	)
 	if errno != 0 {
-		return fmt.Errorf("prctl PR_SET_SECCOMP: %w", errno)
+		// Fallback to prctl(PR_SET_SECCOMP) for older kernels or restricted environments
+		_, _, errno = syscall.RawSyscall(
+			syscall.SYS_PRCTL,
+			uintptr(unix.PR_SET_SECCOMP),
+			uintptr(unix.SECCOMP_MODE_FILTER),
+			uintptr(unsafe.Pointer(&prog)),
+		)
+		if errno != 0 {
+			return fmt.Errorf("seccomp filter installation failed: %w", errno)
+		}
 	}
 
 	return nil

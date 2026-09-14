@@ -150,7 +150,7 @@ Summary: Environment is fully ready for high-performance Microfat dispatch!
 
 ---
 
-### `microfat inspect <binary>`
+### `microfat inspect <binary>` (alias: `microfat info`)
 
 Inspect embedded variants, format version, dictionary metadata, uncompressed/compressed sizes, and platform targeting inside an existing fat binary.
 
@@ -158,9 +158,15 @@ Inspect embedded variants, format version, dictionary metadata, uncompressed/com
 # Standard table inspection
 microfat inspect bin/myapp
 
+# Or using the 'info' alias
+microfat info bin/myapp
+
 # JSON inspection
 microfat inspect bin/myapp --json
 ```
+
+> [!WARNING]
+> **Format v1 Deprecation**: Inspecting binaries packed with the legacy Format v1 JSON manifest displays a deprecation warning on stderr. Format v1 will be removed in a future release. Please repack using Format v2 (the default).
 
 #### Flags
 | Flag | Shorthand | Type | Default | Description |
@@ -216,7 +222,15 @@ microfat verify bin/myapp --json
 Package multiple pre-compiled microarchitecture-specific ELF binaries into a self-dispatching fat executable.
 
 ```bash
-# AMD64 manual packaging with balanced compression
+# AMD64 packaging (launcher stub auto-discovered from same directory or $PATH)
+microfat pack \
+  --name myapp \
+  -v v1=dist/app_v1 \
+  -v v3=dist/app_v3 \
+  -v v4=dist/app_v4 \
+  -o bin/myapp
+
+# Or explicitly specifying launcher stub path
 microfat pack \
   --stub bin/microfat-stub \
   --name myapp \
@@ -243,7 +257,7 @@ microfat pack --manifest pgo.yaml -o bin/myapp
 #### Flags
 | Flag | Shorthand | Type | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `--stub` | *(none)* | `string` | `""` | Path to the `microfat-stub` launcher binary. |
+| `--stub` | *(none)* | `string` | `""` | Path to `microfat-stub`. If omitted, automatically discovers `microfat-stub` in the executable's directory or `$PATH`. |
 | `--output` | `-o` | `string` | `""` | Destination output path for the packaged fat executable. |
 | `--name` | *(none)* | `string` | `""` | Application name string embedded in manifest. |
 | `--os` | *(none)* | `string` | `"linux"` | Target operating system. |
@@ -254,7 +268,7 @@ microfat pack --manifest pgo.yaml -o bin/myapp
 | `--compression-level` | *(none)* | `string` | `""` | Compression level override: `fastest`, `default`, `better`, `best`, or number. |
 | `--dict`, `--zstd-dict` | *(none)* | `bool` | `false` | Enable shared Zstandard inter-variant dictionary compression. |
 | `--dict-size` | *(none)* | `int` | `114688` | Target shared dictionary size in bytes (default: 112 KB). |
-| `--format-version` | *(none)* | `int` | `2` | Binary format version: `2` (compact binary table) or `1` (legacy JSON). |
+| `--format-version` | *(none)* | `int` | `2` | Binary format version: `2` (compact binary table, default) or `1` (legacy JSON, deprecated). |
 | `--skip-elf-validation` | *(none)* | `bool` | `false` | Skip ELF header architecture and machine type validation. |
 | `--manifest` | `-m` | `string` | `""` | Path to YAML or JSON declarative build manifest. |
 | `--concurrency` | `-j` | `int` | `NumCPU` | Concurrent compiler workers when building via manifest. |

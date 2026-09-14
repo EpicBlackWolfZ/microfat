@@ -28,7 +28,7 @@ const (
 	maxStubBytes        = 5 * 1024 * 1024
 	testRepeatLen       = 64
 	expectedCount       = 3
-	minExpectedArchives = 11
+	minExpectedArchives = 2
 )
 
 type goreleaserConfig struct {
@@ -345,30 +345,26 @@ func TestGoReleaserSnapshotArtifacts(t *testing.T) {
 	}
 
 	t.Run("VerifyArchivesExist", func(t *testing.T) {
-		expectedPrefixes := []string{
-			"microfat-stub-minimal_",
-			"microfat-stub_",
-			"microfat_",
+		specificArchives := []string{
+			"microfat_*_linux_amd64.tar.gz",
+			"microfat_*_linux_arm64.tar.gz",
 		}
-		for _, prefix := range expectedPrefixes {
-			matches, err := filepath.Glob(filepath.Join(distDir, prefix+"*.tar.gz"))
+		for _, sa := range specificArchives {
+			matches, err := filepath.Glob(filepath.Join(distDir, sa))
 			if err != nil {
-				t.Fatalf("glob error for prefix %s: %v", prefix, err)
+				t.Fatalf("glob error for %s: %v", sa, err)
 			}
-			if len(matches) == 0 {
-				t.Errorf("no archives found matching prefix %s in dist", prefix)
+			if len(matches) != 1 {
+				t.Errorf("expected exactly 1 archive matching %s, got %d", sa, len(matches))
 			}
 		}
 
-		specificArchives := []string{
-			"microfat_linux_amd64_fat.tar.gz",
-			"microfat_linux_arm64_fat.tar.gz",
+		allArchives, err := filepath.Glob(filepath.Join(distDir, "*.tar.gz"))
+		if err != nil {
+			t.Fatal(err)
 		}
-		for _, sa := range specificArchives {
-			p := filepath.Join(distDir, sa)
-			if _, err := os.Stat(p); err != nil {
-				t.Errorf("required archive %s missing: %v", sa, err)
-			}
+		if len(allArchives) != len(specificArchives) {
+			t.Errorf("expected exactly %d release archives in dist, got %d: %v", len(specificArchives), len(allArchives), allArchives)
 		}
 	})
 
@@ -450,23 +446,23 @@ func TestGoReleaserSnapshotArtifacts(t *testing.T) {
 	})
 
 	t.Run("VerifyStubBehaviorAndSizes", func(t *testing.T) {
-		fullStubArchives, err := filepath.Glob(filepath.Join(distDir, "microfat-stub_*_linux_amd64_v1.tar.gz"))
-		if err != nil || len(fullStubArchives) == 0 {
-			t.Fatalf("finding full stub archive: %v (found: %v)", err, fullStubArchives)
-		}
-		minStubArchives, err := filepath.Glob(filepath.Join(distDir, "microfat-stub-minimal_*_linux_amd64_v1.tar.gz"))
-		if err != nil || len(minStubArchives) == 0 {
-			t.Fatalf("finding min stub archive: %v (found: %v)", err, minStubArchives)
+		amd64Archives, err := filepath.Glob(filepath.Join(distDir, "microfat_*_linux_amd64.tar.gz"))
+		if err != nil || len(amd64Archives) == 0 {
+			t.Fatalf("finding amd64 fat archive: %v (found: %v)", err, amd64Archives)
 		}
 
 		tempExtract := t.TempDir()
 		fullStubPath := filepath.Join(tempExtract, "microfat-stub")
 		minStubPath := filepath.Join(tempExtract, "microfat-stub-minimal")
+		microfatCliPath := filepath.Join(tempExtract, "microfat")
 
-		if err := extractFileFromArchive(fullStubArchives[0], "microfat-stub", fullStubPath); err != nil {
+		if err := extractFileFromArchive(amd64Archives[0], "microfat", microfatCliPath); err != nil {
+			t.Fatalf("extracting microfat CLI from fat archive: %v", err)
+		}
+		if err := extractFileFromArchive(amd64Archives[0], "microfat-stub", fullStubPath); err != nil {
 			t.Fatalf("extracting full stub: %v", err)
 		}
-		if err := extractFileFromArchive(minStubArchives[0], "microfat-stub-minimal", minStubPath); err != nil {
+		if err := extractFileFromArchive(amd64Archives[0], "microfat-stub-minimal", minStubPath); err != nil {
 			t.Fatalf("extracting minimal stub: %v", err)
 		}
 

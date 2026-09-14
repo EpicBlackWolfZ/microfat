@@ -34,6 +34,7 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 | Guide | Description |
 | :--- | :--- |
 | [**v0.2.3 Release Notes**](docs/releases/v0.2.3.md) | Safety fixes, benchmark scope and release limitations. |
+| [**Release Artifacts Guide**](docs/release-artifacts.md) | Universal fat archives, bundled launcher stubs, and Format v1 deprecation. |
 | [**Production Roadmap**](docs/roadmap.md) | Release priorities, safety gates and experimental scope. |
 | 📊 [**Demo & Benchmark Suite**](examples/demo/README.md) | Multi-workload benchmark application testing SIMD vector math, JSON/Zstd processing, and concurrent workers. |
 | [**Reproducible Server Benchmarks**](docs/benchmarks/README.md) | Paired native/fat server trials, external Fortio load, resource telemetry, and verifiable evidence. |
@@ -50,6 +51,10 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 
 ### 1. Installation
 
+#### Pre-compiled Universal Fat Archives (Recommended)
+Download the universal fat archive for your architecture (`microfat_<version>_linux_amd64.tar.gz` or `microfat_<version>_linux_arm64.tar.gz`) from the [GitHub Releases](https://github.com/EpicBlackWolfZ/microfat/releases) page. Each archive bundles the self-dispatching `microfat` CLI binary alongside both launcher stubs (`microfat-stub` and `microfat-stub-minimal`).
+
+#### Via Go Toolchain
 ```bash
 go install github.com/EpicBlackWolfZ/microfat/cmd/microfat@latest
 go install github.com/EpicBlackWolfZ/microfat/cmd/microfat-stub@latest

@@ -99,9 +99,10 @@ func newInspectCmd() *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:   "inspect <binary>",
-		Short: "Inspect embedded variants and metadata inside a microfat binary",
-		Args:  cobra.ExactArgs(1),
+		Use:     "inspect <binary>",
+		Aliases: []string{"info"},
+		Short:   "Inspect embedded variants and metadata inside a microfat binary",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := filepath.Clean(args[0])
 			// #nosec G304 -- user-supplied binary path to inspect
@@ -123,6 +124,15 @@ func newInspectCmd() *cobra.Command {
 			idx, err := format.ReadTrailerAndIndex(f, stat.Size())
 			if err != nil {
 				return fmt.Errorf("reading binary manifest: %w", err)
+			}
+
+			if idx.Version == format.FormatVersion1 {
+				_, _ = fmt.Fprintf(
+					cmd.ErrOrStderr(),
+					"[microfat:warn] binary %q uses legacy Format v1 JSON manifest; "+
+						"Format v1 is deprecated and scheduled for removal in v0.4.0 (use Format v2 for production)\n",
+					path,
+				)
 			}
 
 			if jsonOutput {
@@ -391,7 +401,7 @@ func newPackCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "pack [--manifest <file> | --stub <stub> -v <level>=<path> ... -o <output>]",
+		Use:   "pack [--manifest <file> | [--stub <stub>] -v <level>=<path> ... -o <output>]",
 		Short: "Package multiple Go microarchitecture binaries into a single fat binary",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if manifestPath != "" {
@@ -429,7 +439,12 @@ func newPackCmd() *cobra.Command {
 			}
 
 			if stubPath == "" {
-				return errors.New("required flag(s) \"stub\" not set (or specify --manifest)")
+				resolvedStub, err := builder.ResolveStubPath("", "", "")
+				if err != nil {
+					return fmt.Errorf("launcher stub resolution failed: %w (provide --stub flag or specify --manifest)", err)
+				}
+				stubPath = resolvedStub
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Using auto-discovered launcher stub: %s\n", stubPath)
 			}
 			if outputPath == "" {
 				return errors.New("required flag(s) \"output\" not set (or specify --manifest)")
