@@ -572,6 +572,43 @@ func verifyReleaseStubBehaviorAndSizes(t *testing.T, distDir string) {
 	}
 }
 
+func verifyReleaseARM64Executables(t *testing.T, facts *releasecheck.ArchiveFacts, contract *releasecheck.ReleaseContract) {
+	t.Helper()
+	for _, req := range contract.RequiredExecutables {
+		exe, ok := facts.Executables[req]
+		if !ok || exe == nil {
+			t.Fatalf("missing executable %s in arm64 archive", req)
+		}
+		if exe.ELFHeader == nil || exe.ELFHeader.Machine != elf.EM_AARCH64 {
+			t.Errorf("executable %s is not an aarch64 ELF binary", req)
+		}
+	}
+}
+
+func verifyReleaseARM64VariantTier(t *testing.T, variant *releasecheck.VariantFacts, tier, expectedSetting string) {
+	t.Helper()
+	if variant.ELFHeader == nil || variant.ELFHeader.Machine != elf.EM_AARCH64 {
+		t.Errorf("variant %s is not an aarch64 ELF binary", tier)
+	}
+	if variant.BuildInfo == nil {
+		t.Fatalf("missing buildinfo in arm64 variant %s", tier)
+	}
+
+	found := false
+	for _, s := range variant.BuildInfo.Settings {
+		if s.Key == "GOARM64" {
+			found = true
+			if s.Value != expectedSetting {
+				t.Errorf("variant %s GOARM64: expected %s, got %s", tier, expectedSetting, s.Value)
+			}
+			break
+		}
+	}
+	if !found && expectedSetting != arm64LevelV80 {
+		t.Errorf("GOARM64 setting not found for variant %s, expected %s", tier, expectedSetting)
+	}
+}
+
 func verifyReleaseARM64VariantBuildSettings(t *testing.T, distDir string) {
 	t.Helper()
 	arm64Archives, err := filepath.Glob(filepath.Join(distDir, "microfat_*_linux_arm64.tar.gz"))
@@ -594,15 +631,7 @@ func verifyReleaseARM64VariantBuildSettings(t *testing.T, distDir string) {
 		t.Fatalf("validating arm64 archive: %v", err)
 	}
 
-	for _, req := range contract.RequiredExecutables {
-		exe, ok := facts.Executables[req]
-		if !ok || exe == nil {
-			t.Fatalf("missing executable %s in arm64 archive", req)
-		}
-		if exe.ELFHeader == nil || exe.ELFHeader.Machine != elf.EM_AARCH64 {
-			t.Errorf("executable %s is not an aarch64 ELF binary", req)
-		}
-	}
+	verifyReleaseARM64Executables(t, facts, contract)
 
 	expectedSettings := map[string]string{
 		arm64LevelV80: arm64LevelV80,
@@ -615,26 +644,7 @@ func verifyReleaseARM64VariantBuildSettings(t *testing.T, distDir string) {
 		if !ok || variant == nil {
 			t.Fatalf("missing embedded variant %s in arm64 fat binary", tier)
 		}
-		if variant.ELFHeader == nil || variant.ELFHeader.Machine != elf.EM_AARCH64 {
-			t.Errorf("variant %s is not an aarch64 ELF binary", tier)
-		}
-		if variant.BuildInfo == nil {
-			t.Fatalf("missing buildinfo in arm64 variant %s", tier)
-		}
-
-		found := false
-		for _, s := range variant.BuildInfo.Settings {
-			if s.Key == "GOARM64" {
-				found = true
-				if s.Value != expectedSetting {
-					t.Errorf("variant %s GOARM64: expected %s, got %s", tier, expectedSetting, s.Value)
-				}
-				break
-			}
-		}
-		if !found && expectedSetting != arm64LevelV80 {
-			t.Errorf("GOARM64 setting not found for variant %s, expected %s", tier, expectedSetting)
-		}
+		verifyReleaseARM64VariantTier(t, variant, tier, expectedSetting)
 	}
 }
 

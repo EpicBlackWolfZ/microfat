@@ -1015,216 +1015,236 @@ func TestResolveInstallationDirectory_FileSystemErrors(t *testing.T) {
 	})
 }
 
-func TestResolveInstallationDirectory_IndexValidationErrors(t *testing.T) {
-	tmpDir := setupOriginMocks(t)
+func testDispatchedIndexMismatchErrors(t *testing.T, tmpDir string) {
+	t.Helper()
+	fatDir := filepath.Join(tmpDir, "mismatched-fat-dir")
+	_ = os.MkdirAll(fatDir, 0o755)
 
-	t.Run("DispatchedExecution_IndexMismatchErrors", func(t *testing.T) {
-		fatDir := filepath.Join(tmpDir, "mismatched-fat-dir")
-		_ = os.MkdirAll(fatDir, 0o755)
+	wrongArch := "arm64"
+	wrongLevel := "v8.0"
+	if runtime.GOARCH == "arm64" {
+		wrongArch = "amd64"
+		wrongLevel = "v1"
+	}
 
-		wrongArch := "arm64"
-		wrongLevel := "v8.0"
-		if runtime.GOARCH == "arm64" {
-			wrongArch = "amd64"
-			wrongLevel = "v1"
-		}
-
-		fatWrongArch := filepath.Join(fatDir, "wrong_arch.fat")
-		idx := &format.Index{
-			Version:    format.FormatVersion2,
-			TargetArch: wrongArch,
-			Variants: []format.VariantEntry{
-				{
-					Level:            wrongLevel,
-					Offset:           10,
-					CompressedSize:   10,
-					UncompressedSize: 10,
-					SHA256:           strings.Repeat("a", 64),
-					Compression:      "none",
-				},
+	fatWrongArch := filepath.Join(fatDir, "wrong_arch.fat")
+	idx := &format.Index{
+		Version:    format.FormatVersion2,
+		TargetArch: wrongArch,
+		Variants: []format.VariantEntry{
+			{
+				Level:            wrongLevel,
+				Offset:           10,
+				CompressedSize:   10,
+				UncompressedSize: 10,
+				SHA256:           strings.Repeat("a", 64),
+				Compression:      "none",
 			},
-		}
-		var buf bytes.Buffer
-		buf.Write(make([]byte, 20))
-		_, err := format.WriteIndexAndTrailer(&buf, idx, 20)
-		if err != nil {
-			t.Fatalf("writing index: %v", err)
-		}
-		if err := os.WriteFile(fatWrongArch, buf.Bytes(), 0o755); err != nil {
-			t.Fatalf("write file: %v", err)
-		}
+		},
+	}
+	var buf bytes.Buffer
+	buf.Write(make([]byte, 20))
+	_, err := format.WriteIndexAndTrailer(&buf, idx, 20)
+	if err != nil {
+		t.Fatalf("writing index: %v", err)
+	}
+	if err := os.WriteFile(fatWrongArch, buf.Bytes(), 0o755); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
 
-		readlinkProcSelfExe = func() (string, error) {
-			return mockMemfdTarget, nil
-		}
-		readAndHashSelfExe = func() (int64, string, error) {
-			return 10, strings.Repeat("a", 64), nil
-		}
+	readlinkProcSelfExe = func() (string, error) {
+		return mockMemfdTarget, nil
+	}
+	readAndHashSelfExe = func() (int64, string, error) {
+		return 10, strings.Repeat("a", 64), nil
+	}
 
-		_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
-		_ = os.Setenv(format.EnvSelectedVariant, wrongLevel)
-		_ = os.Setenv(format.EnvSelectedSize, "10")
-		_ = os.Setenv(format.EnvSelectedSHA256, strings.Repeat("a", 64))
-		_ = os.Setenv(format.EnvOriginalExe, fatWrongArch)
-		defer func() {
-			_ = os.Unsetenv(format.EnvExecMode)
-			_ = os.Unsetenv(format.EnvSelectedVariant)
-			_ = os.Unsetenv(format.EnvSelectedSize)
-			_ = os.Unsetenv(format.EnvSelectedSHA256)
-			_ = os.Unsetenv(format.EnvOriginalExe)
-		}()
-
-		_, err = ResolveInstallationDirectory()
-		if err == nil {
-			t.Fatalf("expected error for mismatched target arch")
-		}
-		if !strings.Contains(err.Error(), "does not match host") {
-			t.Fatalf("expected error containing 'does not match host', got: %v", err)
-		}
-	})
-
-	t.Run("DispatchedExecution_VersionNotV2", func(t *testing.T) {
-		v1FatFile := filepath.Join(tmpDir, "v1_format.fat")
-		idxV1 := &format.Index{
-			Version:    format.FormatVersion1,
-			TargetArch: runtime.GOARCH,
-			Variants: []format.VariantEntry{
-				{
-					Level:            "v1",
-					Offset:           10,
-					CompressedSize:   10,
-					UncompressedSize: 10,
-					SHA256:           strings.Repeat("a", 64),
-					Compression:      "none",
-				},
-			},
-		}
-		var buf bytes.Buffer
-		buf.Write(make([]byte, 20))
-		_, err := format.WriteIndexAndTrailerWithVersion(&buf, idxV1, 20, format.FormatVersion1)
-		if err != nil {
-			t.Fatalf("writing v1 index: %v", err)
-		}
-		if err := os.WriteFile(v1FatFile, buf.Bytes(), 0o755); err != nil {
-			t.Fatalf("write file: %v", err)
-		}
-
-		readlinkProcSelfExe = func() (string, error) {
-			return mockMemfdTarget, nil
-		}
-		readAndHashSelfExe = func() (int64, string, error) {
-			return 10, strings.Repeat("a", 64), nil
-		}
-
-		_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
-		_ = os.Setenv(format.EnvSelectedVariant, "v1")
-		_ = os.Setenv(format.EnvSelectedSize, "10")
-		_ = os.Setenv(format.EnvSelectedSHA256, strings.Repeat("a", 64))
-		_ = os.Setenv(format.EnvOriginalExe, v1FatFile)
-		defer func() {
-			_ = os.Unsetenv(format.EnvExecMode)
-			_ = os.Unsetenv(format.EnvSelectedVariant)
-			_ = os.Unsetenv(format.EnvSelectedSize)
-			_ = os.Unsetenv(format.EnvSelectedSHA256)
-			_ = os.Unsetenv(format.EnvOriginalExe)
-		}()
-
-		_, err = ResolveInstallationDirectory()
-		if err == nil || !strings.Contains(err.Error(), "is not v2") {
-			t.Fatalf("expected version not v2 error, got: %v", err)
-		}
-	})
-
-	t.Run("DispatchedExecution_VariantNotFound", func(t *testing.T) {
-		validFat := filepath.Join(tmpDir, "valid_v2.fat")
-		idxV2 := &format.Index{
-			Version:    format.FormatVersion2,
-			TargetArch: runtime.GOARCH,
-			Variants: []format.VariantEntry{
-				{
-					Level:            "v1",
-					Offset:           10,
-					CompressedSize:   10,
-					UncompressedSize: 10,
-					SHA256:           strings.Repeat("a", 64),
-					Compression:      "none",
-				},
-			},
-		}
-		var buf bytes.Buffer
-		buf.Write(make([]byte, 20))
-		_, err := format.WriteIndexAndTrailer(&buf, idxV2, 20)
-		if err != nil {
-			t.Fatalf("writing v2 index: %v", err)
-		}
-		if err := os.WriteFile(validFat, buf.Bytes(), 0o755); err != nil {
-			t.Fatalf("write file: %v", err)
-		}
-
-		readlinkProcSelfExe = func() (string, error) {
-			return mockMemfdTarget, nil
-		}
-		readAndHashSelfExe = func() (int64, string, error) {
-			return 10, strings.Repeat("a", 64), nil
-		}
-
-		_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
-		_ = os.Setenv(format.EnvSelectedVariant, "v4_nonexistent")
-		_ = os.Setenv(format.EnvSelectedSize, "10")
-		_ = os.Setenv(format.EnvSelectedSHA256, strings.Repeat("a", 64))
-		_ = os.Setenv(format.EnvOriginalExe, validFat)
-		defer func() {
-			_ = os.Unsetenv(format.EnvExecMode)
-			_ = os.Unsetenv(format.EnvSelectedVariant)
-			_ = os.Unsetenv(format.EnvSelectedSize)
-			_ = os.Unsetenv(format.EnvSelectedSHA256)
-			_ = os.Unsetenv(format.EnvOriginalExe)
-		}()
-
-		_, err = ResolveInstallationDirectory()
-		if err == nil || !strings.Contains(err.Error(), "not found in original executable") {
-			t.Fatalf("expected variant not found error, got: %v", err)
-		}
-	})
-
-	t.Run("DispatchedExecution_IndexSizeAndDigestMismatches", func(t *testing.T) {
-		validFat := filepath.Join(tmpDir, "valid_v2.fat")
-		readlinkProcSelfExe = func() (string, error) {
-			return mockMemfdTarget, nil
-		}
-
-		// Size mismatch in index
-		readAndHashSelfExe = func() (int64, string, error) {
-			return 15, strings.Repeat("a", 64), nil
-		}
-		_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
-		_ = os.Setenv(format.EnvSelectedVariant, "v1")
-		_ = os.Setenv(format.EnvSelectedSize, "15")
-		_ = os.Setenv(format.EnvSelectedSHA256, strings.Repeat("a", 64))
-		_ = os.Setenv(format.EnvOriginalExe, validFat)
-
-		_, err := ResolveInstallationDirectory()
-		if err == nil || !strings.Contains(err.Error(), "size in index (10) does not match running payload (15)") {
-			t.Fatalf("expected index size mismatch error, got: %v", err)
-		}
-
-		// Digest mismatch in index
-		readAndHashSelfExe = func() (int64, string, error) {
-			return 10, strings.Repeat("b", 64), nil
-		}
-		_ = os.Setenv(format.EnvSelectedSize, "10")
-		_ = os.Setenv(format.EnvSelectedSHA256, strings.Repeat("b", 64))
-
-		_, err = ResolveInstallationDirectory()
-		if err == nil || !strings.Contains(err.Error(), "digest in index") {
-			t.Fatalf("expected index digest mismatch error, got: %v", err)
-		}
-
+	_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+	_ = os.Setenv(format.EnvSelectedVariant, wrongLevel)
+	_ = os.Setenv(format.EnvSelectedSize, "10")
+	_ = os.Setenv(format.EnvSelectedSHA256, strings.Repeat("a", 64))
+	_ = os.Setenv(format.EnvOriginalExe, fatWrongArch)
+	defer func() {
 		_ = os.Unsetenv(format.EnvExecMode)
 		_ = os.Unsetenv(format.EnvSelectedVariant)
 		_ = os.Unsetenv(format.EnvSelectedSize)
 		_ = os.Unsetenv(format.EnvSelectedSHA256)
 		_ = os.Unsetenv(format.EnvOriginalExe)
+	}()
+
+	_, err = ResolveInstallationDirectory()
+	if err == nil {
+		t.Fatalf("expected error for mismatched target arch")
+	}
+	if !strings.Contains(err.Error(), "does not match host") {
+		t.Fatalf("expected error containing 'does not match host', got: %v", err)
+	}
+}
+
+func testDispatchedVersionNotV2(t *testing.T, tmpDir string) {
+	t.Helper()
+	v1FatFile := filepath.Join(tmpDir, "v1_format.fat")
+	idxV1 := &format.Index{
+		Version:    format.FormatVersion1,
+		TargetArch: runtime.GOARCH,
+		Variants: []format.VariantEntry{
+			{
+				Level:            "v1",
+				Offset:           10,
+				CompressedSize:   10,
+				UncompressedSize: 10,
+				SHA256:           strings.Repeat("a", 64),
+				Compression:      "none",
+			},
+		},
+	}
+	var buf bytes.Buffer
+	buf.Write(make([]byte, 20))
+	_, err := format.WriteIndexAndTrailerWithVersion(&buf, idxV1, 20, format.FormatVersion1)
+	if err != nil {
+		t.Fatalf("writing v1 index: %v", err)
+	}
+	if err := os.WriteFile(v1FatFile, buf.Bytes(), 0o755); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	readlinkProcSelfExe = func() (string, error) {
+		return mockMemfdTarget, nil
+	}
+	readAndHashSelfExe = func() (int64, string, error) {
+		return 10, strings.Repeat("a", 64), nil
+	}
+
+	_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+	_ = os.Setenv(format.EnvSelectedVariant, "v1")
+	_ = os.Setenv(format.EnvSelectedSize, "10")
+	_ = os.Setenv(format.EnvSelectedSHA256, strings.Repeat("a", 64))
+	_ = os.Setenv(format.EnvOriginalExe, v1FatFile)
+	defer func() {
+		_ = os.Unsetenv(format.EnvExecMode)
+		_ = os.Unsetenv(format.EnvSelectedVariant)
+		_ = os.Unsetenv(format.EnvSelectedSize)
+		_ = os.Unsetenv(format.EnvSelectedSHA256)
+		_ = os.Unsetenv(format.EnvOriginalExe)
+	}()
+
+	_, err = ResolveInstallationDirectory()
+	if err == nil || !strings.Contains(err.Error(), "is not v2") {
+		t.Fatalf("expected version not v2 error, got: %v", err)
+	}
+}
+
+func testDispatchedVariantNotFound(t *testing.T, tmpDir string) {
+	t.Helper()
+	validFat := filepath.Join(tmpDir, "valid_v2.fat")
+	idxV2 := &format.Index{
+		Version:    format.FormatVersion2,
+		TargetArch: runtime.GOARCH,
+		Variants: []format.VariantEntry{
+			{
+				Level:            "v1",
+				Offset:           10,
+				CompressedSize:   10,
+				UncompressedSize: 10,
+				SHA256:           strings.Repeat("a", 64),
+				Compression:      "none",
+			},
+		},
+	}
+	var buf bytes.Buffer
+	buf.Write(make([]byte, 20))
+	_, err := format.WriteIndexAndTrailer(&buf, idxV2, 20)
+	if err != nil {
+		t.Fatalf("writing v2 index: %v", err)
+	}
+	if err := os.WriteFile(validFat, buf.Bytes(), 0o755); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	readlinkProcSelfExe = func() (string, error) {
+		return mockMemfdTarget, nil
+	}
+	readAndHashSelfExe = func() (int64, string, error) {
+		return 10, strings.Repeat("a", 64), nil
+	}
+
+	_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+	_ = os.Setenv(format.EnvSelectedVariant, "v4_nonexistent")
+	_ = os.Setenv(format.EnvSelectedSize, "10")
+	_ = os.Setenv(format.EnvSelectedSHA256, strings.Repeat("a", 64))
+	_ = os.Setenv(format.EnvOriginalExe, validFat)
+	defer func() {
+		_ = os.Unsetenv(format.EnvExecMode)
+		_ = os.Unsetenv(format.EnvSelectedVariant)
+		_ = os.Unsetenv(format.EnvSelectedSize)
+		_ = os.Unsetenv(format.EnvSelectedSHA256)
+		_ = os.Unsetenv(format.EnvOriginalExe)
+	}()
+
+	_, err = ResolveInstallationDirectory()
+	if err == nil || !strings.Contains(err.Error(), "not found in original executable") {
+		t.Fatalf("expected variant not found error, got: %v", err)
+	}
+}
+
+func testDispatchedIndexSizeAndDigestMismatches(t *testing.T, tmpDir string) {
+	t.Helper()
+	validFat := filepath.Join(tmpDir, "valid_v2.fat")
+	readlinkProcSelfExe = func() (string, error) {
+		return mockMemfdTarget, nil
+	}
+
+	// Size mismatch in index
+	readAndHashSelfExe = func() (int64, string, error) {
+		return 15, strings.Repeat("a", 64), nil
+	}
+	_ = os.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+	_ = os.Setenv(format.EnvSelectedVariant, "v1")
+	_ = os.Setenv(format.EnvSelectedSize, "15")
+	_ = os.Setenv(format.EnvSelectedSHA256, strings.Repeat("a", 64))
+	_ = os.Setenv(format.EnvOriginalExe, validFat)
+
+	_, err := ResolveInstallationDirectory()
+	if err == nil || !strings.Contains(err.Error(), "size in index (10) does not match running payload (15)") {
+		t.Fatalf("expected index size mismatch error, got: %v", err)
+	}
+
+	// Digest mismatch in index
+	readAndHashSelfExe = func() (int64, string, error) {
+		return 10, strings.Repeat("b", 64), nil
+	}
+	_ = os.Setenv(format.EnvSelectedSize, "10")
+	_ = os.Setenv(format.EnvSelectedSHA256, strings.Repeat("b", 64))
+
+	_, err = ResolveInstallationDirectory()
+	if err == nil || !strings.Contains(err.Error(), "digest in index") {
+		t.Fatalf("expected index digest mismatch error, got: %v", err)
+	}
+
+	_ = os.Unsetenv(format.EnvExecMode)
+	_ = os.Unsetenv(format.EnvSelectedVariant)
+	_ = os.Unsetenv(format.EnvSelectedSize)
+	_ = os.Unsetenv(format.EnvSelectedSHA256)
+	_ = os.Unsetenv(format.EnvOriginalExe)
+}
+
+func TestResolveInstallationDirectory_IndexValidationErrors(t *testing.T) {
+	tmpDir := setupOriginMocks(t)
+
+	t.Run("DispatchedExecution_IndexMismatchErrors", func(t *testing.T) {
+		testDispatchedIndexMismatchErrors(t, tmpDir)
+	})
+
+	t.Run("DispatchedExecution_VersionNotV2", func(t *testing.T) {
+		testDispatchedVersionNotV2(t, tmpDir)
+	})
+
+	t.Run("DispatchedExecution_VariantNotFound", func(t *testing.T) {
+		testDispatchedVariantNotFound(t, tmpDir)
+	})
+
+	t.Run("DispatchedExecution_IndexSizeAndDigestMismatches", func(t *testing.T) {
+		testDispatchedIndexSizeAndDigestMismatches(t, tmpDir)
 	})
 }
 

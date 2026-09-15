@@ -1148,3 +1148,40 @@ func TestWriteAtomic_CreateTempError(t *testing.T) {
 	assert.Contains(t, err.Error(), "creating temp file in")
 }
 
+func TestValidateAttributedSBOM_Formats(t *testing.T) {
+	t.Parallel()
+	facts, inv := createMockFactsAndInventory()
+
+	t.Run("UnsupportedFormat", func(t *testing.T) {
+		err := validateAttributedSBOM([]byte("{}"), "invalid-format", facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported format")
+	})
+
+	t.Run("InvalidSPDXBytes", func(t *testing.T) {
+		err := validateAttributedSBOM([]byte("{not-valid-spdx"), "spdx-json", facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "semantic validation of generated SPDX failed")
+	})
+
+	t.Run("InvalidCycloneDXBytes", func(t *testing.T) {
+		err := validateAttributedSBOM([]byte("{not-valid-cdx"), "cyclonedx-json", facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "semantic validation of generated CycloneDX failed")
+	})
+}
+
+func TestResolveArchiveVersion(t *testing.T) {
+	t.Parallel()
+
+	v := resolveArchiveVersion("/some/path/microfat_v1.2.3_linux_amd64.tar.gz")
+	assert.Equal(t, "1.2.3", v)
+
+	vNoPrefix := resolveArchiveVersion("/some/path/microfat_2.0.0_linux_arm64.tar.gz")
+	assert.Equal(t, "2.0.0", vNoPrefix)
+
+	vFallback := resolveArchiveVersion("/some/path/invalid.tar.gz")
+	assert.Equal(t, "0.0.0-dev", vFallback)
+}
+
+

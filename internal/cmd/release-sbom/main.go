@@ -20,10 +20,11 @@ import (
 )
 
 const (
-	dirPerms      = 0o755
-	filePerms     = 0o644
-	execPerms     = 0o755
-	keyValueParts = 2
+	dirPerms        = 0o755
+	filePerms       = 0o644
+	execPerms       = 0o755
+	keyValueParts   = 2
+	minArchiveParts = 2
 
 	formatSPDXJSON      = "spdx-json"
 	formatCycloneDXJSON = "cyclonedx-json"
@@ -730,6 +731,55 @@ func writeAtomic(targetPath string, data []byte) error {
 	return nil
 }
 
+func resolveArchiveVersion(archivePath string) string {
+	version, err := releasecheck.DeriveVersion(filepath.Dir(archivePath), "")
+	if err == nil {
+		return version
+	}
+	parts := strings.Split(filepath.Base(archivePath), "_")
+	if len(parts) >= minArchiveParts && parts[1] != "" {
+		return strings.TrimPrefix(parts[1], "v")
+	}
+	return "0.0.0-dev"
+}
+
+func stageExtractedVariants(facts *releasecheck.ArchiveFacts) error {
+	stagingVariantsDir := filepath.Join(facts.StagingDir, "embedded_variants")
+	// #nosec G703 -- stagingVariantsDir within validated temporary staging dir
+	if err := os.MkdirAll(stagingVariantsDir, dirPerms); err != nil {
+		return fmt.Errorf("creating variants staging dir: %w", err)
+	}
+	for tier, vf := range facts.EmbeddedVariants {
+		vPath := filepath.Join(stagingVariantsDir, "microfat-variant-"+tier)
+		// #nosec G703 -- vPath within validated temporary staging dir
+		if err := os.WriteFile(vPath, vf.Data, execPerms); err != nil {
+			return fmt.Errorf("staging variant %s: %w", tier, err)
+		}
+	}
+	return nil
+}
+
+func validateAttributedSBOM(
+	attributed []byte,
+	formatName string,
+	facts *releasecheck.ArchiveFacts,
+	inv *releasecheck.ArchiveInventory,
+) error {
+	switch formatName {
+	case "spdx", "spdx-json":
+		if err := releasecheck.ValidateSPDXBytes(attributed, facts, inv); err != nil {
+			return fmt.Errorf("semantic validation of generated SPDX failed: %w", err)
+		}
+	case "cyclonedx", "cyclonedx-json":
+		if err := releasecheck.ValidateCycloneDXBytes(attributed, facts, inv); err != nil {
+			return fmt.Errorf("semantic validation of generated CycloneDX failed: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported format %s", formatName)
+	}
+	return nil
+}
+
 // Generate processes an archive tarball, extracts embedded variants, invokes syft, and writes an attributed SBOM.
 func Generate(archivePath, outputPath, formatName string) error {
 	targetArch := releasecheck.ArchAMD64
@@ -737,16 +787,7 @@ func Generate(archivePath, outputPath, formatName string) error {
 		targetArch = releasecheck.ArchARM64
 	}
 
-	version, err := releasecheck.DeriveVersion(filepath.Dir(archivePath), "")
-	if err != nil {
-		parts := strings.Split(filepath.Base(archivePath), "_")
-		if len(parts) >= 2 && parts[1] != "" {
-			version = strings.TrimPrefix(parts[1], "v")
-		} else {
-			version = "0.0.0-dev"
-		}
-	}
-
+	version := resolveArchiveVersion(archivePath)
 	contract, err := releasecheck.NewReleaseContract(version)
 	if err != nil {
 		return fmt.Errorf("creating release contract: %w", err)
@@ -761,15 +802,8 @@ func Generate(archivePath, outputPath, formatName string) error {
 		_ = os.RemoveAll(facts.StagingDir)
 	}()
 
-	stagingVariantsDir := filepath.Join(facts.StagingDir, "embedded_variants")
-	if err := os.MkdirAll(stagingVariantsDir, dirPerms); err != nil {
-		return fmt.Errorf("creating variants staging dir: %w", err)
-	}
-	for tier, vf := range facts.EmbeddedVariants {
-		vPath := filepath.Join(stagingVariantsDir, "microfat-variant-"+tier)
-		if err := os.WriteFile(vPath, vf.Data, execPerms); err != nil {
-			return fmt.Errorf("staging variant %s: %w", tier, err)
-		}
+	if err := stageExtractedVariants(facts); err != nil {
+		return err
 	}
 
 	inv, err := releasecheck.ExtractArchiveInventory(facts)
@@ -787,17 +821,8 @@ func Generate(archivePath, outputPath, formatName string) error {
 		return fmt.Errorf("attributing SBOM: %w", err)
 	}
 
-	switch formatName {
-	case "spdx", "spdx-json":
-		if err := releasecheck.ValidateSPDXBytes(attributed, facts, inv); err != nil {
-			return fmt.Errorf("semantic validation of generated SPDX failed: %w", err)
-		}
-	case "cyclonedx", "cyclonedx-json":
-		if err := releasecheck.ValidateCycloneDXBytes(attributed, facts, inv); err != nil {
-			return fmt.Errorf("semantic validation of generated CycloneDX failed: %w", err)
-		}
-	default:
-		return fmt.Errorf("unsupported format %s", formatName)
+	if err := validateAttributedSBOM(attributed, formatName, facts, inv); err != nil {
+		return err
 	}
 
 	if err := writeAtomic(outputPath, attributed); err != nil {

@@ -100,3 +100,42 @@ func TestNewReleaseContract_Empty(t *testing.T) {
 	assert.Len(t, c.ExpectedPayloadNames, 6)
 	assert.Len(t, c.RequiredExecutables, 3)
 }
+
+func TestDeriveVersion_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("EmptyExplicitTag", func(t *testing.T) {
+		_, err := releasecheck.DeriveVersion("", "   ")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "explicit tag is empty")
+
+		_, err = releasecheck.DeriveVersion("", "v")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "explicit tag is empty")
+	})
+
+	t.Run("EmptyMetadataVersion", func(t *testing.T) {
+		distDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(distDir, "metadata.json"), []byte(`{"version":" "}`), 0o644))
+		_, err := releasecheck.DeriveVersion(distDir, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unable to derive release version")
+	})
+
+	t.Run("NoMatchingArtifactsInJSON", func(t *testing.T) {
+		distDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(distDir, "artifacts.json"), []byte(`[{"name":"foo","type":"Binary"}]`), 0o644))
+		_, err := releasecheck.DeriveVersion(distDir, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unable to derive release version")
+	})
+
+	t.Run("InvalidArchiveNamingFormat", func(t *testing.T) {
+		distDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(distDir, "microfat_linux_amd64.tar.gz"), []byte("data"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(distDir, "microfat_linux_arm64.tar.gz"), []byte("data"), 0o644))
+		_, err := releasecheck.DeriveVersion(distDir, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unable to derive release version")
+	})
+}

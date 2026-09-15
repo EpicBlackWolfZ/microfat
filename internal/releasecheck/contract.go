@@ -77,74 +77,101 @@ func NewReleaseContract(version string) (*ReleaseContract, error) {
 	}, nil
 }
 
-// DeriveVersion determines the release version from an explicit tag, GoReleaser metadata, or matching archives.
-func DeriveVersion(distDir string, explicitTag string) (string, error) {
-	if explicitTag != "" {
-		v := strings.TrimSpace(explicitTag)
-		v = strings.TrimPrefix(v, "v")
-		if v == "" {
-			return "", fmt.Errorf("explicit tag is empty")
-		}
-		return v, nil
+func deriveVersionFromExplicitTag(explicitTag string) (string, error) {
+	v := strings.TrimSpace(explicitTag)
+	v = strings.TrimPrefix(v, "v")
+	if v == "" {
+		return "", fmt.Errorf("explicit tag is empty")
 	}
+	return v, nil
+}
 
-	// Try dist/metadata.json
+func deriveVersionFromMetadata(distDir string) (string, error) {
 	metaPath := filepath.Join(distDir, "metadata.json")
 	// #nosec G304 -- metaPath within checked dist directory
-	if data, err := os.ReadFile(metaPath); err == nil {
-		var meta GoReleaserMetadata
-		if err := json.Unmarshal(data, &meta); err == nil && meta.Version != "" {
-			if meta.ProjectName != "" && meta.ProjectName != ReleaseProjectName {
-				return "", fmt.Errorf("unexpected project name in metadata.json: %s", meta.ProjectName)
-			}
-			v := strings.TrimSpace(meta.Version)
-			v = strings.TrimPrefix(v, "v")
-			if v != "" {
-				return v, nil
-			}
-		}
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		return "", err
 	}
+	var meta GoReleaserMetadata
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return "", err
+	}
+	if meta.ProjectName != "" && meta.ProjectName != ReleaseProjectName {
+		return "", fmt.Errorf("unexpected project name in metadata.json: %s", meta.ProjectName)
+	}
+	v := strings.TrimSpace(meta.Version)
+	v = strings.TrimPrefix(v, "v")
+	if v == "" {
+		return "", fmt.Errorf("empty version in metadata.json")
+	}
+	return v, nil
+}
 
-	// Try dist/artifacts.json
+func deriveVersionFromArtifacts(distDir string) (string, error) {
 	artPath := filepath.Join(distDir, "artifacts.json")
 	// #nosec G304 -- artPath within checked dist directory
-	if data, err := os.ReadFile(artPath); err == nil {
-		var artifacts []struct {
-			Name string `json:"name"`
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(data, &artifacts); err == nil {
-			for _, a := range artifacts {
-				if a.Type == "Archive" && strings.HasPrefix(a.Name, "microfat_") && strings.HasSuffix(a.Name, ".tar.gz") {
-					parts := strings.Split(a.Name, "_")
-					if len(parts) >= minArchiveParts {
-						v := strings.TrimPrefix(parts[1], "v")
-						if v != "" {
-							return v, nil
-						}
-					}
+	data, err := os.ReadFile(artPath)
+	if err != nil {
+		return "", err
+	}
+	var artifacts []struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &artifacts); err != nil {
+		return "", err
+	}
+	for _, a := range artifacts {
+		if a.Type == "Archive" && strings.HasPrefix(a.Name, "microfat_") && strings.HasSuffix(a.Name, ".tar.gz") {
+			parts := strings.Split(a.Name, "_")
+			if len(parts) >= minArchiveParts {
+				v := strings.TrimPrefix(parts[1], "v")
+				if v != "" {
+					return v, nil
 				}
 			}
 		}
 	}
+	return "", fmt.Errorf("no valid archive found in artifacts.json")
+}
 
-	// Fallback: check archives on disk
+func deriveVersionFromArchives(distDir string) (string, error) {
 	amd64Matches, _ := filepath.Glob(filepath.Join(distDir, "microfat_*_linux_amd64.tar.gz"))
 	arm64Matches, _ := filepath.Glob(filepath.Join(distDir, "microfat_*_linux_arm64.tar.gz"))
-	if len(amd64Matches) == 1 && len(arm64Matches) == 1 {
-		baseAmd64 := filepath.Base(amd64Matches[0])
-		baseArm64 := filepath.Base(arm64Matches[0])
-		partsAmd64 := strings.Split(baseAmd64, "_")
-		partsArm64 := strings.Split(baseArm64, "_")
-		if len(partsAmd64) >= minArchiveParts && len(partsArm64) >= minArchiveParts {
-			vAmd64 := strings.TrimPrefix(partsAmd64[1], "v")
-			vArm64 := strings.TrimPrefix(partsArm64[1], "v")
-			if vAmd64 == vArm64 && vAmd64 != "" {
-				return vAmd64, nil
-			}
-			return "", fmt.Errorf("architecture archives have mismatched versions: %s vs %s", vAmd64, vArm64)
-		}
+	if len(amd64Matches) != 1 || len(arm64Matches) != 1 {
+		return "", fmt.Errorf("expected 1 amd64 and 1 arm64 archive in %s", distDir)
 	}
+	partsAmd64 := strings.Split(filepath.Base(amd64Matches[0]), "_")
+	partsArm64 := strings.Split(filepath.Base(arm64Matches[0]), "_")
+	if len(partsAmd64) < minArchiveParts || len(partsArm64) < minArchiveParts {
+		return "", fmt.Errorf("invalid archive naming format")
+	}
+	vAmd64 := strings.TrimPrefix(partsAmd64[1], "v")
+	vArm64 := strings.TrimPrefix(partsArm64[1], "v")
+	if vAmd64 != vArm64 || vAmd64 == "" {
+		return "", fmt.Errorf("architecture archives have mismatched versions: %s vs %s", vAmd64, vArm64)
+	}
+	return vAmd64, nil
+}
 
+// DeriveVersion determines the release version from an explicit tag, GoReleaser metadata, or matching archives.
+func DeriveVersion(distDir string, explicitTag string) (string, error) {
+	if explicitTag != "" {
+		return deriveVersionFromExplicitTag(explicitTag)
+	}
+	if v, err := deriveVersionFromMetadata(distDir); err == nil {
+		return v, nil
+	} else if strings.Contains(err.Error(), "unexpected project name") {
+		return "", err
+	}
+	if v, err := deriveVersionFromArtifacts(distDir); err == nil {
+		return v, nil
+	}
+	if v, err := deriveVersionFromArchives(distDir); err == nil {
+		return v, nil
+	} else if strings.Contains(err.Error(), "mismatched versions") {
+		return "", err
+	}
 	return "", fmt.Errorf("unable to derive release version from tag, metadata, or archives in %s", distDir)
 }
