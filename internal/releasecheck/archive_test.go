@@ -5,10 +5,15 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"debug/buildinfo"
+	"debug/elf"
 	"encoding/hex"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
@@ -66,22 +71,56 @@ func createOrderedTarGz(t *testing.T, archivePath string, entries []tarEntry) {
 	}
 }
 
+var (
+	testBinaryCache = make(map[string][]byte)
+	testBinaryMu    sync.Mutex
+)
+
+func getCompiledTestBinary(t *testing.T, arch, tier string) []byte {
+	t.Helper()
+	key := arch + "_" + tier
+	testBinaryMu.Lock()
+	defer testBinaryMu.Unlock()
+	if b, ok := testBinaryCache[key]; ok {
+		return b
+	}
+
+	tempDir := t.TempDir()
+	src := filepath.Join(tempDir, "main.go")
+	require.NoError(t, os.WriteFile(src, []byte("package main\nfunc main() {}\n"), 0o644))
+
+	outBin := filepath.Join(tempDir, "bin")
+	cmd := exec.Command("go", "build", "-ldflags=-s -w", "-trimpath", "-o", outBin, src)
+	env := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+		"CGO_ENABLED=0",
+		"GOOS=linux",
+		"GOARCH=" + arch,
+	}
+	if arch == releasecheck.ArchAMD64 {
+		env = append(env, "GOAMD64="+tier)
+	} else if arch == releasecheck.ArchARM64 {
+		env = append(env, "GOARM64="+tier)
+	}
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "compiling test binary: %s", string(out))
+
+	data, err := os.ReadFile(outBin)
+	require.NoError(t, err)
+
+	testBinaryCache[key] = data
+	return data
+}
+
 func createValidFatBinaryWithDict(t *testing.T, arch string, tiers []string, dict []byte) []byte {
 	t.Helper()
-	// Minimal valid ELF header: \x7fELF (64-bit, little endian, exec, x86_64 or aarch64)
-	elfMachine := byte(0x3e) // AMD64
-	if arch == "arm64" {
-		elfMachine = byte(0xb7) // AARCH64
+	baselineTier := "v1"
+	if arch == releasecheck.ArchARM64 {
+		baselineTier = "v8.0"
 	}
-	elfHeader := []byte{
-		0x7f, 'E', 'L', 'F', // Magic
-		2, 1, 1, 0, // 64-bit, LE, v1, System V
-		0, 0, 0, 0, 0, 0, 0, 0, // Padding
-		2, 0, // ET_EXEC
-		elfMachine, 0, // e_machine
-		1, 0, 0, 0, // e_version
-	}
-	stubBytes := append(append([]byte(nil), elfHeader...), bytes.Repeat([]byte{0x90}, 256)...)
+	stubBytes := getCompiledTestBinary(t, arch, baselineTier)
 
 	c, err := codec.Get("none")
 	require.NoError(t, err)
@@ -100,7 +139,7 @@ func createValidFatBinaryWithDict(t *testing.T, arch string, tiers []string, dic
 	payloadOffset := dictOffset + dictSize
 
 	for _, tier := range tiers {
-		variantPayload := append(append([]byte(nil), stubBytes...), []byte("-variant-"+tier)...)
+		variantPayload := getCompiledTestBinary(t, arch, tier)
 		h := sha256.Sum256(variantPayload)
 		tierHash := hex.EncodeToString(h[:])
 
@@ -148,7 +187,11 @@ func createStandardValidEntries(t *testing.T, arch string, contract *releasechec
 	t.Helper()
 	tiers := contract.ExpectedTiers[arch]
 	fatData := createValidFatBinary(t, arch, tiers)
-	stubData := []byte("\x7fELF\x02\x01\x01\x00" + strings.Repeat("\x00", 64))
+	baselineTier := "v1"
+	if arch == releasecheck.ArchARM64 {
+		baselineTier = "v8.0"
+	}
+	stubData := getCompiledTestBinary(t, arch, baselineTier)
 
 	return []tarEntry{
 		{Name: releasecheck.ReleaseProjectName, Data: fatData, Mode: 0o755},
@@ -169,6 +212,7 @@ func TestValidateArchive_ValidAMD64(t *testing.T) {
 
 	facts, err := releasecheck.ValidateArchive(archivePath, releasecheck.ArchAMD64, contract)
 	require.NoError(t, err)
+	defer func() { _ = facts.Cleanup() }()
 	assert.Equal(t, releasecheck.ArchAMD64, facts.TargetArch)
 	assert.Len(t, facts.Executables, 3)
 	assert.Len(t, facts.EmbeddedVariants, 4) // v1, v2, v3, v4
@@ -470,7 +514,7 @@ func TestValidateArchive_WithSharedDict(t *testing.T) {
 	dict := []byte("shared-dictionary-data-for-compression")
 	tiers := contract.ExpectedTiers[releasecheck.ArchAMD64]
 	fatData := createValidFatBinaryWithDict(t, releasecheck.ArchAMD64, tiers, dict)
-	stubData := []byte("\x7fELF\x02\x01\x01\x00" + strings.Repeat("\x00", 64))
+	stubData := getCompiledTestBinary(t, releasecheck.ArchAMD64, "v1")
 
 	entries := []tarEntry{
 		{Name: releasecheck.ReleaseProjectName, Data: fatData, Mode: 0o755},
@@ -484,6 +528,7 @@ func TestValidateArchive_WithSharedDict(t *testing.T) {
 
 	facts, err := releasecheck.ValidateArchive(archivePath, releasecheck.ArchAMD64, contract)
 	require.NoError(t, err)
+	defer func() { _ = facts.Cleanup() }()
 	assert.Equal(t, releasecheck.ArchAMD64, facts.TargetArch)
 	assert.NotEmpty(t, facts.EmbeddedVariants)
 }
@@ -594,5 +639,241 @@ func TestExtractArchiveSafely_Errors(t *testing.T) {
 
 		err = releasecheck.ExtractArchiveSafely(archivePath, f.Name())
 		require.Error(t, err)
+	})
+}
+
+func TestValidateArchive_ValidARM64(t *testing.T) {
+	t.Parallel()
+	contract, err := releasecheck.NewReleaseContract("0.2.3")
+	require.NoError(t, err)
+
+	entries := createStandardValidEntries(t, releasecheck.ArchARM64, contract)
+	archivePath := filepath.Join(t.TempDir(), "microfat_0.2.3_linux_arm64.tar.gz")
+	createOrderedTarGz(t, archivePath, entries)
+
+	facts, err := releasecheck.ValidateArchive(archivePath, releasecheck.ArchARM64, contract)
+	require.NoError(t, err)
+	defer func() { _ = facts.Cleanup() }()
+	assert.Equal(t, releasecheck.ArchARM64, facts.TargetArch)
+	assert.Len(t, facts.Executables, 3)
+	assert.Len(t, facts.EmbeddedVariants, 3) // v8.0, v8.2, v9.0
+	assert.NotEmpty(t, facts.ArchiveSHA256)
+}
+
+func TestValidateArchive_ISABuildSettings_Mismatches(t *testing.T) {
+	t.Parallel()
+	contract, err := releasecheck.NewReleaseContract("0.2.3")
+	require.NoError(t, err)
+
+	t.Run("AMD64_VariantMismatch", func(t *testing.T) {
+		t.Parallel()
+		badV1Payload := getCompiledTestBinary(t, releasecheck.ArchAMD64, "v4")
+		tiers := contract.ExpectedTiers[releasecheck.ArchAMD64]
+
+		stubBytes := getCompiledTestBinary(t, releasecheck.ArchAMD64, "v1")
+		c, err := codec.Get("none")
+		require.NoError(t, err)
+
+		var compVariantsBuf bytes.Buffer
+		var variantEntries []format.VariantEntry
+		dictOffset := int64(len(stubBytes))
+
+		for _, tier := range tiers {
+			payload := getCompiledTestBinary(t, releasecheck.ArchAMD64, tier)
+			if tier == "v1" {
+				payload = badV1Payload
+			}
+			h := sha256.Sum256(payload)
+			var compBuf bytes.Buffer
+			require.NoError(t, c.Compress(&compBuf, payload, "fastest"))
+
+			variantEntries = append(variantEntries, format.VariantEntry{
+				Level:            tier,
+				Offset:           dictOffset + int64(compVariantsBuf.Len()),
+				CompressedSize:   int64(compBuf.Len()),
+				UncompressedSize: int64(len(payload)),
+				SHA256:           hex.EncodeToString(h[:]),
+				Compression:      "none",
+			})
+			compVariantsBuf.Write(compBuf.Bytes())
+		}
+
+		idx := &format.Index{
+			Version:    format.FormatVersion2,
+			TargetArch: releasecheck.ArchAMD64,
+			Variants:   variantEntries,
+		}
+
+		var fatBuf bytes.Buffer
+		fatBuf.Write(stubBytes)
+		fatBuf.Write(compVariantsBuf.Bytes())
+		_, err = format.WriteIndexAndTrailer(&fatBuf, idx, int64(fatBuf.Len()))
+		require.NoError(t, err)
+
+		entries := []tarEntry{
+			{Name: releasecheck.ReleaseProjectName, Data: fatBuf.Bytes(), Mode: 0o755},
+			{Name: releasecheck.ReleaseFullStub, Data: stubBytes, Mode: 0o755},
+			{Name: releasecheck.ReleaseMinStub, Data: stubBytes, Mode: 0o755},
+		}
+
+		archivePath := filepath.Join(t.TempDir(), "bad_variant.tar.gz")
+		createOrderedTarGz(t, archivePath, entries)
+
+		_, err = releasecheck.ValidateArchive(archivePath, releasecheck.ArchAMD64, contract)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "embedded variant v1 GOAMD64 mismatch")
+	})
+
+	t.Run("AMD64_RootExecutableMismatch", func(t *testing.T) {
+		t.Parallel()
+		entries := createStandardValidEntries(t, releasecheck.ArchAMD64, contract)
+		badStub := getCompiledTestBinary(t, releasecheck.ArchAMD64, "v4")
+		for i := range entries {
+			if entries[i].Name == releasecheck.ReleaseFullStub {
+				entries[i].Data = badStub
+			}
+		}
+
+		archivePath := filepath.Join(t.TempDir(), "bad_root.tar.gz")
+		createOrderedTarGz(t, archivePath, entries)
+
+		_, err := releasecheck.ValidateArchive(archivePath, releasecheck.ArchAMD64, contract)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "root executable microfat-stub GOAMD64 setting mismatch")
+	})
+}
+
+func TestValidateArchive_Cleanup(t *testing.T) {
+	t.Parallel()
+	contract, err := releasecheck.NewReleaseContract("0.2.3")
+	require.NoError(t, err)
+
+	t.Run("ExplicitCleanup", func(t *testing.T) {
+		t.Parallel()
+		entries := createStandardValidEntries(t, releasecheck.ArchAMD64, contract)
+		archivePath := filepath.Join(t.TempDir(), "test_cleanup.tar.gz")
+		createOrderedTarGz(t, archivePath, entries)
+
+		facts, err := releasecheck.ValidateArchive(archivePath, releasecheck.ArchAMD64, contract)
+		require.NoError(t, err)
+		stagingDir := facts.StagingDir
+		require.DirExists(t, stagingDir)
+
+		require.NoError(t, facts.Cleanup())
+		assert.NoDirExists(t, stagingDir)
+		assert.Empty(t, facts.StagingDir)
+		assert.Empty(t, facts.ExtractedDir)
+
+		require.NoError(t, facts.Cleanup())
+
+		// Nil receiver or empty staging dir should be safe no-op
+		var nilFacts *releasecheck.ArchiveFacts
+		require.NoError(t, nilFacts.Cleanup())
+		emptyFacts := &releasecheck.ArchiveFacts{}
+		require.NoError(t, emptyFacts.Cleanup())
+	})
+
+	t.Run("FailureRollbackCleanup", func(t *testing.T) {
+		t.Parallel()
+		archivePath := filepath.Join(t.TempDir(), "corrupt.tar.gz")
+		require.NoError(t, os.WriteFile(archivePath, []byte("not-a-valid-tar-gz"), 0o644))
+
+		_, err := releasecheck.ValidateArchive(archivePath, releasecheck.ArchAMD64, contract)
+		require.Error(t, err)
+	})
+}
+
+func TestValidateISABuildSettings_DirectUnitTests(t *testing.T) {
+	t.Parallel()
+
+	t.Run("GetBuildSetting_NilAndNotFound", func(t *testing.T) {
+		val, ok := releasecheck.GetBuildSetting(nil, "GOAMD64")
+		assert.False(t, ok)
+		assert.Empty(t, val)
+
+		bi := &buildinfo.BuildInfo{
+			Settings: []debug.BuildSetting{
+				{Key: "GOOS", Value: "linux"},
+			},
+		}
+		val, ok = releasecheck.GetBuildSetting(bi, "GOAMD64")
+		assert.False(t, ok)
+		assert.Empty(t, val)
+
+		val, ok = releasecheck.GetBuildSetting(bi, "GOOS")
+		assert.True(t, ok)
+		assert.Equal(t, "linux", val)
+	})
+
+	t.Run("RootExecutable_EdgeCases", func(t *testing.T) {
+		err := releasecheck.ValidateRootExecutableISA(releasecheck.ArchAMD64, "microfat", nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing executable facts")
+
+		err = releasecheck.ValidateRootExecutableISA(releasecheck.ArchAMD64, "microfat", &releasecheck.ExecutableFacts{
+			ELFHeader: nil,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a valid amd64 ELF binary")
+
+		err = releasecheck.ValidateRootExecutableISA(releasecheck.ArchAMD64, "microfat", &releasecheck.ExecutableFacts{
+			ELFHeader: &elf.FileHeader{Machine: elf.EM_AARCH64},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a valid amd64 ELF binary")
+
+		err = releasecheck.ValidateRootExecutableISA(releasecheck.ArchAMD64, "microfat", &releasecheck.ExecutableFacts{
+			ELFHeader: &elf.FileHeader{Machine: elf.EM_X86_64},
+			BuildInfo: nil,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing Go buildinfo")
+
+		err = releasecheck.ValidateRootExecutableISA(releasecheck.ArchARM64, "microfat", &releasecheck.ExecutableFacts{
+			ELFHeader: &elf.FileHeader{Machine: elf.EM_X86_64},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a valid arm64 ELF binary")
+	})
+
+	t.Run("EmbeddedVariant_EdgeCases", func(t *testing.T) {
+		err := releasecheck.ValidateEmbeddedVariantISA(releasecheck.ArchAMD64, "v1", nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing variant facts")
+
+		err = releasecheck.ValidateEmbeddedVariantISA(releasecheck.ArchAMD64, "v1", &releasecheck.VariantFacts{
+			ELFHeader: nil,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a valid amd64 ELF binary")
+
+		err = releasecheck.ValidateEmbeddedVariantISA(releasecheck.ArchAMD64, "v1", &releasecheck.VariantFacts{
+			ELFHeader: &elf.FileHeader{Machine: elf.EM_AARCH64},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a valid amd64 ELF binary")
+
+		err = releasecheck.ValidateEmbeddedVariantISA(releasecheck.ArchAMD64, "v1", &releasecheck.VariantFacts{
+			ELFHeader: &elf.FileHeader{Machine: elf.EM_X86_64},
+			BuildInfo: nil,
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing Go buildinfo")
+
+		// Missing required GOAMD64 on non-baseline tier
+		err = releasecheck.ValidateEmbeddedVariantISA(releasecheck.ArchAMD64, "v2", &releasecheck.VariantFacts{
+			ELFHeader: &elf.FileHeader{Machine: elf.EM_X86_64},
+			BuildInfo: &buildinfo.BuildInfo{},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing required GOAMD64 setting (expected v2)")
+
+		// Missing required GOARM64 on non-baseline tier
+		err = releasecheck.ValidateEmbeddedVariantISA(releasecheck.ArchARM64, "v8.2", &releasecheck.VariantFacts{
+			ELFHeader: &elf.FileHeader{Machine: elf.EM_AARCH64},
+			BuildInfo: &buildinfo.BuildInfo{},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing required GOARM64 setting (expected v8.2)")
 	})
 }

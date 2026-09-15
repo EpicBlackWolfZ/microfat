@@ -34,6 +34,14 @@ type SPDXRelationship struct {
 	Comment            string `json:"comment,omitempty"`
 }
 
+// SPDXCreationInfo represents the creation information of an SPDX document.
+type SPDXCreationInfo struct {
+	Created            string   `json:"created"`
+	Creators           []string `json:"creators"`
+	LicenseListVersion string   `json:"licenseListVersion,omitempty"`
+	Comment            string   `json:"comment,omitempty"`
+}
+
 // SPDXDocument represents an SPDX 2.3 JSON document.
 type SPDXDocument struct {
 	SPDXVersion       string             `json:"spdxVersion"`
@@ -41,6 +49,7 @@ type SPDXDocument struct {
 	SPDXID            string             `json:"SPDXID"`
 	Name              string             `json:"name"`
 	DocumentNamespace string             `json:"documentNamespace"`
+	CreationInfo      SPDXCreationInfo   `json:"creationInfo"`
 	Packages          []SPDXPackage      `json:"packages"`
 	Relationships     []SPDXRelationship `json:"relationships"`
 }
@@ -111,6 +120,17 @@ func validateSPDXHeader(doc *SPDXDocument, facts *ArchiveFacts) error {
 	}
 	if doc.Name != facts.ArchiveName {
 		return fmt.Errorf("SPDX document name mismatch: expected %q, got %q", facts.ArchiveName, doc.Name)
+	}
+	if doc.CreationInfo.Created == "" {
+		return fmt.Errorf("SPDX creationInfo missing required 'created' timestamp")
+	}
+	if len(doc.CreationInfo.Creators) == 0 {
+		return fmt.Errorf("SPDX creationInfo missing required 'creators' list")
+	}
+	for _, c := range doc.CreationInfo.Creators {
+		if strings.TrimSpace(c) == "" {
+			return fmt.Errorf("SPDX creationInfo contains empty creator entry")
+		}
 	}
 	return nil
 }
@@ -371,6 +391,12 @@ func validateCDXComponents(
 		return nil
 	}
 
+	if doc.Metadata.Component != nil && len(doc.Metadata.Component.Components) > 0 {
+		if err := collectComponents(doc.Metadata.Component.Components); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	if err := collectComponents(doc.Components); err != nil {
 		return nil, nil, err
 	}
@@ -449,18 +475,30 @@ func validateCDXGraph(
 	}
 
 	metaComp := doc.Metadata.Component
+	if len(depMap[metaComp.BOMRef]) > 0 {
+		return fmt.Errorf("archive root component must not declare functional dependency edges (containment is modeled via component assembly)")
+	}
+
+	metaCompByRef := make(map[string]bool)
+	for _, c := range metaComp.Components {
+		metaCompByRef[c.BOMRef] = true
+	}
 	for exeName := range facts.Executables {
 		exeComp := compByName[exeName]
-		if !depMap[metaComp.BOMRef][exeComp.BOMRef] {
-			return fmt.Errorf("archive missing dependency edge to executable %s", exeName)
+		if !metaCompByRef[exeComp.BOMRef] {
+			return fmt.Errorf("archive component assembly missing root executable component %s", exeName)
 		}
 	}
 
 	fatComp := compByName[ReleaseProjectName]
+	fatCompByRef := make(map[string]bool)
+	for _, c := range fatComp.Components {
+		fatCompByRef[c.BOMRef] = true
+	}
 	for tier := range facts.EmbeddedVariants {
 		vComp := compByName["microfat-variant-"+tier]
-		if !depMap[fatComp.BOMRef][vComp.BOMRef] {
-			return fmt.Errorf("fat binary missing dependency edge to variant %s", tier)
+		if !fatCompByRef[vComp.BOMRef] {
+			return fmt.Errorf("fat binary component assembly missing embedded variant component %s", tier)
 		}
 	}
 

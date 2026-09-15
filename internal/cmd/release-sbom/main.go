@@ -252,9 +252,12 @@ func sanitizeSPDXID(s string) string {
 }
 
 func isOmittedBinaryPackage(name string) bool {
-	return strings.HasPrefix(name, "/") || name == "microfat" || name == "microfat-stub" ||
-		name == "microfat-stub-minimal" || strings.HasPrefix(name, "embedded_variants") ||
-		name == "embedded_variants"
+	clean := strings.TrimPrefix(name, "archive/")
+	clean = strings.TrimPrefix(clean, "derived/variants/")
+	clean = strings.TrimPrefix(clean, "embedded_variants/")
+	return strings.HasPrefix(name, "/") || clean == "microfat" || clean == "microfat-stub" ||
+		clean == "microfat-stub-minimal" || strings.HasPrefix(clean, "microfat-variant-") ||
+		name == "archive" || name == "derived" || name == "embedded_variants"
 }
 
 func buildSPDXPackages(
@@ -432,30 +435,64 @@ func attributeSPDX(
 	inv *releasecheck.ArchiveInventory,
 	version string,
 ) ([]byte, error) {
-	var doc releasecheck.SPDXDocument
-	if err := json.Unmarshal(rawJSON, &doc); err != nil {
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(rawJSON, &rawMap); err != nil {
 		return nil, fmt.Errorf("parsing syft SPDX JSON: %w", err)
 	}
 
-	doc.SPDXVersion = "SPDX-2.3"
-	doc.DataLicense = "CC0-1.0"
-	doc.SPDXID = "SPDXRef-DOCUMENT"
-	doc.Name = facts.ArchiveName
-	doc.DocumentNamespace = fmt.Sprintf("https://github.com/EpicBlackWolfZ/microfat/releases/tag/v%s/%s",
-		version, facts.ArchiveName)
+	var creationInfo releasecheck.SPDXCreationInfo
+	rawCI, ok := rawMap["creationInfo"]
+	if !ok {
+		return nil, fmt.Errorf("SPDX raw JSON missing required 'creationInfo'")
+	}
+	if err := json.Unmarshal(rawCI, &creationInfo); err != nil {
+		return nil, fmt.Errorf("parsing creationInfo: %w", err)
+	}
+	if creationInfo.Created == "" {
+		return nil, fmt.Errorf("SPDX raw JSON missing required 'creationInfo.created'")
+	}
+	if len(creationInfo.Creators) == 0 {
+		return nil, fmt.Errorf("SPDX raw JSON missing required 'creationInfo.creators'")
+	}
 
+	var originalPackages []releasecheck.SPDXPackage
+	if rawPkgs, ok := rawMap["packages"]; ok {
+		if err := json.Unmarshal(rawPkgs, &originalPackages); err != nil {
+			return nil, fmt.Errorf("unmarshalling packages: %w", err)
+		}
+	}
+
+	docID := "SPDXRef-DOCUMENT"
 	archivePkgID := "SPDXRef-Archive"
-	cleanPackages, existingPkgByName := buildSPDXPackages(doc.Packages, facts, inv, version)
-	doc.Packages = cleanPackages
-	doc.Relationships = buildSPDXRelationships(doc.SPDXID, archivePkgID, facts, inv, existingPkgByName)
+	cleanPackages, existingPkgByName := buildSPDXPackages(originalPackages, facts, inv, version)
+	relationships := buildSPDXRelationships(docID, archivePkgID, facts, inv, existingPkgByName)
 
-	return json.MarshalIndent(doc, "", "  ")
+	spdxVer, _ := json.Marshal("SPDX-2.3")
+	rawMap["spdxVersion"] = spdxVer
+	dataLic, _ := json.Marshal("CC0-1.0")
+	rawMap["dataLicense"] = dataLic
+	spdxID, _ := json.Marshal(docID)
+	rawMap["SPDXID"] = spdxID
+	docName, _ := json.Marshal(facts.ArchiveName)
+	rawMap["name"] = docName
+	docNS, _ := json.Marshal(fmt.Sprintf("https://github.com/EpicBlackWolfZ/microfat/releases/tag/v%s/%s",
+		version, facts.ArchiveName))
+	rawMap["documentNamespace"] = docNS
+	pkgsBytes, _ := json.Marshal(cleanPackages)
+	rawMap["packages"] = pkgsBytes
+	relsBytes, _ := json.Marshal(relationships)
+	rawMap["relationships"] = relsBytes
+
+	return json.MarshalIndent(rawMap, "", "  ")
 }
 
 func isOmittedBinaryComponent(name string) bool {
-	return strings.HasPrefix(name, "/") || name == "microfat" || name == "microfat-stub" ||
-		name == "microfat-stub-minimal" || strings.HasPrefix(name, "embedded_variants") ||
-		name == "embedded_variants"
+	clean := strings.TrimPrefix(name, "archive/")
+	clean = strings.TrimPrefix(clean, "derived/variants/")
+	clean = strings.TrimPrefix(clean, "embedded_variants/")
+	return strings.HasPrefix(name, "/") || clean == "microfat" || clean == "microfat-stub" ||
+		clean == "microfat-stub-minimal" || strings.HasPrefix(clean, "microfat-variant-") ||
+		name == "archive" || name == "derived" || name == "embedded_variants"
 }
 
 func buildCDXComponents(
@@ -463,7 +500,7 @@ func buildCDXComponents(
 	facts *releasecheck.ArchiveFacts,
 	inv *releasecheck.ArchiveInventory,
 	version string,
-) ([]releasecheck.CDXComponent, map[string]releasecheck.CDXComponent, []string) {
+) ([]releasecheck.CDXComponent, []releasecheck.CDXComponent, map[string]releasecheck.CDXComponent) {
 	var cleanComponents []releasecheck.CDXComponent
 	existingCompByName := make(map[string]releasecheck.CDXComponent)
 	for _, c := range docComponents {
@@ -520,12 +557,10 @@ func buildCDXComponents(
 	sort.Strings(tiers)
 
 	var variantComponents []releasecheck.CDXComponent
-	var variantRefs []string
 	for _, tier := range tiers {
 		vf := facts.EmbeddedVariants[tier]
 		vRef := fmt.Sprintf("variant-%s", sanitizeSPDXID(tier))
-		variantRefs = append(variantRefs, vRef)
-		variantComponents = append(variantComponents, releasecheck.CDXComponent{
+		vComp := releasecheck.CDXComponent{
 			BOMRef:  vRef,
 			Type:    cdxTypeApplication,
 			Name:    "microfat-variant-" + tier,
@@ -537,7 +572,9 @@ func buildCDXComponents(
 				{Name: "microfat:variant_tier", Value: tier},
 				{Name: "microfat:target_arch", Value: facts.TargetArch},
 			},
-		})
+		}
+		variantComponents = append(variantComponents, vComp)
+		existingCompByName[vComp.Name] = vComp
 	}
 
 	microfatComp := releasecheck.CDXComponent{
@@ -550,7 +587,6 @@ func buildCDXComponents(
 		},
 		Components: variantComponents,
 	}
-	cleanComponents = append(cleanComponents, microfatComp)
 
 	stubComp := releasecheck.CDXComponent{
 		BOMRef:  "bin-stub",
@@ -565,7 +601,6 @@ func buildCDXComponents(
 			{Name: "microfat:target_arch", Value: facts.TargetArch},
 		},
 	}
-	cleanComponents = append(cleanComponents, stubComp)
 
 	minStubComp := releasecheck.CDXComponent{
 		BOMRef:  "bin-min-stub",
@@ -580,26 +615,20 @@ func buildCDXComponents(
 			{Name: "microfat:target_arch", Value: facts.TargetArch},
 		},
 	}
-	cleanComponents = append(cleanComponents, minStubComp)
 
-	return cleanComponents, existingCompByName, variantRefs
+	rootExecComponents := []releasecheck.CDXComponent{microfatComp, stubComp, minStubComp}
+	existingCompByName[microfatComp.Name] = microfatComp
+	existingCompByName[stubComp.Name] = stubComp
+	existingCompByName[minStubComp.Name] = minStubComp
+
+	return cleanComponents, rootExecComponents, existingCompByName
 }
 
 func buildCDXDependencies(
-	archiveRef string,
-	variantRefs []string,
 	inv *releasecheck.ArchiveInventory,
 	existingCompByName map[string]releasecheck.CDXComponent,
 ) []releasecheck.CDXDependency {
 	var dependencies []releasecheck.CDXDependency
-	dependencies = append(dependencies, releasecheck.CDXDependency{
-		Ref:       archiveRef,
-		DependsOn: []string{"bin-microfat", "bin-stub", "bin-min-stub"},
-	})
-	dependencies = append(dependencies, releasecheck.CDXDependency{
-		Ref:       "bin-microfat",
-		DependsOn: variantRefs,
-	})
 
 	for binID, binInv := range inv.Binaries {
 		var sourceRef string
@@ -649,6 +678,8 @@ func attributeCycloneDX(
 	doc.BOMFormat = "CycloneDX"
 	doc.SpecVersion = "1.5"
 
+	cleanComponents, rootExecComponents, existingCompByName := buildCDXComponents(doc.Components, facts, inv, version)
+
 	archiveRef := "archive-root"
 	doc.Metadata.Component = &releasecheck.CDXComponent{
 		BOMRef:  archiveRef,
@@ -661,11 +692,11 @@ func attributeCycloneDX(
 		Properties: []releasecheck.CDXProperty{
 			{Name: "microfat:target_arch", Value: facts.TargetArch},
 		},
+		Components: rootExecComponents,
 	}
 
-	cleanComponents, existingCompByName, variantRefs := buildCDXComponents(doc.Components, facts, inv, version)
 	doc.Components = cleanComponents
-	doc.Dependencies = buildCDXDependencies(archiveRef, variantRefs, inv, existingCompByName)
+	doc.Dependencies = buildCDXDependencies(inv, existingCompByName)
 
 	return json.MarshalIndent(doc, "", "  ")
 }
@@ -744,7 +775,7 @@ func resolveArchiveVersion(archivePath string) string {
 }
 
 func stageExtractedVariants(facts *releasecheck.ArchiveFacts) error {
-	stagingVariantsDir := filepath.Join(facts.StagingDir, "embedded_variants")
+	stagingVariantsDir := filepath.Join(facts.StagingDir, "derived", "variants")
 	// #nosec G703 -- stagingVariantsDir within validated temporary staging dir
 	if err := os.MkdirAll(stagingVariantsDir, dirPerms); err != nil {
 		return fmt.Errorf("creating variants staging dir: %w", err)
@@ -798,8 +829,7 @@ func Generate(archivePath, outputPath, formatName string) error {
 		return fmt.Errorf("validating archive %s: %w", archivePath, err)
 	}
 	defer func() {
-		// #nosec G703 -- cleaning up temporary staging directory
-		_ = os.RemoveAll(facts.StagingDir)
+		_ = facts.Cleanup()
 	}()
 
 	if err := stageExtractedVariants(facts); err != nil {

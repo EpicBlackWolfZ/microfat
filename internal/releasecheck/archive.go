@@ -57,9 +57,21 @@ type ArchiveFacts struct {
 	ArchiveSHA256    string
 	TargetArch       string
 	StagingDir       string
+	ExtractedDir     string
 	Entries          map[string]bool
 	Executables      map[string]*ExecutableFacts
 	EmbeddedVariants map[string]*VariantFacts
+}
+
+// Cleanup safely removes the temporary staging directory and clears paths.
+func (af *ArchiveFacts) Cleanup() error {
+	if af == nil || af.StagingDir == "" {
+		return nil
+	}
+	err := os.RemoveAll(af.StagingDir)
+	af.StagingDir = ""
+	af.ExtractedDir = ""
+	return err
 }
 
 func sanitizeTarEntryName(rawName string) (string, error) {
@@ -166,16 +178,29 @@ func ValidateArchive(archivePath, expectedArch string, contract *ReleaseContract
 		return nil, fmt.Errorf("creating staging directory: %w", err)
 	}
 
+	var success bool
+	defer func() {
+		if !success {
+			_ = os.RemoveAll(stagingDir)
+		}
+	}()
+
+	extractedDir := filepath.Join(stagingDir, "archive")
+	if err := os.MkdirAll(extractedDir, dirPerms); err != nil {
+		return nil, fmt.Errorf("creating archive extraction directory: %w", err)
+	}
+
 	facts := &ArchiveFacts{
 		ArchiveName:      filepath.Base(archivePath),
 		TargetArch:       expectedArch,
 		StagingDir:       stagingDir,
+		ExtractedDir:     extractedDir,
 		Entries:          make(map[string]bool),
 		Executables:      make(map[string]*ExecutableFacts),
 		EmbeddedVariants: make(map[string]*VariantFacts),
 	}
 
-	if err := processArchiveEntries(tar.NewReader(gzr), stagingDir, facts); err != nil {
+	if err := processArchiveEntries(tar.NewReader(gzr), extractedDir, facts); err != nil {
 		return nil, err
 	}
 
@@ -190,11 +215,16 @@ func ValidateArchive(archivePath, expectedArch string, contract *ReleaseContract
 		}
 	}
 
-	microfatPath := filepath.Join(stagingDir, ReleaseProjectName)
+	microfatPath := filepath.Join(extractedDir, ReleaseProjectName)
 	if err := inspectFatBinary(microfatPath, expectedArch, contract, facts); err != nil {
 		return nil, fmt.Errorf("validating fat binary in archive: %w", err)
 	}
 
+	if err := validateISABuildSettings(expectedArch, contract, facts); err != nil {
+		return nil, fmt.Errorf("validating ISA build settings: %w", err)
+	}
+
+	success = true
 	return facts, nil
 }
 
@@ -505,3 +535,91 @@ func ExtractFileFromArchive(archivePath, targetName, destPath string) error {
 
 	return os.WriteFile(destPath, matchedBytes, execPerms)
 }
+
+func getBuildSetting(bi *buildinfo.BuildInfo, key string) (string, bool) {
+	if bi == nil {
+		return "", false
+	}
+	for _, s := range bi.Settings {
+		if s.Key == key {
+			return s.Value, true
+		}
+	}
+	return "", false
+}
+
+func validateRootExecutableISA(expectedArch, req string, exe *ExecutableFacts) error {
+	if exe == nil {
+		return fmt.Errorf("missing executable facts for %s", req)
+	}
+	expectedMachine := elf.EM_X86_64
+	expectedSettingKey := "GOAMD64"
+	expectedSettingVal := "v1"
+	if expectedArch == ArchARM64 {
+		expectedMachine = elf.EM_AARCH64
+		expectedSettingKey = "GOARM64"
+		expectedSettingVal = "v8.0"
+	}
+
+	if exe.ELFHeader == nil || exe.ELFHeader.Machine != expectedMachine {
+		return fmt.Errorf("root executable %s is not a valid %s ELF binary", req, expectedArch)
+	}
+	if exe.BuildInfo == nil {
+		return fmt.Errorf("root executable %s is missing Go buildinfo", req)
+	}
+
+	val, found := getBuildSetting(exe.BuildInfo, expectedSettingKey)
+	if found && val != expectedSettingVal {
+		return fmt.Errorf("root executable %s %s setting mismatch: expected %s, got %s", req, expectedSettingKey, expectedSettingVal, val)
+	}
+	return nil
+}
+
+func validateEmbeddedVariantISA(expectedArch, tier string, vf *VariantFacts) error {
+	if vf == nil {
+		return fmt.Errorf("missing variant facts for tier %s", tier)
+	}
+	expectedMachine := elf.EM_X86_64
+	settingKey := "GOAMD64"
+	expectedVal := tier
+	baseline := "v1"
+	if expectedArch == ArchARM64 {
+		expectedMachine = elf.EM_AARCH64
+		settingKey = "GOARM64"
+		baseline = "v8.0"
+	}
+
+	if vf.ELFHeader == nil || vf.ELFHeader.Machine != expectedMachine {
+		return fmt.Errorf("embedded variant %s is not a valid %s ELF binary", tier, expectedArch)
+	}
+	if vf.BuildInfo == nil {
+		return fmt.Errorf("embedded variant %s is missing Go buildinfo", tier)
+	}
+
+	val, found := getBuildSetting(vf.BuildInfo, settingKey)
+	if !found {
+		if tier != baseline {
+			return fmt.Errorf("embedded variant %s missing required %s setting (expected %s)", tier, settingKey, expectedVal)
+		}
+	} else if val != expectedVal {
+		return fmt.Errorf("embedded variant %s %s mismatch: expected %s, got %s", tier, settingKey, expectedVal, val)
+	}
+	return nil
+}
+
+func validateISABuildSettings(expectedArch string, contract *ReleaseContract, facts *ArchiveFacts) error {
+	for _, req := range contract.RequiredExecutables {
+		exe := facts.Executables[req]
+		if err := validateRootExecutableISA(expectedArch, req, exe); err != nil {
+			return err
+		}
+	}
+
+	for tier, vf := range facts.EmbeddedVariants {
+		if err := validateEmbeddedVariantISA(expectedArch, tier, vf); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+

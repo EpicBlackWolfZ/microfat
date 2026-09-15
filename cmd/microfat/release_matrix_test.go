@@ -312,10 +312,11 @@ func verifySingleArchiveExecutables(t *testing.T, archPath string) {
 		t.Fatalf("creating release contract for %s: %v", archPath, err)
 	}
 
-	_, err = releasecheck.ValidateArchive(archPath, expectedArch, contract)
+	facts, err := releasecheck.ValidateArchive(archPath, expectedArch, contract)
 	if err != nil {
 		t.Fatalf("validating archive %s: %v", archPath, err)
 	}
+	defer func() { _ = facts.Cleanup() }()
 }
 
 func verifyReleaseArchiveRawEntries(t *testing.T, distDir string) {
@@ -380,6 +381,7 @@ func verifyReleaseSBOMs(t *testing.T, distDir string, hasSyft, releaseTestsRequi
 		if err != nil {
 			t.Fatalf("validating archive %s for SBOM checks: %v", archiveName, err)
 		}
+		defer func(af *releasecheck.ArchiveFacts) { _ = af.Cleanup() }(facts)
 
 		inv, err := releasecheck.ExtractArchiveInventory(facts)
 		if err != nil {
@@ -431,8 +433,16 @@ func verifyVariantExecutionModes(t *testing.T, microfatCliPath, fullStubPath, mi
 	_ = os.MkdirAll(decoyParent, 0o755)
 	_ = os.WriteFile(filepath.Join(decoyParent, releaseFullStub), []byte("decoy ../bin stub"), 0o755)
 
+	emptyPathDir := t.TempDir()
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", emptyPathDir)
+	if _, err := exec.LookPath("microfat-stub"); err == nil {
+		t.Fatalf("microfat-stub unexpectedly discoverable in isolated PATH environment")
+	}
+	t.Setenv("PATH", origPath)
+
 	cleanEnv := []string{
-		"PATH=/usr/bin:/bin",
+		"PATH=" + emptyPathDir,
 		"HOME=" + workDir,
 		"TMPDIR=" + workDir,
 		"GOTOOLCHAIN=local",
@@ -630,6 +640,7 @@ func verifyReleaseARM64VariantBuildSettings(t *testing.T, distDir string) {
 	if err != nil {
 		t.Fatalf("validating arm64 archive: %v", err)
 	}
+	defer func() { _ = facts.Cleanup() }()
 
 	verifyReleaseARM64Executables(t, facts, contract)
 

@@ -110,6 +110,10 @@ func createValidSPDXDocument() *SPDXDocument {
 		SPDXID:            "SPDXRef-DOCUMENT",
 		Name:              testArchiveName,
 		DocumentNamespace: "https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.2.3/" + testArchiveName,
+		CreationInfo: SPDXCreationInfo{
+			Created:  "2026-09-15T12:00:00Z",
+			Creators: []string{"Tool: syft", "Tool: microfat-release-sbom"},
+		},
 		Packages: []SPDXPackage{
 			{
 				SPDXID:           testSPDXArchiveID,
@@ -226,56 +230,58 @@ func createValidCDXDocument() *CDXDocument {
 				Properties: []CDXProperty{
 					{Name: "microfat:target_arch", Value: ArchAMD64},
 				},
+				Components: []CDXComponent{
+					{
+						BOMRef:  "bin-microfat",
+						Type:    testAppType,
+						Name:    ReleaseProjectName,
+						Version: testVersion,
+						Hashes: []CDXHash{
+							{Alg: testAlgoHyphen256, Content: testMicrofatHash},
+						},
+						Components: []CDXComponent{
+							{
+								BOMRef:  "var-v1",
+								Type:    testAppType,
+								Name:    "microfat-variant-v1",
+								Version: testVersion,
+								Hashes: []CDXHash{
+									{Alg: testAlgoHyphen256, Content: testV1Hash},
+								},
+							},
+							{
+								BOMRef:  "var-v2",
+								Type:    testAppType,
+								Name:    "microfat-variant-v2",
+								Version: testVersion,
+								Hashes: []CDXHash{
+									{Alg: testAlgoHyphen256, Content: testV2Hash},
+								},
+							},
+						},
+					},
+					{
+						BOMRef:  testBOMRefStub,
+						Type:    testAppType,
+						Name:    ReleaseFullStub,
+						Version: testVersion,
+						Hashes: []CDXHash{
+							{Alg: testAlgoHyphen256, Content: testStubHash},
+						},
+					},
+					{
+						BOMRef:  "bin-min-stub",
+						Type:    testAppType,
+						Name:    ReleaseMinStub,
+						Version: testVersion,
+						Hashes: []CDXHash{
+							{Alg: testAlgoHyphen256, Content: testMinStubHash},
+						},
+					},
+				},
 			},
 		},
 		Components: []CDXComponent{
-			{
-				BOMRef:  "bin-microfat",
-				Type:    testAppType,
-				Name:    ReleaseProjectName,
-				Version: testVersion,
-				Hashes: []CDXHash{
-					{Alg: testAlgoHyphen256, Content: testMicrofatHash},
-				},
-				Components: []CDXComponent{
-					{
-						BOMRef:  "var-v1",
-						Type:    testAppType,
-						Name:    "microfat-variant-v1",
-						Version: testVersion,
-						Hashes: []CDXHash{
-							{Alg: testAlgoHyphen256, Content: testV1Hash},
-						},
-					},
-					{
-						BOMRef:  "var-v2",
-						Type:    testAppType,
-						Name:    "microfat-variant-v2",
-						Version: testVersion,
-						Hashes: []CDXHash{
-							{Alg: testAlgoHyphen256, Content: testV2Hash},
-						},
-					},
-				},
-			},
-			{
-				BOMRef:  testBOMRefStub,
-				Type:    testAppType,
-				Name:    ReleaseFullStub,
-				Version: testVersion,
-				Hashes: []CDXHash{
-					{Alg: testAlgoHyphen256, Content: testStubHash},
-				},
-			},
-			{
-				BOMRef:  "bin-min-stub",
-				Type:    testAppType,
-				Name:    ReleaseMinStub,
-				Version: testVersion,
-				Hashes: []CDXHash{
-					{Alg: testAlgoHyphen256, Content: testMinStubHash},
-				},
-			},
 			{
 				BOMRef:  "mod-sys",
 				Type:    "library",
@@ -296,8 +302,6 @@ func createValidCDXDocument() *CDXDocument {
 			},
 		},
 		Dependencies: []CDXDependency{
-			{Ref: "archive-root", DependsOn: []string{"bin-microfat", testBOMRefStub, "bin-min-stub"}},
-			{Ref: "bin-microfat", DependsOn: []string{"var-v1", "var-v2"}},
 			{Ref: testBOMRefStub, DependsOn: []string{"mod-sys"}},
 			{Ref: "bin-min-stub", DependsOn: []string{"mod-sys"}},
 			{Ref: "var-v1", DependsOn: []string{"mod-cobra", "mod-compress"}},
@@ -451,10 +455,40 @@ func TestSPDXValidation_BaselineAndMutations(t *testing.T) {
 
 	t.Run("Mutation11_HeaderOnlyJSON", func(t *testing.T) {
 		headerOnly := []byte(`{"spdxVersion":"SPDX-2.3","dataLicense":"CC0-1.0","SPDXID":"SPDXRef-DOCUMENT","name":"` +
-			testArchiveName + `"}`)
+			testArchiveName + `","creationInfo":{"created":"2026-09-15T12:00:00Z","creators":["Tool: test"]}}`)
 		err := ValidateSPDXBytes(headerOnly, facts, inv)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "missing package describing release archive")
+	})
+
+	t.Run("Mutation12_MissingCreationInfoCreated", func(t *testing.T) {
+		doc := createValidSPDXDocument()
+		doc.CreationInfo.Created = ""
+		data, _ := json.Marshal(doc)
+		err := ValidateSPDXBytes(data, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "SPDX creationInfo missing required 'created' timestamp")
+	})
+
+	t.Run("Mutation13_EmptyCreationInfoCreators", func(t *testing.T) {
+		doc := createValidSPDXDocument()
+		doc.CreationInfo.Creators = nil
+		data, _ := json.Marshal(doc)
+		err := ValidateSPDXBytes(data, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "SPDX creationInfo missing required 'creators' list")
+	})
+
+	t.Run("Mutation14_MissingCreationInfo", func(t *testing.T) {
+		doc := createValidSPDXDocument()
+		data, _ := json.Marshal(doc)
+		var rawMap map[string]any
+		require.NoError(t, json.Unmarshal(data, &rawMap))
+		delete(rawMap, "creationInfo")
+		rawBytes, _ := json.Marshal(rawMap)
+		err := ValidateSPDXBytes(rawBytes, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "SPDX creationInfo missing required 'created' timestamp")
 	})
 }
 
@@ -525,15 +559,17 @@ func TestCycloneDXValidation_BaselineAndMutations(t *testing.T) {
 
 	t.Run("Mutation5_RemoveTierNode", func(t *testing.T) {
 		doc := createValidCDXDocument()
-		for i := range doc.Components {
-			if doc.Components[i].Name == ReleaseProjectName {
-				var filteredNested []CDXComponent
-				for _, nested := range doc.Components[i].Components {
-					if nested.Name != "microfat-variant-v2" {
-						filteredNested = append(filteredNested, nested)
+		if doc.Metadata.Component != nil {
+			for i := range doc.Metadata.Component.Components {
+				if doc.Metadata.Component.Components[i].Name == ReleaseProjectName {
+					var filteredNested []CDXComponent
+					for _, nested := range doc.Metadata.Component.Components[i].Components {
+						if nested.Name != "microfat-variant-v2" {
+							filteredNested = append(filteredNested, nested)
+						}
 					}
+					doc.Metadata.Component.Components[i].Components = filteredNested
 				}
-				doc.Components[i].Components = filteredNested
 			}
 		}
 		data, _ := json.Marshal(doc)
@@ -601,6 +637,33 @@ func TestCycloneDXValidation_BaselineAndMutations(t *testing.T) {
 		err := ValidateCycloneDXBytes(headerOnly, facts, inv)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "missing root metadata.component")
+	})
+
+	t.Run("Mutation12_ArchiveRootDependencyEdge", func(t *testing.T) {
+		doc := createValidCDXDocument()
+		doc.Dependencies = append(doc.Dependencies, CDXDependency{
+			Ref:       "archive-root",
+			DependsOn: []string{"bin-microfat"},
+		})
+		data, _ := json.Marshal(doc)
+		err := ValidateCycloneDXBytes(data, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "archive root component must not declare functional dependency edges")
+	})
+
+	t.Run("Mutation13_MissingRootExecutableAssembly", func(t *testing.T) {
+		doc := createValidCDXDocument()
+		var filtered []CDXComponent
+		for _, comp := range doc.Metadata.Component.Components {
+			if comp.Name != ReleaseProjectName {
+				filtered = append(filtered, comp)
+			}
+		}
+		doc.Metadata.Component.Components = filtered
+		data, _ := json.Marshal(doc)
+		err := ValidateCycloneDXBytes(data, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing component for root executable: microfat")
 	})
 }
 
