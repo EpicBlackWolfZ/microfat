@@ -2,8 +2,6 @@
 package main
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -17,6 +15,7 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/releasecheck"
 )
 
 const (
@@ -94,100 +93,8 @@ func parseArgs(args []string) (archivePath, outputPath, formatName string, err e
 	return archivePath, outputPath, formatName, nil
 }
 
-func validateArchiveEntryPath(name, targetDir string) (string, error) {
-	cleanName := filepath.Clean(name)
-	if strings.HasPrefix(cleanName, "/") || strings.HasPrefix(cleanName, "\\") || strings.Contains(cleanName, "..") {
-		return "", fmt.Errorf("illegal relative or absolute path in archive: %s", name)
-	}
-
-	cleanTargetDir := filepath.Clean(targetDir) + string(filepath.Separator)
-	destPath := filepath.Join(targetDir, cleanName)
-	if !strings.HasPrefix(destPath, cleanTargetDir) {
-		return "", fmt.Errorf("path escapes target directory: %s", destPath)
-	}
-	return destPath, nil
-}
-
-func extractArchiveFileEntry(tr io.Reader, hdr *tar.Header, destPath string, totalExtracted *int64) error {
-	if err := os.MkdirAll(filepath.Dir(destPath), dirPerms); err != nil {
-		return fmt.Errorf("creating parent directory for %s: %w", destPath, err)
-	}
-	if hdr.Size > maxSingleFileBytes {
-		return fmt.Errorf("file %s exceeds maximum size limit of %d bytes", hdr.Name, maxSingleFileBytes)
-	}
-	*totalExtracted += hdr.Size
-	if *totalExtracted > maxTotalExtractBytes {
-		return fmt.Errorf("archive exceeds total uncompressed size limit of %d bytes", maxTotalExtractBytes)
-	}
-
-	perms := os.FileMode(filePerms)
-	if hdr.Mode&0o111 != 0 {
-		perms = execPerms
-	}
-	// #nosec G304 -- destPath validated against target directory
-	outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perms)
-	if err != nil {
-		return fmt.Errorf("creating output file %s: %w", destPath, err)
-	}
-	written, err := io.Copy(outFile, io.LimitReader(tr, maxSingleFileBytes))
-	closeErr := outFile.Close()
-	if err != nil {
-		return fmt.Errorf("extracting file %s: %w", destPath, err)
-	}
-	if closeErr != nil {
-		return fmt.Errorf("closing file %s: %w", destPath, closeErr)
-	}
-	if written != hdr.Size {
-		return fmt.Errorf("size mismatch for %s: header %d, written %d", hdr.Name, hdr.Size, written)
-	}
-	return nil
-}
-
 func extractArchiveSafely(archivePath, targetDir string) error {
-	// #nosec G304,G703 -- archive path provided by user or GoReleaser
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return fmt.Errorf("opening archive %s: %w", archivePath, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	gzr, err := gzip.NewReader(f)
-	if err != nil {
-		return fmt.Errorf("creating gzip reader: %w", err)
-	}
-	defer func() { _ = gzr.Close() }()
-
-	tr := tar.NewReader(gzr)
-	var totalExtracted int64
-
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("reading tar header: %w", err)
-		}
-
-		destPath, err := validateArchiveEntryPath(hdr.Name, targetDir)
-		if err != nil {
-			return err
-		}
-
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(destPath, dirPerms); err != nil {
-				return fmt.Errorf("creating directory %s: %w", destPath, err)
-			}
-		case tar.TypeReg:
-			if err := extractArchiveFileEntry(tr, hdr, destPath, &totalExtracted); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("refusing to extract unsafe archive entry %s of type %v", hdr.Name, hdr.Typeflag)
-		}
-	}
-	return nil
+	return releasecheck.ExtractArchiveSafely(archivePath, targetDir)
 }
 
 func readSharedDictionary(f *os.File, idx *format.Index) ([]byte, error) {

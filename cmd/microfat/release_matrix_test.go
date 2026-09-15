@@ -1,17 +1,9 @@
 package main
 
 import (
-	"archive/tar"
-	"bufio"
-	"compress/gzip"
-	"crypto/sha256"
 	"debug/buildinfo"
 	"debug/elf"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +13,7 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+	"github.com/EpicBlackWolfZ/microfat/internal/releasecheck"
 	"gopkg.in/yaml.v3"
 )
 
@@ -267,55 +260,9 @@ func TestMinimalStubAndMatrixDistribution(t *testing.T) {
 }
 
 func extractFileFromArchive(archivePath, targetName, destPath string) error {
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	gzr, err := gzip.NewReader(f)
-	if err != nil {
-		return err
-	}
-	defer gzr.Close()
-
-	tr := tar.NewReader(gzr)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		if filepath.Base(hdr.Name) == targetName {
-			outF, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, testExecPerms)
-			if err != nil {
-				return err
-			}
-			defer outF.Close()
-			if _, err := io.Copy(outF, tr); err != nil {
-				return err
-			}
-			return nil
-		}
-	}
-	return fmt.Errorf("target file %q not found in archive %s", targetName, archivePath)
+	return releasecheck.ExtractFileFromArchive(archivePath, targetName, destPath)
 }
 
-func computeFileSHA256(filePath string) (string, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
 
 func verifyReleaseArchivesExist(t *testing.T, distDir string) {
 	t.Helper()
@@ -344,41 +291,25 @@ func verifyReleaseArchivesExist(t *testing.T, distDir string) {
 
 func verifySingleArchiveExecutables(t *testing.T, archPath string) {
 	t.Helper()
-	archFile, err := os.Open(archPath)
+	expectedArch := releasecheck.ArchAMD64
+	if strings.Contains(archPath, "arm64") {
+		expectedArch = releasecheck.ArchARM64
+	}
+
+	distDir := filepath.Dir(archPath)
+	version, err := releasecheck.DeriveVersion(distDir, "")
 	if err != nil {
-		t.Fatalf("opening archive %s: %v", archPath, err)
+		t.Fatalf("deriving release version for %s: %v", archPath, err)
 	}
-	defer func() { _ = archFile.Close() }()
 
-	gzr, err := gzip.NewReader(archFile)
+	contract, err := releasecheck.NewReleaseContract(version)
 	if err != nil {
-		t.Fatalf("reading gzip archive %s: %v", archPath, err)
-	}
-	defer func() { _ = gzr.Close() }()
-
-	tr := tar.NewReader(gzr)
-	foundExecs := make(map[string]bool)
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			t.Fatalf("reading tar entry in %s: %v", archPath, err)
-		}
-		cleanName := filepath.Clean(hdr.Name)
-		if cleanName == releaseProjectName || cleanName == releaseFullStub || cleanName == releaseMinStub {
-			foundExecs[cleanName] = true
-			if hdr.Mode&0o111 == 0 {
-				t.Errorf("%s in %s must be executable, got mode %o", cleanName, archPath, hdr.Mode)
-			}
-		}
+		t.Fatalf("creating release contract for %s: %v", archPath, err)
 	}
 
-	for _, required := range []string{releaseProjectName, releaseFullStub, releaseMinStub} {
-		if !foundExecs[required] {
-			t.Errorf("missing required executable %s in %s", required, archPath)
-		}
+	_, err = releasecheck.ValidateArchive(archPath, expectedArch, contract)
+	if err != nil {
+		t.Fatalf("validating archive %s: %v", archPath, err)
 	}
 }
 
@@ -395,48 +326,25 @@ func verifyReleaseArchiveRawEntries(t *testing.T, distDir string) {
 
 func verifyReleaseChecksums(t *testing.T, distDir string, hasSyft bool) {
 	t.Helper()
-	checksumsPath := filepath.Join(distDir, "checksums.txt")
-	f, err := os.Open(checksumsPath)
+	version, err := releasecheck.DeriveVersion(distDir, "")
 	if err != nil {
-		t.Fatalf("opening checksums.txt: %v", err)
+		t.Fatalf("deriving release version in %s: %v", distDir, err)
 	}
-	defer func() { _ = f.Close() }()
 
-	scanner := bufio.NewScanner(f)
-	verifiedCount := 0
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		parts := strings.Fields(line)
-		if len(parts) != 2 {
-			t.Errorf("invalid checksum line format: %q", line)
-			continue
-		}
-		expectedHash := parts[0]
-		relPath := parts[1]
-		fullPath := filepath.Join(distDir, relPath)
+	contract, err := releasecheck.NewReleaseContract(version)
+	if err != nil {
+		t.Fatalf("creating release contract: %v", err)
+	}
 
-		actualHash, err := computeFileSHA256(fullPath)
-		if err != nil {
-			t.Errorf("computing hash for %s: %v", relPath, err)
-			continue
+	if !hasSyft {
+		contract.ExpectedPayloadNames = map[string]bool{
+			contract.ExpectedArchives[releasecheck.ArchAMD64]: true,
+			contract.ExpectedArchives[releasecheck.ArchARM64]: true,
 		}
-		if actualHash != expectedHash {
-			t.Errorf("hash mismatch for %s: expected %s, got %s", relPath, expectedHash, actualHash)
-		}
-		verifiedCount++
 	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("scanning checksums.txt: %v", err)
-	}
-	expectedExact := 2
-	if hasSyft {
-		expectedExact = 6
-	}
-	if verifiedCount != expectedExact {
-		t.Errorf("expected exactly %d verified entries in checksums.txt, got %d", expectedExact, verifiedCount)
+
+	if _, err := releasecheck.ValidateChecksums(distDir, contract); err != nil {
+		t.Fatalf("validating checksums: %v", err)
 	}
 }
 
