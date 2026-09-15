@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"debug/buildinfo"
 	"debug/elf"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -352,37 +351,47 @@ func verifyReleaseChecksums(t *testing.T, distDir string, hasSyft bool) {
 
 func verifyReleaseSBOMs(t *testing.T, distDir string, hasSyft bool) {
 	t.Helper()
-	if !hasSyft {
-		t.Skip("syft not installed in PATH, skipping SBOM inspection")
-	}
-	archives, err := filepath.Glob(filepath.Join(distDir, "*.tar.gz"))
+
+	version, err := releasecheck.DeriveVersion(distDir, "")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("deriving release version: %v", err)
 	}
-	for _, tc := range []struct{ suffix, key, value string }{
-		{".spdx.json", "spdxVersion", "SPDX-2.3"},
-		{".cyclonedx.json", "bomFormat", "CycloneDX"},
-	} {
-		t.Run(tc.key, func(t *testing.T) {
-			files, globErr := filepath.Glob(filepath.Join(distDir, "*"+tc.suffix))
-			if globErr != nil || len(files) != len(archives) || len(files) == 0 {
-				t.Fatalf("expected one %s SBOM per archive: files=%d archives=%d error=%v",
-					tc.suffix, len(files), len(archives), globErr)
-			}
-			for _, file := range files {
-				data, readErr := os.ReadFile(file)
-				if readErr != nil {
-					t.Fatal(readErr)
-				}
-				var parsed map[string]any
-				if parseErr := json.Unmarshal(data, &parsed); parseErr != nil {
-					t.Fatal(parseErr)
-				}
-				if parsed[tc.key] != tc.value {
-					t.Errorf("SBOM %s: expected %s=%s, got %v", file, tc.key, tc.value, parsed[tc.key])
-				}
-			}
-		})
+
+	contract, err := releasecheck.NewReleaseContract(version)
+	if err != nil {
+		t.Fatalf("creating contract: %v", err)
+	}
+
+	isReq := os.Getenv("MICROFAT_RELEASE_TESTS") == "required"
+	if !hasSyft && !isReq {
+		spdxFiles, _ := filepath.Glob(filepath.Join(distDir, "*.spdx.json"))
+		if len(spdxFiles) == 0 {
+			t.Skip("syft not installed in PATH and no SBOMs generated, skipping SBOM inspection")
+			return
+		}
+	}
+
+	for arch, archiveName := range contract.ExpectedArchives {
+		archivePath := filepath.Join(distDir, archiveName)
+		facts, err := releasecheck.ValidateArchive(archivePath, arch, contract)
+		if err != nil {
+			t.Fatalf("validating archive %s for SBOM checks: %v", archiveName, err)
+		}
+
+		inv, err := releasecheck.ExtractArchiveInventory(facts)
+		if err != nil {
+			t.Fatalf("extracting inventory from archive %s: %v", archiveName, err)
+		}
+
+		spdxPath := archivePath + ".spdx.json"
+		if err := releasecheck.ValidateSPDX(spdxPath, facts, inv); err != nil {
+			t.Errorf("validating SPDX SBOM %s: %v", filepath.Base(spdxPath), err)
+		}
+
+		cdxPath := archivePath + ".cyclonedx.json"
+		if err := releasecheck.ValidateCycloneDX(cdxPath, facts, inv); err != nil {
+			t.Errorf("validating CycloneDX SBOM %s: %v", filepath.Base(cdxPath), err)
+		}
 	}
 }
 

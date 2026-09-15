@@ -15,6 +15,7 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/releasecheck"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -279,7 +280,7 @@ func TestGenerate_MutationsAndErrors(t *testing.T) {
 
 		err := Generate(archivePath, filepath.Join(tempDir, "out.spdx.json"), "spdx-json")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "verifying required archive executable")
+		assert.Contains(t, err.Error(), "missing required root executable in archive")
 	})
 
 	t.Run("CorruptedFatBinaryPayload", func(t *testing.T) {
@@ -297,7 +298,7 @@ func TestGenerate_MutationsAndErrors(t *testing.T) {
 
 		err := Generate(archivePath, filepath.Join(tempDir, "out.spdx.json"), "spdx-json")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "extracting fat binary variants")
+		assert.Contains(t, err.Error(), "reading index and trailer")
 	})
 
 	t.Run("VariantChecksumMismatch", func(t *testing.T) {
@@ -662,8 +663,10 @@ func TestReadSharedDictionary_DefenseInDepth(t *testing.T) {
 func createSyntheticFatBinary(t *testing.T, targetArch string, dictBytes []byte, variantPayload []byte, compCodec string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
-	stubBytes := make([]byte, 256)
-	copy(stubBytes, []byte("\x7fELF\x02\x01\x01\x00"))
+	stubBytes := variantPayload
+	if len(stubBytes) == 0 {
+		stubBytes = append([]byte("\x7fELF\x02\x01\x01\x00"), make([]byte, 252)...)
+	}
 	buf.Write(stubBytes)
 
 	var dictOffset int64
@@ -688,28 +691,34 @@ func createSyntheticFatBinary(t *testing.T, targetArch string, dictBytes []byte,
 	} else {
 		require.NoError(t, c.Compress(&compBuf, variantPayload, "fastest"))
 	}
-
-	payloadOffset := int64(buf.Len())
 	compBytes := compBuf.Bytes()
-	buf.Write(compBytes)
-
 	pHash := sha256.Sum256(variantPayload)
+	tiers := []string{"v1", "v2", "v3", "v4"}
+	if targetArch == "arm64" {
+		tiers = []string{"v8.0", "v8.2", "v9.0"}
+	}
+
+	var variants []format.VariantEntry
+	for _, level := range tiers {
+		payloadOffset := int64(buf.Len())
+		buf.Write(compBytes)
+		variants = append(variants, format.VariantEntry{
+			Level:            level,
+			Offset:           payloadOffset,
+			CompressedSize:   int64(len(compBytes)),
+			UncompressedSize: int64(len(variantPayload)),
+			SHA256:           hex.EncodeToString(pHash[:]),
+			Compression:      compCodec,
+		})
+	}
+
 	idx := &format.Index{
 		Version:          format.FormatVersion2,
 		TargetArch:       targetArch,
 		DictionaryOffset: dictOffset,
 		DictionarySize:   dictSize,
 		DictionarySHA256: dictSHA256,
-		Variants: []format.VariantEntry{
-			{
-				Level:            "v1",
-				Offset:           payloadOffset,
-				CompressedSize:   int64(len(compBytes)),
-				UncompressedSize: int64(len(variantPayload)),
-				SHA256:           hex.EncodeToString(pHash[:]),
-				Compression:      compCodec,
-			},
-		},
+		Variants:         variants,
 	}
 
 	currentOffset := int64(buf.Len())
@@ -719,8 +728,38 @@ func createSyntheticFatBinary(t *testing.T, targetArch string, dictBytes []byte,
 	return buf.Bytes()
 }
 
+func createMockFactsAndInventory() (*releasecheck.ArchiveFacts, *releasecheck.ArchiveInventory) {
+	facts := &releasecheck.ArchiveFacts{
+		ArchiveName:   "microfat_0.2.3_linux_amd64.tar.gz",
+		ArchiveSHA256: strings.Repeat("a", 64),
+		TargetArch:    releasecheck.ArchAMD64,
+		Executables: map[string]*releasecheck.ExecutableFacts{
+			releasecheck.ReleaseProjectName: {Name: releasecheck.ReleaseProjectName, SHA256: strings.Repeat("b", 64)},
+			releasecheck.ReleaseFullStub:    {Name: releasecheck.ReleaseFullStub, SHA256: strings.Repeat("c", 64)},
+			releasecheck.ReleaseMinStub:     {Name: releasecheck.ReleaseMinStub, SHA256: strings.Repeat("d", 64)},
+		},
+		EmbeddedVariants: map[string]*releasecheck.VariantFacts{
+			"v1": {Level: "v1", SHA256: strings.Repeat("e", 64)},
+		},
+	}
+	inv := &releasecheck.ArchiveInventory{
+		ArchiveName: facts.ArchiveName,
+		TargetArch:  facts.TargetArch,
+		Binaries: map[string]*releasecheck.BinaryInventory{
+			releasecheck.ReleaseProjectName: {
+				Identifier:   releasecheck.ReleaseProjectName,
+				BinaryName:   releasecheck.ReleaseProjectName,
+				Dependencies: make(map[string]releasecheck.ModuleDep),
+			},
+		},
+		AllDependencies: make(map[string]releasecheck.ModuleDep),
+	}
+	return facts, inv
+}
+
 func TestAttributeSBOM(t *testing.T) {
 	t.Parallel()
+	facts, inv := createMockFactsAndInventory()
 
 	t.Run("SPDX_Attribution", func(t *testing.T) {
 		t.Parallel()
@@ -729,13 +768,13 @@ func TestAttributeSBOM(t *testing.T) {
 			"name": "/tmp/scan-dir-123",
 			"documentNamespace": "http://spdx.org/spdxdocs/repo/tmp/scan-dir-123"
 		}`)
-		out, err := attributeSBOM(raw, "spdx-json", "dist/microfat_0.2.3_linux_amd64.tar.gz", "/tmp/scan-dir-123")
+		out, err := attributeSBOM(raw, "spdx-json", facts, inv, "0.2.3")
 		require.NoError(t, err)
 
 		var doc map[string]any
 		require.NoError(t, json.Unmarshal(out, &doc))
 		assert.Equal(t, "microfat_0.2.3_linux_amd64.tar.gz", doc["name"])
-		assert.Equal(t, "http://spdx.org/spdxdocs/repo/microfat_0.2.3_linux_amd64.tar.gz", doc["documentNamespace"])
+		assert.Contains(t, doc["documentNamespace"], "microfat_0.2.3_linux_amd64.tar.gz")
 	})
 
 	t.Run("CycloneDX_Attribution", func(t *testing.T) {
@@ -749,7 +788,7 @@ func TestAttributeSBOM(t *testing.T) {
 				}
 			}
 		}`)
-		out, err := attributeSBOM(raw, "cyclonedx-json", "dist/microfat_0.2.3_linux_amd64.tar.gz", "/tmp/scan-dir")
+		out, err := attributeSBOM(raw, "cyclonedx-json", facts, inv, "0.2.3")
 		require.NoError(t, err)
 
 		var doc map[string]any
@@ -762,7 +801,7 @@ func TestAttributeSBOM(t *testing.T) {
 
 	t.Run("InvalidJSON", func(t *testing.T) {
 		t.Parallel()
-		_, err := attributeSBOM([]byte("invalid json"), "spdx-json", "app.tar.gz", "/tmp")
+		_, err := attributeSBOM([]byte("invalid json"), "spdx-json", facts, inv, "0.2.3")
 		require.Error(t, err)
 	})
 }
@@ -840,8 +879,16 @@ func TestGenerate_SyntheticArchive(t *testing.T) {
 	tempDir := t.TempDir()
 	archivePath := filepath.Join(tempDir, "microfat_0.2.3_linux_amd64.tar.gz")
 
-	fatBytes := createSyntheticFatBinary(t, testArchAMD64, nil, []byte("payload-bytes"), compressionNone)
-	dummyELF := []byte("\x7fELF\x02\x01\x01\x00" + strings.Repeat("\x00", 256))
+	dummySrc := filepath.Join(tempDir, "dummy_main.go")
+	require.NoError(t, os.WriteFile(dummySrc, []byte("package main\nimport \"fmt\"\nfunc main(){fmt.Println(\"ok\")}\n"), 0o644))
+	dummyBin := filepath.Join(tempDir, "dummy_bin")
+	cmd := exec.Command("go", "build", "-o", dummyBin, dummySrc)
+	cmdOut, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(cmdOut))
+	dummyELF, err := os.ReadFile(dummyBin)
+	require.NoError(t, err)
+
+	fatBytes := createSyntheticFatBinary(t, testArchAMD64, nil, dummyELF, compressionNone)
 
 	createTestTarArchive(t, archivePath, map[string][]byte{
 		binMicrofat:    fatBytes,
@@ -1048,9 +1095,10 @@ func TestRunSyft_ExecutionError(t *testing.T) {
 
 func TestAttributeSBOM_InvalidJSON(t *testing.T) {
 	t.Parallel()
-	_, err := attributeSBOM([]byte("{invalid-json"), "spdx-json", "app.tar.gz", "/tmp")
+	facts, inv := createMockFactsAndInventory()
+	_, err := attributeSBOM([]byte("{invalid-json"), "spdx-json", facts, inv, "0.2.3")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parsing syft JSON output")
+	assert.Contains(t, err.Error(), "parsing syft")
 }
 
 func TestWriteAtomic_CreateTempError(t *testing.T) {
