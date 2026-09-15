@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"debug/buildinfo"
 	"debug/elf"
 	"encoding/json"
@@ -26,6 +27,7 @@ const (
 	testRepeatLen       = 64
 	expectedCount       = 3
 	minExpectedArchives = 2
+	arm64LevelV80       = "v8.0"
 )
 
 type goreleaserConfig struct {
@@ -194,12 +196,12 @@ func TestMinimalStubAndMatrixDistribution(t *testing.T) {
 					break
 				}
 			}
-			if !found && expectedLevel != "v8.0" {
+			if !found && expectedLevel != arm64LevelV80 {
 				t.Errorf("setting GOARM64 not found in %s buildinfo, expected %s", binPath, expectedLevel)
 			}
 		}
 
-		checkARM64Setting(v80Bin, "v8.0")
+		checkARM64Setting(v80Bin, arm64LevelV80)
 		checkARM64Setting(v88Bin, "v8.8")
 		checkARM64Setting(v89Bin, "v8.9")
 
@@ -211,7 +213,7 @@ func TestMinimalStubAndMatrixDistribution(t *testing.T) {
 		opts.AppName = "arm64-matrix-app"
 		opts.FormatVersion = format.FormatVersion2
 		opts.Variants = map[string]string{
-			"v8.0": v80Bin,
+			arm64LevelV80: v80Bin,
 			"v8.8": v88Bin,
 			"v8.9": v89Bin,
 		}
@@ -384,75 +386,125 @@ func verifyReleaseSBOMs(t *testing.T, distDir string, hasSyft bool) {
 	}
 }
 
-func verifyVariantExecutionModes(t *testing.T, tempExtract, microfatCliPath, minStubPath, dummyBin string) {
+func verifyStubPrefix(t *testing.T, fatBinaryPath string, expectedStubBytes []byte) {
 	t.Helper()
-	fatAuto := filepath.Join(tempExtract, "fat-auto")
-	packCmd := exec.Command(microfatCliPath, "pack", "--arch", "amd64", "-v", "v1="+dummyBin, "-o", fatAuto)
-	packCmd.Dir = tempExtract
-	packCmd.Env = append(os.Environ(), "PATH="+tempExtract+":"+os.Getenv("PATH"))
-	pOut, err := packCmd.CombinedOutput()
+	fatBytes, err := os.ReadFile(fatBinaryPath)
 	if err != nil {
-		t.Fatalf("microfat pack without --stub failed: %v\nOutput: %s", err, string(pOut))
+		t.Fatalf("reading %s: %v", fatBinaryPath, err)
+	}
+	if len(fatBytes) < len(expectedStubBytes) {
+		t.Fatalf("fat binary %s (%d bytes) smaller than stub (%d bytes)", fatBinaryPath, len(fatBytes), len(expectedStubBytes))
+	}
+	if !bytes.Equal(fatBytes[:len(expectedStubBytes)], expectedStubBytes) {
+		t.Errorf("stub prefix in %s does not match expected stub binary bytes", fatBinaryPath)
+	}
+}
+
+func verifyVariantExecutionModes(t *testing.T, microfatCliPath, fullStubPath, minStubPath, dummyBin string) {
+	t.Helper()
+
+	fullStubBytes, err := os.ReadFile(fullStubPath)
+	if err != nil {
+		t.Fatalf("reading full stub: %v", err)
 	}
 
-	runAuto := exec.Command(fatAuto, "--microfat:help")
-	outAuto, err := runAuto.CombinedOutput()
-	if err != nil {
-		t.Errorf("auto-packed fat --microfat:help failed: %v\nOutput: %s", err, string(outAuto))
-	}
-	if !strings.Contains(string(outAuto), releaseProjectName) {
-		t.Errorf("auto-packed fat --microfat:help missing 'microfat': %s", string(outAuto))
+	workDir := t.TempDir()
+
+	// Plant decoy stubs in ./bin and ../bin relative to workDir to prove they are never selected
+	decoySubdir := filepath.Join(workDir, "bin")
+	_ = os.MkdirAll(decoySubdir, 0o755)
+	_ = os.WriteFile(filepath.Join(decoySubdir, releaseFullStub), []byte("decoy ./bin stub"), 0o755)
+
+	decoyParent := filepath.Join(workDir, "..", "bin")
+	_ = os.MkdirAll(decoyParent, 0o755)
+	_ = os.WriteFile(filepath.Join(decoyParent, releaseFullStub), []byte("decoy ../bin stub"), 0o755)
+
+	cleanEnv := []string{
+		"PATH=/usr/bin:/bin",
+		"HOME=" + workDir,
+		"TMPDIR=" + workDir,
+		"GOTOOLCHAIN=local",
 	}
 
-	// Test memfd execution
-	runMemfd := exec.Command(fatAuto)
-	runMemfd.Env = append(os.Environ(), "MICROFAT_EXEC_MODE=memfd")
+	// 1. Forced memfd dispatch mode for the CLI without --stub
+	fatMemfd := filepath.Join(workDir, "fat-memfd")
+	cmdMemfd := exec.Command(microfatCliPath, "pack", "--arch", "amd64", "-v", "v1="+dummyBin, "-o", fatMemfd)
+	cmdMemfd.Dir = workDir
+	cmdMemfd.Env = append(append([]string(nil), cleanEnv...), "MICROFAT_EXEC_MODE=memfd")
+	out, err := cmdMemfd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("microfat pack under forced memfd failed: %v\nOutput: %s", err, string(out))
+	}
+
+	verifyStubPrefix(t, fatMemfd, fullStubBytes)
+
+	runMemfd := exec.Command(fatMemfd)
+	runMemfd.Env = append(append([]string(nil), cleanEnv...), "MICROFAT_EXEC_MODE=memfd")
 	outMemfd, err := runMemfd.CombinedOutput()
 	if err != nil {
-		t.Errorf("memfd execution failed: %v\nOutput: %s", err, string(outMemfd))
+		t.Fatalf("executing fat-memfd failed: %v\nOutput: %s", err, string(outMemfd))
 	}
 	if !strings.Contains(string(outMemfd), "DUMMY_VARIANT_DISPATCH_OK") {
-		t.Errorf("memfd output mismatch: %s", string(outMemfd))
+		t.Errorf("fat-memfd output missing expected marker: %s", string(outMemfd))
 	}
 
-	// Test cold and warm cache execution
-	cacheDir := filepath.Join(tempExtract, "test_cache")
-	runCacheCold := exec.Command(fatAuto)
-	runCacheCold.Env = append(os.Environ(), "MICROFAT_EXEC_MODE=cache", "MICROFAT_CACHE_DIR="+cacheDir)
-	outCold, err := runCacheCold.CombinedOutput()
+	// 2. Forced cold cache dispatch mode for the CLI without --stub
+	coldCacheDir := filepath.Join(workDir, "cache_cold")
+	fatCold := filepath.Join(workDir, "fat-cold")
+	cmdCold := exec.Command(microfatCliPath, "pack", "--arch", "amd64", "-v", "v1="+dummyBin, "-o", fatCold)
+	cmdCold.Dir = workDir
+	cmdCold.Env = append(append([]string(nil), cleanEnv...), "MICROFAT_EXEC_MODE=cache", "MICROFAT_CACHE_DIR="+coldCacheDir)
+	out, err = cmdCold.CombinedOutput()
 	if err != nil {
-		t.Errorf("cold cache execution failed: %v\nOutput: %s", err, string(outCold))
-	}
-	if !strings.Contains(string(outCold), "DUMMY_VARIANT_DISPATCH_OK") {
-		t.Errorf("cold cache output mismatch: %s", string(outCold))
+		t.Fatalf("microfat pack under forced cold cache failed: %v\nOutput: %s", err, string(out))
 	}
 
-	runCacheWarm := exec.Command(fatAuto)
-	runCacheWarm.Env = append(os.Environ(), "MICROFAT_EXEC_MODE=cache", "MICROFAT_CACHE_DIR="+cacheDir)
-	outWarm, err := runCacheWarm.CombinedOutput()
+	verifyStubPrefix(t, fatCold, fullStubBytes)
+
+	entries, _ := os.ReadDir(coldCacheDir)
+	if len(entries) == 0 {
+		t.Errorf("expected cached payload in %s, found none", coldCacheDir)
+	}
+
+	// 3. Forced warm cache dispatch mode for the CLI without --stub
+	fatWarm := filepath.Join(workDir, "fat-warm")
+	cmdWarm := exec.Command(microfatCliPath, "pack", "--arch", "amd64", "-v", "v1="+dummyBin, "-o", fatWarm)
+	cmdWarm.Dir = workDir
+	cmdWarm.Env = append(append([]string(nil), cleanEnv...), "MICROFAT_EXEC_MODE=cache", "MICROFAT_CACHE_DIR="+coldCacheDir)
+	out, err = cmdWarm.CombinedOutput()
 	if err != nil {
-		t.Errorf("warm cache execution failed: %v\nOutput: %s", err, string(outWarm))
-	}
-	if !strings.Contains(string(outWarm), "DUMMY_VARIANT_DISPATCH_OK") {
-		t.Errorf("warm cache output mismatch: %s", string(outWarm))
+		t.Fatalf("microfat pack under forced warm cache failed: %v\nOutput: %s", err, string(out))
 	}
 
-	// 2. Pack using extracted microfat CLI WITH explicit --stub microfat-stub-minimal
-	fatMin := filepath.Join(tempExtract, "fat-min")
-	packMinCmd := exec.Command(microfatCliPath, "pack", "--stub", minStubPath, "--arch", "amd64", "-v", "v1="+dummyBin, "-o", fatMin)
-	packMinCmd.Dir = tempExtract
-	pMinOut, err := packMinCmd.CombinedOutput()
+	verifyStubPrefix(t, fatWarm, fullStubBytes)
+
+	// 4. Pack with explicit minimal stub
+	fatMin := filepath.Join(workDir, "fat-min")
+	cmdMin := exec.Command(microfatCliPath, "pack", "--stub", minStubPath, "--arch", "amd64", "-v", "v1="+dummyBin, "-o", fatMin)
+	cmdMin.Dir = workDir
+	cmdMin.Env = cleanEnv
+	out, err = cmdMin.CombinedOutput()
 	if err != nil {
-		t.Fatalf("microfat pack with minimal stub failed: %v\nOutput: %s", err, string(pMinOut))
+		t.Fatalf("microfat pack with minimal stub failed: %v\nOutput: %s", err, string(out))
 	}
 
-	runMin := exec.Command(fatMin, "--microfat:help")
-	outMin, err := runMin.CombinedOutput()
+	runMinHelp := exec.Command(fatMin, "--microfat:help")
+	outMinHelp, err := runMinHelp.CombinedOutput()
 	if err == nil {
-		t.Errorf("minimal stub --microfat:help should fail, got exit 0\nOutput: %s", string(outMin))
+		t.Errorf("minimal stub --microfat:help should fail, got exit 0: %s", string(outMinHelp))
 	}
-	if !strings.Contains(string(outMin), "disabled in minimal launcher stub profile") {
-		t.Errorf("expected disabled message for minimal stub, got %s", string(outMin))
+	if !strings.Contains(string(outMinHelp), "disabled in minimal launcher stub profile") {
+		t.Errorf("expected disabled message for minimal stub, got %s", string(outMinHelp))
+	}
+
+	runMinExec := exec.Command(fatMin)
+	runMinExec.Env = cleanEnv
+	outMinExec, err := runMinExec.CombinedOutput()
+	if err != nil {
+		t.Fatalf("executing minimal stub payload failed: %v\nOutput: %s", err, string(outMinExec))
+	}
+	if !strings.Contains(string(outMinExec), "DUMMY_VARIANT_DISPATCH_OK") {
+		t.Errorf("minimal stub execution missing marker: %s", string(outMinExec))
 	}
 }
 
@@ -504,36 +556,74 @@ func verifyReleaseStubBehaviorAndSizes(t *testing.T, distDir string) {
 			t.Fatalf("compiling dummy: %v, out: %s", err, string(bOut))
 		}
 
-		verifyVariantExecutionModes(t, tempExtract, microfatCliPath, minStubPath, dummyBin)
+		verifyVariantExecutionModes(t, microfatCliPath, fullStubPath, minStubPath, dummyBin)
 	}
 }
 
 func verifyReleaseARM64VariantBuildSettings(t *testing.T, distDir string) {
 	t.Helper()
-	checkVariantGOARM64 := func(relPath, expectedSetting string) {
-		p := filepath.Join(distDir, relPath)
-		bi, err := buildinfo.ReadFile(p)
-		if err != nil {
-			t.Fatalf("reading buildinfo for %s: %v", relPath, err)
+	arm64Archives, err := filepath.Glob(filepath.Join(distDir, "microfat_*_linux_arm64.tar.gz"))
+	if err != nil || len(arm64Archives) == 0 {
+		t.Fatalf("finding arm64 fat archive in %s: %v", distDir, err)
+	}
+
+	version, err := releasecheck.DeriveVersion(distDir, "")
+	if err != nil {
+		t.Fatalf("deriving release version: %v", err)
+	}
+
+	contract, err := releasecheck.NewReleaseContract(version)
+	if err != nil {
+		t.Fatalf("creating contract: %v", err)
+	}
+
+	facts, err := releasecheck.ValidateArchive(arm64Archives[0], releasecheck.ArchARM64, contract)
+	if err != nil {
+		t.Fatalf("validating arm64 archive: %v", err)
+	}
+
+	for _, req := range contract.RequiredExecutables {
+		exe, ok := facts.Executables[req]
+		if !ok || exe == nil {
+			t.Fatalf("missing executable %s in arm64 archive", req)
 		}
+		if exe.ELFHeader == nil || exe.ELFHeader.Machine != elf.EM_AARCH64 {
+			t.Errorf("executable %s is not an aarch64 ELF binary", req)
+		}
+	}
+
+	expectedSettings := map[string]string{
+		arm64LevelV80: arm64LevelV80,
+		"v8.2":        "v8.2",
+		"v9.0":        "v9.0",
+	}
+
+	for tier, expectedSetting := range expectedSettings {
+		variant, ok := facts.EmbeddedVariants[tier]
+		if !ok || variant == nil {
+			t.Fatalf("missing embedded variant %s in arm64 fat binary", tier)
+		}
+		if variant.ELFHeader == nil || variant.ELFHeader.Machine != elf.EM_AARCH64 {
+			t.Errorf("variant %s is not an aarch64 ELF binary", tier)
+		}
+		if variant.BuildInfo == nil {
+			t.Fatalf("missing buildinfo in arm64 variant %s", tier)
+		}
+
 		found := false
-		for _, s := range bi.Settings {
+		for _, s := range variant.BuildInfo.Settings {
 			if s.Key == "GOARM64" {
 				found = true
 				if s.Value != expectedSetting {
-					t.Errorf("for %s expected GOARM64=%s, got %s", relPath, expectedSetting, s.Value)
+					t.Errorf("variant %s GOARM64: expected %s, got %s", tier, expectedSetting, s.Value)
 				}
 				break
 			}
 		}
-		if !found && expectedSetting != "v8.0" {
-			t.Errorf("setting GOARM64 not found in %s, expected %s", relPath, expectedSetting)
+		if !found && expectedSetting != arm64LevelV80 {
+			t.Errorf("GOARM64 setting not found for variant %s, expected %s", tier, expectedSetting)
 		}
 	}
-
-	checkVariantGOARM64("microfat-arm64-v8.0_linux_arm64_v8.0/microfat", "v8.0")
-	checkVariantGOARM64("microfat-arm64-v8.2_linux_arm64_v8.2/microfat", "v8.2")
-	checkVariantGOARM64("microfat-arm64-v9.0_linux_arm64_v9.0/microfat", "v9.0")
 }
 
 func TestGoReleaserSnapshotArtifacts(t *testing.T) {

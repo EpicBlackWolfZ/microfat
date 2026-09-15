@@ -22,10 +22,24 @@ var (
 	readlinkProcSelfExe   = func() (string, error) { return os.Readlink("/proc/self/exe") }
 	readAndHashSelfExe    = defaultReadAndHashProcSelfExe
 	openFileFunc          = os.Open
-	resolveCacheDirFDFunc = format.ResolveCacheDirFD
+	resolveCacheDirFDFunc = func(string) (int, string, error) { return -1, defaultResolveCacheDir(), nil }
 )
 
+func defaultResolveCacheDir() string {
+	if envDir := os.Getenv(format.EnvCacheDir); envDir != "" {
+		return envDir
+	}
+	if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
+		return filepath.Join(xdg, "microfat")
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".cache", "microfat")
+	}
+	return filepath.Join(os.TempDir(), fmt.Sprintf(".microfat-%d", os.Geteuid()))
+}
+
 func defaultReadAndHashProcSelfExe() (int64, string, error) {
+	// #nosec G304 -- /proc/self/exe kernel virtual filesystem
 	f, err := os.Open("/proc/self/exe")
 	if err != nil {
 		return 0, "", fmt.Errorf("opening /proc/self/exe: %w", err)
@@ -66,22 +80,93 @@ func resolveNativeInstallationDirectory() (string, error) {
 	return filepath.Dir(realPath), nil
 }
 
-func isDispatchedTarget(target string) bool {
-	if strings.HasPrefix(target, "memfd:") || strings.HasPrefix(target, "/memfd:") ||
-		strings.Contains(target, "memfd:") || strings.Contains(target, "(deleted)") {
-		return true
+func isMemfdTarget(target string) bool {
+	prefix := ""
+	switch {
+	case strings.HasPrefix(target, "/memfd:"):
+		prefix = "/memfd:"
+	case strings.HasPrefix(target, "memfd:"):
+		prefix = "memfd:"
+	default:
+		return false
 	}
 
-	dirFD, cacheDir, cacheErr := resolveCacheDirFDFunc("")
-	if cacheErr == nil {
-		if dirFD >= 0 {
-			_ = os.NewFile(uintptr(dirFD), "cacheDir").Close()
-		}
-		if cacheDir != "" && strings.HasPrefix(target, cacheDir) {
-			return true
+	const deletedSuffix = " (deleted)"
+	if !strings.HasSuffix(target, deletedSuffix) {
+		return false
+	}
+
+	name := target[len(prefix) : len(target)-len(deletedSuffix)]
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\x00") {
+		return false
+	}
+
+	return true
+}
+
+func getCandidateCacheRoots() []string {
+	var roots []string
+	if envDir := os.Getenv(format.EnvCacheDir); envDir != "" {
+		roots = append(roots, envDir)
+	}
+	if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
+		roots = append(roots, filepath.Join(xdg, "microfat"))
+	} else if home, err := os.UserHomeDir(); err == nil && home != "" {
+		roots = append(roots, filepath.Join(home, ".cache", "microfat"))
+	}
+	roots = append(roots, filepath.Join(os.TempDir(), fmt.Sprintf(".microfat-%d", os.Geteuid())))
+	return roots
+}
+
+func evalAncestorSymlinks(p string) string {
+	if eval, err := evalSymlinksFunc(p); err == nil && eval != "" {
+		return eval
+	}
+	dir := filepath.Dir(p)
+	if evalDir, err := evalSymlinksFunc(dir); err == nil && evalDir != "" {
+		return filepath.Join(evalDir, filepath.Base(p))
+	}
+	return p
+}
+
+func isInsideCache(target string) bool {
+	targetAbs, err := filepath.Abs(target)
+	if err != nil {
+		return false
+	}
+	targetAbs = evalAncestorSymlinks(targetAbs)
+
+	roots := getCandidateCacheRoots()
+	if resolveCacheDirFDFunc != nil {
+		if _, cDir, err := resolveCacheDirFDFunc(""); err == nil && cDir != "" {
+			roots = append([]string{cDir}, roots...)
 		}
 	}
+
+	for _, root := range roots {
+		rootAbs, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		rootAbs = evalAncestorSymlinks(rootAbs)
+
+		rel, err := filepath.Rel(rootAbs, targetAbs)
+		if err != nil {
+			continue
+		}
+		if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+			continue
+		}
+		return true
+	}
 	return false
+}
+
+func isDispatchedTarget(target string) bool {
+	if isMemfdTarget(target) {
+		return true
+	}
+	return isInsideCache(target)
 }
 
 func ResolveInstallationDirectory() (string, error) {
