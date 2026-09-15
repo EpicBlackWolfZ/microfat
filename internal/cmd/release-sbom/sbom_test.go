@@ -264,13 +264,15 @@ func TestGenerate_MutationsAndErrors(t *testing.T) {
 	tempDir := t.TempDir()
 
 	t.Run("NonExistentArchive", func(t *testing.T) {
-		err := Generate(filepath.Join(tempDir, "non-existent.tar.gz"), filepath.Join(tempDir, "out.spdx.json"), "spdx-json")
+		err := Generate(filepath.Join(tempDir, "microfat_0.2.3_linux_amd64.tar.gz"), filepath.Join(tempDir, "out.spdx.json"), "spdx-json")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "opening archive")
 	})
 
 	t.Run("MissingRequiredExecutable", func(t *testing.T) {
-		archivePath := filepath.Join(tempDir, "incomplete.tar.gz")
+		subDir := filepath.Join(tempDir, "sub_incomplete")
+		require.NoError(t, os.MkdirAll(subDir, 0o755))
+		archivePath := filepath.Join(subDir, "microfat_0.2.3_linux_amd64.tar.gz")
 		createTestTarArchive(t, archivePath, map[string][]byte{
 			binMicrofat: []byte("bin"),
 			// missing microfat-stub and microfat-stub-minimal
@@ -285,7 +287,9 @@ func TestGenerate_MutationsAndErrors(t *testing.T) {
 
 	t.Run("CorruptedFatBinaryPayload", func(t *testing.T) {
 		// Valid archive structure but corrupted trailer/index on microfat binary
-		archivePath := filepath.Join(tempDir, "corrupted_fat.tar.gz")
+		subDir := filepath.Join(tempDir, "sub_corrupted")
+		require.NoError(t, os.MkdirAll(subDir, 0o755))
+		archivePath := filepath.Join(subDir, "microfat_0.2.3_linux_amd64.tar.gz")
 		createTestTarArchive(t, archivePath, map[string][]byte{
 			binMicrofat:    []byte("not a real fat binary"),
 			binStub:        []byte("stub"),
@@ -331,7 +335,9 @@ func TestGenerate_MutationsAndErrors(t *testing.T) {
 		_, err = format.WriteIndexAndTrailer(&fatBuf, idx, int64(len(stubBytes)+compBuf.Len()))
 		require.NoError(t, err)
 
-		archivePath := filepath.Join(tempDir, "tampered_variant.tar.gz")
+		subDir := filepath.Join(tempDir, "sub_tampered")
+		require.NoError(t, os.MkdirAll(subDir, 0o755))
+		archivePath := filepath.Join(subDir, "microfat_0.2.3_linux_amd64.tar.gz")
 		createTestTarArchive(t, archivePath, map[string][]byte{
 			binMicrofat:    fatBuf.Bytes(),
 			binStub:        stubBytes,
@@ -1345,17 +1351,19 @@ func TestValidateAttributedSBOM_Formats(t *testing.T) {
 	})
 }
 
-func TestResolveArchiveVersion(t *testing.T) {
+func TestGenerate_ArchiveNameParsing(t *testing.T) {
 	t.Parallel()
 
-	v := resolveArchiveVersion("/some/path/microfat_v1.2.3_linux_amd64.tar.gz")
-	assert.Equal(t, "1.2.3", v)
+	// Invalid archive name fails at parsing step
+	err := Generate("/some/path/invalid.tar.gz", "out.json", "spdx-json")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing release archive name")
 
-	vNoPrefix := resolveArchiveVersion("/some/path/microfat_2.0.0_linux_arm64.tar.gz")
-	assert.Equal(t, "2.0.0", vNoPrefix)
-
-	vFallback := resolveArchiveVersion("/some/path/invalid.tar.gz")
-	assert.Equal(t, "0.0.0-dev", vFallback)
+	// Directory containing "arm64" must still be parsed as amd64 if the archive name is amd64
+	err = Generate("/tmp/arm64-dir/microfat_0.2.3_linux_amd64.tar.gz", "out.json", "spdx-json")
+	require.Error(t, err)
+	// Must fail at archive opening/validation, NOT at name parsing
+	assert.Contains(t, err.Error(), "validating archive")
 }
 
 

@@ -17,7 +17,7 @@ Starting in `v0.2.3`, `microfat` eliminates artifact fragmentation by distributi
 
 Each archive is accompanied by:
 - A SHA-256 checksum in `checksums.txt` signed with Cosign (`checksums.txt.sig`).
-- Software Bill of Materials (SBOM) in both **SPDX 2.3** (`.spdx.json`) and **CycloneDX** (`.cyclonedx.json`) formats.
+- Software Bill of Materials (SBOM) in both **SPDX 2.3** (`.spdx.json`) and **CycloneDX 1.5** (`.cyclonedx.json`) formats.
 - Verified hosted benchmark evidence (`benchmark-evidence-<tag>-<run>-<attempt>.tar.gz` and `.sha256`).
 
 ---

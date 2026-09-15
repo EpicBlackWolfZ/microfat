@@ -24,7 +24,6 @@ const (
 	filePerms       = 0o644
 	execPerms       = 0o755
 	keyValueParts   = 2
-	minArchiveParts = 2
 
 	formatSPDXJSON      = "spdx-json"
 	formatCycloneDXJSON = "cyclonedx-json"
@@ -762,18 +761,6 @@ func writeAtomic(targetPath string, data []byte) error {
 	return nil
 }
 
-func resolveArchiveVersion(archivePath string) string {
-	version, err := releasecheck.DeriveVersion(filepath.Dir(archivePath), "")
-	if err == nil {
-		return version
-	}
-	parts := strings.Split(filepath.Base(archivePath), "_")
-	if len(parts) >= minArchiveParts && parts[1] != "" {
-		return strings.TrimPrefix(parts[1], "v")
-	}
-	return "0.0.0-dev"
-}
-
 func stageExtractedVariants(facts *releasecheck.ArchiveFacts) error {
 	stagingVariantsDir := filepath.Join(facts.StagingDir, "derived", "variants")
 	// #nosec G703 -- stagingVariantsDir within validated temporary staging dir
@@ -813,18 +800,17 @@ func validateAttributedSBOM(
 
 // Generate processes an archive tarball, extracts embedded variants, invokes syft, and writes an attributed SBOM.
 func Generate(archivePath, outputPath, formatName string) error {
-	targetArch := releasecheck.ArchAMD64
-	if strings.Contains(archivePath, "arm64") {
-		targetArch = releasecheck.ArchARM64
+	identity, err := releasecheck.ParseReleaseArchiveName(archivePath)
+	if err != nil {
+		return fmt.Errorf("parsing release archive name %s: %w", archivePath, err)
 	}
 
-	version := resolveArchiveVersion(archivePath)
-	contract, err := releasecheck.NewReleaseContract(version)
+	contract, err := releasecheck.NewReleaseContract(identity.Version)
 	if err != nil {
 		return fmt.Errorf("creating release contract: %w", err)
 	}
 
-	facts, err := releasecheck.ValidateArchive(archivePath, targetArch, contract)
+	facts, err := releasecheck.ValidateArchive(archivePath, identity.Arch, contract)
 	if err != nil {
 		return fmt.Errorf("validating archive %s: %w", archivePath, err)
 	}

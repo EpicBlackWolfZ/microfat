@@ -327,7 +327,7 @@ func TestValidateArchive_UnsafeEntryTypesRejected(t *testing.T) {
 		entries = append(entries, tarEntry{
 			Name:     "hardlink_entry",
 			Typeflag: tar.TypeLink,
-			Linkname: "microfat",
+			Linkname: releasecheck.ReleaseProjectName,
 		})
 		archivePath := filepath.Join(t.TempDir(), "test.tar.gz")
 		createOrderedTarGz(t, archivePath, entries)
@@ -504,6 +504,116 @@ func TestExtractFileFromArchive_ValidAndDuplicate(t *testing.T) {
 	err = releasecheck.ExtractFileFromArchive(dupeArchive, releasecheck.ReleaseProjectName, filepath.Join(t.TempDir(), "out2"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicate entry in archive")
+}
+
+func createTruncatedTarGz(t *testing.T, archivePath, name string, advertisedSize int64, actualData []byte) {
+	t.Helper()
+	f, err := os.Create(archivePath)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	gw := gzip.NewWriter(f)
+	defer func() { _ = gw.Close() }()
+
+	hdr := &tar.Header{
+		Name:     name,
+		Mode:     0o755,
+		Size:     advertisedSize,
+		Typeflag: tar.TypeReg,
+	}
+	tw := tar.NewWriter(gw)
+	require.NoError(t, tw.WriteHeader(hdr))
+	if len(actualData) > 0 {
+		_, err := tw.Write(actualData)
+		require.NoError(t, err)
+	}
+}
+
+func TestExtractFileFromArchive_Hardening(t *testing.T) {
+	t.Parallel()
+
+	targetExe := releasecheck.ReleaseProjectName
+
+	t.Run("ValidExact100Bytes", func(t *testing.T) {
+		t.Parallel()
+		data := bytes.Repeat([]byte("X"), 100)
+		archivePath := filepath.Join(t.TempDir(), "valid100.tar.gz")
+		createOrderedTarGz(t, archivePath, []tarEntry{
+			{Name: targetExe, Data: data, Mode: 0o755},
+		})
+		destPath := filepath.Join(t.TempDir(), "extracted-microfat")
+		err := releasecheck.ExtractFileFromArchive(archivePath, targetExe, destPath)
+		require.NoError(t, err)
+		readBack, err := os.ReadFile(destPath)
+		require.NoError(t, err)
+		assert.Equal(t, data, readBack)
+		assert.Len(t, readBack, 100)
+	})
+
+	t.Run("TruncatedMember", func(t *testing.T) {
+		t.Parallel()
+		archivePath := filepath.Join(t.TempDir(), "truncated.tar.gz")
+		actualData := bytes.Repeat([]byte("Y"), 50)
+		createTruncatedTarGz(t, archivePath, targetExe, 100, actualData)
+
+		destPath := filepath.Join(t.TempDir(), "extracted-truncated")
+		err := releasecheck.ExtractFileFromArchive(archivePath, targetExe, destPath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "reading target entry")
+	})
+
+	t.Run("OversizedMember", func(t *testing.T) {
+		t.Parallel()
+		archivePath := filepath.Join(t.TempDir(), "oversized.tar.gz")
+		createTruncatedTarGz(t, archivePath, targetExe, 250*1024*1024+1, nil)
+
+		destPath := filepath.Join(t.TempDir(), "extracted-oversized")
+		err := releasecheck.ExtractFileFromArchive(archivePath, targetExe, destPath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exceeds size limit")
+	})
+
+	t.Run("DuplicateTargetEntries", func(t *testing.T) {
+		t.Parallel()
+		archivePath := filepath.Join(t.TempDir(), "duplicate_target.tar.gz")
+		createOrderedTarGz(t, archivePath, []tarEntry{
+			{Name: targetExe, Data: []byte("first"), Mode: 0o755},
+			{Name: targetExe, Data: []byte("second"), Mode: 0o755},
+		})
+
+		destPath := filepath.Join(t.TempDir(), "extracted-dupe")
+		err := releasecheck.ExtractFileFromArchive(archivePath, targetExe, destPath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate entry in archive")
+	})
+
+	t.Run("PathTraversalTargets", func(t *testing.T) {
+		t.Parallel()
+		archivePath := filepath.Join(t.TempDir(), "traversal_test.tar.gz")
+		createOrderedTarGz(t, archivePath, []tarEntry{
+			{Name: targetExe, Data: []byte("payload"), Mode: 0o755},
+		})
+
+		invalidTargets := []string{
+			"../" + targetExe,
+			"subdir/" + targetExe,
+			"/" + targetExe,
+			"",
+			".",
+			"..",
+			targetExe + "/../" + targetExe,
+			"sub\\" + targetExe,
+		}
+
+		for _, target := range invalidTargets {
+			t.Run(target, func(t *testing.T) {
+				destPath := filepath.Join(t.TempDir(), "extracted")
+				err := releasecheck.ExtractFileFromArchive(archivePath, target, destPath)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "invalid target name")
+			})
+		}
+	})
 }
 
 func TestValidateArchive_WithSharedDict(t *testing.T) {

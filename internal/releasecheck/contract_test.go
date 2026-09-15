@@ -139,3 +139,100 @@ func TestDeriveVersion_EdgeCases(t *testing.T) {
 		assert.Contains(t, err.Error(), "unable to derive release version")
 	})
 }
+
+func TestParseReleaseArchiveName(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name        string
+		input       string
+		wantVersion string
+		wantArch    string
+		wantErr     bool
+		errMsg      string
+	}{
+		{
+			name:        "ValidAMD64Release",
+			input:       "microfat_0.2.3_linux_amd64.tar.gz",
+			wantVersion: "0.2.3",
+			wantArch:    releasecheck.ArchAMD64,
+		},
+		{
+			name:        "ValidARM64Release",
+			input:       "microfat_0.2.3_linux_arm64.tar.gz",
+			wantVersion: "0.2.3",
+			wantArch:    releasecheck.ArchARM64,
+		},
+		{
+			name:        "ValidSnapshotRelease",
+			input:       "microfat_0.2.3-SNAPSHOT-deadbee_linux_amd64.tar.gz",
+			wantVersion: "0.2.3-SNAPSHOT-deadbee",
+			wantArch:    releasecheck.ArchAMD64,
+		},
+		{
+			name:        "DistractingDirectoryARM64ForAMD64Archive",
+			input:       "/tmp/arm64/microfat_0.2.3_linux_amd64.tar.gz",
+			wantVersion: "0.2.3",
+			wantArch:    releasecheck.ArchAMD64,
+		},
+		{
+			name:        "DistractingDirectoryAMD64ForARM64Archive",
+			input:       "/tmp/amd64/microfat_0.2.3_linux_arm64.tar.gz",
+			wantVersion: "0.2.3",
+			wantArch:    releasecheck.ArchARM64,
+		},
+		{
+			name:    "WrongPrefix",
+			input:   "foo_0.2.3_linux_amd64.tar.gz",
+			wantErr: true,
+			errMsg:  "missing required prefix",
+		},
+		{
+			name:    "EmptyVersion",
+			input:   "microfat__linux_amd64.tar.gz",
+			wantErr: true,
+			errMsg:  "empty version",
+		},
+		{
+			name:    "UnknownArchitecture",
+			input:   "microfat_0.2.3_linux_x86.tar.gz",
+			wantErr: true,
+			errMsg:  "missing or unknown architecture suffix",
+		},
+		{
+			name:    "MissingLinuxComponent",
+			input:   "microfat_0.2.3_amd64.tar.gz",
+			wantErr: true,
+			errMsg:  "missing or unknown architecture suffix",
+		},
+		{
+			name:    "WrongSuffixZip",
+			input:   "microfat_0.2.3_linux_arm64.zip",
+			wantErr: true,
+			errMsg:  "missing required suffix",
+		},
+		{
+			name:    "EmptyName",
+			input:   "",
+			wantErr: true,
+			errMsg:  "missing required prefix",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			id, err := releasecheck.ParseReleaseArchiveName(tc.input)
+			if tc.wantErr {
+				require.Error(t, err)
+				if tc.errMsg != "" {
+					assert.Contains(t, err.Error(), tc.errMsg)
+				}
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.wantVersion, id.Version)
+				assert.Equal(t, tc.wantArch, id.Arch)
+			}
+		})
+	}
+}

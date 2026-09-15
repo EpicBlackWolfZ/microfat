@@ -17,9 +17,65 @@ const (
 	// Architectures
 	ArchAMD64 = "amd64"
 	ArchARM64 = "arm64"
-
-	minArchiveParts = 4
 )
+
+// ArchiveIdentity represents the parsed version and target architecture of a release archive.
+type ArchiveIdentity struct {
+	Version string
+	Arch    string
+}
+
+// ParseReleaseArchiveName extracts and validates the archive identity from an archive path or filename.
+func ParseReleaseArchiveName(name string) (ArchiveIdentity, error) {
+	base := filepath.Base(name)
+	const (
+		prefix      = ReleaseProjectName + "_"
+		suffix      = ".tar.gz"
+		amd64Suffix = "_linux_" + ArchAMD64
+		arm64Suffix = "_linux_" + ArchARM64
+	)
+
+	if !strings.HasPrefix(base, prefix) {
+		return ArchiveIdentity{}, fmt.Errorf("archive name %q missing required prefix %q", base, prefix)
+	}
+	if !strings.HasSuffix(base, suffix) {
+		return ArchiveIdentity{}, fmt.Errorf("archive name %q missing required suffix %q", base, suffix)
+	}
+
+	trimmed := strings.TrimSuffix(strings.TrimPrefix(base, prefix), suffix)
+	var arch, version string
+	switch {
+	case strings.HasSuffix(trimmed, amd64Suffix):
+		arch = ArchAMD64
+		version = strings.TrimSuffix(trimmed, amd64Suffix)
+	case strings.HasSuffix(trimmed, arm64Suffix):
+		arch = ArchARM64
+		version = strings.TrimSuffix(trimmed, arm64Suffix)
+	default:
+		return ArchiveIdentity{}, fmt.Errorf("archive name %q missing or unknown architecture suffix", base)
+	}
+
+	if version == "" {
+		return ArchiveIdentity{}, fmt.Errorf("archive name %q has empty version", base)
+	}
+
+	identity := ArchiveIdentity{
+		Version: version,
+		Arch:    arch,
+	}
+
+	contract, err := NewReleaseContract(identity.Version)
+	if err != nil {
+		return ArchiveIdentity{}, fmt.Errorf("release contract error for %q: %w", base, err)
+	}
+
+	expectedBase, ok := contract.ExpectedArchives[identity.Arch]
+	if !ok || base != expectedBase {
+		return ArchiveIdentity{}, fmt.Errorf("archive name %q does not match release contract expected archive %q", base, expectedBase)
+	}
+
+	return identity, nil
+}
 
 // GoReleaserMetadata represents dist/metadata.json schema emitted by GoReleaser v2.
 type GoReleaserMetadata struct {
@@ -123,13 +179,9 @@ func deriveVersionFromArtifacts(distDir string) (string, error) {
 		return "", err
 	}
 	for _, a := range artifacts {
-		if a.Type == "Archive" && strings.HasPrefix(a.Name, "microfat_") && strings.HasSuffix(a.Name, ".tar.gz") {
-			parts := strings.Split(a.Name, "_")
-			if len(parts) >= minArchiveParts {
-				v := strings.TrimPrefix(parts[1], "v")
-				if v != "" {
-					return v, nil
-				}
+		if a.Type == "Archive" {
+			if id, err := ParseReleaseArchiveName(a.Name); err == nil {
+				return id.Version, nil
 			}
 		}
 	}
@@ -142,17 +194,15 @@ func deriveVersionFromArchives(distDir string) (string, error) {
 	if len(amd64Matches) != 1 || len(arm64Matches) != 1 {
 		return "", fmt.Errorf("expected 1 amd64 and 1 arm64 archive in %s", distDir)
 	}
-	partsAmd64 := strings.Split(filepath.Base(amd64Matches[0]), "_")
-	partsArm64 := strings.Split(filepath.Base(arm64Matches[0]), "_")
-	if len(partsAmd64) < minArchiveParts || len(partsArm64) < minArchiveParts {
+	idAmd64, err1 := ParseReleaseArchiveName(amd64Matches[0])
+	idArm64, err2 := ParseReleaseArchiveName(arm64Matches[0])
+	if err1 != nil || err2 != nil {
 		return "", fmt.Errorf("invalid archive naming format")
 	}
-	vAmd64 := strings.TrimPrefix(partsAmd64[1], "v")
-	vArm64 := strings.TrimPrefix(partsArm64[1], "v")
-	if vAmd64 != vArm64 || vAmd64 == "" {
-		return "", fmt.Errorf("architecture archives have mismatched versions: %s vs %s", vAmd64, vArm64)
+	if idAmd64.Version != idArm64.Version || idAmd64.Version == "" {
+		return "", fmt.Errorf("architecture archives have mismatched versions: %s vs %s", idAmd64.Version, idArm64.Version)
 	}
-	return vAmd64, nil
+	return idAmd64.Version, nil
 }
 
 // DeriveVersion determines the release version from an explicit tag, GoReleaser metadata, or matching archives.

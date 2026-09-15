@@ -472,6 +472,11 @@ func ExtractArchiveSafely(archivePath, targetDir string) error {
 
 // ExtractFileFromArchive safely validates the entire archive and extracts targetName at root to destPath.
 func ExtractFileFromArchive(archivePath, targetName, destPath string) error {
+	if targetName == "" || targetName == "." || targetName == ".." || path.Base(targetName) != targetName ||
+		strings.Contains(targetName, "/") || strings.Contains(targetName, "\\") {
+		return fmt.Errorf("invalid target name: %q", targetName)
+	}
+
 	// #nosec G304 -- archivePath provided by caller
 	af, err := os.Open(archivePath)
 	if err != nil {
@@ -516,8 +521,14 @@ func ExtractFileFromArchive(archivePath, targetName, destPath string) error {
 			if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
 				return fmt.Errorf("target entry %s is not a regular file", targetName)
 			}
-			data, err := io.ReadAll(io.LimitReader(tr, maxSingleFileBytes))
-			if err != nil {
+			if hdr.Size < 0 {
+				return fmt.Errorf("target entry %s has negative size %d", targetName, hdr.Size)
+			}
+			if hdr.Size > maxSingleFileBytes {
+				return fmt.Errorf("target entry %s exceeds size limit (%d > %d)", targetName, hdr.Size, maxSingleFileBytes)
+			}
+			data := make([]byte, hdr.Size)
+			if _, err := io.ReadFull(tr, data); err != nil {
 				return fmt.Errorf("reading target entry %s: %w", targetName, err)
 			}
 			matchedBytes = data
