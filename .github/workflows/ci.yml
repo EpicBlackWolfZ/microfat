@@ -207,20 +207,20 @@ jobs:
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
-          version: '~> v2'
+          version: 'v2.18.0'
           args: release --snapshot --clean --parallelism=1 --skip=publish,sign,announce,validate
 
       - name: Mandatory Product-Oriented Release Validation (Serialized)
         run: |
-          MICROFAT_RELEASE_TESTS=required MICROFAT_RELEASE_DIST=$(pwd)/dist go test -v ./cmd/microfat -run TestGoReleaserSnapshotArtifacts -count=1
+          MICROFAT_RELEASE_TESTS=required MICROFAT_RELEASE_DIST=$(pwd)/dist go test -v ./cmd/microfat -run '^TestGoReleaserSnapshotArtifacts$' -count=1
 
       - name: Release Artifact Quality & Concurrent Snapshot Verification
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
-          version: '~> v2'
+          version: 'v2.18.0'
           args: release --snapshot --clean --skip=publish,sign,announce,validate
 
       - name: Mandatory Product-Oriented Release Validation (Concurrent)
         run: |
-          MICROFAT_RELEASE_TESTS=required MICROFAT_RELEASE_DIST=$(pwd)/dist go test -v ./cmd/microfat -run TestGoReleaserSnapshotArtifacts -count=1
+          MICROFAT_RELEASE_TESTS=required MICROFAT_RELEASE_DIST=$(pwd)/dist go test -v ./cmd/microfat -run '^TestGoReleaserSnapshotArtifacts$' -count=1

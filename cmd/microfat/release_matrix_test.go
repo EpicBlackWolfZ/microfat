@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"debug/buildinfo"
 	"debug/elf"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +16,8 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"github.com/EpicBlackWolfZ/microfat/internal/releasecheck"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -325,7 +329,7 @@ func verifyReleaseArchiveRawEntries(t *testing.T, distDir string) {
 	}
 }
 
-func verifyReleaseChecksums(t *testing.T, distDir string, hasSyft bool) {
+func verifyReleaseChecksums(t *testing.T, distDir string, hasSyft, releaseTestsRequired bool) {
 	t.Helper()
 	version, err := releasecheck.DeriveVersion(distDir, "")
 	if err != nil {
@@ -337,7 +341,7 @@ func verifyReleaseChecksums(t *testing.T, distDir string, hasSyft bool) {
 		t.Fatalf("creating release contract: %v", err)
 	}
 
-	if !hasSyft {
+	if !hasSyft && !releaseTestsRequired {
 		contract.ExpectedPayloadNames = map[string]bool{
 			contract.ExpectedArchives[releasecheck.ArchAMD64]: true,
 			contract.ExpectedArchives[releasecheck.ArchARM64]: true,
@@ -349,7 +353,7 @@ func verifyReleaseChecksums(t *testing.T, distDir string, hasSyft bool) {
 	}
 }
 
-func verifyReleaseSBOMs(t *testing.T, distDir string, hasSyft bool) {
+func verifyReleaseSBOMs(t *testing.T, distDir string, hasSyft, releaseTestsRequired bool) {
 	t.Helper()
 
 	version, err := releasecheck.DeriveVersion(distDir, "")
@@ -362,8 +366,7 @@ func verifyReleaseSBOMs(t *testing.T, distDir string, hasSyft bool) {
 		t.Fatalf("creating contract: %v", err)
 	}
 
-	isReq := os.Getenv("MICROFAT_RELEASE_TESTS") == "required"
-	if !hasSyft && !isReq {
+	if !hasSyft && !releaseTestsRequired {
 		spdxFiles, _ := filepath.Glob(filepath.Join(distDir, "*.spdx.json"))
 		if len(spdxFiles) == 0 {
 			t.Skip("syft not installed in PATH and no SBOMs generated, skipping SBOM inspection")
@@ -641,6 +644,7 @@ func TestGoReleaserSnapshotArtifacts(t *testing.T) {
 		strings.EqualFold(os.Getenv("MICROFAT_RELEASE_TESTS"), "true")
 
 	var distDir string
+	var hasSyft bool
 	customDist := os.Getenv("MICROFAT_RELEASE_DIST")
 	if customDist != "" {
 		absDist, err := filepath.Abs(customDist)
@@ -648,10 +652,17 @@ func TestGoReleaserSnapshotArtifacts(t *testing.T) {
 			t.Fatalf("resolving MICROFAT_RELEASE_DIST: %v", err)
 		}
 		distDir = absDist
+		// Static validation-only mode: does not need goreleaser or syft installed.
+		if releaseTestsRequired {
+			hasSyft = true
+		} else {
+			matches, _ := filepath.Glob(filepath.Join(distDir, "*.spdx.json"))
+			hasSyft = len(matches) > 0
+		}
 	} else {
 		if _, err := exec.LookPath("goreleaser"); err != nil {
 			if releaseTestsRequired {
-				t.Fatalf("goreleaser required but not found in PATH: %v", err)
+				t.Fatalf("goreleaser required for release generation but not found in PATH: %v", err)
 			}
 			t.Skip("goreleaser not installed in PATH, skipping snapshot artifact test")
 		}
@@ -662,13 +673,22 @@ func TestGoReleaserSnapshotArtifacts(t *testing.T) {
 		}
 
 		distDir = filepath.Join(repoRoot, "dist")
-		defer func() {
-			_ = os.RemoveAll(distDir)
-		}()
+		t.Cleanup(func() {
+			if !t.Failed() {
+				_ = os.RemoveAll(distDir)
+			}
+		})
 
 		args := []string{"release", "--snapshot", "--clean", "--skip=publish,sign,announce,validate"}
-		if _, syftErr := exec.LookPath("syft"); syftErr != nil {
+		_, syftErr := exec.LookPath("syft")
+		if syftErr != nil {
+			if releaseTestsRequired {
+				t.Fatalf("syft required for release generation but not found in PATH: %v", syftErr)
+			}
 			args = append(args, "--skip=sbom")
+			hasSyft = false
+		} else {
+			hasSyft = true
 		}
 
 		cmd := exec.Command("goreleaser", args...)
@@ -680,18 +700,130 @@ func TestGoReleaserSnapshotArtifacts(t *testing.T) {
 		}
 	}
 
-	_, syftErr := exec.LookPath("syft")
-	hasSyft := syftErr == nil
-	if !hasSyft && distDir != "" {
-		if matches, _ := filepath.Glob(filepath.Join(distDir, "*.spdx.json")); len(matches) > 0 {
-			hasSyft = true
-		}
-	}
-
 	t.Run("VerifyArchivesExist", func(t *testing.T) { verifyReleaseArchivesExist(t, distDir) })
 	t.Run("VerifyArchiveRawEntries", func(t *testing.T) { verifyReleaseArchiveRawEntries(t, distDir) })
-	t.Run("VerifyChecksums", func(t *testing.T) { verifyReleaseChecksums(t, distDir, hasSyft) })
-	t.Run("VerifySBOMs", func(t *testing.T) { verifyReleaseSBOMs(t, distDir, hasSyft) })
+	t.Run("VerifyChecksums", func(t *testing.T) { verifyReleaseChecksums(t, distDir, hasSyft, releaseTestsRequired) })
+	t.Run("VerifySBOMs", func(t *testing.T) { verifyReleaseSBOMs(t, distDir, hasSyft, releaseTestsRequired) })
 	t.Run("VerifyStubBehaviorAndSizes", func(t *testing.T) { verifyReleaseStubBehaviorAndSizes(t, distDir) })
 	t.Run("VerifyARM64VariantBuildSettings", func(t *testing.T) { verifyReleaseARM64VariantBuildSettings(t, distDir) })
+}
+
+func copyDirectory(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, info.Mode())
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode())
+	})
+}
+
+func computeDirHashes(dir string) (map[string]string, error) {
+	hashes := make(map[string]string)
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(data)
+		hashes[rel] = hex.EncodeToString(sum[:])
+		return nil
+	})
+	return hashes, err
+}
+
+func TestValidationOnly_DoesNotModifyCallerDistribution(t *testing.T) {
+	repoRoot, err := filepath.Abs("../..")
+	require.NoError(t, err)
+
+	distDir := filepath.Join(repoRoot, "dist")
+	if _, err := os.Stat(distDir); os.IsNotExist(err) {
+		t.Skip("dist directory not present; skipping caller distribution immutability test")
+	}
+
+	tempCopy := t.TempDir()
+	require.NoError(t, copyDirectory(distDir, tempCopy))
+
+	hashesBefore, err := computeDirHashes(tempCopy)
+	require.NoError(t, err)
+
+	t.Setenv("MICROFAT_RELEASE_DIST", tempCopy)
+	t.Setenv("MICROFAT_RELEASE_TESTS", "required")
+
+	// Run static validation subtests
+	t.Run("VerifyArchivesExist", func(t *testing.T) { verifyReleaseArchivesExist(t, tempCopy) })
+	t.Run("VerifyArchiveRawEntries", func(t *testing.T) { verifyReleaseArchiveRawEntries(t, tempCopy) })
+	t.Run("VerifyChecksums", func(t *testing.T) { verifyReleaseChecksums(t, tempCopy, true, true) })
+	t.Run("VerifySBOMs", func(t *testing.T) { verifyReleaseSBOMs(t, tempCopy, true, true) })
+	t.Run("VerifyStubBehaviorAndSizes", func(t *testing.T) { verifyReleaseStubBehaviorAndSizes(t, tempCopy) })
+	t.Run("VerifyARM64VariantBuildSettings", func(t *testing.T) { verifyReleaseARM64VariantBuildSettings(t, tempCopy) })
+
+	hashesAfter, err := computeDirHashes(tempCopy)
+	require.NoError(t, err)
+
+	assert.Equal(t, hashesBefore, hashesAfter, "caller-provided distribution must never be modified by validation")
+}
+
+func TestValidationOnly_MissingSidecarFailsInRequiredMode(t *testing.T) {
+	repoRoot, err := filepath.Abs("../..")
+	require.NoError(t, err)
+
+	distDir := filepath.Join(repoRoot, "dist")
+	if _, err := os.Stat(distDir); os.IsNotExist(err) {
+		t.Skip("dist directory not present; skipping missing sidecar test")
+	}
+
+	tempCopy := t.TempDir()
+	require.NoError(t, copyDirectory(distDir, tempCopy))
+
+	// Remove one SBOM sidecar
+	spdxFiles, err := filepath.Glob(filepath.Join(tempCopy, "*.spdx.json"))
+	require.NoError(t, err)
+	require.NotEmpty(t, spdxFiles)
+	require.NoError(t, os.Remove(spdxFiles[0]))
+
+	// Checksums verification must fail because an expected sidecar is missing
+	version, err := releasecheck.DeriveVersion(tempCopy, "")
+	require.NoError(t, err)
+	contract, err := releasecheck.NewReleaseContract(version)
+	require.NoError(t, err)
+
+	_, err = releasecheck.ValidateChecksums(tempCopy, contract)
+	assert.Error(t, err, "ValidateChecksums must fail when expected SBOM file is deleted from distribution")
+}
+
+func TestGenerationPreflight_MissingToolsFailsSubprocess(t *testing.T) {
+	cmd := exec.Command("go", "test", "-v", ".", "-run", "^TestGoReleaserSnapshotArtifacts$", "-count=1")
+	cmd.Env = []string{
+		"PATH=/usr/bin:/bin:" + filepath.Join(runtime.GOROOT(), "bin"),
+		"MICROFAT_RELEASE_TESTS=required",
+		"GOPATH=" + os.Getenv("GOPATH"),
+		"GOCACHE=" + os.Getenv("GOCACHE"),
+		"GOTOOLCHAIN=local",
+		"HOME=" + os.Getenv("HOME"),
+	}
+	out, err := cmd.CombinedOutput()
+	require.Error(t, err, "snapshot test in generation mode must fail when required tools are missing")
+	assert.Contains(t, string(out), "required for release generation but not found in PATH")
 }
