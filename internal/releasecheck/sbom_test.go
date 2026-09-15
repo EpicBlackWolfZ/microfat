@@ -660,3 +660,105 @@ func TestValidateSBOM_FilePathsAndErrors(t *testing.T) {
 		require.Error(t, ValidateCycloneDXBytes([]byte(`{}`), facts, nil))
 	})
 }
+
+func TestValidateSPDX_HeaderMutations(t *testing.T) {
+	t.Parallel()
+	facts, inv := createTestFactsAndInventory()
+
+	t.Run("InvalidSPDXVersion", func(t *testing.T) {
+		doc := createValidSPDXDocument()
+		doc.SPDXVersion = "SPDX-2.2"
+		data, _ := json.Marshal(doc)
+		err := ValidateSPDXBytes(data, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid or unsupported SPDX version")
+	})
+
+	t.Run("InvalidDataLicense", func(t *testing.T) {
+		doc := createValidSPDXDocument()
+		doc.DataLicense = "MIT"
+		data, _ := json.Marshal(doc)
+		err := ValidateSPDXBytes(data, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid SPDX data license")
+	})
+
+	t.Run("InvalidSPDXID", func(t *testing.T) {
+		doc := createValidSPDXDocument()
+		doc.SPDXID = "SPDXRef-OTHER"
+		data, _ := json.Marshal(doc)
+		err := ValidateSPDXBytes(data, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid SPDX root document ID")
+	})
+
+	t.Run("NameMismatch", func(t *testing.T) {
+		doc := createValidSPDXDocument()
+		doc.Name = "wrong_name.tar.gz"
+		data, _ := json.Marshal(doc)
+		err := ValidateSPDXBytes(data, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "SPDX document name mismatch")
+	})
+}
+
+func TestValidateCycloneDX_HeaderMutations(t *testing.T) {
+	t.Parallel()
+	facts, inv := createTestFactsAndInventory()
+
+	t.Run("InvalidBOMFormat", func(t *testing.T) {
+		doc := createValidCDXDocument()
+		doc.BOMFormat = "InvalidFormat"
+		data, _ := json.Marshal(doc)
+		err := ValidateCycloneDXBytes(data, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid bomFormat")
+	})
+
+	t.Run("MissingSpecVersion", func(t *testing.T) {
+		doc := createValidCDXDocument()
+		doc.SpecVersion = ""
+		data, _ := json.Marshal(doc)
+		err := ValidateCycloneDXBytes(data, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing specVersion in CycloneDX document")
+	})
+
+	t.Run("MissingRootComponent", func(t *testing.T) {
+		doc := createValidCDXDocument()
+		doc.Metadata.Component = nil
+		data, _ := json.Marshal(doc)
+		err := ValidateCycloneDXBytes(data, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing root metadata.component")
+	})
+
+	t.Run("RootComponentNameMismatch", func(t *testing.T) {
+		doc := createValidCDXDocument()
+		doc.Metadata.Component.Name = "mismatch.tar.gz"
+		data, _ := json.Marshal(doc)
+		err := ValidateCycloneDXBytes(data, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "root component name mismatch")
+	})
+
+	t.Run("RootComponentHashMismatch", func(t *testing.T) {
+		doc := createValidCDXDocument()
+		doc.Metadata.Component.Hashes[0].Content = "0000000000000000000000000000000000000000000000000000000000000000"
+		data, _ := json.Marshal(doc)
+		err := ValidateCycloneDXBytes(data, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "archive metadata component hash")
+	})
+
+	t.Run("RootComponentArchMismatch", func(t *testing.T) {
+		doc := createValidCDXDocument()
+		doc.Metadata.Component.Properties = []CDXProperty{
+			{Name: "microfat:target_arch", Value: "arm64"},
+		}
+		data, _ := json.Marshal(doc)
+		err := ValidateCycloneDXBytes(data, facts, inv)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "archive component target_arch mismatch")
+	})
+}

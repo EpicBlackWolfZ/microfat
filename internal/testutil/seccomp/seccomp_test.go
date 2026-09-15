@@ -19,6 +19,7 @@ const (
 	testFallbackTID uintptr = 42
 	testRunnerBin           = "runner"
 	testEchoBin             = "/bin/echo"
+	testTrueBin             = "/bin/true"
 )
 
 func TestClassifySeccompResult(t *testing.T) {
@@ -274,7 +275,7 @@ func TestRunRunner_Orchestration(t *testing.T) {
 			execCalled = true
 			return nil
 		}
-		code := seccomp.RunRunner([]string{testRunnerBin, "/bin/true"}, adapter, execFn, &stderr)
+		code := seccomp.RunRunner([]string{testRunnerBin, testTrueBin}, adapter, execFn, &stderr)
 		assert.Equal(t, seccomp.ExitCodeSelfTestFailure, code)
 		assert.Contains(t, stderr.String(), "filter installation failed")
 		assert.Contains(t, stderr.String(), "seccomp TSYNC failed on thread 1337")
@@ -298,7 +299,7 @@ func TestRunRunner_Orchestration(t *testing.T) {
 			execCalled = true
 			return nil
 		}
-		code := seccomp.RunRunner([]string{testRunnerBin, "/bin/true"}, adapter, execFn, &stderr)
+		code := seccomp.RunRunner([]string{testRunnerBin, testTrueBin}, adapter, execFn, &stderr)
 		assert.Equal(t, seccomp.ExitCodeSelfTestFailure, code)
 		assert.Contains(t, stderr.String(), "operation not permitted")
 		assert.False(t, execCalled, "target must not be executed on hard error")
@@ -320,7 +321,7 @@ func TestRunRunner_Orchestration(t *testing.T) {
 			execCalled = true
 			return nil
 		}
-		code := seccomp.RunRunner([]string{testRunnerBin, "/bin/true"}, adapter, execFn, &stderr)
+		code := seccomp.RunRunner([]string{testRunnerBin, testTrueBin}, adapter, execFn, &stderr)
 		assert.Equal(t, seccomp.ExitCodeSelfTestFailure, code)
 		assert.Contains(t, stderr.String(), "single injected failure invariant failed")
 		assert.False(t, execCalled, "target must not be executed on invariant failure")
@@ -384,5 +385,195 @@ func TestResolveRunnerArgsAndAdapter(t *testing.T) {
 		assert.Equal(t, []string{testRunnerBin, testEchoBin}, clean)
 		err := adapter.Prctl(unix.PR_SET_NO_NEW_PRIVS, 0, 0, 0, 0)
 		require.ErrorIs(t, err, unix.EPERM)
+	})
+}
+
+func TestParseErrnoName(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, unix.ENOSYS, seccomp.ParseErrnoNameForTest("ENOSYS"))
+	assert.Equal(t, unix.EINVAL, seccomp.ParseErrnoNameForTest("einval"))
+	assert.Equal(t, unix.EPERM, seccomp.ParseErrnoNameForTest("EPERM"))
+	assert.Equal(t, unix.EACCES, seccomp.ParseErrnoNameForTest("EACCES"))
+	assert.Equal(t, unix.ENOENT, seccomp.ParseErrnoNameForTest("enoent"))
+	assert.Equal(t, syscall.Errno(42), seccomp.ParseErrnoNameForTest("42"))
+	assert.Equal(t, syscall.Errno(0), seccomp.ParseErrnoNameForTest("NOT_AN_ERRNO"))
+}
+
+func TestInstallStrictMemfdDenialFilter(t *testing.T) {
+	restore := seccomp.SetDefaultSyscallAdapter(func() seccomp.SyscallAdapter {
+		return seccomp.SyscallAdapter{
+			Prctl: func(_ int, _, _, _, _ uintptr) error { return nil },
+			RawSyscall: func(_ uintptr, _, _, _ uintptr) (uintptr, uintptr, syscall.Errno) {
+				return 0, 0, 0
+			},
+		}
+	})
+	defer restore()
+
+	err := seccomp.InstallStrictMemfdDenialFilter()
+	require.NoError(t, err)
+}
+
+func TestRunStandardSyscallCheck_OpenDevNullFailure(t *testing.T) {
+	restore := seccomp.SetOpenDevNullProbe(func() (int, error) {
+		return -1, unix.EACCES
+	})
+	defer restore()
+
+	err := seccomp.RunStandardSyscallCheck()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "open /dev/null")
+}
+
+func TestVerifySingleInjectedFailureInvariant_Branches(t *testing.T) {
+	t.Run("StandardSyscallCheckFailure", func(t *testing.T) {
+		restore := seccomp.SetOpenDevNullProbe(func() (int, error) {
+			return -1, unix.EACCES
+		})
+		defer restore()
+
+		err := seccomp.VerifySingleInjectedFailureInvariant()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "standard syscall failed under filter")
+	})
+
+	t.Run("MemfdUnexpectedSuccess", func(t *testing.T) {
+		restore := seccomp.SetMemfdCreateProbe(func(_ string, _ int) (int, error) {
+			return 100, nil
+		})
+		defer restore()
+
+		err := seccomp.VerifySingleInjectedFailureInvariant()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "memfd_create unexpectedly succeeded")
+	})
+
+	t.Run("MemfdUnexpectedErrno", func(t *testing.T) {
+		restore := seccomp.SetMemfdCreateProbe(func(_ string, _ int) (int, error) {
+			return -1, unix.EPERM
+		})
+		defer restore()
+
+		err := seccomp.VerifySingleInjectedFailureInvariant()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expected ENOSYS error on memfd_create")
+	})
+
+	t.Run("MemfdExpectedENOSYS", func(t *testing.T) {
+		restore := seccomp.SetMemfdCreateProbe(func(_ string, _ int) (int, error) {
+			return -1, unix.ENOSYS
+		})
+		defer restore()
+
+		err := seccomp.VerifySingleInjectedFailureInvariant()
+		require.NoError(t, err)
+	})
+}
+
+func TestRunRunner_PreFilterFailureAndSuccess(t *testing.T) {
+	t.Run("PreFilterFailure", func(t *testing.T) {
+		restore := seccomp.SetOpenDevNullProbe(func() (int, error) {
+			return -1, unix.EACCES
+		})
+		defer restore()
+
+		var stderr bytes.Buffer
+		code := seccomp.RunRunner([]string{testRunnerBin, testTrueBin}, seccomp.DefaultSyscallAdapter(), nil, &stderr)
+		assert.Equal(t, seccomp.ExitCodeSelfTestFailure, code)
+		assert.Contains(t, stderr.String(), "pre-filter self-test failed")
+	})
+
+	t.Run("SuccessAndExecError", func(t *testing.T) {
+		restore := seccomp.SetMemfdCreateProbe(func(_ string, _ int) (int, error) {
+			return -1, unix.ENOSYS
+		})
+		defer restore()
+
+		adapter := seccomp.SyscallAdapter{
+			Prctl: func(_ int, _, _, _, _ uintptr) error { return nil },
+			RawSyscall: func(_ uintptr, _, _, _ uintptr) (uintptr, uintptr, syscall.Errno) {
+				return 0, 0, 0
+			},
+		}
+
+		var stderr bytes.Buffer
+		execCalled := false
+		execFn := func(_ string, _ []string, _ []string) error {
+			execCalled = true
+			return unix.ENOENT
+		}
+
+		code := seccomp.RunRunner([]string{testRunnerBin, testTrueBin}, adapter, execFn, &stderr)
+		assert.Equal(t, seccomp.ExitCodeExecFailure, code)
+		assert.True(t, execCalled)
+		assert.Contains(t, stderr.String(), "execve /bin/true failed")
+	})
+
+	t.Run("FullSuccess", func(t *testing.T) {
+		restore := seccomp.SetMemfdCreateProbe(func(_ string, _ int) (int, error) {
+			return -1, unix.ENOSYS
+		})
+		defer restore()
+
+		adapter := seccomp.SyscallAdapter{
+			Prctl: func(_ int, _, _, _, _ uintptr) error { return nil },
+			RawSyscall: func(_ uintptr, _, _, _ uintptr) (uintptr, uintptr, syscall.Errno) {
+				return 0, 0, 0
+			},
+		}
+
+		var stderr bytes.Buffer
+		execCalled := false
+		execFn := func(_ string, _ []string, _ []string) error {
+			execCalled = true
+			return nil
+		}
+
+		code := seccomp.RunRunner([]string{testRunnerBin, testTrueBin}, adapter, execFn, &stderr)
+		assert.Equal(t, 0, code)
+		assert.True(t, execCalled)
+		assert.Empty(t, stderr.String())
+	})
+}
+
+func TestResolveRunnerArgsAndAdapter_EnvAndEdgeCases(t *testing.T) {
+	t.Run("EnvSimulateSeccompErrno", func(t *testing.T) {
+		t.Setenv(seccomp.EnvSimulateSeccompErrno, "ENOSYS")
+		_, adapter := seccomp.ResolveRunnerArgsAndAdapter([]string{testRunnerBin, testEchoBin})
+		_, _, errno := adapter.RawSyscall(unix.SYS_SECCOMP, 0, 0, 0)
+		assert.Equal(t, unix.ENOSYS, errno)
+	})
+
+	t.Run("EnvSimulateFallbackErrno", func(t *testing.T) {
+		t.Setenv(seccomp.EnvSimulateFallbackErrno, "EINVAL")
+		_, adapter := seccomp.ResolveRunnerArgsAndAdapter([]string{testRunnerBin, testEchoBin})
+		_, _, errno := adapter.RawSyscall(unix.SYS_SECCOMP, 0, 0, 0)
+		assert.Equal(t, unix.ENOSYS, errno)
+		_, _, errno = adapter.RawSyscall(syscall.SYS_PRCTL, uintptr(unix.PR_SET_SECCOMP), 0, 0)
+		assert.Equal(t, unix.EINVAL, errno)
+	})
+
+	t.Run("EnvSimulateFallbackTID", func(t *testing.T) {
+		t.Setenv(seccomp.EnvSimulateFallbackTID, "123")
+		_, adapter := seccomp.ResolveRunnerArgsAndAdapter([]string{testRunnerBin, testEchoBin})
+		_, _, errno := adapter.RawSyscall(unix.SYS_SECCOMP, 0, 0, 0)
+		assert.Equal(t, unix.ENOSYS, errno)
+		r1, _, _ := adapter.RawSyscall(syscall.SYS_PRCTL, uintptr(unix.PR_SET_SECCOMP), 0, 0)
+		assert.Equal(t, uintptr(123), r1)
+	})
+
+	t.Run("EnvSimulateNoNewPrivsErr", func(t *testing.T) {
+		t.Setenv(seccomp.EnvSimulateNoNewPrivsErr, "1")
+		_, adapter := seccomp.ResolveRunnerArgsAndAdapter([]string{testRunnerBin, testEchoBin})
+		err := adapter.Prctl(unix.PR_SET_NO_NEW_PRIVS, 0, 0, 0, 0)
+		assert.Equal(t, unix.EPERM, err)
+		_ = adapter.Prctl(unix.PR_GET_NAME, 0, 0, 0, 0)
+	})
+
+	t.Run("BuildSimulatedSyscallAdapter_Passthrough", func(t *testing.T) {
+		adapter := seccomp.BuildSimulatedSyscallAdapter(seccomp.SimulationConfig{})
+		pid, _, _ := adapter.RawSyscall(syscall.SYS_GETPID, 0, 0, 0)
+		assert.True(t, pid > 0)
 	})
 }

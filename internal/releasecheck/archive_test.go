@@ -18,6 +18,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testReadme = "README.md"
+
 type tarEntry struct {
 	Name     string
 	Data     []byte
@@ -64,7 +66,7 @@ func createOrderedTarGz(t *testing.T, archivePath string, entries []tarEntry) {
 	}
 }
 
-func createValidFatBinary(t *testing.T, arch string, tiers []string) []byte {
+func createValidFatBinaryWithDict(t *testing.T, arch string, tiers []string, dict []byte) []byte {
 	t.Helper()
 	// Minimal valid ELF header: \x7fELF (64-bit, little endian, exec, x86_64 or aarch64)
 	elfMachine := byte(0x3e) // AMD64
@@ -87,6 +89,16 @@ func createValidFatBinary(t *testing.T, arch string, tiers []string) []byte {
 	var compVariantsBuf bytes.Buffer
 	var variantEntries []format.VariantEntry
 
+	dictOffset := int64(len(stubBytes))
+	dictSize := int64(len(dict))
+	dictHash := ""
+	if dictSize > 0 {
+		h := sha256.Sum256(dict)
+		dictHash = hex.EncodeToString(h[:])
+	}
+
+	payloadOffset := dictOffset + dictSize
+
 	for _, tier := range tiers {
 		variantPayload := append(append([]byte(nil), stubBytes...), []byte("-variant-"+tier)...)
 		h := sha256.Sum256(variantPayload)
@@ -97,7 +109,7 @@ func createValidFatBinary(t *testing.T, arch string, tiers []string) []byte {
 
 		vEntry := format.VariantEntry{
 			Level:            tier,
-			Offset:           int64(len(stubBytes) + compVariantsBuf.Len()),
+			Offset:           payloadOffset + int64(compVariantsBuf.Len()),
 			CompressedSize:   int64(compBuf.Len()),
 			UncompressedSize: int64(len(variantPayload)),
 			SHA256:           tierHash,
@@ -108,18 +120,28 @@ func createValidFatBinary(t *testing.T, arch string, tiers []string) []byte {
 	}
 
 	idx := &format.Index{
-		Version:    format.FormatVersion2,
-		TargetArch: arch,
-		Variants:   variantEntries,
+		Version:          format.FormatVersion2,
+		TargetArch:       arch,
+		Variants:         variantEntries,
+		DictionaryOffset: dictOffset,
+		DictionarySize:   dictSize,
+		DictionarySHA256: dictHash,
 	}
 
 	var fatBuf bytes.Buffer
 	fatBuf.Write(stubBytes)
+	if dictSize > 0 {
+		fatBuf.Write(dict)
+	}
 	fatBuf.Write(compVariantsBuf.Bytes())
 	_, err = format.WriteIndexAndTrailer(&fatBuf, idx, int64(fatBuf.Len()))
 	require.NoError(t, err)
 
 	return fatBuf.Bytes()
+}
+
+func createValidFatBinary(t *testing.T, arch string, tiers []string) []byte {
+	return createValidFatBinaryWithDict(t, arch, tiers, nil)
 }
 
 func createStandardValidEntries(t *testing.T, arch string, contract *releasecheck.ReleaseContract) []tarEntry {
@@ -132,7 +154,7 @@ func createStandardValidEntries(t *testing.T, arch string, contract *releasechec
 		{Name: releasecheck.ReleaseProjectName, Data: fatData, Mode: 0o755},
 		{Name: releasecheck.ReleaseFullStub, Data: stubData, Mode: 0o755},
 		{Name: releasecheck.ReleaseMinStub, Data: stubData, Mode: 0o755},
-		{Name: "README.md", Data: []byte("# README"), Mode: 0o644},
+		{Name: testReadme, Data: []byte("# README"), Mode: 0o644},
 	}
 }
 
@@ -390,7 +412,7 @@ func TestExtractArchiveSafely_ValidAndRejections(t *testing.T) {
 	// Test duplicate rejection
 	dupeEntries := append([]tarEntry{}, entries...)
 	dupeEntries = append(dupeEntries, tarEntry{
-		Name: "README.md",
+		Name: testReadme,
 		Data: []byte("second-readme"),
 		Mode: 0o644,
 	})
@@ -428,7 +450,7 @@ func TestExtractFileFromArchive_ValidAndDuplicate(t *testing.T) {
 	// Archive with duplicate must fail even if target was encountered first
 	dupeEntries := append([]tarEntry{}, entries...)
 	dupeEntries = append(dupeEntries, tarEntry{
-		Name: "README.md",
+		Name: testReadme,
 		Data: []byte("dupe"),
 		Mode: 0o644,
 	})
@@ -438,4 +460,139 @@ func TestExtractFileFromArchive_ValidAndDuplicate(t *testing.T) {
 	err = releasecheck.ExtractFileFromArchive(dupeArchive, releasecheck.ReleaseProjectName, filepath.Join(t.TempDir(), "out2"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicate entry in archive")
+}
+
+func TestValidateArchive_WithSharedDict(t *testing.T) {
+	t.Parallel()
+	contract, err := releasecheck.NewReleaseContract("0.2.3")
+	require.NoError(t, err)
+
+	dict := []byte("shared-dictionary-data-for-compression")
+	tiers := contract.ExpectedTiers[releasecheck.ArchAMD64]
+	fatData := createValidFatBinaryWithDict(t, releasecheck.ArchAMD64, tiers, dict)
+	stubData := []byte("\x7fELF\x02\x01\x01\x00" + strings.Repeat("\x00", 64))
+
+	entries := []tarEntry{
+		{Name: releasecheck.ReleaseProjectName, Data: fatData, Mode: 0o755},
+		{Name: releasecheck.ReleaseFullStub, Data: stubData, Mode: 0o755},
+		{Name: releasecheck.ReleaseMinStub, Data: stubData, Mode: 0o755},
+		{Name: testReadme, Data: []byte("# README"), Mode: 0o644},
+	}
+
+	archivePath := filepath.Join(t.TempDir(), "with_dict.tar.gz")
+	createOrderedTarGz(t, archivePath, entries)
+
+	facts, err := releasecheck.ValidateArchive(archivePath, releasecheck.ArchAMD64, contract)
+	require.NoError(t, err)
+	assert.Equal(t, releasecheck.ArchAMD64, facts.TargetArch)
+	assert.NotEmpty(t, facts.EmbeddedVariants)
+}
+
+func TestValidateArchive_InspectFatBinary_Errors(t *testing.T) {
+	t.Parallel()
+	contract, err := releasecheck.NewReleaseContract("0.2.3")
+	require.NoError(t, err)
+
+	t.Run("NonFatBinaryExecutable", func(t *testing.T) {
+		t.Parallel()
+		stubData := []byte("\x7fELF\x02\x01\x01\x00" + strings.Repeat("\x00", 64))
+		entries := []tarEntry{
+			{Name: releasecheck.ReleaseProjectName, Data: stubData, Mode: 0o755},
+			{Name: releasecheck.ReleaseFullStub, Data: stubData, Mode: 0o755},
+			{Name: releasecheck.ReleaseMinStub, Data: stubData, Mode: 0o755},
+			{Name: testReadme, Data: []byte("# README"), Mode: 0o644},
+		}
+		archivePath := filepath.Join(t.TempDir(), "nonfat.tar.gz")
+		createOrderedTarGz(t, archivePath, entries)
+
+		_, err := releasecheck.ValidateArchive(archivePath, releasecheck.ArchAMD64, contract)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "reading index and trailer")
+	})
+
+	t.Run("InvalidFormatVersion", func(t *testing.T) {
+		t.Parallel()
+		stubBytes := []byte("\x7fELF\x02\x01\x01\x00" + strings.Repeat("\x00", 64))
+		variantPayload := []byte("\x7fELF\x02\x01\x01\x00" + strings.Repeat("\x00", 64))
+		variants := []format.VariantEntry{
+			{
+				Level:            "v1",
+				Offset:           int64(len(stubBytes)),
+				CompressedSize:   int64(len(variantPayload)),
+				UncompressedSize: int64(len(variantPayload)),
+				SHA256:           "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+				Compression:      "none",
+			},
+		}
+		idx := &format.Index{
+			Version:    format.FormatVersion1,
+			TargetArch: releasecheck.ArchAMD64,
+			Variants:   variants,
+		}
+		var fatBuf bytes.Buffer
+		fatBuf.Write(stubBytes)
+		fatBuf.Write(variantPayload)
+		_, err := format.WriteIndexAndTrailerWithVersion(&fatBuf, idx, int64(fatBuf.Len()), format.FormatVersion1)
+		require.NoError(t, err)
+
+		entries := []tarEntry{
+			{Name: releasecheck.ReleaseProjectName, Data: fatBuf.Bytes(), Mode: 0o755},
+			{Name: releasecheck.ReleaseFullStub, Data: stubBytes, Mode: 0o755},
+			{Name: releasecheck.ReleaseMinStub, Data: stubBytes, Mode: 0o755},
+		}
+		archivePath := filepath.Join(t.TempDir(), "badver.tar.gz")
+		createOrderedTarGz(t, archivePath, entries)
+
+		_, err = releasecheck.ValidateArchive(archivePath, releasecheck.ArchAMD64, contract)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expected format v2 index")
+	})
+
+	t.Run("UnexpectedVariantLevel", func(t *testing.T) {
+		t.Parallel()
+		contractCopy, err := releasecheck.NewReleaseContract("0.2.3")
+		require.NoError(t, err)
+		contractCopy.ExpectedTiers[releasecheck.ArchAMD64] = []string{"v1"}
+
+		fatData := createValidFatBinary(t, releasecheck.ArchAMD64, []string{"v1", "v2"})
+		stubData := []byte("\x7fELF\x02\x01\x01\x00" + strings.Repeat("\x00", 64))
+		entries := []tarEntry{
+			{Name: releasecheck.ReleaseProjectName, Data: fatData, Mode: 0o755},
+			{Name: releasecheck.ReleaseFullStub, Data: stubData, Mode: 0o755},
+			{Name: releasecheck.ReleaseMinStub, Data: stubData, Mode: 0o755},
+		}
+		archivePath := filepath.Join(t.TempDir(), "badtier.tar.gz")
+		createOrderedTarGz(t, archivePath, entries)
+
+		_, err = releasecheck.ValidateArchive(archivePath, releasecheck.ArchAMD64, contractCopy)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unexpected variant level")
+	})
+}
+
+func TestExtractArchiveSafely_Errors(t *testing.T) {
+	t.Parallel()
+
+	t.Run("NonExistentArchive", func(t *testing.T) {
+		t.Parallel()
+		err := releasecheck.ExtractArchiveSafely("/nonexistent/path.tar.gz", t.TempDir())
+		require.Error(t, err)
+	})
+
+	t.Run("TargetNotDirectory", func(t *testing.T) {
+		t.Parallel()
+		contract, err := releasecheck.NewReleaseContract("0.2.3")
+		require.NoError(t, err)
+
+		entries := createStandardValidEntries(t, releasecheck.ArchAMD64, contract)
+		archivePath := filepath.Join(t.TempDir(), "valid.tar.gz")
+		createOrderedTarGz(t, archivePath, entries)
+
+		f, err := os.CreateTemp(t.TempDir(), "not_a_dir")
+		require.NoError(t, err)
+		_ = f.Close()
+
+		err = releasecheck.ExtractArchiveSafely(archivePath, f.Name())
+		require.Error(t, err)
+	})
 }

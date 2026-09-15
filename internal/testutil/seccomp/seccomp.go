@@ -99,13 +99,19 @@ type ExecFn func(argv0 string, argv []string, envv []string) error
 // DefaultExec is the standard syscall.Exec implementation.
 var DefaultExec ExecFn = syscall.Exec
 
+var (
+	memfdCreateFn           = unix.MemfdCreate
+	openDevNullFn           = func() (int, error) { return unix.Open("/dev/null", unix.O_RDONLY|unix.O_CLOEXEC, 0) }
+	defaultSyscallAdapterFn = DefaultSyscallAdapter
+)
+
 // RunStandardSyscallCheck verifies standard syscalls execute unhindered.
 func RunStandardSyscallCheck() error {
 	pid := unix.Getpid()
 	if pid <= 0 {
 		return fmt.Errorf("unexpected pid %d", pid)
 	}
-	fd, err := unix.Open("/dev/null", unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	fd, err := openDevNullFn()
 	if err != nil {
 		return fmt.Errorf("open /dev/null: %w", err)
 	}
@@ -119,7 +125,7 @@ func VerifySingleInjectedFailureInvariant() error {
 		return fmt.Errorf("standard syscall failed under filter: %w", err)
 	}
 
-	fd, err := unix.MemfdCreate("runner_invariant_probe", unix.MFD_CLOEXEC)
+	fd, err := memfdCreateFn("runner_invariant_probe", unix.MFD_CLOEXEC)
 	if err == nil {
 		_ = unix.Close(fd)
 		return errors.New("memfd_create unexpectedly succeeded when filter is installed")
@@ -196,7 +202,7 @@ func InstallStrictMemfdDenialFilterWithAdapter(adapter SyscallAdapter) error {
 
 // InstallStrictMemfdDenialFilter installs the filter using default production syscalls.
 func InstallStrictMemfdDenialFilter() error {
-	return InstallStrictMemfdDenialFilterWithAdapter(DefaultSyscallAdapter())
+	return InstallStrictMemfdDenialFilterWithAdapter(defaultSyscallAdapterFn())
 }
 
 // SimulationConfig holds parameters to simulate kernel behavior in tests.

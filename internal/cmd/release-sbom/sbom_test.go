@@ -359,8 +359,13 @@ func TestGenerate_SnapshotArchiveVerification(t *testing.T) {
 		t.Skip("No snapshot amd64 archive found in dist; run goreleaser snapshot first")
 	}
 
-	targetArchive := archives[0]
 	tempDir := t.TempDir()
+	archiveBytes, err := os.ReadFile(archives[0])
+	if err != nil {
+		t.Skip("Snapshot archive unreadable or cleaned concurrently, skipping")
+	}
+	targetArchive := filepath.Join(tempDir, filepath.Base(archives[0]))
+	require.NoError(t, os.WriteFile(targetArchive, archiveBytes, 0o644))
 
 	t.Run("Generate_SPDX", func(t *testing.T) {
 		spdxOut := filepath.Join(tempDir, "test.spdx.json")
@@ -742,6 +747,13 @@ func createMockFactsAndInventory() (*releasecheck.ArchiveFacts, *releasecheck.Ar
 			"v1": {Level: "v1", SHA256: strings.Repeat("e", 64)},
 		},
 	}
+	depNormal := releasecheck.ModuleDep{Path: "golang.org/x/sys", Version: "v0.30.0"}
+	depReplaced := releasecheck.ModuleDep{
+		Path:        "github.com/orig/lib",
+		Version:     "v1.0.0",
+		ReplacePath: "github.com/replaced/lib",
+		ReplaceVer:  "v1.0.1",
+	}
 	inv := &releasecheck.ArchiveInventory{
 		ArchiveName: facts.ArchiveName,
 		TargetArch:  facts.TargetArch,
@@ -749,10 +761,29 @@ func createMockFactsAndInventory() (*releasecheck.ArchiveFacts, *releasecheck.Ar
 			releasecheck.ReleaseProjectName: {
 				Identifier:   releasecheck.ReleaseProjectName,
 				BinaryName:   releasecheck.ReleaseProjectName,
-				Dependencies: make(map[string]releasecheck.ModuleDep),
+				MainModule:   "github.com/EpicBlackWolfZ/microfat",
+				Dependencies: map[string]releasecheck.ModuleDep{depNormal.Path: depNormal},
+			},
+			releasecheck.ReleaseFullStub: {
+				Identifier:   releasecheck.ReleaseFullStub,
+				BinaryName:   releasecheck.ReleaseFullStub,
+				Dependencies: map[string]releasecheck.ModuleDep{depNormal.Path: depNormal},
+			},
+			releasecheck.ReleaseMinStub: {
+				Identifier:   releasecheck.ReleaseMinStub,
+				BinaryName:   releasecheck.ReleaseMinStub,
+				Dependencies: map[string]releasecheck.ModuleDep{},
+			},
+			"variant:v1": {
+				Identifier:   "variant:v1",
+				BinaryName:   releasecheck.ReleaseProjectName,
+				Dependencies: map[string]releasecheck.ModuleDep{depReplaced.Path: depReplaced},
 			},
 		},
-		AllDependencies: make(map[string]releasecheck.ModuleDep),
+		AllDependencies: map[string]releasecheck.ModuleDep{
+			depNormal.Path:   depNormal,
+			depReplaced.Path: depReplaced,
+		},
 	}
 	return facts, inv
 }

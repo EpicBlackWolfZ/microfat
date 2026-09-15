@@ -290,3 +290,26 @@ func TestValidateChecksums_NonRegularChecksumsFile(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not a regular file")
 }
+
+func TestValidateChecksums_MissingFileOnDisk(t *testing.T) {
+	t.Parallel()
+	distDir, contract, digests := createValidDistFixture(t, "0.2.3")
+
+	for n := range digests {
+		require.NoError(t, os.Remove(filepath.Join(distDir, n)))
+		break
+	}
+
+	_, err := releasecheck.ValidateChecksums(distDir, contract)
+	require.Error(t, err)
+}
+
+func TestValidateChecksums_MissingChecksumsFile(t *testing.T) {
+	t.Parallel()
+	distDir := t.TempDir()
+	contract, err := releasecheck.NewReleaseContract("0.2.3")
+	require.NoError(t, err)
+
+	_, err = releasecheck.ValidateChecksums(distDir, contract)
+	require.Error(t, err)
+}

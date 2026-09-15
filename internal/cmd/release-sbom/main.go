@@ -28,6 +28,8 @@ const (
 	formatSPDXJSON      = "spdx-json"
 	formatCycloneDXJSON = "cyclonedx-json"
 	hashAlgSHA256       = "SHA-256"
+	spdxNoAssertion     = "NOASSERTION"
+	cdxTypeApplication  = "application"
 )
 
 func parseArgs(args []string) (archivePath, outputPath, formatName string, err error) {
@@ -248,32 +250,47 @@ func sanitizeSPDXID(s string) string {
 	return sb.String()
 }
 
-func attributeSPDX(
-	rawJSON []byte,
+func isOmittedBinaryPackage(name string) bool {
+	return strings.HasPrefix(name, "/") || name == "microfat" || name == "microfat-stub" ||
+		name == "microfat-stub-minimal" || strings.HasPrefix(name, "embedded_variants") ||
+		name == "embedded_variants"
+}
+
+func buildSPDXPackages(
+	docPackages []releasecheck.SPDXPackage,
 	facts *releasecheck.ArchiveFacts,
 	inv *releasecheck.ArchiveInventory,
 	version string,
-) ([]byte, error) {
-	var doc releasecheck.SPDXDocument
-	if err := json.Unmarshal(rawJSON, &doc); err != nil {
-		return nil, fmt.Errorf("parsing syft SPDX JSON: %w", err)
-	}
-
-	doc.SPDXVersion = "SPDX-2.3"
-	doc.DataLicense = "CC0-1.0"
-	doc.SPDXID = "SPDXRef-DOCUMENT"
-	doc.Name = facts.ArchiveName
-	doc.DocumentNamespace = fmt.Sprintf("https://github.com/EpicBlackWolfZ/microfat/releases/tag/v%s/%s",
-		version, facts.ArchiveName)
-
+) ([]releasecheck.SPDXPackage, map[string]releasecheck.SPDXPackage) {
 	var cleanPackages []releasecheck.SPDXPackage
 	existingPkgByName := make(map[string]releasecheck.SPDXPackage)
-	for _, p := range doc.Packages {
-		if strings.HasPrefix(p.Name, "/") || strings.Contains(p.Name, "microfat") || p.Name == "embedded_variants" {
+	for _, p := range docPackages {
+		if isOmittedBinaryPackage(p.Name) {
 			continue
 		}
 		cleanPackages = append(cleanPackages, p)
 		existingPkgByName[p.Name] = p
+	}
+
+	var mainModule string
+	for _, b := range inv.Binaries {
+		if b.MainModule != "" {
+			mainModule = b.MainModule
+			break
+		}
+	}
+	if mainModule != "" {
+		if _, exists := existingPkgByName[mainModule]; !exists {
+			pkg := releasecheck.SPDXPackage{
+				SPDXID:           fmt.Sprintf("SPDXRef-Package-%s", sanitizeSPDXID(mainModule)),
+				Name:             mainModule,
+				VersionInfo:      version,
+				DownloadLocation: spdxNoAssertion,
+				FilesAnalyzed:    false,
+			}
+			cleanPackages = append(cleanPackages, pkg)
+			existingPkgByName[mainModule] = pkg
+		}
 	}
 
 	for modPath, dep := range inv.AllDependencies {
@@ -288,7 +305,7 @@ func attributeSPDX(
 				SPDXID:           fmt.Sprintf("SPDXRef-Package-%s", sanitizeSPDXID(targetName)),
 				Name:             targetName,
 				VersionInfo:      targetVer,
-				DownloadLocation: "NOASSERTION",
+				DownloadLocation: spdxNoAssertion,
 				FilesAnalyzed:    false,
 			}
 			cleanPackages = append(cleanPackages, pkg)
@@ -301,7 +318,7 @@ func attributeSPDX(
 		SPDXID:           archivePkgID,
 		Name:             facts.ArchiveName,
 		VersionInfo:      version,
-		DownloadLocation: "NOASSERTION",
+		DownloadLocation: spdxNoAssertion,
 		FilesAnalyzed:    false,
 		Checksums: []releasecheck.SPDXChecksum{
 			{Algorithm: "SHA256", ChecksumValue: facts.ArchiveSHA256},
@@ -316,7 +333,7 @@ func attributeSPDX(
 			SPDXID:           fmt.Sprintf("SPDXRef-Binary-%s", exeName),
 			Name:             exeName,
 			VersionInfo:      version,
-			DownloadLocation: "NOASSERTION",
+			DownloadLocation: spdxNoAssertion,
 			FilesAnalyzed:    false,
 			Checksums: []releasecheck.SPDXChecksum{
 				{Algorithm: "SHA256", ChecksumValue: exe.SHA256},
@@ -336,7 +353,7 @@ func attributeSPDX(
 			SPDXID:           fmt.Sprintf("SPDXRef-Variant-%s", sanitizeSPDXID(tier)),
 			Name:             "microfat-variant-" + tier,
 			VersionInfo:      version,
-			DownloadLocation: "NOASSERTION",
+			DownloadLocation: spdxNoAssertion,
 			FilesAnalyzed:    false,
 			Checksums: []releasecheck.SPDXChecksum{
 				{Algorithm: "SHA256", ChecksumValue: vf.SHA256},
@@ -345,11 +362,19 @@ func attributeSPDX(
 		}
 		cleanPackages = append(cleanPackages, vPkg)
 	}
-	doc.Packages = cleanPackages
 
+	return cleanPackages, existingPkgByName
+}
+
+func buildSPDXRelationships(
+	docID, archivePkgID string,
+	facts *releasecheck.ArchiveFacts,
+	inv *releasecheck.ArchiveInventory,
+	existingPkgByName map[string]releasecheck.SPDXPackage,
+) []releasecheck.SPDXRelationship {
 	var relationships []releasecheck.SPDXRelationship
 	relationships = append(relationships, releasecheck.SPDXRelationship{
-		SPDXElementID:      doc.SPDXID,
+		SPDXElementID:      docID,
 		RelatedSPDXElement: archivePkgID,
 		RelationshipType:   "DESCRIBES",
 	})
@@ -360,6 +385,11 @@ func attributeSPDX(
 			RelationshipType:   "CONTAINS",
 		})
 	}
+	tiers := make([]string, 0, len(facts.EmbeddedVariants))
+	for tier := range facts.EmbeddedVariants {
+		tiers = append(tiers, tier)
+	}
+	sort.Strings(tiers)
 	for _, tier := range tiers {
 		relationships = append(relationships, releasecheck.SPDXRelationship{
 			SPDXElementID:      fmt.Sprintf("SPDXRef-Binary-%s", releasecheck.ReleaseProjectName),
@@ -392,47 +422,75 @@ func attributeSPDX(
 			})
 		}
 	}
-	doc.Relationships = relationships
-
-	return json.MarshalIndent(doc, "", "  ")
+	return relationships
 }
 
-func attributeCycloneDX(
+func attributeSPDX(
 	rawJSON []byte,
 	facts *releasecheck.ArchiveFacts,
 	inv *releasecheck.ArchiveInventory,
 	version string,
 ) ([]byte, error) {
-	var doc releasecheck.CDXDocument
+	var doc releasecheck.SPDXDocument
 	if err := json.Unmarshal(rawJSON, &doc); err != nil {
-		return nil, fmt.Errorf("parsing syft CycloneDX JSON: %w", err)
+		return nil, fmt.Errorf("parsing syft SPDX JSON: %w", err)
 	}
 
-	doc.BOMFormat = "CycloneDX"
-	doc.SpecVersion = "1.5"
+	doc.SPDXVersion = "SPDX-2.3"
+	doc.DataLicense = "CC0-1.0"
+	doc.SPDXID = "SPDXRef-DOCUMENT"
+	doc.Name = facts.ArchiveName
+	doc.DocumentNamespace = fmt.Sprintf("https://github.com/EpicBlackWolfZ/microfat/releases/tag/v%s/%s",
+		version, facts.ArchiveName)
 
-	archiveRef := "archive-root"
-	doc.Metadata.Component = &releasecheck.CDXComponent{
-		BOMRef:  archiveRef,
-		Type:    "file",
-		Name:    facts.ArchiveName,
-		Version: version,
-		Hashes: []releasecheck.CDXHash{
-			{Alg: hashAlgSHA256, Content: facts.ArchiveSHA256},
-		},
-		Properties: []releasecheck.CDXProperty{
-			{Name: "microfat:target_arch", Value: facts.TargetArch},
-		},
-	}
+	archivePkgID := "SPDXRef-Archive"
+	cleanPackages, existingPkgByName := buildSPDXPackages(doc.Packages, facts, inv, version)
+	doc.Packages = cleanPackages
+	doc.Relationships = buildSPDXRelationships(doc.SPDXID, archivePkgID, facts, inv, existingPkgByName)
 
+	return json.MarshalIndent(doc, "", "  ")
+}
+
+func isOmittedBinaryComponent(name string) bool {
+	return strings.HasPrefix(name, "/") || name == "microfat" || name == "microfat-stub" ||
+		name == "microfat-stub-minimal" || strings.HasPrefix(name, "embedded_variants") ||
+		name == "embedded_variants"
+}
+
+func buildCDXComponents(
+	docComponents []releasecheck.CDXComponent,
+	facts *releasecheck.ArchiveFacts,
+	inv *releasecheck.ArchiveInventory,
+	version string,
+) ([]releasecheck.CDXComponent, map[string]releasecheck.CDXComponent, []string) {
 	var cleanComponents []releasecheck.CDXComponent
 	existingCompByName := make(map[string]releasecheck.CDXComponent)
-	for _, c := range doc.Components {
-		if strings.HasPrefix(c.Name, "/") || strings.Contains(c.Name, "microfat") || c.Name == "embedded_variants" {
+	for _, c := range docComponents {
+		if isOmittedBinaryComponent(c.Name) {
 			continue
 		}
 		cleanComponents = append(cleanComponents, c)
 		existingCompByName[c.Name] = c
+	}
+
+	var mainModule string
+	for _, b := range inv.Binaries {
+		if b.MainModule != "" {
+			mainModule = b.MainModule
+			break
+		}
+	}
+	if mainModule != "" {
+		if _, exists := existingCompByName[mainModule]; !exists {
+			comp := releasecheck.CDXComponent{
+				BOMRef:  fmt.Sprintf("pkg:%s@%s", mainModule, version),
+				Type:    cdxTypeApplication,
+				Name:    mainModule,
+				Version: version,
+			}
+			cleanComponents = append(cleanComponents, comp)
+			existingCompByName[mainModule] = comp
+		}
 	}
 
 	for modPath, dep := range inv.AllDependencies {
@@ -468,11 +526,11 @@ func attributeCycloneDX(
 		variantRefs = append(variantRefs, vRef)
 		variantComponents = append(variantComponents, releasecheck.CDXComponent{
 			BOMRef:  vRef,
-			Type:    "application",
+			Type:    cdxTypeApplication,
 			Name:    "microfat-variant-" + tier,
 			Version: version,
 			Hashes: []releasecheck.CDXHash{
-				{Alg: "SHA-256", Content: vf.SHA256},
+				{Alg: hashAlgSHA256, Content: vf.SHA256},
 			},
 			Properties: []releasecheck.CDXProperty{
 				{Name: "microfat:variant_tier", Value: tier},
@@ -483,11 +541,11 @@ func attributeCycloneDX(
 
 	microfatComp := releasecheck.CDXComponent{
 		BOMRef:  "bin-microfat",
-		Type:    "application",
+		Type:    cdxTypeApplication,
 		Name:    releasecheck.ReleaseProjectName,
 		Version: version,
 		Hashes: []releasecheck.CDXHash{
-			{Alg: "SHA-256", Content: facts.Executables[releasecheck.ReleaseProjectName].SHA256},
+			{Alg: hashAlgSHA256, Content: facts.Executables[releasecheck.ReleaseProjectName].SHA256},
 		},
 		Components: variantComponents,
 	}
@@ -495,11 +553,11 @@ func attributeCycloneDX(
 
 	stubComp := releasecheck.CDXComponent{
 		BOMRef:  "bin-stub",
-		Type:    "application",
+		Type:    cdxTypeApplication,
 		Name:    releasecheck.ReleaseFullStub,
 		Version: version,
 		Hashes: []releasecheck.CDXHash{
-			{Alg: "SHA-256", Content: facts.Executables[releasecheck.ReleaseFullStub].SHA256},
+			{Alg: hashAlgSHA256, Content: facts.Executables[releasecheck.ReleaseFullStub].SHA256},
 		},
 		Properties: []releasecheck.CDXProperty{
 			{Name: "microfat:stub_profile", Value: "full"},
@@ -510,11 +568,11 @@ func attributeCycloneDX(
 
 	minStubComp := releasecheck.CDXComponent{
 		BOMRef:  "bin-min-stub",
-		Type:    "application",
+		Type:    cdxTypeApplication,
 		Name:    releasecheck.ReleaseMinStub,
 		Version: version,
 		Hashes: []releasecheck.CDXHash{
-			{Alg: "SHA-256", Content: facts.Executables[releasecheck.ReleaseMinStub].SHA256},
+			{Alg: hashAlgSHA256, Content: facts.Executables[releasecheck.ReleaseMinStub].SHA256},
 		},
 		Properties: []releasecheck.CDXProperty{
 			{Name: "microfat:stub_profile", Value: "minimal"},
@@ -522,8 +580,16 @@ func attributeCycloneDX(
 		},
 	}
 	cleanComponents = append(cleanComponents, minStubComp)
-	doc.Components = cleanComponents
 
+	return cleanComponents, existingCompByName, variantRefs
+}
+
+func buildCDXDependencies(
+	archiveRef string,
+	variantRefs []string,
+	inv *releasecheck.ArchiveInventory,
+	existingCompByName map[string]releasecheck.CDXComponent,
+) []releasecheck.CDXDependency {
 	var dependencies []releasecheck.CDXDependency
 	dependencies = append(dependencies, releasecheck.CDXDependency{
 		Ref:       archiveRef,
@@ -565,7 +631,40 @@ func attributeCycloneDX(
 			})
 		}
 	}
-	doc.Dependencies = dependencies
+	return dependencies
+}
+
+func attributeCycloneDX(
+	rawJSON []byte,
+	facts *releasecheck.ArchiveFacts,
+	inv *releasecheck.ArchiveInventory,
+	version string,
+) ([]byte, error) {
+	var doc releasecheck.CDXDocument
+	if err := json.Unmarshal(rawJSON, &doc); err != nil {
+		return nil, fmt.Errorf("parsing syft CycloneDX JSON: %w", err)
+	}
+
+	doc.BOMFormat = "CycloneDX"
+	doc.SpecVersion = "1.5"
+
+	archiveRef := "archive-root"
+	doc.Metadata.Component = &releasecheck.CDXComponent{
+		BOMRef:  archiveRef,
+		Type:    "file",
+		Name:    facts.ArchiveName,
+		Version: version,
+		Hashes: []releasecheck.CDXHash{
+			{Alg: hashAlgSHA256, Content: facts.ArchiveSHA256},
+		},
+		Properties: []releasecheck.CDXProperty{
+			{Name: "microfat:target_arch", Value: facts.TargetArch},
+		},
+	}
+
+	cleanComponents, existingCompByName, variantRefs := buildCDXComponents(doc.Components, facts, inv, version)
+	doc.Components = cleanComponents
+	doc.Dependencies = buildCDXDependencies(archiveRef, variantRefs, inv, existingCompByName)
 
 	return json.MarshalIndent(doc, "", "  ")
 }
