@@ -350,61 +350,6 @@ func buildGoCommand(
 	return cmd
 }
 
-// ResolveStubPath resolves the path to the microfat launcher stub binary using precedence:
-// 1. Explicit CLI flag `--stub`
-// 2. Manifest field `stub:`
-// 3. Executable-adjacent directory (`microfat-stub`)
-// 4. `bin/microfat-stub` or `../bin/microfat-stub`
-// 5. System `$PATH` lookup
-func ResolveStubPath(cliStub, manifestStub, manifestDir string) (string, error) {
-	if cliStub != "" {
-		clean := filepath.Clean(cliStub)
-		if stat, err := os.Stat(clean); err == nil && !stat.IsDir() {
-			return clean, nil
-		}
-		return "", fmt.Errorf("%w: %s (specified via --stub)", ErrStubNotFound, cliStub)
-	}
-
-	if manifestStub != "" {
-		resolved := manifestStub
-		if !filepath.IsAbs(resolved) && manifestDir != "" {
-			resolved = filepath.Join(manifestDir, resolved)
-		}
-		clean := filepath.Clean(resolved)
-		if stat, err := os.Stat(clean); err == nil && !stat.IsDir() {
-			return clean, nil
-		}
-		return "", fmt.Errorf("%w: %s (specified in manifest)", ErrStubNotFound, manifestStub)
-	}
-
-	// Search adjacent to current executable
-	if exePath, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exePath)
-		candidate := filepath.Join(exeDir, "microfat-stub")
-		if stat, err := os.Stat(candidate); err == nil && !stat.IsDir() {
-			return candidate, nil
-		}
-	}
-
-	// Search relative working directories
-	candidates := []string{
-		filepath.Join("bin", "microfat-stub"),
-		filepath.Join("..", "bin", "microfat-stub"),
-	}
-	for _, c := range candidates {
-		if stat, err := os.Stat(c); err == nil && !stat.IsDir() {
-			return filepath.Clean(c), nil
-		}
-	}
-
-	// Search in PATH
-	if p, err := exec.LookPath("microfat-stub"); err == nil {
-		return p, nil
-	}
-
-	return "", fmt.Errorf("%w: provide --stub flag, 'stub:' manifest entry, or compile stub into bin/microfat-stub", ErrStubNotFound)
-}
-
 func assemblePackOptions(
 	m *Manifest,
 	stubPath, finalOutput, appName string,

@@ -20,11 +20,7 @@ SPEC.loader.exec_module(RELEASE)
 
 def assets():
     names = ['checksums.txt', 'checksums.txt.sig']
-    archives = [f'microfat_0.2.3_linux_amd64_v{i}.tar.gz' for i in range(1, 5)]
-    archives += [f'microfat_0.2.3_linux_arm64_{v}.tar.gz' for v in ('v8.0', 'v8.2', 'v9.0')]
-    archives += [f'microfat-stub{p}_0.2.3_linux_{a}_{v}.tar.gz'
-                 for p in ('', '-minimal') for a, v in (('amd64', 'v1'), ('arm64', 'v8.0'))]
-    archives += [f'microfat_linux_{a}_fat.tar.gz' for a in ('amd64', 'arm64')]
+    archives = ['microfat_0.2.3_linux_amd64.tar.gz', 'microfat_0.2.3_linux_arm64.tar.gz']
     names += [name + suffix for name in archives for suffix in ('', '.spdx.json', '.cyclonedx.json')]
     return [dict(name=name, size=1) for name in names]
 
@@ -66,20 +62,6 @@ class PublicationTests(unittest.TestCase):
                     else:
                         self.assertEqual(('v0.2.3', 'a' * 40), RELEASE.recovery_source('owner/repo', '1', '1'))
 
-    def test_fat_sbom_failure_stops_packaging(self):
-        functions = Path(__file__).with_name('bundle-fat.sh').read_text().split('# 1. AMD64 Fat Binary Assembly')[0]
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            (root / 'dist').mkdir()
-            for name in ('payload', 'README.md', 'LICENSE', 'SECURITY.md'):
-                (root / name).write_text('fixture')
-            (root / 'syft').write_text('#!/bin/sh\nexit 42\n')
-            (root / 'syft').chmod(0o755)
-            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'])
-            result = subprocess.run(['bash', '-c', functions + '\npackage_fat_archive payload amd64'],
-                                    cwd=root, env=env, capture_output=True, text=True, check=False)
-            self.assertEqual(42, result.returncode)
-            self.assertNotIn('Generated SBOMs', result.stdout)
 
     def test_publication_requires_complete_build_and_assets(self):
         for failure in (None, 'failed-build', 'running-build', 'wrong-source', 'wrong-tag', 'wrong-event',

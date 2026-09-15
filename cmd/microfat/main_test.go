@@ -3,14 +3,18 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -24,9 +28,10 @@ const (
 	flagStub     = "--stub"
 	flagName     = "--name"
 
-	testOSLinux   = "linux"
-	testArchAMD64 = "amd64"
-	testArchARM64 = "arm64"
+	testBinaryMicrofat = "microfat"
+	testOSLinux        = "linux"
+	testArchAMD64      = "amd64"
+	testArchARM64      = "arm64"
 )
 
 func TestRootCmdAndSubcommands(t *testing.T) {
@@ -114,6 +119,33 @@ func TestRootCmdAndSubcommands(t *testing.T) {
 		t.Errorf("expected inspect on nonexistent binary to fail")
 	}
 
+	// Test Inspect on binary with shared dictionary
+	dictFatPath := filepath.Join(tempDir, "dict_inspect.fat")
+	dictV1 := filepath.Join(tempDir, "dict_v1")
+	_ = os.WriteFile(dictV1, bytes.Repeat([]byte("DICT_PAYLOAD_V1_REPEATED_"), 100), 0o755)
+	dictV3 := filepath.Join(tempDir, "dict_v3")
+	_ = os.WriteFile(dictV3, bytes.Repeat([]byte("DICT_PAYLOAD_V3_REPEATED_"), 100), 0o755)
+	packDictCmd := newPackCmd()
+	packDictCmd.SetArgs([]string{
+		flagStub, stubPath,
+		flagOutput, dictFatPath,
+		flagName, "dict-app",
+		"-v", "v1=" + dictV1,
+		"-v", "v3=" + dictV3,
+		flagSkipELF,
+		"--dict",
+	})
+	if err := packDictCmd.Execute(); err == nil {
+		inspectDictCmd := newInspectCmd()
+		var outBuf bytes.Buffer
+		inspectDictCmd.SetOut(&outBuf)
+		inspectDictCmd.SetArgs([]string{dictFatPath})
+		_ = inspectDictCmd.Execute()
+		if !strings.Contains(outBuf.String(), "Shared Dictionary:") {
+			t.Errorf("expected Shared Dictionary in inspect output, got: %s", outBuf.String())
+		}
+	}
+
 	// 5. Test Verify Command
 	verifyText := newVerifyCmd()
 	verifyText.SetArgs([]string{fatPath})
@@ -146,6 +178,18 @@ func TestRootCmdAndSubcommands(t *testing.T) {
 	if err := trimCmd.Execute(); err != nil {
 		t.Fatalf("trim command failed: %v", err)
 	}
+
+	// Test Trim with policy and symlink resolution
+	symlinkFat := filepath.Join(tempDir, "symlink_fat")
+	_ = os.Symlink(fatPath, symlinkFat)
+	trimPolicyCmd := newTrimCmd()
+	trimmedPolicyPath := filepath.Join(tempDir, "trimmed_policy.fat")
+	trimPolicyCmd.SetArgs([]string{
+		"--policy", "safe_avx512",
+		"-o", trimmedPolicyPath,
+		symlinkFat,
+	})
+	_ = trimPolicyCmd.Execute()
 
 	// Test Trim in-place with auto-detected level
 	fatForInPlaceTrim := filepath.Join(tempDir, "fat_for_inplace.fat")
@@ -258,14 +302,14 @@ func TestMainInvocation(t *testing.T) {
 		exitFunc = oldExit
 	}()
 
-	os.Args = []string{"microfat", "--help"}
+	os.Args = []string{testBinaryMicrofat, "--help"}
 	main()
 
 	exitCalled := false
 	exitFunc = func(code int) {
 		exitCalled = true
 	}
-	os.Args = []string{"microfat", "invalid-subcommand-name"}
+	os.Args = []string{testBinaryMicrofat, "invalid-subcommand-name"}
 	main()
 	if !exitCalled {
 		t.Errorf("expected exitFunc to be called on invalid command")
@@ -1067,5 +1111,225 @@ func TestTrim_DestinationInNewDirectory(t *testing.T) {
 	if _, err := os.Stat(destFatPath); err != nil {
 		t.Fatalf("expected trimmed file at %s, got err: %v", destFatPath, err)
 	}
+}
+
+func TestInspect_FormatV1DeprecationWarning(t *testing.T) {
+	tempDir := t.TempDir()
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("STUB_BIN"), 0o755)
+	v1Path := filepath.Join(tempDir, "v1")
+	_ = os.WriteFile(v1Path, []byte("PAYLOAD_V1"), 0o755)
+	fatV1Path := filepath.Join(tempDir, "app_v1.fat")
+
+	packCmd := newPackCmd()
+	packCmd.SetArgs([]string{
+		flagStub, stubPath,
+		flagOutput, fatV1Path,
+		flagName, "v1-app",
+		"-v", "v1=" + v1Path,
+		flagSkipELF,
+		"--format-version", "1",
+	})
+	if err := packCmd.Execute(); err != nil {
+		t.Fatalf("pack format v1 failed: %v", err)
+	}
+
+	var stderrBuf bytes.Buffer
+	inspectCmd := newInspectCmd()
+	inspectCmd.SetErr(&stderrBuf)
+	inspectCmd.SetArgs([]string{fatV1Path})
+	if err := inspectCmd.Execute(); err != nil {
+		t.Fatalf("inspect format v1 failed: %v", err)
+	}
+
+	output := stderrBuf.String()
+	if !strings.Contains(output, "[microfat:warn]") || !strings.Contains(output, "Format v1 is deprecated") {
+		t.Errorf("expected Format v1 deprecation warning in stderr, got: %q", output)
+	}
+
+	// Verify info alias also triggers inspect and prints warning
+	rootCmd := newRootCmd()
+	stderrBuf.Reset()
+	rootCmd.SetErr(&stderrBuf)
+	rootCmd.SetArgs([]string{"info", fatV1Path})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("info alias failed: %v", err)
+	}
+	if !strings.Contains(stderrBuf.String(), "[microfat:warn]") {
+		t.Errorf("expected deprecation warning when calling 'microfat info', got: %q", stderrBuf.String())
+	}
+
+	// Verify Format v2 binary does not emit deprecation warning
+	fatV2Path := filepath.Join(tempDir, "app_v2.fat")
+	packV2Cmd := newPackCmd()
+	packV2Cmd.SetArgs([]string{
+		flagStub, stubPath,
+		flagOutput, fatV2Path,
+		flagName, "v2-app",
+		"-v", "v1=" + v1Path,
+		flagSkipELF,
+		"--format-version", "2",
+	})
+	if err := packV2Cmd.Execute(); err != nil {
+		t.Fatalf("pack format v2 failed: %v", err)
+	}
+
+	stderrBuf.Reset()
+	inspectV2Cmd := newInspectCmd()
+	inspectV2Cmd.SetErr(&stderrBuf)
+	inspectV2Cmd.SetArgs([]string{fatV2Path})
+	if err := inspectV2Cmd.Execute(); err != nil {
+		t.Fatalf("inspect format v2 failed: %v", err)
+	}
+	if strings.Contains(stderrBuf.String(), "Format v1 is deprecated") {
+		t.Errorf("Format v2 binary should not emit deprecation warning, got: %q", stderrBuf.String())
+	}
+}
+
+func TestStubAutoDiscovery(t *testing.T) {
+	tempDir := t.TempDir()
+	v1Path := filepath.Join(tempDir, "v1")
+	_ = os.WriteFile(v1Path, []byte("PAYLOAD_V1"), 0o755)
+	fatPath := filepath.Join(tempDir, "app.fat")
+
+	// 1. Without any stub in PATH or adjacent dir, pack without --stub should fail
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", t.TempDir()) // empty PATH
+
+	packCmd := newPackCmd()
+	packCmd.SetArgs([]string{
+		flagOutput, fatPath,
+		flagName, "autodiscover-app",
+		"-v", "v1=" + v1Path,
+		flagSkipELF,
+	})
+	if err := packCmd.Execute(); err == nil {
+		t.Fatalf("expected pack without stub to fail when no stub is discoverable")
+	}
+
+	// 2. Put microfat-stub into a directory on PATH
+	binDir := filepath.Join(tempDir, "fakebin")
+	_ = os.MkdirAll(binDir, 0o755)
+	fakeStub := filepath.Join(binDir, "microfat-stub")
+	_ = os.WriteFile(fakeStub, []byte("FAKE_STUB_ELF"), 0o755)
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+origPath)
+
+	var stderrBuf bytes.Buffer
+	packDiscoverCmd := newPackCmd()
+	packDiscoverCmd.SetErr(&stderrBuf)
+	packDiscoverCmd.SetArgs([]string{
+		flagOutput, fatPath,
+		flagName, "autodiscover-app",
+		"-v", "v1=" + v1Path,
+		flagSkipELF,
+	})
+	if err := packDiscoverCmd.Execute(); err != nil {
+		t.Fatalf("expected pack with auto-discovered stub to succeed, got: %v", err)
+	}
+	if !strings.Contains(stderrBuf.String(), "Using auto-discovered launcher stub") {
+		t.Errorf("expected auto-discovery notice in stderr, got: %q", stderrBuf.String())
+	}
+}
+
+func TestInspectAndInfo_SubprocessStreams(t *testing.T) {
+	tempDir := t.TempDir()
+
+	stubPath := filepath.Join(tempDir, "stub")
+	_ = os.WriteFile(stubPath, []byte("\x7fELF\x02\x01\x01\x00"+strings.Repeat("\x00", 256)), 0o755)
+	v1Path := filepath.Join(tempDir, "v1")
+	_ = os.WriteFile(v1Path, []byte("PAYLOAD_V1"), 0o755)
+
+	// Create Format v2 binary
+	fatV2 := filepath.Join(tempDir, "app_v2.fat")
+	p2 := newPackCmd()
+	p2.SetArgs([]string{
+		flagStub, stubPath,
+		flagOutput, fatV2,
+		flagName, "v2-app",
+		"-v", "v1=" + v1Path,
+		flagSkipELF,
+		"--format-version", "2",
+	})
+	require.NoError(t, p2.Execute())
+
+	// Create Format v1 binary
+	fatV1 := filepath.Join(tempDir, "app_v1.fat")
+	p1 := newPackCmd()
+	p1.SetArgs([]string{
+		flagStub, stubPath,
+		flagOutput, fatV1,
+		flagName, "v1-app",
+		"-v", "v1=" + v1Path,
+		flagSkipELF,
+		"--format-version", "1",
+	})
+	require.NoError(t, p1.Execute())
+
+	// Build the real microfat CLI binary to run as a subprocess
+	cliBin := filepath.Join(tempDir, "microfat_cli")
+	buildCmd := exec.Command("go", "build", "-o", cliBin, ".")
+	buildCmd.Env = append(os.Environ(), "GOTOOLCHAIN=local")
+	out, err := buildCmd.CombinedOutput()
+	require.NoError(t, err, "compiling microfat: %s", string(out))
+
+	subtests := []struct {
+		name         string
+		cmdSub       string // "inspect" or "info"
+		target       string
+		wantExitCode int
+		isV1         bool
+		isInvalid    bool
+	}{
+		{name: "Inspect_V2_JSON_StdoutPureJSON", cmdSub: "inspect", target: fatV2, wantExitCode: 0, isV1: false},
+		{name: "Info_V2_JSON_StdoutPureJSON", cmdSub: "info", target: fatV2, wantExitCode: 0, isV1: false},
+		{name: "Inspect_V1_JSON_StderrWarning", cmdSub: "inspect", target: fatV1, wantExitCode: 0, isV1: true},
+		{name: "Info_V1_JSON_StderrWarning", cmdSub: "info", target: fatV1, wantExitCode: 0, isV1: true},
+		{name: "Inspect_NonFat_NonZeroExit", cmdSub: "inspect", target: stubPath, wantExitCode: 1, isInvalid: true},
+		{name: "Info_NonFat_NonZeroExit", cmdSub: "info", target: stubPath, wantExitCode: 1, isInvalid: true},
+		{name: "Inspect_MissingFile_NonZeroExit", cmdSub: "inspect", target: filepath.Join(tempDir, "missing"), wantExitCode: 1, isInvalid: true},
+	}
+
+	for _, tc := range subtests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := exec.Command(cliBin, tc.cmdSub, "--json", tc.target)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			runErr := cmd.Run()
+			if tc.wantExitCode == 0 {
+				require.NoError(t, runErr, "expected exit 0, stderr: %s", stderr.String())
+
+				// Stdout must be strictly valid JSON
+				var parsed map[string]any
+				err := json.Unmarshal(stdout.Bytes(), &parsed)
+				require.NoError(t, err, "stdout must be strictly valid JSON: %s", stdout.String())
+
+				if tc.isV1 {
+					assert.Contains(t, stderr.String(), "[microfat:warn]", "stderr must contain warning")
+					assert.Contains(t, stderr.String(), "Format v1 is deprecated")
+				} else {
+					assert.NotContains(t, stderr.String(), "deprecated")
+				}
+			} else {
+				require.Error(t, runErr)
+				var exitErr *exec.ExitError
+				require.ErrorAs(t, runErr, &exitErr)
+				assert.Equal(t, tc.wantExitCode, exitErr.ExitCode())
+				assert.Empty(t, strings.TrimSpace(stdout.String()), "stdout must be empty on error")
+				assert.NotEmpty(t, strings.TrimSpace(stderr.String()), "stderr must contain error details")
+			}
+		})
+	}
+}
+
+func TestFormatVersionName(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "legacy JSON manifest", formatVersionName(format.FormatVersion1))
+	assert.Equal(t, "compact binary table", formatVersionName(format.FormatVersion2))
+	assert.Equal(t, "unknown", formatVersionName(999))
 }
 

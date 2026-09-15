@@ -34,6 +34,7 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 | Guide | Description |
 | :--- | :--- |
 | [**v0.2.3 Release Notes**](docs/releases/v0.2.3.md) | Safety fixes, benchmark scope and release limitations. |
+| [**Release Artifacts Guide**](docs/release-artifacts.md) | Universal fat archives, bundled launcher stubs, and Format v1 deprecation. |
 | [**Production Roadmap**](docs/roadmap.md) | Release priorities, safety gates and experimental scope. |
 | 📊 [**Demo & Benchmark Suite**](examples/demo/README.md) | Multi-workload benchmark application testing SIMD vector math, JSON/Zstd processing, and concurrent workers. |
 | [**Reproducible Server Benchmarks**](docs/benchmarks/README.md) | Paired native/fat server trials, external Fortio load, resource telemetry, and verifiable evidence. |
@@ -50,6 +51,45 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 
 ### 1. Installation
 
+#### Pre-compiled Universal Fat Archives (Recommended)
+Download the universal fat archive for your architecture (`microfat_<version>_linux_amd64.tar.gz` or `microfat_<version>_linux_arm64.tar.gz`) from the [GitHub Releases](https://github.com/EpicBlackWolfZ/microfat/releases) page. Each archive bundles the self-dispatching `microfat` CLI binary alongside both launcher stubs (`microfat-stub` and `microfat-stub-minimal`).
+
+```bash
+set -euo pipefail
+
+VERSION="0.2.3"
+ARCH="amd64" # or "arm64"
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+ARCHIVE_NAME="microfat_${VERSION}_linux_${ARCH}.tar.gz"
+RELEASE_URL="https://github.com/EpicBlackWolfZ/microfat/releases/download/v${VERSION}"
+
+# 1. Download archive, checksums, and signature bundle using fail-on-error behavior
+curl --fail -sSL -o "$WORK_DIR/$ARCHIVE_NAME" "$RELEASE_URL/$ARCHIVE_NAME"
+curl --fail -sSL -o "$WORK_DIR/checksums.txt" "$RELEASE_URL/checksums.txt"
+curl --fail -sSL -o "$WORK_DIR/checksums.txt.sig" "$RELEASE_URL/checksums.txt.sig"
+
+# 2. Verify keyless Cosign signature against official release identity
+cosign verify-blob \
+  --bundle "$WORK_DIR/checksums.txt.sig" \
+  --certificate-identity "https://github.com/EpicBlackWolfZ/microfat/.github/workflows/release.yml@refs/tags/v${VERSION}" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "$WORK_DIR/checksums.txt"
+
+# 3. Verify SHA-256 archive checksum (exact filename match only)
+ENTRY=$(awk -v target="$ARCHIVE_NAME" '$2 == target || $2 == "*"target { print $1, $2 }' "$WORK_DIR/checksums.txt")
+[ -n "$ENTRY" ] && [ "$(printf '%s\n' "$ENTRY" | wc -l)" -eq 1 ]
+(cd "$WORK_DIR" && printf '%s\n' "$ENTRY" | sha256sum --check --status)
+
+# 4. Extract and install solely the 3 executables to /usr/local/bin
+tar -xzf "$WORK_DIR/$ARCHIVE_NAME" -C "$WORK_DIR"
+sudo install -m 0755 "$WORK_DIR/microfat" /usr/local/bin/microfat
+sudo install -m 0755 "$WORK_DIR/microfat-stub" /usr/local/bin/microfat-stub
+sudo install -m 0755 "$WORK_DIR/microfat-stub-minimal" /usr/local/bin/microfat-stub-minimal
+```
+
+#### Via Go Toolchain
 ```bash
 go install github.com/EpicBlackWolfZ/microfat/cmd/microfat@latest
 go install github.com/EpicBlackWolfZ/microfat/cmd/microfat-stub@latest

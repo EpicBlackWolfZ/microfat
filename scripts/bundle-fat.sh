@@ -3,50 +3,22 @@ set -euo pipefail
 
 # Helper to resolve variant path with retry/wait for concurrent GoReleaser builds
 resolve_variant_with_wait() {
-    local timeout=60
-    local elapsed=0
-    while [[ $elapsed -lt $timeout ]]; do
+    local timeout_seconds=60
+    local poll_interval=0.5
+    local max_iterations=120
+    local count=0
+    while [[ $count -lt $max_iterations ]]; do
         for p in "$@"; do
             if [[ -f "$p" ]]; then
                 echo "$p"
                 return 0
             fi
         done
-        sleep 0.5
-        elapsed=$((elapsed + 1))
+        sleep "$poll_interval"
+        count=$((count + 1))
     done
-    echo ""
-}
-
-# Helper to package fat binary into tar.gz with docs and generate SBOMs
-package_fat_archive() {
-    local fat_bin="$1"
-    local arch_name="$2"
-    local out_tar="dist/microfat_linux_${arch_name}_fat.tar.gz"
-    local stage_dir="dist/.stage_microfat_linux_${arch_name}_fat"
-
-    echo "==> Packaging ${arch_name} fat binary into ${out_tar}..."
-    rm -rf "$stage_dir"
-    mkdir -p "$stage_dir"
-    cp "$fat_bin" "$stage_dir/microfat"
-    cp README.md LICENSE SECURITY.md "$stage_dir/"
-    if [[ -d docs ]]; then
-        cp -r docs "$stage_dir/"
-    fi
-
-    tar -czf "$out_tar" -C "$stage_dir" .
-    rm -rf "$stage_dir"
-    echo "✔ Created fat archive: ${out_tar}"
-
-    if command -v syft &> /dev/null; then
-        echo "==> Generating SBOMs for ${out_tar}..."
-        syft "$out_tar" -o spdx-json > "${out_tar}.spdx.json"
-        syft "$out_tar" -o cyclonedx-json > "${out_tar}.cyclonedx.json"
-        echo "✔ Generated SBOMs for ${out_tar}"
-    elif [[ "${MICROFAT_REQUIRE_SBOM:-0}" == 1 ]]; then
-        echo "ERROR: syft is required for release SBOMs" >&2
-        exit 1
-    fi
+    echo "ERROR: Timed out waiting for build artifact. None of the following paths exist: $*" >&2
+    return 1
 }
 
 # 1. AMD64 Fat Binary Assembly
@@ -69,8 +41,6 @@ if [[ -n "$V1" && -n "$V2" && -n "$V3" && -n "$V4" && -n "$STUB_AMD64" ]]; then
         "$OUT_AMD64" verify "$OUT_AMD64"
     fi
     echo "✔ Microfat AMD64 universal fat binary successfully bundled: $OUT_AMD64"
-
-    package_fat_archive "$OUT_AMD64" "amd64"
 else
     echo "ERROR: Missing required AMD64 build artifacts" >&2
     exit 1
@@ -95,8 +65,6 @@ if [[ -n "$ARM_V80" && -n "$ARM_V82" && -n "$ARM_V90" && -n "$STUB_ARM64" ]]; th
         "$OUT_ARM64" verify "$OUT_ARM64"
     fi
     echo "✔ Microfat ARM64 universal fat binary successfully bundled: $OUT_ARM64"
-
-    package_fat_archive "$OUT_ARM64" "arm64"
 else
     echo "ERROR: Missing required ARM64 build artifacts" >&2
     exit 1

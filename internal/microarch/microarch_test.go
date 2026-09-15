@@ -1248,3 +1248,64 @@ func TestARM64Evaluation_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestCanonicalArch_Aliases(t *testing.T) {
+	t.Parallel()
+	if got := canonicalArch("aarch64"); got != ArchARM64 {
+		t.Errorf("canonicalArch(aarch64) = %q, want %q", got, ArchARM64)
+	}
+	if got := canonicalArch("AARCH64"); got != ArchARM64 {
+		t.Errorf("canonicalArch(AARCH64) = %q, want %q", got, ArchARM64)
+	}
+	if got := canonicalArch("x86_64"); got != ArchAMD64 {
+		t.Errorf("canonicalArch(x86_64) = %q, want %q", got, ArchAMD64)
+	}
+	if got := canonicalArch("X86_64"); got != ArchAMD64 {
+		t.Errorf("canonicalArch(X86_64) = %q, want %q", got, ArchAMD64)
+	}
+	if got := canonicalArch("mips"); got != "mips" {
+		t.Errorf("canonicalArch(mips) = %q, want %q", got, "mips")
+	}
+}
+
+func TestCollectARM64Requirements_Unknown(t *testing.T) {
+	t.Parallel()
+	if collectARM64Requirements("unknown_level", nil) {
+		t.Errorf("expected false for unknown ARM64 level")
+	}
+}
+
+func TestResolveForcedVariant_EdgeCases(t *testing.T) {
+	t.Parallel()
+	_, err := resolveForcedVariant(ArchAMD64, 1, AMD64v1, []string{"v1"}, "invalid_level_xyz")
+	if !errors.Is(err, ErrIncompatibleForcedVariant) {
+		t.Errorf("expected ErrIncompatibleForcedVariant, got: %v", err)
+	}
+
+	_, err = resolveForcedVariant(ArchAMD64, 3, AMD64v3, []string{"v1"}, "v2")
+	if !errors.Is(err, ErrVariantNotEmbedded) {
+		t.Errorf("expected ErrVariantNotEmbedded, got: %v", err)
+	}
+}
+
+func TestSelectVariantForHost_ArchAliases(t *testing.T) {
+	t.Parallel()
+	host := Info{
+		Arch:  "x86_64",
+		Level: "v3",
+	}
+	res, err := SelectVariantForHost("amd64", host, []string{"v1", "v3"}, Policy{})
+	if err != nil || res.SelectedVariant != "v3" {
+		t.Errorf("expected v3, got %v (err: %v)", res.SelectedVariant, err)
+	}
+
+	armHost := Info{
+		Arch:     "aarch64",
+		Level:    ARM64v8_0,
+		Features: []string{"fp", "asimd"},
+	}
+	res, err = SelectVariantForHost("arm64", armHost, []string{ARM64v8_0}, Policy{})
+	if err != nil || res.SelectedVariant != ARM64v8_0 {
+		t.Errorf("expected %s, got %v (err: %v)", ARM64v8_0, res.SelectedVariant, err)
+	}
+}
+

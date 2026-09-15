@@ -87,3 +87,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MICROFAT_REQUIRE_SBOM: '1'
+
+      - name: Mandatory Product-Oriented Release Validation
+        run: |
+          MICROFAT_RELEASE_TESTS=required MICROFAT_RELEASE_DIST=$(pwd)/dist go test -v ./cmd/microfat -run '^TestGoReleaserSnapshotArtifacts$' -count=1
+
+      - name: Verify Signed Checksums with Cosign
+        run: |
+          cosign verify-blob \
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ github.ref_name }}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --bundle dist/checksums.txt.sig \
+            dist/checksums.txt

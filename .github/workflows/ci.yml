@@ -88,6 +88,9 @@ jobs:
           go-version: '1.27.1'
           cache: true
 
+      - name: Install Syft (SBOM Generation)
+        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+
       - name: Install gotestsum
         run: go install gotest.tools/gotestsum@v1.13.0
 
@@ -184,6 +187,9 @@ jobs:
           go-version: '1.27.1'
           cache: true
 
+      - name: Install Syft (SBOM Generation)
+        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+
       - name: Verify release publication contracts
         run: |
           python3 scripts/release_finalize_test.py
@@ -197,9 +203,24 @@ jobs:
           ./bin/microfat --help
           ./bin/microfat detect
 
-      - name: GoReleaser Snapshot Build & Self-Bundling Verification
+      - name: Release Artifact Quality & Serialized Snapshot Verification
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
-          version: '~> v2'
-          args: release --snapshot --clean --skip=publish,sign,announce,validate,sbom
+          version: 'v2.18.0'
+          args: release --snapshot --clean --parallelism=1 --skip=publish,sign,announce,validate
+
+      - name: Mandatory Product-Oriented Release Validation (Serialized)
+        run: |
+          MICROFAT_RELEASE_TESTS=required MICROFAT_RELEASE_DIST=$(pwd)/dist go test -v ./cmd/microfat -run '^TestGoReleaserSnapshotArtifacts$' -count=1
+
+      - name: Release Artifact Quality & Concurrent Snapshot Verification
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: 'v2.18.0'
+          args: release --snapshot --clean --skip=publish,sign,announce,validate
+
+      - name: Mandatory Product-Oriented Release Validation (Concurrent)
+        run: |
+          MICROFAT_RELEASE_TESTS=required MICROFAT_RELEASE_DIST=$(pwd)/dist go test -v ./cmd/microfat -run '^TestGoReleaserSnapshotArtifacts$' -count=1

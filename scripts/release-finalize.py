@@ -29,11 +29,10 @@ def validate_assets(release):
     if len(names) != len(assets) or not {'checksums.txt', 'checksums.txt.sig'} <= names:
         raise SystemExit('Missing, empty or duplicate signed release assets')
     version = release['tag_name'].removeprefix('v')
-    archives = {f'microfat_{version}_linux_amd64_v{level}.tar.gz' for level in range(1, 5)}
-    archives.update(f'microfat_{version}_linux_arm64_{level}.tar.gz' for level in ('v8.0', 'v8.2', 'v9.0'))
-    archives.update(f'microfat-stub{profile}_{version}_linux_{arch}_{level}.tar.gz'
-                    for profile in ('', '-minimal') for arch, level in (('amd64', 'v1'), ('arm64', 'v8.0')))
-    archives.update(f'microfat_linux_{arch}_fat.tar.gz' for arch in ('amd64', 'arm64'))
+    archives = {
+        f'microfat_{version}_linux_amd64.tar.gz',
+        f'microfat_{version}_linux_arm64.tar.gz',
+    }
     required = archives | {name + suffix for name in archives for suffix in ('.spdx.json', '.cyclonedx.json')}
     if not required <= names:
         raise SystemExit(f'Missing archives or SBOMs: {sorted(required - names)}')
