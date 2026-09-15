@@ -4,13 +4,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
+
+	"github.com/EpicBlackWolfZ/microfat/internal/testutil/seccomp"
+)
+
+const (
+	runnerExitCodeUsageError      = 64
+	runnerExitCodeSelfTestFailure = 99
+	runnerExitCodeMemfdDenied     = 42
+	testSimulatedTID              = 1337
 )
 
 func TestClassifySeccompResult(t *testing.T) {
@@ -20,48 +28,48 @@ func TestClassifySeccompResult(t *testing.T) {
 		name       string
 		r1         uintptr
 		errno      syscall.Errno
-		wantAction SeccompAction
+		wantAction seccomp.SeccompAction
 		wantErrStr string
 	}{
 		{
 			name:       "Success_ZeroReturnZeroErrno",
 			r1:         0,
 			errno:      0,
-			wantAction: SeccompActionSuccess,
+			wantAction: seccomp.SeccompActionSuccess,
 		},
 		{
 			name:       "ThreadError_NonZeroTIDZeroErrno",
-			r1:         1337,
+			r1:         testSimulatedTID,
 			errno:      0,
-			wantAction: SeccompActionThreadError,
+			wantAction: seccomp.SeccompActionThreadError,
 			wantErrStr: "seccomp TSYNC failed on thread 1337",
 		},
 		{
 			name:       "FallbackPermitted_ENOSYS",
 			r1:         0,
 			errno:      unix.ENOSYS,
-			wantAction: SeccompActionFallbackPermitted,
+			wantAction: seccomp.SeccompActionFallbackPermitted,
 			wantErrStr: "fallback permitted",
 		},
 		{
 			name:       "FallbackPermitted_EINVAL",
 			r1:         0,
 			errno:      unix.EINVAL,
-			wantAction: SeccompActionFallbackPermitted,
+			wantAction: seccomp.SeccompActionFallbackPermitted,
 			wantErrStr: "fallback permitted",
 		},
 		{
 			name:       "HardError_EPERM",
 			r1:         0,
 			errno:      unix.EPERM,
-			wantAction: SeccompActionHardError,
+			wantAction: seccomp.SeccompActionHardError,
 			wantErrStr: "operation not permitted",
 		},
 		{
 			name:       "HardError_EACCES",
 			r1:         0,
 			errno:      unix.EACCES,
-			wantAction: SeccompActionHardError,
+			wantAction: seccomp.SeccompActionHardError,
 			wantErrStr: "permission denied",
 		},
 	}
@@ -70,7 +78,7 @@ func TestClassifySeccompResult(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			action, err := ClassifySeccompResult(tc.r1, tc.errno)
+			action, err := seccomp.ClassifySeccompResult(tc.r1, tc.errno)
 			assert.Equal(t, tc.wantAction, action)
 			if tc.wantErrStr != "" {
 				require.Error(t, err)
@@ -140,7 +148,94 @@ func main() {
 		// Exit code 42 indicates MEMFD_DENIED_ENOSYS
 		var exitErr *exec.ExitError
 		require.ErrorAs(t, err, &exitErr)
-		assert.Equal(t, 42, exitErr.ExitCode(), "probe should exit with 42 (ENOSYS)")
-		assert.True(t, strings.Contains(string(probeOut), "MEMFD_DENIED_ENOSYS"))
+		assert.Equal(t, runnerExitCodeMemfdDenied, exitErr.ExitCode(), "probe should exit with 42 (ENOSYS)")
+		assert.Contains(t, string(probeOut), "MEMFD_DENIED_ENOSYS")
+	})
+
+	t.Run("PositiveTIDFailureAbortsWithoutExecutingTarget_Flag", func(t *testing.T) {
+		markerFile := filepath.Join(tempDir, "marker-flag.txt")
+		// Target command is a shell script that touches the marker file
+		scriptSrc := filepath.Join(tempDir, "touch-marker-flag.sh")
+		scriptContent := "#!/bin/sh\ntouch \"" + markerFile + "\"\n"
+		require.NoError(t, os.WriteFile(scriptSrc, []byte(scriptContent), 0o755))
+
+		cmd := exec.Command(runnerBin, "--simulate-tsync-tid=1337", scriptSrc)
+		runOut, err := cmd.CombinedOutput()
+		require.Error(t, err, "runner should fail when TSYNC returns thread ID")
+
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, err, &exitErr)
+		assert.Equal(t, runnerExitCodeSelfTestFailure, exitErr.ExitCode())
+		assert.Contains(t, string(runOut), "seccomp TSYNC failed on thread 1337")
+		assert.NoFileExists(t, markerFile, "target binary/script must NOT be executed when filter installation fails")
+	})
+
+	t.Run("PositiveTIDFailureAbortsWithoutExecutingTarget_Env", func(t *testing.T) {
+		markerFile := filepath.Join(tempDir, "marker-env.txt")
+		scriptSrc := filepath.Join(tempDir, "touch-marker-env.sh")
+		scriptContent := "#!/bin/sh\ntouch \"" + markerFile + "\"\n"
+		require.NoError(t, os.WriteFile(scriptSrc, []byte(scriptContent), 0o755))
+
+		cmd := exec.Command(runnerBin, scriptSrc)
+		cmd.Env = append(os.Environ(), "MICROFAT_TEST_SIMULATE_TSYNC_TID=1337")
+		runOut, err := cmd.CombinedOutput()
+		require.Error(t, err, "runner should fail when TSYNC returns thread ID via env")
+
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, err, &exitErr)
+		assert.Equal(t, runnerExitCodeSelfTestFailure, exitErr.ExitCode())
+		assert.Contains(t, string(runOut), "seccomp TSYNC failed on thread 1337")
+		assert.NoFileExists(t, markerFile, "target binary/script must NOT be executed when filter installation fails")
+	})
+
+	t.Run("HardErrorAbortsWithoutExecutingTarget", func(t *testing.T) {
+		markerFile := filepath.Join(tempDir, "marker-harderr.txt")
+		scriptSrc := filepath.Join(tempDir, "touch-marker-harderr.sh")
+		scriptContent := "#!/bin/sh\ntouch \"" + markerFile + "\"\n"
+		require.NoError(t, os.WriteFile(scriptSrc, []byte(scriptContent), 0o755))
+
+		cmd := exec.Command(runnerBin, "--simulate-seccomp-errno=EPERM", scriptSrc)
+		runOut, err := cmd.CombinedOutput()
+		require.Error(t, err)
+
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, err, &exitErr)
+		assert.Equal(t, runnerExitCodeSelfTestFailure, exitErr.ExitCode())
+		assert.Contains(t, string(runOut), "operation not permitted")
+		assert.NoFileExists(t, markerFile)
+	})
+
+	t.Run("FallbackFailureAbortsWithoutExecutingTarget", func(t *testing.T) {
+		markerFile := filepath.Join(tempDir, "marker-fallbackerr.txt")
+		scriptSrc := filepath.Join(tempDir, "touch-marker-fallbackerr.sh")
+		scriptContent := "#!/bin/sh\ntouch \"" + markerFile + "\"\n"
+		require.NoError(t, os.WriteFile(scriptSrc, []byte(scriptContent), 0o755))
+
+		cmd := exec.Command(runnerBin, "--simulate-fallback-errno=EPERM", scriptSrc)
+		runOut, err := cmd.CombinedOutput()
+		require.Error(t, err)
+
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, err, &exitErr)
+		assert.Equal(t, runnerExitCodeSelfTestFailure, exitErr.ExitCode())
+		assert.Contains(t, string(runOut), "prctl seccomp fallback failed")
+		assert.NoFileExists(t, markerFile)
+	})
+
+	t.Run("FallbackThreadErrorAbortsWithoutExecutingTarget", func(t *testing.T) {
+		markerFile := filepath.Join(tempDir, "marker-fallbacktid.txt")
+		scriptSrc := filepath.Join(tempDir, "touch-marker-fallbacktid.sh")
+		scriptContent := "#!/bin/sh\ntouch \"" + markerFile + "\"\n"
+		require.NoError(t, os.WriteFile(scriptSrc, []byte(scriptContent), 0o755))
+
+		cmd := exec.Command(runnerBin, "--simulate-fallback-tid=42", scriptSrc)
+		runOut, err := cmd.CombinedOutput()
+		require.Error(t, err)
+
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, err, &exitErr)
+		assert.Equal(t, runnerExitCodeSelfTestFailure, exitErr.ExitCode())
+		assert.Contains(t, string(runOut), "prctl seccomp fallback failed on thread 42")
+		assert.NoFileExists(t, markerFile)
 	})
 }
