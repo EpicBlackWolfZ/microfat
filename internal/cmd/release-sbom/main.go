@@ -271,6 +271,9 @@ func buildSPDXPackages(
 		if isOmittedBinaryPackage(p.Name) {
 			continue
 		}
+		if p.SPDXID == "" {
+			p.SPDXID = fmt.Sprintf("SPDXRef-Package-%s", sanitizeSPDXID(p.Name))
+		}
 		cleanPackages = append(cleanPackages, p)
 		existingPkgByName[p.Name] = p
 	}
@@ -505,6 +508,9 @@ func buildCDXComponents(
 	for _, c := range docComponents {
 		if isOmittedBinaryComponent(c.Name) {
 			continue
+		}
+		if c.BOMRef == "" {
+			c.BOMRef = fmt.Sprintf("pkg:%s", c.Name)
 		}
 		cleanComponents = append(cleanComponents, c)
 		existingCompByName[c.Name] = c

@@ -1051,23 +1051,47 @@ func ensureSyftInPATH(t *testing.T) {
 	}
 	mockDir := t.TempDir()
 	mockSyftPath := filepath.Join(mockDir, "syft")
-	mockScript := "#!/bin/sh\n" +
-		"format=\"spdx-json\"\n" +
-		"for arg in \"$@\"; do\n" +
-		"\tif [ \"$arg\" = \"cyclonedx-json\" ] || [ \"$arg\" = \"cyclonedx\" ]; then\n" +
-		"\t\tformat=\"cyclonedx-json\"\n" +
-		"\tfi\n" +
-		"done\n" +
-		"if [ \"$format\" = \"cyclonedx-json\" ]; then\n" +
-		"\techo '{\"bomFormat\":\"CycloneDX\",\"specVersion\":\"1.5\",\"metadata\":{\"component\":{\"name\":\"archive\"}}," +
-		"\"components\":[{\"name\":\"github.com/spf13/cobra\"},{\"name\":\"github.com/EpicBlackWolfZ/microfat\"}]}'\n" +
-		"else\n" +
-		"\techo '{\"spdxVersion\":\"SPDX-2.3\",\"name\":\"archive\",\"documentNamespace\":\"https://anchore.com/syft/dir/mock\"," +
-		"\"creationInfo\":{\"created\":\"2026-09-15T12:00:00Z\",\"creators\":[\"Tool: syft-mock\"]}," +
-		"\"packages\":[{\"name\":\"github.com/spf13/cobra\"},{\"name\":\"github.com/EpicBlackWolfZ/microfat\"}," +
-		"{\"name\":\"github.com/klauspost/compress\"}]}'\n" +
-		"fi\n" +
-		"exit 0\n"
+	mockScript := `#!/bin/sh
+format="spdx-json"
+for arg in "$@"; do
+	if [ "$arg" = "cyclonedx-json" ] || [ "$arg" = "cyclonedx" ]; then
+		format="cyclonedx-json"
+	fi
+done
+if [ "$format" = "cyclonedx-json" ]; then
+	cat << 'EOF'
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "metadata": {
+    "component": { "name": "archive" }
+  },
+  "components": [
+    { "bom-ref": "pkg:golang/github.com/spf13/cobra@v1.8.0", "name": "github.com/spf13/cobra" },
+    { "bom-ref": "pkg:golang/github.com/EpicBlackWolfZ/microfat", "name": "github.com/EpicBlackWolfZ/microfat" }
+  ]
+}
+EOF
+else
+	cat << 'EOF'
+{
+  "spdxVersion": "SPDX-2.3",
+  "name": "archive",
+  "documentNamespace": "https://anchore.com/syft/dir/mock",
+  "creationInfo": {
+    "created": "2026-09-15T12:00:00Z",
+    "creators": ["Tool: syft-mock"]
+  },
+  "packages": [
+    { "SPDXID": "SPDXRef-Package-github.com-spf13-cobra", "name": "github.com/spf13/cobra" },
+    { "SPDXID": "SPDXRef-Package-github.com-EpicBlackWolfZ-microfat", "name": "github.com/EpicBlackWolfZ/microfat" },
+    { "SPDXID": "SPDXRef-Package-github.com-klauspost-compress", "name": "github.com/klauspost/compress" }
+  ]
+}
+EOF
+fi
+exit 0
+`
 	require.NoError(t, os.WriteFile(mockSyftPath, []byte(mockScript), 0o755))
 	t.Setenv("PATH", mockDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
 }
