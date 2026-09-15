@@ -592,6 +592,73 @@ func TestExtractVariantsFromFatBinary_Errors(t *testing.T) {
 	})
 }
 
+func TestExtractSingleVariant_DefenseInDepth(t *testing.T) {
+	tempDir := t.TempDir()
+	dummyFile, err := os.CreateTemp(tempDir, "dummy")
+	require.NoError(t, err)
+	defer func() { _ = dummyFile.Close() }()
+
+	t.Run("InvalidChecksum", func(t *testing.T) {
+		v := format.VariantEntry{
+			Level:  "v1",
+			SHA256: "not-a-valid-checksum",
+		}
+		err := extractSingleVariant(dummyFile, v, nil, tempDir)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid checksum for variant")
+	})
+
+	t.Run("InvalidUncompressedSize", func(t *testing.T) {
+		v := format.VariantEntry{
+			Level:            "v1",
+			SHA256:           strings.Repeat("a", 64),
+			UncompressedSize: 0,
+		}
+		err := extractSingleVariant(dummyFile, v, nil, tempDir)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid uncompressed size")
+	})
+
+	t.Run("InvalidOffsetOrCompressedSize", func(t *testing.T) {
+		v := format.VariantEntry{
+			Level:            "v1",
+			SHA256:           strings.Repeat("a", 64),
+			UncompressedSize: 10,
+			Offset:           -1,
+			CompressedSize:   10,
+		}
+		err := extractSingleVariant(dummyFile, v, nil, tempDir)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid offset")
+	})
+}
+
+func TestReadSharedDictionary_DefenseInDepth(t *testing.T) {
+	tempDir := t.TempDir()
+	dummyFile, err := os.CreateTemp(tempDir, "dummy")
+	require.NoError(t, err)
+	defer func() { _ = dummyFile.Close() }()
+
+	t.Run("SizeOutOfBounds", func(t *testing.T) {
+		idx := &format.Index{
+			DictionarySize: format.MaxDictionarySize + 1,
+		}
+		_, err := readSharedDictionary(dummyFile, idx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "out of bounds")
+	})
+
+	t.Run("InvalidChecksum", func(t *testing.T) {
+		idx := &format.Index{
+			DictionarySize:   10,
+			DictionarySHA256: "not-valid-hex",
+		}
+		_, err := readSharedDictionary(dummyFile, idx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing or invalid sha256 checksum")
+	})
+}
+
 func createSyntheticFatBinary(t *testing.T, targetArch string, dictBytes []byte, variantPayload []byte, compCodec string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -740,10 +807,35 @@ func TestExtractVariantsFromFatBinary_WithDict(t *testing.T) {
 	assert.Equal(t, variantPayload, readPayload)
 }
 
-func TestGenerate_SyntheticArchive(t *testing.T) {
-	if _, err := exec.LookPath("syft"); err != nil {
-		t.Skip("syft not available in PATH")
+func ensureSyftInPATH(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("syft"); err == nil {
+		return
 	}
+	mockDir := t.TempDir()
+	mockSyftPath := filepath.Join(mockDir, "syft")
+	mockScript := "#!/bin/sh\n" +
+		"format=\"spdx-json\"\n" +
+		"for arg in \"$@\"; do\n" +
+		"\tif [ \"$arg\" = \"cyclonedx-json\" ] || [ \"$arg\" = \"cyclonedx\" ]; then\n" +
+		"\t\tformat=\"cyclonedx-json\"\n" +
+		"\tfi\n" +
+		"done\n" +
+		"if [ \"$format\" = \"cyclonedx-json\" ]; then\n" +
+		"\techo '{\"bomFormat\":\"CycloneDX\",\"specVersion\":\"1.5\",\"metadata\":{\"component\":{\"name\":\"archive\"}}," +
+		"\"components\":[{\"name\":\"github.com/spf13/cobra\"},{\"name\":\"github.com/EpicBlackWolfZ/microfat\"}]}'\n" +
+		"else\n" +
+		"\techo '{\"spdxVersion\":\"SPDX-2.3\",\"name\":\"archive\",\"documentNamespace\":\"https://anchore.com/syft/dir/mock\"," +
+		"\"packages\":[{\"name\":\"github.com/spf13/cobra\"},{\"name\":\"github.com/EpicBlackWolfZ/microfat\"}," +
+		"{\"name\":\"github.com/klauspost/compress\"}]}'\n" +
+		"fi\n" +
+		"exit 0\n"
+	require.NoError(t, os.WriteFile(mockSyftPath, []byte(mockScript), 0o755))
+	t.Setenv("PATH", mockDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+}
+
+func TestGenerate_SyntheticArchive(t *testing.T) {
+	ensureSyftInPATH(t)
 
 	tempDir := t.TempDir()
 	archivePath := filepath.Join(tempDir, "microfat_0.2.3_linux_amd64.tar.gz")
@@ -940,3 +1032,40 @@ func TestExtractVariantsFromFatBinary_EdgeCases(t *testing.T) {
 		assert.Contains(t, err.Error(), "opening fat binary")
 	})
 }
+
+func TestRunSyft_ExecutionError(t *testing.T) {
+	mockDir := t.TempDir()
+	mockSyftPath := filepath.Join(mockDir, "syft")
+	mockScript := "#!/bin/sh\necho \"simulated syft error\" >&2\nexit 2\n"
+	require.NoError(t, os.WriteFile(mockSyftPath, []byte(mockScript), 0o755))
+	t.Setenv("PATH", mockDir)
+
+	tempDir := t.TempDir()
+	_, err := runSyft(tempDir, "spdx-json")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "syft failed with exit code 2: simulated syft error")
+}
+
+func TestAttributeSBOM_InvalidJSON(t *testing.T) {
+	t.Parallel()
+	_, err := attributeSBOM([]byte("{invalid-json"), "spdx-json", "app.tar.gz", "/tmp")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing syft JSON output")
+}
+
+func TestWriteAtomic_CreateTempError(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() == 0 {
+		t.Skip("skipping read-only directory test when running as root")
+	}
+	tempDir := t.TempDir()
+	roDir := filepath.Join(tempDir, "readonly")
+	require.NoError(t, os.MkdirAll(roDir, 0o555))
+	defer func() { _ = os.Chmod(roDir, 0o755) }()
+
+	target := filepath.Join(roDir, "out.json")
+	err := writeAtomic(target, []byte("test"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "creating temp file in")
+}
+

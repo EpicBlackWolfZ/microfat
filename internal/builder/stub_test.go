@@ -14,6 +14,8 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -330,6 +332,70 @@ func TestResolveStubPath_PATHFilteringAndMinimal(t *testing.T) {
 		if !errors.Is(err, ErrStubNotFound) {
 			t.Fatalf("expected ErrStubNotFound, got %v", err)
 		}
+	})
+}
+
+func TestResolveStubPath_ExplicitAndPATHValidationErrors(t *testing.T) {
+	f := setupStubTestFixture(t)
+
+	t.Run("ExplicitStub_RelativeWithEmptyBaseDir", func(t *testing.T) {
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(cwd) }()
+
+		sandbox := filepath.Join(f.tmpDir, "rel-base-empty")
+		require.NoError(t, os.MkdirAll(sandbox, 0o755))
+		stubPath := createDummyELF(t, sandbox, "my-stub.elf", testArchAMD64)
+		require.NoError(t, os.Chdir(sandbox))
+
+		res, err := ResolveStubPath("my-stub.elf", "", "")
+		require.NoError(t, err)
+		assert.Equal(t, stubPath, res)
+	})
+
+	t.Run("ExplicitStub_UnreadableFile", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("skipping unreadable file test when running as root")
+		}
+		unreadable := createDummyELF(t, f.tmpDir, "unreadable.elf", testArchAMD64)
+		require.NoError(t, os.Chmod(unreadable, 0o000))
+		defer func() { _ = os.Chmod(unreadable, 0o755) }()
+
+		_, err := ResolveStubPath(unreadable, "", "")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrStubNotFound))
+	})
+
+	t.Run("FindSiblingStub_DirectoryOrUnreadable", func(t *testing.T) {
+		siblingAsDir := filepath.Join(f.tmpDir, "sibling-as-dir")
+		require.NoError(t, os.MkdirAll(filepath.Join(siblingAsDir, "microfat-stub"), 0o755))
+		f.mockNativeDir(siblingAsDir)
+		_ = os.Setenv("PATH", "")
+
+		_, err := ResolveStubPath("", "", "")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrStubNotFound))
+	})
+
+	t.Run("PATH_DirectoryNonExecutableOrUnreadableCandidates", func(t *testing.T) {
+		dirCandidate := filepath.Join(f.tmpDir, "path-dir-candidate")
+		require.NoError(t, os.MkdirAll(filepath.Join(dirCandidate, "microfat-stub"), 0o755))
+
+		nonExecCandidate := filepath.Join(f.tmpDir, "path-nonexec-candidate")
+		require.NoError(t, os.MkdirAll(nonExecCandidate, 0o755))
+		p := createDummyELF(t, nonExecCandidate, "microfat-stub", testArchAMD64)
+		require.NoError(t, os.Chmod(p, 0o644))
+
+		emptySibling := filepath.Join(f.tmpDir, "empty-sibling-filter")
+		require.NoError(t, os.MkdirAll(emptySibling, 0o755))
+		f.mockNativeDir(emptySibling)
+
+		craftedPath := strings.Join([]string{dirCandidate, nonExecCandidate, f.trustedBinDir}, string(os.PathListSeparator))
+		_ = os.Setenv("PATH", craftedPath)
+
+		res, err := ResolveStubPath("", "", "")
+		require.NoError(t, err)
+		assert.Equal(t, f.pathStub, res)
 	})
 }
 
