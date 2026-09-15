@@ -360,17 +360,11 @@ func validateCDXHeader(doc *CDXDocument, facts *ArchiveFacts) error {
 	return nil
 }
 
-func validateCDXComponents(
+func populateCDXComponentsTree(
 	doc *CDXDocument,
-	facts *ArchiveFacts,
-	inv *ArchiveInventory,
-) (map[string]CDXComponent, map[string]bool, error) {
-	knownRefs := make(map[string]bool)
-	if doc.Metadata.Component.BOMRef != "" {
-		knownRefs[doc.Metadata.Component.BOMRef] = true
-	}
-	compByName := make(map[string]CDXComponent)
-
+	compByName map[string]CDXComponent,
+	knownRefs map[string]bool,
+) error {
 	var collectComponents func(comps []CDXComponent) error
 	collectComponents = func(comps []CDXComponent) error {
 		for _, c := range comps {
@@ -393,21 +387,21 @@ func validateCDXComponents(
 
 	if doc.Metadata.Component != nil && len(doc.Metadata.Component.Components) > 0 {
 		if err := collectComponents(doc.Metadata.Component.Components); err != nil {
-			return nil, nil, err
+			return err
 		}
 	}
 
-	if err := collectComponents(doc.Components); err != nil {
-		return nil, nil, err
-	}
+	return collectComponents(doc.Components)
+}
 
+func verifyCDXPayloadHashes(compByName map[string]CDXComponent, facts *ArchiveFacts) error {
 	for exeName, exe := range facts.Executables {
 		c, ok := compByName[exeName]
 		if !ok {
-			return nil, nil, fmt.Errorf("missing component for root executable: %s", exeName)
+			return fmt.Errorf("missing component for root executable: %s", exeName)
 		}
 		if err := verifyCDXHash(c, exe.SHA256); err != nil {
-			return nil, nil, fmt.Errorf("executable %s hash: %w", exeName, err)
+			return fmt.Errorf("executable %s hash: %w", exeName, err)
 		}
 	}
 
@@ -415,11 +409,32 @@ func validateCDXComponents(
 		vName := "microfat-variant-" + tier
 		c, ok := compByName[vName]
 		if !ok {
-			return nil, nil, fmt.Errorf("missing component for embedded variant: %s", vName)
+			return fmt.Errorf("missing component for embedded variant: %s", vName)
 		}
 		if err := verifyCDXHash(c, vf.SHA256); err != nil {
-			return nil, nil, fmt.Errorf("variant %s hash: %w", tier, err)
+			return fmt.Errorf("variant %s hash: %w", tier, err)
 		}
+	}
+	return nil
+}
+
+func validateCDXComponents(
+	doc *CDXDocument,
+	facts *ArchiveFacts,
+	inv *ArchiveInventory,
+) (map[string]CDXComponent, map[string]bool, error) {
+	knownRefs := make(map[string]bool)
+	if doc.Metadata.Component.BOMRef != "" {
+		knownRefs[doc.Metadata.Component.BOMRef] = true
+	}
+	compByName := make(map[string]CDXComponent)
+
+	if err := populateCDXComponentsTree(doc, compByName, knownRefs); err != nil {
+		return nil, nil, err
+	}
+
+	if err := verifyCDXPayloadHashes(compByName, facts); err != nil {
+		return nil, nil, err
 	}
 
 	if err := validateCDXDependencies(compByName, inv); err != nil {
@@ -451,34 +466,33 @@ func validateCDXDependencies(compByName map[string]CDXComponent, inv *ArchiveInv
 	return nil
 }
 
-func validateCDXGraph(
-	doc *CDXDocument,
-	facts *ArchiveFacts,
-	inv *ArchiveInventory,
-	compByName map[string]CDXComponent,
+func buildCDXDependencyMap(
+	deps []CDXDependency,
 	knownRefs map[string]bool,
-) error {
+) (map[string]map[string]bool, error) {
 	depMap := make(map[string]map[string]bool)
-	for _, dep := range doc.Dependencies {
+	for _, dep := range deps {
 		if !knownRefs[dep.Ref] {
-			return fmt.Errorf("orphaned reference in dependencies ref: %s", dep.Ref)
+			return nil, fmt.Errorf("orphaned reference in dependencies ref: %s", dep.Ref)
 		}
 		if depMap[dep.Ref] == nil {
 			depMap[dep.Ref] = make(map[string]bool)
 		}
 		for _, edge := range dep.DependsOn {
 			if !knownRefs[edge] {
-				return fmt.Errorf("orphaned reference in dependsOn: %s", edge)
+				return nil, fmt.Errorf("orphaned reference in dependsOn: %s", edge)
 			}
 			depMap[dep.Ref][edge] = true
 		}
 	}
+	return depMap, nil
+}
 
-	metaComp := doc.Metadata.Component
-	if len(depMap[metaComp.BOMRef]) > 0 {
-		return fmt.Errorf("archive root component must not declare functional dependency edges (containment is modeled via component assembly)")
-	}
-
+func verifyCDXComponentAssemblies(
+	metaComp *CDXComponent,
+	compByName map[string]CDXComponent,
+	facts *ArchiveFacts,
+) error {
 	metaCompByRef := make(map[string]bool)
 	for _, c := range metaComp.Components {
 		metaCompByRef[c.BOMRef] = true
@@ -501,7 +515,14 @@ func validateCDXGraph(
 			return fmt.Errorf("fat binary component assembly missing embedded variant component %s", tier)
 		}
 	}
+	return nil
+}
 
+func verifyCDXModuleDependencies(
+	inv *ArchiveInventory,
+	compByName map[string]CDXComponent,
+	depMap map[string]map[string]bool,
+) error {
 	for binID, binInv := range inv.Binaries {
 		sourceRef := getCDXBinaryRef(binID, compByName)
 		if sourceRef == "" {
@@ -518,6 +539,30 @@ func validateCDXGraph(
 		}
 	}
 	return nil
+}
+
+func validateCDXGraph(
+	doc *CDXDocument,
+	facts *ArchiveFacts,
+	inv *ArchiveInventory,
+	compByName map[string]CDXComponent,
+	knownRefs map[string]bool,
+) error {
+	depMap, err := buildCDXDependencyMap(doc.Dependencies, knownRefs)
+	if err != nil {
+		return err
+	}
+
+	metaComp := doc.Metadata.Component
+	if len(depMap[metaComp.BOMRef]) > 0 {
+		return fmt.Errorf("archive root component must not declare functional dependency edges (containment is modeled via component assembly)")
+	}
+
+	if err := verifyCDXComponentAssemblies(metaComp, compByName, facts); err != nil {
+		return err
+	}
+
+	return verifyCDXModuleDependencies(inv, compByName, depMap)
 }
 
 // ValidateCycloneDXBytes validates an in-memory CycloneDX document against archive facts and inventory.
