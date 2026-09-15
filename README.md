@@ -410,6 +410,42 @@ builds:
 
 ---
 
+## Development & Developer Workflow
+
+All daily development operations are automated through the root `Makefile`:
+
+```bash
+# View all targets and descriptions (respects NO_COLOR=1 and COLOR=0)
+make help
+
+# Run complete verification pipeline: tidy, fmt-check, lint, vuln, test, coverage gate, build
+make all
+
+# Format code across the repository with gofmt -s
+make fmt
+
+# Verify all Go source files are formatted cleanly
+make fmt-check
+
+# Run Go API modernizations ('go fix'), linter auto-fixes, and format code
+make fix
+
+# Check for Go 1.27 goroutine leaks on the benchmark workload
+make check-leaks
+
+# Run test suite while probing Go 1.27 goroutine leak detection
+make test-leaks
+
+# Open interactive browser UI for pprof profiles (e.g. heap, cpu, goroutine, mutex)
+make pprof PROFILE=heap
+
+# Verify finished fat binary stub commands (info, optimize-to, trim-to, prewarm)
+make demo-check
+```
+
+---
+
 ## License
 
 Apache 2.0
+

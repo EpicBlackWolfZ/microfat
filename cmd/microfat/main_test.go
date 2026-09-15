@@ -2,14 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
@@ -830,7 +835,7 @@ func TestPackAndInspect_DictionaryFlags(t *testing.T) {
 	v3Path := filepath.Join(tempDir, "app_v3")
 
 	var v1Buf, v3Buf bytes.Buffer
-	for i := 0; i < 800; i++ {
+	for i := range 800 {
 		str := fmt.Sprintf("runtime_symbol_record_%04d_metadata_hash_%x\n", i, (i*31)^0x12345678)
 		v1Buf.WriteString(str)
 		v3Buf.WriteString(str)
@@ -1291,7 +1296,6 @@ func TestInspectAndInfo_SubprocessStreams(t *testing.T) {
 	}
 
 	for _, tc := range subtests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			cmd := exec.Command(cliBin, tc.cmdSub, "--json", tc.target)
@@ -1333,3 +1337,117 @@ func TestFormatVersionName(t *testing.T) {
 	assert.Equal(t, "unknown", formatVersionName(999))
 }
 
+func TestPprofServerFlagAndEnv(t *testing.T) {
+	ln, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_, portStr, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	require.NoError(t, ln.Close())
+
+	rootCmd := newRootCmd()
+	var errBuf bytes.Buffer
+	rootCmd.SetErr(&errBuf)
+	rootCmd.SetArgs([]string{"--pprof-port", portStr, "detect"})
+
+	err = rootCmd.Execute()
+	require.NoError(t, err)
+	assert.Contains(t, errBuf.String(), "[microfat:pprof] serving pprof endpoints")
+
+	resp, err := http.Get("http://" + addr + "/debug/pprof/")
+	require.NoError(t, err)
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	leakResp, err := http.Get("http://" + addr + "/debug/pprof/goroutineleak?debug=1")
+	require.NoError(t, err)
+	defer func() {
+		_ = leakResp.Body.Close()
+	}()
+	assert.Equal(t, http.StatusOK, leakResp.StatusCode)
+	leakBody, err := io.ReadAll(leakResp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(leakBody), "total 0")
+}
+
+func TestPprofServerEnvVar(t *testing.T) {
+	ln, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_, portStr, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	require.NoError(t, ln.Close())
+
+	t.Setenv("MICROFAT_PPROF_PORT", portStr)
+
+	rootCmd := newRootCmd()
+	var errBuf bytes.Buffer
+	rootCmd.SetErr(&errBuf)
+	rootCmd.SetArgs([]string{"detect"})
+
+	err = rootCmd.Execute()
+	require.NoError(t, err)
+	assert.Contains(t, errBuf.String(), "[microfat:pprof] serving pprof endpoints")
+
+	resp, err := http.Get("http://" + addr + "/debug/pprof/")
+	require.NoError(t, err)
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	leakResp, err := http.Get("http://" + addr + "/debug/pprof/goroutineleak?debug=1")
+	require.NoError(t, err)
+	defer func() {
+		_ = leakResp.Body.Close()
+	}()
+	assert.Equal(t, http.StatusOK, leakResp.StatusCode)
+	leakBody, err := io.ReadAll(leakResp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(leakBody), "total 0")
+}
+
+func TestPprofServerInvalidPort(t *testing.T) {
+	rootCmd := newRootCmd()
+	rootCmd.SetArgs([]string{"--pprof-port", "invalid-port-string", "detect"})
+
+	err := rootCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "starting pprof server on port")
+}
+
+func TestPprofServerContextCancellation(t *testing.T) {
+	ln, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_, portStr, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	require.NoError(t, ln.Close())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var logBuf bytes.Buffer
+	err = startPprofServer(ctx, portStr, &logBuf)
+	require.NoError(t, err)
+	assert.Contains(t, logBuf.String(), "[microfat:pprof] serving pprof endpoints")
+
+	// Ensure the server responds
+	resp, err := http.Get("http://" + addr + "/debug/pprof/")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Cancel context and verify the port is freed
+	cancel()
+
+	// Wait for server to close and port to be bindable again
+	require.Eventually(t, func() bool {
+		testLn, testErr := net.Listen("tcp", addr)
+		if testErr == nil {
+			_ = testLn.Close()
+			return true
+		}
+		return false
+	}, 2*time.Second, 20*time.Millisecond, "expected port %s to be released after context cancellation", portStr)
+}

@@ -73,19 +73,29 @@ A `microfat` fat binary consists of contiguous segments:
 All development operations are automated through the root `Makefile`:
 
 ```bash
-make help       # View all available targets and descriptions
-make all        # Run tidy, lint, vuln, test, and build
-make build      # Compile microfat and microfat-stub into bin/
-make test       # Run unit tests with race detection
-make coverage   # Generate coverage profile and enforce 95% threshold gate
-make lint       # Run golangci-lint across all packages
-make vuln       # Run govulncheck vulnerability scan
-make tidy       # Run go mod tidy and go mod verify
-make snapshot   # Test local GoReleaser release packaging without publishing
-make demo       # Build the demo fat binary in examples/demo
-make bench      # Run benchmark suite in examples/demo
-make clean      # Remove build artifacts and coverage files
+make help          # View all available targets and descriptions (respects NO_COLOR=1 and COLOR=0)
+make all           # Run complete pipeline: tidy, fmt-check, lint, vuln, test, coverage gate, build
+make fmt           # Format and simplify all Go source files with gofmt -s
+make fmt-check     # Check formatting and fail if any Go files need formatting
+make fix           # Apply Go API modernizations ('go fix'), linter auto-fixes, and gofmt -s
+make build         # Compile microfat and microfat-stub into bin/
+make test          # Run unit tests with race detection
+make test-leaks    # Run unit tests while probing Go 1.27 /debug/pprof/goroutineleak endpoint
+make check-leaks   # Probe Go 1.27 goroutine leak endpoint during benchmark workload
+make pprof         # Open interactive pprof web UI (e.g. make pprof PROFILE=heap|cpu|goroutine)
+make coverage      # Generate coverage profile and enforce 95% threshold gate
+make lint          # Run golangci-lint across all packages
+make vuln          # Run govulncheck vulnerability scan
+make tidy          # Run make fmt, go mod tidy, and go mod verify
+make snapshot      # Test local GoReleaser release packaging without publishing
+make demo          # Build the demo fat binary in examples/demo
+make demo-check    # Verify finished fat binary stub commands (info, optimize, trim, prewarm)
+make bench         # Run benchmark suite in examples/demo
+make clean         # Remove build artifacts and coverage files
 ```
+
+> **Terminal Output & Colors**: All make targets support the standard [`NO_COLOR`](https://no-color.org) environment variable (`NO_COLOR=1`) and `COLOR=0` make variable to strip ANSI escape codes and switch Unicode symbols (`✔`/`✖`) to clean ASCII markers (`[OK]`/`[FAIL]`). Terminal detection automatically disables colors when standard output is non-interactive.
+
 
 ---
 
