@@ -124,7 +124,7 @@ func TestConcurrentCacheRacingStress(t *testing.T) {
 	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
 	policyRes := microarch.PolicyResult{}
 
-	for i := 0; i < concurrentWorkers; i++ {
+	for i := range concurrentWorkers {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()

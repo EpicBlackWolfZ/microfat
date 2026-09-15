@@ -358,7 +358,7 @@ func runSIMDMathWorkload(level WorkloadLevel, simd bool) WorkloadMetrics {
 
 	// #nosec G404 -- deterministic pseudo-random seed for reproducible benchmark runs
 	r := rand.New(rand.NewSource(seedValue))
-	for i := 0; i < totalElements; i++ {
+	for i := range totalElements {
 		a[i] = r.Float64() * scaleMultiplier
 		b[i] = r.Float64() * scaleMultiplier
 	}

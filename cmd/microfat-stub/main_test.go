@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -384,11 +385,8 @@ func TestBuildAutoTunedEnviron_DeduplicationAndReplacement(t *testing.T) {
 	for k, expectedVal := range expectedValues {
 		expectedEntry := fmt.Sprintf("%s=%s", k, expectedVal)
 		var found bool
-		for _, e := range env {
-			if e == expectedEntry {
-				found = true
-				break
-			}
+		if slices.Contains(env, expectedEntry) {
+			found = true
 		}
 		if !found {
 			t.Errorf("expected %q in environment, but not found or value mismatch. env: %v", expectedEntry, env)
@@ -1230,11 +1228,11 @@ func TestPolicyDispatchIntegration(t *testing.T) {
 	defer func() { execveFunc = oldExec }()
 	execveFunc = func(argv0 string, argv []string, envv []string) error {
 		for _, e := range envv {
-			if strings.HasPrefix(e, "MICROFAT_SELECTED_VARIANT=") {
-				lastExecVariant = strings.TrimPrefix(e, "MICROFAT_SELECTED_VARIANT=")
+			if after, ok := strings.CutPrefix(e, "MICROFAT_SELECTED_VARIANT="); ok {
+				lastExecVariant = after
 			}
-			if strings.HasPrefix(e, "MICROFAT_POLICY_APPLIED=") {
-				lastPolicyApplied = strings.TrimPrefix(e, "MICROFAT_POLICY_APPLIED=")
+			if after, ok := strings.CutPrefix(e, "MICROFAT_POLICY_APPLIED="); ok {
+				lastPolicyApplied = after
 			}
 		}
 		return nil
@@ -2004,7 +2002,7 @@ func TestMain_DiagnosticHints(t *testing.T) {
 
 		out := buf.String()
 		var lines []string
-		for _, line := range strings.Split(out, "\n") {
+		for line := range strings.SplitSeq(out, "\n") {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "[microfat] {") {
 				lines = append(lines, line)
@@ -2191,7 +2189,7 @@ func TestStubDictionaryExecutionAndMetaCommands(t *testing.T) {
 
 	makeVariant := func(lvl string) []byte {
 		var buf bytes.Buffer
-		for i := 0; i < 800; i++ {
+		for i := range 800 {
 			buf.WriteString(fmt.Sprintf("symbol_entry_%04d_runtime_pkg_metadata_hash_%x\n", i, (i*37)^0xDEADBEEF))
 		}
 		buf.WriteString(fmt.Sprintf("variant_specific_instructions_%s\n", lvl))
@@ -2295,7 +2293,7 @@ func TestStubDictionaryCorruptedError(t *testing.T) {
 
 	makeVariant := func(lvl string) []byte {
 		var buf bytes.Buffer
-		for i := 0; i < 800; i++ {
+		for i := range 800 {
 			buf.WriteString(fmt.Sprintf("symbol_entry_%04d_runtime_pkg_metadata_hash_%x\n", i, (i*37)^0xCAFEBABE))
 		}
 		buf.WriteString(fmt.Sprintf("variant_specific_instructions_%s\n", lvl))
@@ -2639,7 +2637,7 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 		if err := os.MkdirAll(targetPath, 0o700); err != nil {
 			t.Fatalf("mkdir targetPath failed: %v", err)
 		}
-			if err := os.WriteFile(filepath.Join(targetPath, "blocking_child"), []byte("blocker"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(targetPath, "blocking_child"), []byte("blocker"), 0o600); err != nil {
 			t.Fatalf("write child file failed: %v", err)
 		}
 
@@ -3464,7 +3462,6 @@ func TestBuildAutoTunedEnviron_OriginalExeReflection(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -3604,10 +3601,3 @@ func TestExecution_OriginalExePropagation(t *testing.T) {
 		})
 	}
 }
-
-
-
-
-
-
-

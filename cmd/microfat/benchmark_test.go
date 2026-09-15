@@ -220,5 +220,3 @@ func TestBenchmarkCmd_UnknownWorkload(t *testing.T) {
 		t.Error("expected error on unknown workload")
 	}
 }
-
-

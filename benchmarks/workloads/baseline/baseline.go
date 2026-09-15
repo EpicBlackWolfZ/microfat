@@ -204,10 +204,7 @@ func (w *Workload) executeKernel(ctx context.Context, plan workloads.ExecutionPl
 
 		batchStart := time.Now()
 		state = StepN(state, currentBatch)
-		batchElapsed := time.Since(batchStart).Nanoseconds()
-		if batchElapsed < 0 {
-			batchElapsed = 0
-		}
+		batchElapsed := max(time.Since(batchStart).Nanoseconds(), 0)
 
 		samples = append(samples, batchElapsed)
 		totalOps += int64(currentBatch)

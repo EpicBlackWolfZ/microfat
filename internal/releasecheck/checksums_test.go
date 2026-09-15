@@ -124,7 +124,7 @@ func TestValidateChecksums_SixCopiesOfOneEntry(t *testing.T) {
 	}
 
 	var sb strings.Builder
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		sb.WriteString(fmt.Sprintf("%s  %s\n", singleHash, singleName))
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(distDir, "checksums.txt"), []byte(sb.String()), 0o644))

@@ -243,9 +243,7 @@ func compileVariantsConcurrently(
 	defer cancel()
 
 	for w := 0; w < concurrency; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for task := range tasks {
 				select {
 				case <-ctxCancel.Done():
@@ -276,7 +274,7 @@ func compileVariantsConcurrently(
 				}
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

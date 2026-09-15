@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -200,10 +201,8 @@ func (c ExperimentConfig) validateControls() error {
 		return err
 	}
 	for _, cpu := range c.Target.Affinity {
-		for _, generatorCPU := range c.Generator.Affinity {
-			if cpu == generatorCPU {
-				return errors.New("target and generator CPU masks overlap")
-			}
+		if slices.Contains(c.Generator.Affinity, cpu) {
+			return errors.New("target and generator CPU masks overlap")
 		}
 	}
 	return nil

@@ -320,7 +320,7 @@ func VerifyFiles(root string) (map[string][]byte, error) {
 		return nil, errors.New("missing SHA256SUMS")
 	}
 	seen := make(map[string]bool)
-	for _, line := range strings.Split(strings.TrimSuffix(string(sums), "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSuffix(string(sums), "\n"), "\n") {
 		digest, name, ok := strings.Cut(line, "  ")
 		if !ok || !schema.ValidDigest(digest) || !schema.SafeReference(name) || name == checksumName || seen[name] {
 			return nil, errors.New("invalid checksum manifest")

@@ -858,5 +858,3 @@ func TestAssemblePackOptions_WarnFuncAndStderr(t *testing.T) {
 		}
 	})
 }
-
-

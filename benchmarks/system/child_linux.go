@@ -70,7 +70,7 @@ func ExecChild(cfg ChildConfig) error {
 }
 
 func containsPID(data string, pid int) bool {
-	for _, value := range strings.Fields(data) {
+	for value := range strings.FieldsSeq(data) {
 		if value == strconv.Itoa(pid) {
 			return true
 		}

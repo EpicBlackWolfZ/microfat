@@ -20,10 +20,10 @@ import (
 )
 
 const (
-	dirPerms        = 0o755
-	filePerms       = 0o644
-	execPerms       = 0o755
-	keyValueParts   = 2
+	dirPerms      = 0o755
+	filePerms     = 0o644
+	execPerms     = 0o755
+	keyValueParts = 2
 
 	formatSPDXJSON      = "spdx-json"
 	formatCycloneDXJSON = "cyclonedx-json"
@@ -229,8 +229,7 @@ func runSyft(scanDir, formatName string) ([]byte, error) {
 
 	out, err := cmd.Output()
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			return nil, fmt.Errorf("syft failed with exit code %d: %s", exitErr.ExitCode(), string(exitErr.Stderr))
 		}
 		return nil, fmt.Errorf("running syft: %w", err)
@@ -406,8 +405,8 @@ func buildSPDXRelationships(
 
 	for binID, binInv := range inv.Binaries {
 		var sourceID string
-		if strings.HasPrefix(binID, "variant:") {
-			tier := strings.TrimPrefix(binID, "variant:")
+		if after, ok := strings.CutPrefix(binID, "variant:"); ok {
+			tier := after
 			sourceID = fmt.Sprintf("SPDXRef-Variant-%s", sanitizeSPDXID(tier))
 		} else {
 			sourceID = fmt.Sprintf("SPDXRef-Binary-%s", binID)

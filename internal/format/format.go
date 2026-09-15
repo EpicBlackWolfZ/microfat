@@ -609,7 +609,7 @@ func UnmarshalBinaryIndex(data []byte) (*Index, error) {
 	offset += 2
 
 	variants := make([]VariantEntry, 0, variantCount)
-	for i := 0; i < variantCount; i++ {
+	for i := range variantCount {
 		entry, newOffset, err := decodeBinaryVariant(data, offset, i)
 		if err != nil {
 			return nil, err

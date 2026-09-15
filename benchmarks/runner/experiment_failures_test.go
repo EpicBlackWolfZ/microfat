@@ -169,14 +169,14 @@ func TestLoadPhaseFailureRetention(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := DefaultExperimentConfig()
 			mutate(&cfg)
-			trial := &schema.ProcessTrial{ScheduledTrial: schema.ScheduledTrial{ID: "failure"}, Metrics: make(map[string]schema.Measurement)}
+			trial := &schema.ProcessTrial{ID: "failure", Metrics: make(map[string]schema.Measurement)}
 			measureTrial(context.Background(), cfg, RunOptions{Helper: helper, Fortio: missingExperimentPath}, &system.Sandbox{}, nil,
 				"http://127.0.0.1:1", trial, make(map[string][]byte))
 			assert.NotEmpty(t, trial.Reason)
 			assert.NotEqual(t, schema.OutcomeOK, trial.Outcome)
 		})
 	}
-	trial := &schema.ProcessTrial{ScheduledTrial: schema.ScheduledTrial{ID: "failure"}, Metrics: make(map[string]schema.Measurement)}
+	trial := &schema.ProcessTrial{ID: "failure", Metrics: make(map[string]schema.Measurement)}
 	finalizeTrial(context.Background(), time.Now(), trial, make(map[string][]byte))
 	assert.NotEmpty(t, trial.Reason)
 	trial.Metrics["invalid"] = schema.Measured(math.NaN(), "s", "trial", "fixture")
@@ -259,7 +259,7 @@ func TestHTTPFailuresRemainMeasurements(t *testing.T) {
 	require.NoError(t, err)
 	cfg := DefaultExperimentConfig()
 	cfg.WarmupMS = 0
-	trial := &schema.ProcessTrial{ScheduledTrial: schema.ScheduledTrial{ID: "http-errors"}, Metrics: make(map[string]schema.Measurement)}
+	trial := &schema.ProcessTrial{ID: "http-errors", Metrics: make(map[string]schema.Measurement)}
 	files := make(map[string][]byte)
 	measureTrial(context.Background(), cfg, RunOptions{Helper: helper, Fortio: tool}, &system.Sandbox{}, nil,
 		"http://127.0.0.1:1", trial, files)

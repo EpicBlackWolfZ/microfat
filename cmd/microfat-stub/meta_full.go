@@ -172,10 +172,10 @@ func parsePrewarmArgs(arg, defaultLevel string, idx *format.Index) ([]string, bo
 		}
 	}
 
-	if strings.HasPrefix(arg, flagPrewarm+"=") {
-		val := strings.TrimPrefix(arg, flagPrewarm+"=")
-		tokens := strings.Split(val, ",")
-		for _, token := range tokens {
+	if after, ok := strings.CutPrefix(arg, flagPrewarm+"="); ok {
+		val := after
+		tokens := strings.SplitSeq(val, ",")
+		for token := range tokens {
 			token = strings.TrimSpace(token)
 			switch {
 			case strings.EqualFold(token, "verify"):
@@ -332,8 +332,8 @@ func isPrefixOrExact(arg, flag string) bool {
 }
 
 func extractTargetPath(arg, primaryFlag, aliasFlag string) (string, error) {
-	if strings.HasPrefix(arg, primaryFlag+"=") {
-		return strings.TrimPrefix(arg, primaryFlag+"="), nil
+	if after, ok := strings.CutPrefix(arg, primaryFlag+"="); ok {
+		return after, nil
 	}
 	if aliasFlag != "" && strings.HasPrefix(arg, aliasFlag+"=") {
 		return strings.TrimPrefix(arg, aliasFlag+"="), nil

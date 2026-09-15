@@ -73,7 +73,6 @@ func TestParseCompressionSpec(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.input, func(t *testing.T) {
 			t.Parallel()
 			algo, level := codec.ParseCompressionSpec(tc.input)
@@ -205,7 +204,6 @@ func TestCodecsRoundtrip(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			c, err := codec.Get(tc.codec)
@@ -214,7 +212,6 @@ func TestCodecsRoundtrip(t *testing.T) {
 			}
 
 			for _, lvl := range tc.levels {
-				lvl := lvl
 				t.Run("level="+lvl, func(t *testing.T) {
 					var compressed bytes.Buffer
 					if err := c.Compress(&compressed, testData, lvl); err != nil {
@@ -241,7 +238,6 @@ func TestCodecErrors(t *testing.T) {
 	data := generateTestData(1024)
 
 	for _, name := range []string{codec.AlgorithmZstd, codec.AlgorithmLZ4, codec.AlgorithmNone} {
-		name := name
 		t.Run(name+" corrupted data", func(t *testing.T) {
 			t.Parallel()
 			c, err := codec.Get(name)
@@ -337,7 +333,7 @@ func generateDictionarySamples() [][]byte {
 	samples := make([][]byte, 40)
 	for i := range samples {
 		var b bytes.Buffer
-		for j := 0; j < 50; j++ {
+		for j := range 50 {
 			b.WriteString(fmt.Sprintf("GO_MICROFAT_RUNTIME_SYMBOL_TABLE_ENTRY_PKG_INDEX_%d_%d_OFFSET_%d_LENGTH_%d\n", i, j, i*100+j, (i+j)*8))
 			b.WriteString("common_static_data_string_for_testing_zstandard_compression_dictionary_builder\n")
 		}
@@ -616,7 +612,6 @@ func TestCodec_PropertyInvariants(t *testing.T) {
 
 	codecs := codec.List()
 	for _, codecName := range codecs {
-		codecName := codecName
 		c, err := codec.Get(codecName)
 		if err != nil {
 			t.Fatalf("resolving registered codec %q: %v", codecName, err)
@@ -673,7 +668,6 @@ func BenchmarkCodecs(b *testing.B) {
 	data := generateTestData(1024 * 1024) // 1 MB payload
 
 	for _, name := range []string{codec.AlgorithmNone, codec.AlgorithmLZ4, codec.AlgorithmZstd} {
-		name := name
 		c, _ := codec.Get(name)
 
 		var compressed bytes.Buffer
@@ -699,7 +693,6 @@ func TestDecompress_NegativeAndOversizedBounds(t *testing.T) {
 
 	data := generateTestData(1024)
 	for _, name := range []string{codec.AlgorithmNone, codec.AlgorithmLZ4, codec.AlgorithmZstd} {
-		name := name
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			c, err := codec.Get(name)
@@ -736,4 +729,3 @@ func TestDecompress_NegativeAndOversizedBounds(t *testing.T) {
 		})
 	}
 }
-

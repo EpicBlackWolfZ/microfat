@@ -389,7 +389,6 @@ func (z *zeroDurationWorkload) RunTrial(_ context.Context, _ workloads.Execution
 }
 func (z *zeroDurationWorkload) Teardown(_ context.Context) error { return nil }
 
-
 func TestWriteEvidenceAtomically_BadPath(t *testing.T) {
 	t.Parallel()
 
@@ -528,4 +527,3 @@ func TestRunner_LoopCancellation(t *testing.T) {
 		t.Error("expected error from context cancellation inside trial loop")
 	}
 }
-

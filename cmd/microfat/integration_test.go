@@ -389,4 +389,3 @@ variants:
 		t.Fatalf("verify failed on shorthand binary: %v (output: %s)", err, out)
 	}
 }
-

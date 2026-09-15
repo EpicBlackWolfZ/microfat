@@ -49,4 +49,3 @@ func validateCacheDirSecurity(dir string) error {
 func isDirOwnedByCurrentUID(fi os.FileInfo) bool {
 	return true
 }
-

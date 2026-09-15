@@ -239,10 +239,8 @@ func TestCacheSecurityAndFilesystemInvariants(t *testing.T) {
 		var wg sync.WaitGroup
 		errChan := make(chan error, concurrentProcsCount)
 
-		for i := 0; i < concurrentProcsCount; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range concurrentProcsCount {
+			wg.Go(func() {
 				stdout, stderr, exitCode, err := executeFatBinary(t, goldenFatBin, env)
 				if err != nil || exitCode != defaultExitCode {
 					errChan <- err
@@ -253,7 +251,7 @@ func TestCacheSecurityAndFilesystemInvariants(t *testing.T) {
 					return
 				}
 				_ = stderr
-			}()
+			})
 		}
 
 		wg.Wait()

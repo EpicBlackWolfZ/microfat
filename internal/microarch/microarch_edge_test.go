@@ -193,11 +193,11 @@ func TestX86FeaturePermutationsFallback(t *testing.T) {
 		HasAVX2:    true,
 		HasBMI1:    true,
 		HasBMI2:    true,
-		HasFMA:      true,
-		HasOSXSAVE:  true,
-		HasF16C:     true,
-		HasLZCNT:    true,
-		HasMOVBE:    true,
+		HasFMA:     true,
+		HasOSXSAVE: true,
+		HasF16C:    true,
+		HasLZCNT:   true,
+		HasMOVBE:   true,
 	}
 
 	if got := EvaluateAMD64(baseV3); got != AMD64v3 {
@@ -278,5 +278,3 @@ func TestCPUIDDirectProbing(t *testing.T) {
 		_ = (ecx & (1 << cpuidLeafExt1ECXABMBit)) != 0
 	}
 }
-
-

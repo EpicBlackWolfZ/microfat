@@ -31,7 +31,7 @@ func Observe(ctx context.Context, cfg ObserverConfig, writer io.Writer) error {
 	defer ticker.Stop()
 	start := time.Now()
 	sandbox := &Sandbox{Paths: cfg.CgroupPaths}
-	for count := 0; count < schema.MaxMeasurements; count++ {
+	for range schema.MaxMeasurements {
 		phaseBytes, err := os.ReadFile(cfg.PhaseFile) // #nosec G304 -- explicit benchmark-owned phase file.
 		if err != nil {
 			return err

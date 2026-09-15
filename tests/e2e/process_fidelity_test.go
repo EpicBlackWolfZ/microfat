@@ -43,7 +43,7 @@ func TestProcessFidelityAndExecutionInvariants(t *testing.T) {
 		args := make([]string, 0, highVolumeArgCount+1)
 		args = append(args, "--echo-args")
 		expectedParts := make([]string, 0, highVolumeArgCount)
-		for i := 0; i < highVolumeArgCount; i++ {
+		for i := range highVolumeArgCount {
 			argVal := fmt.Sprintf("arg_%03d", i)
 			args = append(args, argVal)
 			expectedParts = append(expectedParts, argVal)
@@ -88,7 +88,6 @@ func TestProcessFidelityAndExecutionInvariants(t *testing.T) {
 		}
 
 		for _, tc := range testCases {
-			tc := tc
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				_, _, exitCode, _ := executeFatBinary(t, goldenFatBin, nil, "--exit-code", tc.codeArg)

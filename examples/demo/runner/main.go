@@ -11,7 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"time"
 
@@ -397,7 +397,7 @@ func buildStartupScenarios(srcDir, benchDir, microfatStub, microfatCli string) [
 
 func runStartupWarmups(scenarios []StartupScenario, warmups int, benchDir string) {
 	for _, s := range scenarios {
-		for i := 0; i < warmups; i++ {
+		for range warmups {
 			_ = runStartupIteration(s, benchDir, 0)
 		}
 	}
@@ -470,7 +470,7 @@ func measureStartupScenarios(scenarios []StartupScenario, iterations int, benchD
 		launcherDurs := make([]time.Duration, iterations)
 		decompressDurs := make([]time.Duration, iterations)
 
-		for j := 0; j < iterations; j++ {
+		for j := range iterations {
 			obs := runStartupIteration(s, benchDir, j+1)
 			allObservations = append(allObservations, obs)
 			wallDurs[j] = obs.TotalWallDuration
@@ -727,7 +727,7 @@ func prepareBenchArgs(isUltra, isHeavy, isSIMD bool) []string {
 func runWarmups(configs []Config, warmups int, benchArgs []string) {
 	fmt.Println("\n==> Step 2: Running warm-up cycles...")
 	for _, c := range configs {
-		for i := 0; i < warmups; i++ {
+		for range warmups {
 			// #nosec G204 -- warm-up run of benchmark test binary
 			_ = exec.Command(c.Path, "--help").Run()
 			// #nosec G204 -- warm-up run of benchmark test binary
@@ -742,7 +742,7 @@ func measureStartup(configs []Config, iterations int) []Stats {
 	for i, c := range configs {
 		fmt.Printf("    Benchmarking %s...", c.Name)
 		durations := make([]time.Duration, iterations)
-		for j := 0; j < iterations; j++ {
+		for j := range iterations {
 			t0 := time.Now()
 			// #nosec G204 -- benchmark execution of test binary
 			cmd := exec.Command(c.Path, "--help")
@@ -767,7 +767,7 @@ func measureCompute(configs []Config, iterations int, benchArgs []string, isUltr
 		pureDurs := make([]time.Duration, iterations)
 		wallDurs := make([]time.Duration, iterations)
 
-		for j := 0; j < iterations; j++ {
+		for j := range iterations {
 			t0 := time.Now()
 			// #nosec G204 -- benchmark execution of test binary
 			cmd := exec.Command(c.Path, benchArgs...)
@@ -954,9 +954,7 @@ func calculateStats(durations []time.Duration) Stats {
 		return Stats{}
 	}
 
-	sort.Slice(durations, func(i, j int) bool {
-		return durations[i] < durations[j]
-	})
+	slices.Sort(durations)
 
 	var sum int64
 	for _, d := range durations {

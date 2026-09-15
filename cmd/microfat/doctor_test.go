@@ -515,4 +515,3 @@ func TestRunDoctorEdgeCases(t *testing.T) {
 		createTempFileFunc = origTemp
 	})
 }
-

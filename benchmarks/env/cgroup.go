@@ -123,7 +123,7 @@ func (d *Detector) parseProcCgroupSafe() (string, bool, map[string]string) {
 			v2Path = rel
 			hasV2 = true
 		} else {
-			for _, ctrl := range strings.Split(ctrls, ",") {
+			for ctrl := range strings.SplitSeq(ctrls, ",") {
 				c := strings.TrimSpace(ctrl)
 				if c != "" {
 					v1Paths[c] = rel

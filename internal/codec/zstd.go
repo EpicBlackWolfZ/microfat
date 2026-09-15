@@ -182,13 +182,7 @@ func TrainDictionary(samples [][]byte, targetDictSize int, level string) ([]byte
 
 	// Cap history buffer to at most targetDictSize and totalBytes/historySampleFractionDivisor
 	// to ensure subsequent sample contents provide literals and dictionary statistics.
-	maxHistBytes := targetDictSize
-	if maxHistBytes > totalBytes/historySampleFractionDivisor {
-		maxHistBytes = totalBytes / historySampleFractionDivisor
-	}
-	if maxHistBytes < 8 {
-		maxHistBytes = 8
-	}
+	maxHistBytes := max(min(targetDictSize, totalBytes/historySampleFractionDivisor), 8)
 
 	var historyBuf bytes.Buffer
 	for _, s := range samples {

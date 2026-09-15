@@ -346,4 +346,3 @@ func TestBaselineWorkload_VaryingBatchSizeDeterminism(t *testing.T) {
 		t.Errorf("checksum mismatch across batch sizes: %d vs %d", obs1.Metrics["checksum"], obs2.Metrics["checksum"])
 	}
 }
-

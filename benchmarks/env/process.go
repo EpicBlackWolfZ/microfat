@@ -25,12 +25,12 @@ var benchmarkWhitelistedEnvVars = []string{
 }
 
 const (
-	envGOMAXPROCS        = "GOMAXPROCS"
-	envGOMEMLIMIT        = "GOMEMLIMIT"
-	envMicrofatAffinity  = "MICROFAT_AFFINITY"
-	procCgroupInit       = "1/cgroup"
-	dockerEnvIndicator   = ".dockerenv"
-	podmanEnvIndicator   = "run/.containerenv"
+	envGOMAXPROCS       = "GOMAXPROCS"
+	envGOMEMLIMIT       = "GOMEMLIMIT"
+	envMicrofatAffinity = "MICROFAT_AFFINITY"
+	procCgroupInit      = "1/cgroup"
+	dockerEnvIndicator  = ".dockerenv"
+	podmanEnvIndicator  = "run/.containerenv"
 )
 
 func (d *Detector) detectProcess() (schema.ProcessContext, []string) {
