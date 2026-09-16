@@ -240,22 +240,9 @@ tidy: ## Run go mod tidy and verify module dependencies
 
 tidy-check: ## Verify Go module dependencies (go.mod, go.sum) are tidy and unchanged
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Verifying Go module dependencies are tidy..."
-	@TMPDIR=$$(mktemp -d); \
-	cp go.mod go.sum "$$TMPDIR/" 2>/dev/null || true; \
-	$(GO) mod tidy; \
-	DIFF_STATUS=0; \
-	if ! cmp -s go.mod "$$TMPDIR/go.mod" || ! cmp -s go.sum "$$TMPDIR/go.sum"; then \
-		DIFF_STATUS=1; \
-	fi; \
-	cp "$$TMPDIR/go.mod" go.mod 2>/dev/null || true; \
-	cp "$$TMPDIR/go.sum" go.sum 2>/dev/null || true; \
-	rm -rf "$$TMPDIR"; \
-	if [ $$DIFF_STATUS -ne 0 ]; then \
-		printf "%b\n" "$(C_RED)$(SYM_FAIL)$(C_RESET) go.mod or go.sum is not tidy. Run 'make tidy' to update."; \
-		exit 1; \
-	fi; \
-	$(GO) mod verify >/dev/null; \
-	printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Go modules are tidy and verified"
+	@$(GO) mod tidy -diff
+	@$(GO) mod verify
+	@printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Go modules are tidy and verified"
 
 snapshot: ## Test GoReleaser local snapshot build
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Testing GoReleaser snapshot build..."

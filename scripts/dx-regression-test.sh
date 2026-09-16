@@ -144,4 +144,32 @@ if [ "$INVALID_PROFILE_FAIL" -ne 1 ]; then
 fi
 echo "    PASS: Unsupported profile name rejected cleanly"
 
+# -----------------------------------------------------------------------------
+# 5. Non-Mutating Module Tidy Verification
+# -----------------------------------------------------------------------------
+echo "--> Test 7: tidy-check verifies dependencies without modifying go.mod or go.sum"
+BEFORE_MOD="$(sha256sum go.mod)"
+BEFORE_SUM="$(sha256sum go.sum)"
+
+TIDY_FAIL=0
+make tidy-check COLOR=0 >/dev/null 2>&1 || TIDY_FAIL=1
+if [ "$TIDY_FAIL" -ne 0 ]; then
+    echo "FAIL: make tidy-check failed on clean repository"
+    exit 1
+fi
+
+AFTER_MOD="$(sha256sum go.mod)"
+AFTER_SUM="$(sha256sum go.sum)"
+
+if [ "$BEFORE_MOD" != "$AFTER_MOD" ]; then
+    echo "FAIL: make tidy-check modified go.mod!"
+    exit 1
+fi
+
+if [ "$BEFORE_SUM" != "$AFTER_SUM" ]; then
+    echo "FAIL: make tidy-check modified go.sum!"
+    exit 1
+fi
+echo "    PASS: make tidy-check is non-mutating and verified dependencies"
+
 echo "==> All DX regression tests passed successfully!"
