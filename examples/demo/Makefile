@@ -89,14 +89,16 @@ optimize: fat
 
 check: fat
 	@echo "==> Verifying finished fat binary stub commands..."
-	@$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:info > /dev/null
-	@$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:info=json > /dev/null
-	@$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:prewarm > /dev/null
-	@$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:optimize-to=$(BIN_DIR)/$(BINARY_NAME)-optimized > /dev/null
-	@$(BIN_DIR)/$(BINARY_NAME)-optimized --help > /dev/null
-	@$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:trim-to=$(BIN_DIR)/$(BINARY_NAME)-trimmed > /dev/null
-	@$(BIN_DIR)/$(BINARY_NAME)-trimmed --microfat:info > /dev/null
-	@rm -f $(BIN_DIR)/$(BINARY_NAME)-optimized $(BIN_DIR)/$(BINARY_NAME)-trimmed
+	@bash -c '\
+		trap "rm -f $(BIN_DIR)/$(BINARY_NAME)-optimized $(BIN_DIR)/$(BINARY_NAME)-trimmed" EXIT INT TERM; \
+		$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:info > /dev/null && \
+		$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:info=json > /dev/null && \
+		$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:prewarm > /dev/null && \
+		$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:optimize-to=$(BIN_DIR)/$(BINARY_NAME)-optimized > /dev/null && \
+		$(BIN_DIR)/$(BINARY_NAME)-optimized --help > /dev/null && \
+		$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:trim-to=$(BIN_DIR)/$(BINARY_NAME)-trimmed > /dev/null && \
+		$(BIN_DIR)/$(BINARY_NAME)-trimmed --microfat:info > /dev/null \
+	'
 	@echo "==> Finished binary stub commands (info, optimize, trim, prewarm) verified successfully!"
 
 run: fat

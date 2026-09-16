@@ -62,3 +62,35 @@ func TestAssertNoGoroutineLeaks_FailsOnLeak(t *testing.T) {
 	require.Error(t, err, "expected subprocess to fail due to leaked goroutine")
 	assert.Contains(t, string(out), "goroutine leak check failed: detected 1 leaked goroutine(s)")
 }
+
+func TestCheckLeaks_NonZeroExit(t *testing.T) {
+	code := checkLeaks(func() int { return 42 })
+	assert.Equal(t, 42, code)
+}
+
+func TestCheckLeaks_CleanWhenEnabled(t *testing.T) {
+	t.Setenv("MICROFAT_TEST_LEAKS", "1")
+	code := checkLeaks(func() int { return 0 })
+	assert.Equal(t, 0, code)
+}
+
+func TestHelperProcessCheckLeaksDetects(t *testing.T) {
+	if os.Getenv("SUBPROCESS_CHECK_LEAKS_FAIL") != "1" {
+		return
+	}
+	os.Setenv("MICROFAT_TEST_LEAKS", "1")
+	go func() {
+		select {}
+	}()
+	time.Sleep(50 * time.Millisecond)
+	code := checkLeaks(func() int { return 0 })
+	os.Exit(code)
+}
+
+func TestCheckLeaks_DetectsLeakInRunner(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcessCheckLeaksDetects$")
+	cmd.Env = append(os.Environ(), "SUBPROCESS_CHECK_LEAKS_FAIL=1")
+	out, err := cmd.CombinedOutput()
+	require.Error(t, err)
+	assert.Contains(t, string(out), "[microfat:leak-check]")
+}

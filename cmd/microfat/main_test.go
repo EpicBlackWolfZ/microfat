@@ -39,6 +39,7 @@ const (
 	testOSLinux        = "linux"
 	testArchAMD64      = "amd64"
 	testArchARM64      = "arm64"
+	subcmdDetect       = "detect"
 )
 
 func TestMain(m *testing.M) {
@@ -1357,7 +1358,7 @@ func TestPprofServerFlagAndEnv(t *testing.T) {
 	rootCmd := newRootCmd()
 	var errBuf bytes.Buffer
 	rootCmd.SetErr(&errBuf)
-	rootCmd.SetArgs([]string{"--pprof-port", portStr, "detect"})
+	rootCmd.SetArgs([]string{"--pprof-port", portStr, subcmdDetect})
 
 	err = rootCmd.ExecuteContext(ctx)
 	require.NoError(t, err)
@@ -1407,7 +1408,7 @@ func TestPprofServerEnvVar(t *testing.T) {
 	rootCmd := newRootCmd()
 	var errBuf bytes.Buffer
 	rootCmd.SetErr(&errBuf)
-	rootCmd.SetArgs([]string{"detect"})
+	rootCmd.SetArgs([]string{subcmdDetect})
 
 	err = rootCmd.ExecuteContext(ctx)
 	require.NoError(t, err)
@@ -1464,7 +1465,7 @@ func TestPprofServerFlagOverridesEnv(t *testing.T) {
 	rootCmd := newRootCmd()
 	var errBuf bytes.Buffer
 	rootCmd.SetErr(&errBuf)
-	rootCmd.SetArgs([]string{"--pprof-port", port2, "detect"})
+	rootCmd.SetArgs([]string{"--pprof-port", port2, subcmdDetect})
 
 	err = rootCmd.ExecuteContext(ctx)
 	require.NoError(t, err)
@@ -1492,7 +1493,7 @@ func TestPprofServerFlagOverridesEnv(t *testing.T) {
 
 func TestPprofServerInvalidPort(t *testing.T) {
 	rootCmd := newRootCmd()
-	rootCmd.SetArgs([]string{"--pprof-port", "invalid-port-string", "detect"})
+	rootCmd.SetArgs([]string{"--pprof-port", "invalid-port-string", subcmdDetect})
 
 	err := rootCmd.Execute()
 	require.Error(t, err)
@@ -1540,7 +1541,7 @@ func TestPprofBlockAndMutexFlags(t *testing.T) {
 	})
 
 	rootCmd := newRootCmd()
-	rootCmd.SetArgs([]string{"--pprof-block-rate", "1", "--pprof-mutex-fraction", "1", "detect"})
+	rootCmd.SetArgs([]string{"--pprof-block-rate", "1", "--pprof-mutex-fraction", "1", subcmdDetect})
 	err := rootCmd.Execute()
 	require.NoError(t, err)
 }
@@ -1555,7 +1556,7 @@ func TestPprofBlockAndMutexEnvVars(t *testing.T) {
 	t.Setenv("MICROFAT_PPROF_MUTEX_FRACTION", "2")
 
 	rootCmd := newRootCmd()
-	rootCmd.SetArgs([]string{"detect"})
+	rootCmd.SetArgs([]string{subcmdDetect})
 	err := rootCmd.Execute()
 	require.NoError(t, err)
 }

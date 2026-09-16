@@ -44,7 +44,11 @@ func AssertNoGoroutineLeaks(t testing.TB) {
 // CheckLeaksIfEnabled runs the test suite and, if MICROFAT_TEST_LEAKS is enabled,
 // checks for goroutine leaks before process exit.
 func CheckLeaksIfEnabled(m *testing.M) int {
-	code := m.Run()
+	return checkLeaks(m.Run)
+}
+
+func checkLeaks(run func() int) int {
+	code := run()
 	if code != 0 {
 		return code
 	}

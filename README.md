@@ -418,30 +418,39 @@ All daily development operations are automated through the root `Makefile`:
 # View all targets and descriptions (respects NO_COLOR=1 and COLOR=0)
 make help
 
-# Run complete verification pipeline: tidy, fmt-check, lint, vuln, test, coverage gate, build
+# Run complete verification pipeline: tidy-check, fmt-check, lint, vuln, test, coverage gate, build
 make all
 
-# Format code across the repository with gofmt -s
+# Format code across the repository with $(GOFMT) -s
 make fmt
 
-# Verify all Go source files are formatted cleanly
+# Verify all Go source files are formatted cleanly (non-mutating)
 make fmt-check
 
 # Run Go API modernizations ('go fix'), linter auto-fixes, and format code
 make fix
 
-# Check for Go 1.27 goroutine leaks on the benchmark workload
-make check-leaks
-
-# Run test suite while probing Go 1.27 goroutine leak detection
+# Run unit tests with in-process Go 1.27 goroutine leak detection enabled (MICROFAT_TEST_LEAKS=1)
 make test-leaks
 
-# Open interactive browser UI for pprof profiles (e.g. heap, cpu, goroutine, mutex)
+# Check for Go 1.27 goroutine leaks on the running benchmark workload
+make check-leaks
+
+# Run regression tests for developer workflows (port safety, formatting, TTY detection)
+make test-dx
+
+# Open interactive browser UI for pprof profiles (heap, cpu, goroutine, allocs, mutex, block, goroutineleak)
+# (block and mutex sampling rates are enabled only when PROFILE=block or PROFILE=mutex)
 make pprof PROFILE=heap
+make pprof PROFILE=block PORT=6061 HTTP_PORT=8081
 
 # Verify finished fat binary stub commands (info, optimize-to, trim-to, prewarm)
 make demo-check
 ```
+
+> **Terminal Detection & Port Safety**:
+> - Piped or redirected stdout automatically disables ANSI escapes and uses ASCII markers (`[OK]`, `[FAIL]`). Use `NO_COLOR=1` or `COLOR=0` to force disable colors.
+> - Profiling targets check port occupancy before spawning servers and fail cleanly without terminating unrelated processes. Cleanup sends graceful `SIGTERM` before `SIGKILL` strictly to target-spawned child processes.
 
 ---
 

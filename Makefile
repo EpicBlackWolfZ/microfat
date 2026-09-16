@@ -43,18 +43,14 @@ TRIALS ?= 3
 # ==============================================================================
 # Respect NO_COLOR standard (https://no-color.org) and explicit COLOR=0/false.
 # Automatically disables colors and switches symbols to ASCII when stdout is not a TTY.
-COLOR ?= 1
+IS_TTY := $(shell [ -t 1 ] || { [ -e /proc/$$PPID/fd/1 ] && [ -t 0 ] < /proc/$$PPID/fd/1; } && echo 1 || echo 0)
+COLOR ?= $(IS_TTY)
 ifneq ($(origin NO_COLOR),undefined)
   ifneq ($(NO_COLOR),)
     COLOR := 0
   endif
 endif
 ifeq ($(COLOR),false)
-  COLOR := 0
-endif
-
-IS_TTY := $(shell [ -t 1 ] && echo 1 || echo 0)
-ifeq ($(IS_TTY),0)
   COLOR := 0
 endif
 
@@ -87,7 +83,7 @@ else
 endif
 
 .PHONY: all help build build-amd64 build-arm64 build-all \
-        test test-leaks e2e fuzz chaos coverage lint vuln tidy tidy-check fmt fmt-check fix \
+        test test-leaks test-dx e2e fuzz chaos coverage lint vuln tidy tidy-check fmt fmt-check fix \
         snapshot demo demo-arm64 demo-check benchmark bench bench-heavy bench-ultra bench-simd bench-startup bench-matrix \
         check-leaks pprof profile-ui test-all clean \
         benchmark-tools benchmark-smoke benchmark-matrix benchmark-integration benchmark-kernel benchmark-kernel-v1
@@ -344,6 +340,9 @@ test-leaks: ## Run unit tests with Go 1.27 in-process goroutine leak detection e
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Running tests with Go 1.27 goroutine leak detection enabled (MICROFAT_TEST_LEAKS=1)..."
 	@MICROFAT_TEST_LEAKS=1 GO="$(GO)" bash scripts/test-profiles.sh test
 	@printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Test leak verification completed with zero detected leaks"
+
+test-dx: build ## Run regression tests for developer workflows (port safety, formatting, TTY detection)
+	@bash scripts/dx-regression-test.sh
 
 pprof: profile-ui ## Alias for profile-ui
 
