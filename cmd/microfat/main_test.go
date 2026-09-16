@@ -19,6 +19,7 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+	"github.com/EpicBlackWolfZ/microfat/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -39,6 +40,10 @@ const (
 	testArchAMD64      = "amd64"
 	testArchARM64      = "arm64"
 )
+
+func TestMain(m *testing.M) {
+	os.Exit(testutil.CheckLeaksIfEnabled(m))
+}
 
 func TestRootCmdAndSubcommands(t *testing.T) {
 	tempDir := t.TempDir()
@@ -1346,12 +1351,15 @@ func TestPprofServerFlagAndEnv(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, ln.Close())
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	rootCmd := newRootCmd()
 	var errBuf bytes.Buffer
 	rootCmd.SetErr(&errBuf)
 	rootCmd.SetArgs([]string{"--pprof-port", portStr, "detect"})
 
-	err = rootCmd.Execute()
+	err = rootCmd.ExecuteContext(ctx)
 	require.NoError(t, err)
 	assert.Contains(t, errBuf.String(), "[microfat:pprof] serving pprof endpoints")
 
@@ -1371,6 +1379,16 @@ func TestPprofServerFlagAndEnv(t *testing.T) {
 	leakBody, err := io.ReadAll(leakResp.Body)
 	require.NoError(t, err)
 	assert.Contains(t, string(leakBody), "total 0")
+
+	cancel()
+	require.Eventually(t, func() bool {
+		testLn, testErr := net.Listen("tcp", addr)
+		if testErr == nil {
+			_ = testLn.Close()
+			return true
+		}
+		return false
+	}, 2*time.Second, 20*time.Millisecond, "expected port %s to be released", portStr)
 }
 
 func TestPprofServerEnvVar(t *testing.T) {
@@ -1383,12 +1401,15 @@ func TestPprofServerEnvVar(t *testing.T) {
 
 	t.Setenv("MICROFAT_PPROF_PORT", portStr)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	rootCmd := newRootCmd()
 	var errBuf bytes.Buffer
 	rootCmd.SetErr(&errBuf)
 	rootCmd.SetArgs([]string{"detect"})
 
-	err = rootCmd.Execute()
+	err = rootCmd.ExecuteContext(ctx)
 	require.NoError(t, err)
 	assert.Contains(t, errBuf.String(), "[microfat:pprof] serving pprof endpoints")
 
@@ -1408,6 +1429,65 @@ func TestPprofServerEnvVar(t *testing.T) {
 	leakBody, err := io.ReadAll(leakResp.Body)
 	require.NoError(t, err)
 	assert.Contains(t, string(leakBody), "total 0")
+
+	cancel()
+	require.Eventually(t, func() bool {
+		testLn, testErr := net.Listen("tcp", addr)
+		if testErr == nil {
+			_ = testLn.Close()
+			return true
+		}
+		return false
+	}, 2*time.Second, 20*time.Millisecond, "expected port %s to be released", portStr)
+}
+
+func TestPprofServerFlagOverridesEnv(t *testing.T) {
+	ln1, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	addr1 := ln1.Addr().String()
+	_, port1, err := net.SplitHostPort(addr1)
+	require.NoError(t, err)
+	require.NoError(t, ln1.Close())
+
+	ln2, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	addr2 := ln2.Addr().String()
+	_, port2, err := net.SplitHostPort(addr2)
+	require.NoError(t, err)
+	require.NoError(t, ln2.Close())
+
+	t.Setenv("MICROFAT_PPROF_PORT", port1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rootCmd := newRootCmd()
+	var errBuf bytes.Buffer
+	rootCmd.SetErr(&errBuf)
+	rootCmd.SetArgs([]string{"--pprof-port", port2, "detect"})
+
+	err = rootCmd.ExecuteContext(ctx)
+	require.NoError(t, err)
+	assert.Contains(t, errBuf.String(), "[microfat:pprof] serving pprof endpoints")
+	assert.Contains(t, errBuf.String(), port2)
+
+	resp, err := http.Get("http://" + addr2 + "/debug/pprof/")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	_, err = net.DialTimeout("tcp", addr1, 100*time.Millisecond)
+	assert.Error(t, err, "expected port1 (%s) not to be listening", port1)
+
+	cancel()
+	require.Eventually(t, func() bool {
+		testLn, testErr := net.Listen("tcp", addr2)
+		if testErr == nil {
+			_ = testLn.Close()
+			return true
+		}
+		return false
+	}, 2*time.Second, 20*time.Millisecond, "expected port %s to be released", port2)
 }
 
 func TestPprofServerInvalidPort(t *testing.T) {

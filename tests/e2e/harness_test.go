@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/testutil"
 )
 
 const (
@@ -81,6 +82,16 @@ func TestMain(m *testing.M) {
 
 	exitCode := runSetupAndExecute(m)
 	_ = os.RemoveAll(e2eRootDir)
+	if exitCode == 0 {
+		env := strings.TrimSpace(os.Getenv("MICROFAT_TEST_LEAKS"))
+		if env == "1" || strings.EqualFold(env, "true") {
+			var buf bytes.Buffer
+			if err := testutil.CheckGoroutineLeaks(&buf); err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "[microfat:leak-check] %v\n", err)
+				exitCode = 1
+			}
+		}
+	}
 	os.Exit(exitCode)
 }
 

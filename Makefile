@@ -340,63 +340,9 @@ check-leaks: build ## Probe Go 1.27 goroutine leak endpoint during benchmark wor
 	@PORT="$(PORT)" DURATION="$(DURATION)" TRIALS="$(TRIALS)" BIN_DIR="$(BIN_DIR)" \
 		COLOR="$(COLOR)" bash scripts/check-leaks.sh
 
-test-leaks: build ## Run unit tests while probing Go 1.27 /debug/pprof/goroutineleak endpoint
-	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Running tests with Go 1.27 goroutine leak detection probe..."
-	@bash -c '\
-		PORT=$(PORT); \
-		LOG=$$(mktemp); \
-		if command -v python3 >/dev/null 2>&1; then \
-			if python3 -c "import socket, sys; s=socket.socket(); s.bind((\"127.0.0.1\", int(sys.argv[1]))); s.close()" "$$PORT" 2>/dev/null; then :; else \
-				printf "%b\n" "$(C_RED)$(SYM_FAIL)$(C_RESET) pprof port $$PORT is already in use."; \
-				printf "%b\n" "Choose another port with PORT=<port>."; \
-				exit 1; \
-			fi; \
-		fi; \
-		cleanup() { \
-			trap - EXIT INT TERM HUP; \
-			rm -f "$$LOG" 2>/dev/null || true; \
-			if [ -n "$$TEST_PID" ] && kill -0 "$$TEST_PID" 2>/dev/null; then \
-				kill -TERM "$$TEST_PID" 2>/dev/null || true; \
-				for _ in $$(seq 1 20); do \
-					if ! kill -0 "$$TEST_PID" 2>/dev/null; then break; fi; \
-					sleep 0.1; \
-				done; \
-				if kill -0 "$$TEST_PID" 2>/dev/null; then kill -KILL "$$TEST_PID" 2>/dev/null || true; fi; \
-				wait "$$TEST_PID" 2>/dev/null || true; \
-			fi; \
-		}; \
-		trap cleanup EXIT INT TERM HUP; \
-		MICROFAT_PPROF_PORT=$$PORT $(BIN_DIR)/microfat benchmark --trials 20 --trial-time 200ms --warmup 100ms >"$$LOG" 2>&1 & \
-		TEST_PID=$$!; \
-		READY=0; \
-		for i in $$(seq 1 30); do \
-			if curl -s "http://localhost:$$PORT/debug/pprof/" >/dev/null 2>&1; then \
-				READY=1; \
-				break; \
-			fi; \
-			if ! kill -0 "$$TEST_PID" 2>/dev/null; then \
-				break; \
-			fi; \
-			sleep 0.1; \
-		done; \
-		if [ $$READY -ne 1 ]; then \
-			printf "%b\n" "$(C_RED)$(SYM_FAIL)$(C_RESET) Failed to connect to pprof server on port $$PORT"; \
-			if [ -s "$$LOG" ]; then \
-				cat "$$LOG"; \
-			fi; \
-			cleanup; \
-			exit 1; \
-		fi; \
-		printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Querying Go 1.27 /debug/pprof/goroutineleak endpoint..."; \
-		LEAK_REPORT=$$(curl -s "http://localhost:$$PORT/debug/pprof/goroutineleak?debug=1"); \
-		cleanup; \
-		printf "%b\n" "$$LEAK_REPORT"; \
-		if ! echo "$$LEAK_REPORT" | grep -q "total 0"; then \
-			printf "%b\n" "$(C_RED)$(SYM_FAIL)$(C_RESET) Goroutine leak check failed: leaked goroutines detected!"; \
-			exit 1; \
-		fi; \
-	'
-	@GO="$(GO)" bash scripts/test-profiles.sh test
+test-leaks: ## Run unit tests with Go 1.27 in-process goroutine leak detection enabled
+	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Running tests with Go 1.27 goroutine leak detection enabled (MICROFAT_TEST_LEAKS=1)..."
+	@MICROFAT_TEST_LEAKS=1 GO="$(GO)" bash scripts/test-profiles.sh test
 	@printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Test leak verification completed with zero detected leaks"
 
 pprof: profile-ui ## Alias for profile-ui
