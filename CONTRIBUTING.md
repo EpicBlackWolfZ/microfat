@@ -23,6 +23,7 @@ All participants in the `microfat` community are expected to adhere to the [Code
 - **Git**: Working copy cloned from `https://github.com/EpicBlackWolfZ/microfat`.
 - **Optional Local Linters / Tools**:
   - `golangci-lint` (v2.13.2+)
+  - `shellcheck` (v0.11.0)
   - `gotestsum`
   - `goreleaser` (v2+)
   - `govulncheck`
@@ -50,7 +51,9 @@ make all        # Run tidy, lint, vuln, test, coverage gate (>=95%), and build
 make build      # Compile microfat and microfat-stub into bin/
 make test       # Run unit tests with race detection (-race)
 make coverage   # Generate coverage profile and enforce >= 95.0% threshold gate
-make lint       # Run golangci-lint across all packages
+make lint       # Run all linters (Go via golangci-lint and Bash via shellcheck)
+make lint-go    # Run golangci-lint across all packages
+make lint-shell # Run ShellCheck (v0.11.0) across all tracked Bash scripts
 make vuln       # Run govulncheck vulnerability scanner
 make tidy       # Run go mod tidy and go mod verify
 make snapshot   # Test GoReleaser release packaging and self-bundling
@@ -106,7 +109,7 @@ We strictly follow the [Conventional Commits](https://www.conventionalcommits.or
 Every Pull Request must pass **7 required automated CI and Security checks**:
 
 1. **`Validate Conventional PR Title`**: Verifies PR title follows Conventional Commits.
-2. **`Lint (golangci-lint)`**: Zero tolerance for linter errors (`errcheck`, `goconst`, `lll`, `mnd`, `govet`, etc.).
+2. **`Lint (golangci-lint)`**: Zero tolerance for Go linter errors (`errcheck`, `goconst`, `lll`, `mnd`, `govet`, etc.) and ShellCheck (v0.11.0) static analysis violations across all tracked Bash scripts.
 3. **`Unit Tests & Coverage Gate (>= 95%)`**: Full test execution with `-race` detection enforcing the strict **>= 95.0%** threshold across all packages (`cmd/...`, `internal/...`, and `runtimeinit/...`).
 4. **`Vulnerability Scan (govulncheck)`**: Automated scanning against the official Go Vulnerability Database.
 5. **`Secrets Detection (gitleaks)`**: Audits commits for accidental credential leaks.

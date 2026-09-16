@@ -30,6 +30,7 @@ GOTESTSUM := $(shell command -v gotestsum 2> /dev/null)
 GOLANGCI_LINT := $(shell command -v golangci-lint 2> /dev/null)
 GOVULNCHECK := $(shell command -v govulncheck 2> /dev/null)
 GORELEASER := $(shell command -v goreleaser 2> /dev/null)
+SHELLCHECK := $(shell command -v shellcheck 2> /dev/null)
 
 FUZZTIME ?= 5s
 PORT ?= 6060
@@ -83,7 +84,7 @@ else
 endif
 
 .PHONY: all help build build-amd64 build-arm64 build-all \
-        test test-leaks test-dx e2e fuzz chaos coverage lint vuln tidy tidy-check fmt fmt-check fix \
+        test test-leaks test-dx e2e fuzz chaos coverage lint lint-go lint-shell vuln tidy tidy-check fmt fmt-check fix \
         snapshot demo demo-arm64 demo-check benchmark bench bench-heavy bench-ultra bench-simd bench-startup bench-matrix \
         check-leaks pprof profile-ui test-all clean \
         benchmark-tools benchmark-smoke benchmark-matrix benchmark-integration benchmark-kernel benchmark-kernel-v1
@@ -212,7 +213,10 @@ coverage: ## Union default/minimal atomic coverage and enforce >= 95% overall
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Total coverage breakdown:"
 	@$(GO) tool cover -func=$(COVERAGE_FILE)
 
-lint: ## Run golangci-lint across all packages
+lint: lint-go lint-shell ## Run all linters (Go via golangci-lint and Bash via shellcheck)
+	@printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) All linters passed successfully"
+
+lint-go: ## Run golangci-lint across all packages
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Running golangci-lint..."
 ifdef GOLANGCI_LINT
 	@golangci-lint run ./...
@@ -220,7 +224,17 @@ else
 	@printf "%b\n" "$(C_YELLOW)$(SYM_WARN)$(C_RESET) golangci-lint not found in PATH, running go vet..."
 	@$(GO) vet ./...
 endif
-	@printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Linting passed with zero warnings"
+	@printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Go linting passed with zero warnings"
+
+lint-shell: ## Run ShellCheck across all tracked Bash scripts
+	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Running shellcheck on tracked shell scripts..."
+ifdef SHELLCHECK
+	@git ls-files -z '*.sh' | xargs -0r $(SHELLCHECK)
+	@printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Shell static analysis passed with zero warnings"
+else
+	@printf "%b\n" "$(C_RED)$(SYM_FAIL)$(C_RESET) shellcheck not found in PATH. Please install shellcheck (v0.11.0 recommended)."
+	@exit 1
+endif
 
 vuln: ## Run govulncheck vulnerability scanner
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Running govulncheck..."

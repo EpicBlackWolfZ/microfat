@@ -59,6 +59,11 @@ A `microfat` fat binary consists of contiguous segments:
   - No unclosed response bodies or resources (`bodyclose`).
   - Line length limit <= 140 characters (`lll`).
   - No naked returns (`nakedret`).
+- **Shell Script Static Analysis & Hardening**:
+  - Pinned toolchain: **ShellCheck v0.11.0**.
+  - Strict baseline enforced across all tracked `*.sh` scripts: `#!/usr/bin/env bash`, `set -euo pipefail`, and `IFS=$'\n\t'`.
+  - Zero-warning tolerance under `.shellcheckrc` optional rules (`check-unassigned-uppercase`, `quote-safe-variables`, `check-extra-masked-returns`, `check-set-e-suppressed`, `require-variable-braces`).
+  - No broad or global rule disables (`SC1090` must remain enabled).
 - **Testing Standard**:
   - Table-driven tests with descriptive subtests (`t.Run`).
   - Concurrent execution where safe (`t.Parallel()`).
@@ -85,7 +90,9 @@ make check-leaks   # Probe Go 1.27 goroutine leak endpoint during running benchm
 make test-dx       # Run regression tests for developer workflows (port safety, formatting, TTY detection)
 make pprof         # Open interactive pprof web UI (PROFILE=heap|cpu|goroutine|allocs|mutex|block|goroutineleak)
 make coverage      # Generate coverage profile and enforce 95% threshold gate
-make lint          # Run golangci-lint across all packages
+make lint          # Run all linters (Go via golangci-lint and Bash via shellcheck)
+make lint-go       # Run golangci-lint across all packages
+make lint-shell    # Run ShellCheck across all tracked Bash scripts
 make vuln          # Run govulncheck vulnerability scan
 make tidy          # Run go mod tidy and go mod verify
 make tidy-check    # Verify module dependencies are tidy using non-mutating verification ('go mod tidy -diff')
