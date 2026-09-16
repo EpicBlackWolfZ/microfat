@@ -1542,6 +1542,10 @@ func TestPprofBlockAndMutexFlags(t *testing.T) {
 		runtime.SetMutexProfileFraction(previous)
 	})
 
+	p := pprof.Lookup("block")
+	require.NotNil(t, p)
+	before := p.Count()
+
 	rootCmd := newRootCmd()
 	rootCmd.SetArgs([]string{"--pprof-block-rate", "1", "--pprof-mutex-fraction", "2", subcmdDetect})
 	err := rootCmd.Execute()
@@ -1549,7 +1553,7 @@ func TestPprofBlockAndMutexFlags(t *testing.T) {
 
 	assert.Equal(t, 2, runtime.SetMutexProfileFraction(-1))
 
-	// Verify block profile rate was applied by provoking a blocking event and checking pprof.Lookup("block")
+	// Provoke a deterministic channel blocking event to verify block profile count increases
 	ch := make(chan struct{})
 	go func() {
 		time.Sleep(10 * time.Millisecond)
@@ -1557,11 +1561,7 @@ func TestPprofBlockAndMutexFlags(t *testing.T) {
 	}()
 	<-ch
 
-	p := pprof.Lookup("block")
-	require.NotNil(t, p)
-	var buf bytes.Buffer
-	require.NoError(t, p.WriteTo(&buf, 1))
-	assert.Positive(t, buf.Len())
+	assert.Greater(t, p.Count(), before)
 }
 
 func TestPprofBlockAndMutexEnvVars(t *testing.T) {
@@ -1570,6 +1570,10 @@ func TestPprofBlockAndMutexEnvVars(t *testing.T) {
 		runtime.SetBlockProfileRate(0)
 		runtime.SetMutexProfileFraction(previous)
 	})
+
+	p := pprof.Lookup("block")
+	require.NotNil(t, p)
+	before := p.Count()
 
 	t.Setenv("MICROFAT_PPROF_BLOCK_RATE", "1")
 	t.Setenv("MICROFAT_PPROF_MUTEX_FRACTION", "3")
@@ -1580,4 +1584,14 @@ func TestPprofBlockAndMutexEnvVars(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, 3, runtime.SetMutexProfileFraction(-1))
+
+	// Provoke a deterministic channel blocking event to verify block profile count increases
+	ch := make(chan struct{})
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		close(ch)
+	}()
+	<-ch
+
+	assert.Greater(t, p.Count(), before)
 }
