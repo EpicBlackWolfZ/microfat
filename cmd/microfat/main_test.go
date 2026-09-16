@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1450,4 +1451,31 @@ func TestPprofServerContextCancellation(t *testing.T) {
 		}
 		return false
 	}, 2*time.Second, 20*time.Millisecond, "expected port %s to be released after context cancellation", portStr)
+}
+
+func TestPprofBlockAndMutexFlags(t *testing.T) {
+	t.Cleanup(func() {
+		runtime.SetBlockProfileRate(0)
+		runtime.SetMutexProfileFraction(0)
+	})
+
+	rootCmd := newRootCmd()
+	rootCmd.SetArgs([]string{"--pprof-block-rate", "1", "--pprof-mutex-fraction", "1", "detect"})
+	err := rootCmd.Execute()
+	require.NoError(t, err)
+}
+
+func TestPprofBlockAndMutexEnvVars(t *testing.T) {
+	t.Cleanup(func() {
+		runtime.SetBlockProfileRate(0)
+		runtime.SetMutexProfileFraction(0)
+	})
+
+	t.Setenv("MICROFAT_PPROF_BLOCK_RATE", "2")
+	t.Setenv("MICROFAT_PPROF_MUTEX_FRACTION", "2")
+
+	rootCmd := newRootCmd()
+	rootCmd.SetArgs([]string{"detect"})
+	err := rootCmd.Execute()
+	require.NoError(t, err)
 }

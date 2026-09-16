@@ -15,6 +15,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -78,8 +80,10 @@ func startPprofServer(ctx context.Context, port string, logWriter io.Writer) err
 
 func newRootCmd() *cobra.Command {
 	var (
-		showVersion bool
-		pprofPort   string
+		showVersion        bool
+		pprofPort          string
+		pprofBlockRate     int
+		pprofMutexFraction int
 	)
 
 	cmd := &cobra.Command{
@@ -92,6 +96,30 @@ self-dispatching fat executable with zero persistent process overhead and payloa
 			if port == "" {
 				port = os.Getenv("MICROFAT_PPROF_PORT")
 			}
+			blockRate := pprofBlockRate
+			if blockRate == 0 {
+				if envVal := os.Getenv("MICROFAT_PPROF_BLOCK_RATE"); envVal != "" {
+					if parsed, err := strconv.Atoi(envVal); err == nil && parsed > 0 {
+						blockRate = parsed
+					}
+				}
+			}
+			mutexFraction := pprofMutexFraction
+			if mutexFraction == 0 {
+				if envVal := os.Getenv("MICROFAT_PPROF_MUTEX_FRACTION"); envVal != "" {
+					if parsed, err := strconv.Atoi(envVal); err == nil && parsed > 0 {
+						mutexFraction = parsed
+					}
+				}
+			}
+
+			if blockRate > 0 {
+				runtime.SetBlockProfileRate(blockRate)
+			}
+			if mutexFraction > 0 {
+				runtime.SetMutexProfileFraction(mutexFraction)
+			}
+
 			if port != "" {
 				if err := startPprofServer(cmd.Context(), port, cmd.ErrOrStderr()); err != nil {
 					return fmt.Errorf("starting pprof server on port %s: %w", port, err)
@@ -111,6 +139,10 @@ self-dispatching fat executable with zero persistent process overhead and payloa
 	cmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Print version and build info")
 	cmd.PersistentFlags().StringVar(&pprofPort, "pprof-port", "",
 		"Port to run background pprof server (or via MICROFAT_PPROF_PORT env var)")
+	cmd.PersistentFlags().IntVar(&pprofBlockRate, "pprof-block-rate", 0,
+		"Block profile sampling rate (or via MICROFAT_PPROF_BLOCK_RATE env var)")
+	cmd.PersistentFlags().IntVar(&pprofMutexFraction, "pprof-mutex-fraction", 0,
+		"Mutex profile sampling fraction (or via MICROFAT_PPROF_MUTEX_FRACTION env var)")
 
 	cmd.AddCommand(newDetectCmd())
 	cmd.AddCommand(newInspectCmd())
