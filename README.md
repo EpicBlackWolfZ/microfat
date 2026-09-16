@@ -430,7 +430,10 @@ make fmt-check
 # Run Go API modernizations ('go fix'), linter auto-fixes, and format code
 make fix
 
-# Run unit tests with in-process Go 1.27 goroutine leak detection enabled (MICROFAT_TEST_LEAKS=1)
+# Verify Go module dependencies are tidy (non-mutating 'go mod tidy -diff')
+make tidy-check
+
+# Run tests with Go 1.27 goroutine leak detection enabled (MICROFAT_TEST_LEAKS=1)
 make test-leaks
 
 # Check for Go 1.27 goroutine leaks on the running benchmark workload
@@ -451,6 +454,7 @@ make demo-check
 > **Terminal Detection & Port Safety**:
 > - Piped or redirected stdout automatically disables ANSI escapes and uses ASCII markers (`[OK]`, `[FAIL]`). Use `NO_COLOR=1` or `COLOR=0` to force disable colors.
 > - Profiling targets check port occupancy before spawning servers and fail cleanly without terminating unrelated processes. Cleanup sends graceful `SIGTERM` before `SIGKILL` strictly to target-spawned child processes.
+> - Developer workflow regressions (`test-dx`, `test-leaks`, `check-leaks`, `demo-check`) are CI-enforced in GitHub Actions.
 
 ---
 

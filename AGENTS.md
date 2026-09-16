@@ -80,7 +80,7 @@ make fmt-check     # Check formatting and fail if any Go files need formatting (
 make fix           # Apply Go API modernizations ('go fix'), linter auto-fixes, and gofmt -s
 make build         # Compile microfat and microfat-stub into bin/
 make test          # Run unit tests with race detection
-make test-leaks    # Run unit tests with in-process Go 1.27 goroutine leak detection enabled (MICROFAT_TEST_LEAKS=1)
+make test-leaks    # Run tests with Go 1.27 goroutine leak detection enabled (MICROFAT_TEST_LEAKS=1)
 make check-leaks   # Probe Go 1.27 goroutine leak endpoint during running benchmark workload
 make test-dx       # Run regression tests for developer workflows (port safety, formatting, TTY detection)
 make pprof         # Open interactive pprof web UI (PROFILE=heap|cpu|goroutine|allocs|mutex|block|goroutineleak)
@@ -88,7 +88,7 @@ make coverage      # Generate coverage profile and enforce 95% threshold gate
 make lint          # Run golangci-lint across all packages
 make vuln          # Run govulncheck vulnerability scan
 make tidy          # Run go mod tidy and go mod verify
-make tidy-check    # Verify module dependencies are tidy without mutating files
+make tidy-check    # Verify module dependencies are tidy using non-mutating verification ('go mod tidy -diff')
 make snapshot      # Test local GoReleaser release packaging without publishing
 make demo          # Build the demo fat binary in examples/demo
 make demo-check    # Verify finished fat binary stub commands (info, optimize, trim, prewarm) with trap cleanup
@@ -98,6 +98,7 @@ make clean         # Remove build artifacts and coverage files
 
 > **Terminal Output & Colors**: All make targets support the standard [`NO_COLOR`](https://no-color.org) environment variable (`NO_COLOR=1`) and `COLOR=0` make variable to strip ANSI escape codes and switch Unicode symbols (`✔`/`✖`) to clean ASCII markers (`[OK]`/`[FAIL]`). Terminal detection checks standard output (`[ -t 1 ]`) to automatically disable colors when redirected or non-interactive.
 > **Port Safety & Profiling**: Profiling targets (`check-leaks`, `pprof`) detect occupied ports cleanly and fail with an actionable message (`PORT=<port>`, `HTTP_PORT=<port>`) rather than terminating external processes. Profiling cleanup sends graceful SIGTERM before SIGKILL strictly to spawned child processes. Mutex and block profile sampling rates (`MICROFAT_PPROF_BLOCK_RATE`, `MICROFAT_PPROF_MUTEX_FRACTION`) are enabled only when `PROFILE=block` or `PROFILE=mutex` is requested.
+> **CI Regression Gates**: Developer workflow regression tests (`test-dx`, `test-leaks`, `check-leaks`, `demo-check`) are CI-enforced in GitHub Actions on every pull request.
 
 
 ---
