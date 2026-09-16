@@ -110,7 +110,6 @@ func TestAutoTune_Disabled(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			mockEnv := map[string]string{
 				format.EnvAutotune: tc.envVal,
@@ -623,8 +622,8 @@ func TestAutoTune_AdaptiveProfile(t *testing.T) {
 
 	t.Run("AdaptiveWithEnvVars", func(t *testing.T) {
 		mockEnv := map[string]string{
-			format.EnvGCProfile:         "adaptive",
-			format.EnvLiveHeapEstimate:  "350MiB",
+			format.EnvGCProfile:        "adaptive",
+			format.EnvLiveHeapEstimate: "350MiB",
 		}
 		withIsolatedEnv(t, mockEnv, &mockLimits, nil, func(_ *int64, _ *int, gogc *int, _ *bytes.Buffer) {
 			res := AutoTune()
@@ -729,7 +728,7 @@ func TestAutoTune_WithCgroupRoot_LiveFilesystem(t *testing.T) {
 	v2CPUMax := filepath.Join(tmpDir, "cpu.max")
 	procFile := filepath.Join(tmpDir, "proc_cgroup")
 
-	const testMemLimit = "1073741824"   // 1 GB
+	const testMemLimit = "1073741824"    // 1 GB
 	const testCPUQuota = "200000 100000" // 2 CPUs
 
 	if err := os.WriteFile(v2MemMax, []byte(testMemLimit+"\n"), testFilePerm); err != nil {
@@ -1086,7 +1085,6 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			tt := tt
 			t.Run(tt.name, func(t *testing.T) {
 				opts := []Option{
 					WithDryRun(true),
@@ -1226,7 +1224,6 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 		}
 
 		for _, tc := range testCases {
-			tc := tc
 			t.Run(tc.name, func(t *testing.T) {
 				mockEnv := map[string]string{
 					format.EnvDryRun: tc.envVal,
@@ -1437,7 +1434,7 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 			const goroutines = 20
 			var wg sync.WaitGroup
 			wg.Add(goroutines)
-			for i := 0; i < goroutines; i++ {
+			for range goroutines {
 				go func() {
 					defer wg.Done()
 					res := AutoTune(WithDryRun(true), WithProfile(ProfileLatencyCritical))
@@ -1654,8 +1651,8 @@ func TestExecutable(t *testing.T) {
 			wantPath: "/usr/local/bin/myapp",
 		},
 		{
-			name:     "OriginalExeWhitespaceOnly_FallsBackToOsExecutable",
-			envVal:   "   \t\n ",
+			name:   "OriginalExeWhitespaceOnly_FallsBackToOsExecutable",
+			envVal: "   \t\n ",
 			mockExec: func() (string, error) {
 				return "/fallback/binary", nil
 			},
@@ -1679,14 +1676,13 @@ func TestExecutable(t *testing.T) {
 			wantErrText: "cannot determine executable",
 		},
 		{
-			name:   "FallbackToDefaultOsExecutable",
-			envVal: "",
+			name:     "FallbackToDefaultOsExecutable",
+			envVal:   "",
 			mockExec: nil, // exercises default executableFunc (os.Executable)
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			origExec := executableFunc
 			origAbs := absFunc
@@ -1774,7 +1770,6 @@ func TestRuntimeInit_ExecutableSubprocess(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -1792,4 +1787,3 @@ func TestRuntimeInit_ExecutableSubprocess(t *testing.T) {
 		})
 	}
 }
-

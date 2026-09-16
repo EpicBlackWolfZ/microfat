@@ -310,8 +310,8 @@ func TestReadTrimmedFile(t *testing.T) {
 
 func TestResolveTuningPlan(t *testing.T) {
 	const (
-		mem32MB            = int64(32 * 1024 * 1024)
-		mem16MB            = int64(16 * 1024 * 1024)
+		mem32MB             = int64(32 * 1024 * 1024)
+		mem16MB             = int64(16 * 1024 * 1024)
 		customHeadroomBytes = int64(128 * 1024 * 1024)
 		expectedCustomRatio = 0.80
 		expectedCustom85    = 0.85
@@ -1650,4 +1650,3 @@ func TestReadLimitsCgroupV2_MemoryHighCorrupted(t *testing.T) {
 		})
 	}
 }
-

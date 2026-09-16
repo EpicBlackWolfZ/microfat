@@ -2,13 +2,23 @@
 package main
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	// #nosec G108 -- opt-in profiling endpoint explicitly controlled via --pprof-port / MICROFAT_PPROF_PORT
+	_ "net/http/pprof"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/builder"
@@ -21,28 +31,102 @@ import (
 )
 
 const (
-	percentMultiplier = 100.0
-	keyValueParts     = 2
-	defaultDirMode    = 0o750
+	percentMultiplier      = 100.0
+	keyValueParts          = 2
+	defaultDirMode         = 0o750
+	pprofHeaderTimeoutSec  = 3
+	pprofReadHeaderTimeout = pprofHeaderTimeoutSec * time.Second
 )
 
 var exitFunc = os.Exit
 
 func main() {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	rootCmd := newRootCmd()
-	if err := rootCmd.Execute(); err != nil {
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		exitFunc(1)
 	}
 }
 
+func startPprofServer(ctx context.Context, port string, logWriter io.Writer) error {
+	addr := net.JoinHostPort("localhost", port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(logWriter, "[microfat:pprof] serving pprof endpoints at http://%s/debug/pprof/\n", ln.Addr().String())
+	server := &http.Server{
+		ReadHeaderTimeout: pprofReadHeaderTimeout,
+	}
+	serverClosed := make(chan struct{})
+	go func() {
+		_ = server.Serve(ln)
+		close(serverClosed)
+	}()
+	if ctx != nil && ctx.Done() != nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+				_ = server.Close()
+				_ = ln.Close()
+			case <-serverClosed:
+			}
+		}()
+	}
+	return nil
+}
+
 func newRootCmd() *cobra.Command {
-	var showVersion bool
+	var (
+		showVersion        bool
+		pprofPort          string
+		pprofBlockRate     int
+		pprofMutexFraction int
+	)
 
 	cmd := &cobra.Command{
 		Use:   "microfat",
 		Short: "Microfat - Dynamic CPU Microarchitecture Optimization and Packaging Tool",
 		Long: `Microfat combines multiple microarchitecture-specific Go ELF binaries into a single,
 self-dispatching fat executable with zero persistent process overhead and payload integrity verification.`,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			port := pprofPort
+			if port == "" {
+				port = os.Getenv("MICROFAT_PPROF_PORT")
+			}
+			blockRate := pprofBlockRate
+			if blockRate == 0 {
+				if envVal := os.Getenv("MICROFAT_PPROF_BLOCK_RATE"); envVal != "" {
+					if parsed, err := strconv.Atoi(envVal); err == nil && parsed > 0 {
+						blockRate = parsed
+					}
+				}
+			}
+			mutexFraction := pprofMutexFraction
+			if mutexFraction == 0 {
+				if envVal := os.Getenv("MICROFAT_PPROF_MUTEX_FRACTION"); envVal != "" {
+					if parsed, err := strconv.Atoi(envVal); err == nil && parsed > 0 {
+						mutexFraction = parsed
+					}
+				}
+			}
+
+			if blockRate > 0 {
+				runtime.SetBlockProfileRate(blockRate)
+			}
+			if mutexFraction > 0 {
+				runtime.SetMutexProfileFraction(mutexFraction)
+			}
+
+			if port != "" {
+				if err := startPprofServer(cmd.Context(), port, cmd.ErrOrStderr()); err != nil {
+					return fmt.Errorf("starting pprof server on port %s: %w", port, err)
+				}
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if showVersion {
 				fmt.Println(version.Info())
@@ -53,6 +137,12 @@ self-dispatching fat executable with zero persistent process overhead and payloa
 	}
 
 	cmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Print version and build info")
+	cmd.PersistentFlags().StringVar(&pprofPort, "pprof-port", "",
+		"Port to run background pprof server (or via MICROFAT_PPROF_PORT env var)")
+	cmd.PersistentFlags().IntVar(&pprofBlockRate, "pprof-block-rate", 0,
+		"Block profile sampling rate (or via MICROFAT_PPROF_BLOCK_RATE env var)")
+	cmd.PersistentFlags().IntVar(&pprofMutexFraction, "pprof-mutex-fraction", 0,
+		"Mutex profile sampling fraction (or via MICROFAT_PPROF_MUTEX_FRACTION env var)")
 
 	cmd.AddCommand(newDetectCmd())
 	cmd.AddCommand(newInspectCmd())
@@ -287,7 +377,7 @@ func newTrimCmd() *cobra.Command {
 				policy.MaxLevel = maxLevel
 			}
 			if disabledVariants != "" {
-				for _, v := range strings.Split(disabledVariants, ",") {
+				for v := range strings.SplitSeq(disabledVariants, ",") {
 					v = strings.TrimSpace(v)
 					if v != "" {
 						policy.DisabledVariants = append(policy.DisabledVariants, v)

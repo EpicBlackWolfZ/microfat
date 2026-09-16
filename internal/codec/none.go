@@ -54,4 +54,3 @@ func (c *NoneCodec) Decompress(w io.Writer, r io.Reader, uncompressedSize int64)
 
 	return nil
 }
-

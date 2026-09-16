@@ -19,21 +19,21 @@ const (
 	maxCPUAffinityBits = 1024
 	kibibyteInBytes    = 1024
 
-	procCPUInfoFile        = "cpuinfo"
-	procMemInfoFile        = "meminfo"
-	procOSReleaseFile      = "sys/kernel/osrelease"
-	sysNodeDir             = "devices/system/node"
-	sysCPU0FreqDir         = "devices/system/cpu/cpu0/cpufreq"
-	scalingGovernorFile    = "scaling_governor"
-	scalingMinFreqFile     = "scaling_min_freq"
-	scalingMaxFreqFile     = "scaling_max_freq"
-	cpuinfoMinFreqFile     = "cpuinfo_min_freq"
-	cpuinfoMaxFreqFile     = "cpuinfo_max_freq"
-	memInfoFieldMemTotal   = "MemTotal:"
-	memInfoFieldMemAvail   = "MemAvailable:"
+	procCPUInfoFile      = "cpuinfo"
+	procMemInfoFile      = "meminfo"
+	procOSReleaseFile    = "sys/kernel/osrelease"
+	sysNodeDir           = "devices/system/node"
+	sysCPU0FreqDir       = "devices/system/cpu/cpu0/cpufreq"
+	scalingGovernorFile  = "scaling_governor"
+	scalingMinFreqFile   = "scaling_min_freq"
+	scalingMaxFreqFile   = "scaling_max_freq"
+	cpuinfoMinFreqFile   = "cpuinfo_min_freq"
+	cpuinfoMaxFreqFile   = "cpuinfo_max_freq"
+	memInfoFieldMemTotal = "MemTotal:"
+	memInfoFieldMemAvail = "MemAvailable:"
 
-	cpuInfoKeyValueParts  = 2
-	minMemInfoFieldCount  = 2
+	cpuInfoKeyValueParts = 2
+	minMemInfoFieldCount = 2
 )
 
 func (d *Detector) detectKernelRelease() (string, []string) {
@@ -333,7 +333,7 @@ func (d *Detector) getEffectiveCPUAffinity() ([]int, []string) {
 
 	count := mask.Count()
 	res := make([]int, 0, count)
-	for i := 0; i < maxCPUAffinityBits; i++ {
+	for i := range maxCPUAffinityBits {
 		if mask.IsSet(i) {
 			res = append(res, i)
 			if len(res) == count {

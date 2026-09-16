@@ -284,7 +284,7 @@ func (s *sampler) stop() ([]schema.ResourceSample, error) {
 	defer cancel()
 	err := errors.Join(s.phaseErr, s.child.Stop(ctx))
 	var samples []schema.ResourceSample
-	for _, line := range bytes.Split(bytes.TrimSpace(s.child.Stdout()), []byte{'\n'}) {
+	for line := range bytes.SplitSeq(bytes.TrimSpace(s.child.Stdout()), []byte{'\n'}) {
 		if len(line) == 0 {
 			continue
 		}

@@ -37,7 +37,7 @@ func hostQualifications(host map[string]string, cfg ExperimentConfig) []string {
 }
 
 func cpuInList(cpu int, list string) bool {
-	for _, part := range strings.Split(list, ",") {
+	for part := range strings.SplitSeq(list, ",") {
 		low, high, rangePresent := strings.Cut(strings.TrimSpace(part), "-")
 		first, err := strconv.Atoi(low)
 		if err != nil {

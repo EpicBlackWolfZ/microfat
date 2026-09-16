@@ -189,8 +189,8 @@ func effectiveLimit(name, requested, effective string, page int64) bool {
 
 func (s *Sandbox) Close() error {
 	var result error
-	for i := len(s.Paths) - 1; i >= 0; i-- {
-		err := os.Remove(s.Paths[i])
+	for _, v := range slices.Backward(s.Paths) {
+		err := os.Remove(v)
 		if !errors.Is(err, os.ErrNotExist) {
 			result = errors.Join(result, err)
 		}

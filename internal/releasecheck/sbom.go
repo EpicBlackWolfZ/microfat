@@ -300,8 +300,8 @@ func ValidateSPDXBytes(data []byte, facts *ArchiveFacts, inv *ArchiveInventory) 
 }
 
 func getSPDXBinaryID(binID string, pkgByName map[string]SPDXPackage) string {
-	if strings.HasPrefix(binID, "variant:") {
-		tier := strings.TrimPrefix(binID, "variant:")
+	if after, ok := strings.CutPrefix(binID, "variant:"); ok {
+		tier := after
 		if p, ok := pkgByName["microfat-variant-"+tier]; ok {
 			return p.SPDXID
 		}
@@ -589,8 +589,8 @@ func ValidateCycloneDXBytes(data []byte, facts *ArchiveFacts, inv *ArchiveInvent
 }
 
 func getCDXBinaryRef(binID string, compByName map[string]CDXComponent) string {
-	if strings.HasPrefix(binID, "variant:") {
-		tier := strings.TrimPrefix(binID, "variant:")
+	if after, ok := strings.CutPrefix(binID, "variant:"); ok {
+		tier := after
 		if c, ok := compByName["microfat-variant-"+tier]; ok {
 			return c.BOMRef
 		}

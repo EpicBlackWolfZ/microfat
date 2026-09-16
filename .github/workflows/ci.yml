@@ -139,6 +139,31 @@ jobs:
           done
 
 
+  dx:
+    name: Developer Workflow Regression Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: true
+
+      - name: Run Developer Workflow Regression Tests
+        run: make test-dx
+
+      - name: Run Tests with Goroutine Leak Detection
+        run: make test-leaks
+
+      - name: Run Benchmark Leak Probe
+        run: make check-leaks
+
+      - name: Verify Demo Fat Binary
+        run: make demo-check
+
   vulncheck:
     name: Vulnerability Scan (govulncheck)
     runs-on: ubuntu-latest

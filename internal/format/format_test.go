@@ -2053,7 +2053,6 @@ func TestValidateChecksum(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := ValidateChecksum(tc.input)
@@ -2179,7 +2178,6 @@ func TestNormalizeVariant(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.input, func(t *testing.T) {
 			t.Parallel()
 			actual := NormalizeVariant(tt.input)
@@ -2216,7 +2214,6 @@ func TestFindVariant_NormalizedMatching(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.query, func(t *testing.T) {
 			t.Parallel()
 			entry, found := idx.FindVariant(tt.query)
@@ -2516,7 +2513,6 @@ func TestParseJSONInt64_BoundsAndOverflow(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got, nextPos, err := parseJSONInt64([]byte(tt.input), 0)
@@ -2585,7 +2581,6 @@ func TestUnmarshalJSONIndex_IntegerOverflow(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			_, err := unmarshalJSONIndex([]byte(tt.json))
@@ -2819,7 +2814,6 @@ func TestReadTrailerAndIndex_IndexBoundsBoundaryEnforcement(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			idx := tt.buildIndex()
@@ -2911,7 +2905,6 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 		}
 
 		for _, tc := range malformedCases {
-			tc := tc
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				idx := &Index{
@@ -3197,5 +3190,3 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 		}
 	})
 }
-
-

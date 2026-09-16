@@ -155,13 +155,11 @@ func TestDemoWorkloads(t *testing.T) {
 
 	// Test concurrent pool reuse under race detector
 	var poolWg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		poolWg.Add(1)
-		go func() {
-			defer poolWg.Done()
+	for range 8 {
+		poolWg.Go(func() {
 			_ = runJSONMemoryWorkload(LevelStandard)
 			_ = runConcurrentWorkload(LevelStandard)
-		}()
+		})
 	}
 	poolWg.Wait()
 

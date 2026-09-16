@@ -3,6 +3,7 @@ package releasecheck
 import (
 	"debug/buildinfo"
 	"fmt"
+	"maps"
 )
 
 // ModuleDep represents a linked Go dependency module and any replacement.
@@ -89,9 +90,7 @@ func ExtractArchiveInventory(facts *ArchiveFacts) (*ArchiveInventory, error) {
 		}
 		binInv := extractBinaryInventory(exeName, exeName, "", exe.BuildInfo)
 		inv.Binaries[exeName] = binInv
-		for k, dep := range binInv.Dependencies {
-			inv.AllDependencies[k] = dep
-		}
+		maps.Copy(inv.AllDependencies, binInv.Dependencies)
 	}
 
 	// 2. Process embedded variants
@@ -102,9 +101,7 @@ func ExtractArchiveInventory(facts *ArchiveFacts) (*ArchiveInventory, error) {
 		id := "variant:" + tier
 		binInv := extractBinaryInventory(id, ReleaseProjectName, tier, vf.BuildInfo)
 		inv.Binaries[id] = binInv
-		for k, dep := range binInv.Dependencies {
-			inv.AllDependencies[k] = dep
-		}
+		maps.Copy(inv.AllDependencies, binInv.Dependencies)
 	}
 
 	return inv, nil

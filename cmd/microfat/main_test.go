@@ -2,17 +2,25 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"runtime/pprof"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+	"github.com/EpicBlackWolfZ/microfat/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +40,12 @@ const (
 	testOSLinux        = "linux"
 	testArchAMD64      = "amd64"
 	testArchARM64      = "arm64"
+	subcmdDetect       = "detect"
 )
+
+func TestMain(m *testing.M) {
+	os.Exit(testutil.CheckLeaksIfEnabled(m))
+}
 
 func TestRootCmdAndSubcommands(t *testing.T) {
 	tempDir := t.TempDir()
@@ -830,7 +843,7 @@ func TestPackAndInspect_DictionaryFlags(t *testing.T) {
 	v3Path := filepath.Join(tempDir, "app_v3")
 
 	var v1Buf, v3Buf bytes.Buffer
-	for i := 0; i < 800; i++ {
+	for i := range 800 {
 		str := fmt.Sprintf("runtime_symbol_record_%04d_metadata_hash_%x\n", i, (i*31)^0x12345678)
 		v1Buf.WriteString(str)
 		v3Buf.WriteString(str)
@@ -1291,7 +1304,6 @@ func TestInspectAndInfo_SubprocessStreams(t *testing.T) {
 	}
 
 	for _, tc := range subtests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			cmd := exec.Command(cliBin, tc.cmdSub, "--json", tc.target)
@@ -1333,3 +1345,253 @@ func TestFormatVersionName(t *testing.T) {
 	assert.Equal(t, "unknown", formatVersionName(999))
 }
 
+func TestPprofServerFlagAndEnv(t *testing.T) {
+	ln, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_, portStr, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	require.NoError(t, ln.Close())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rootCmd := newRootCmd()
+	var errBuf bytes.Buffer
+	rootCmd.SetErr(&errBuf)
+	rootCmd.SetArgs([]string{"--pprof-port", portStr, subcmdDetect})
+
+	err = rootCmd.ExecuteContext(ctx)
+	require.NoError(t, err)
+	assert.Contains(t, errBuf.String(), "[microfat:pprof] serving pprof endpoints")
+
+	resp, err := http.Get("http://" + addr + "/debug/pprof/")
+	require.NoError(t, err)
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	leakResp, err := http.Get("http://" + addr + "/debug/pprof/goroutineleak?debug=1")
+	require.NoError(t, err)
+	defer func() {
+		_ = leakResp.Body.Close()
+	}()
+	assert.Equal(t, http.StatusOK, leakResp.StatusCode)
+	leakBody, err := io.ReadAll(leakResp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(leakBody), "total 0")
+
+	cancel()
+	require.Eventually(t, func() bool {
+		testLn, testErr := net.Listen("tcp", addr)
+		if testErr == nil {
+			_ = testLn.Close()
+			return true
+		}
+		return false
+	}, 2*time.Second, 20*time.Millisecond, "expected port %s to be released", portStr)
+}
+
+func TestPprofServerEnvVar(t *testing.T) {
+	ln, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_, portStr, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	require.NoError(t, ln.Close())
+
+	t.Setenv("MICROFAT_PPROF_PORT", portStr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rootCmd := newRootCmd()
+	var errBuf bytes.Buffer
+	rootCmd.SetErr(&errBuf)
+	rootCmd.SetArgs([]string{subcmdDetect})
+
+	err = rootCmd.ExecuteContext(ctx)
+	require.NoError(t, err)
+	assert.Contains(t, errBuf.String(), "[microfat:pprof] serving pprof endpoints")
+
+	resp, err := http.Get("http://" + addr + "/debug/pprof/")
+	require.NoError(t, err)
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	leakResp, err := http.Get("http://" + addr + "/debug/pprof/goroutineleak?debug=1")
+	require.NoError(t, err)
+	defer func() {
+		_ = leakResp.Body.Close()
+	}()
+	assert.Equal(t, http.StatusOK, leakResp.StatusCode)
+	leakBody, err := io.ReadAll(leakResp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(leakBody), "total 0")
+
+	cancel()
+	require.Eventually(t, func() bool {
+		testLn, testErr := net.Listen("tcp", addr)
+		if testErr == nil {
+			_ = testLn.Close()
+			return true
+		}
+		return false
+	}, 2*time.Second, 20*time.Millisecond, "expected port %s to be released", portStr)
+}
+
+func TestPprofServerFlagOverridesEnv(t *testing.T) {
+	ln1, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	addr1 := ln1.Addr().String()
+	_, port1, err := net.SplitHostPort(addr1)
+	require.NoError(t, err)
+	require.NoError(t, ln1.Close())
+
+	ln2, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	addr2 := ln2.Addr().String()
+	_, port2, err := net.SplitHostPort(addr2)
+	require.NoError(t, err)
+	require.NoError(t, ln2.Close())
+
+	t.Setenv("MICROFAT_PPROF_PORT", port1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rootCmd := newRootCmd()
+	var errBuf bytes.Buffer
+	rootCmd.SetErr(&errBuf)
+	rootCmd.SetArgs([]string{"--pprof-port", port2, subcmdDetect})
+
+	err = rootCmd.ExecuteContext(ctx)
+	require.NoError(t, err)
+	assert.Contains(t, errBuf.String(), "[microfat:pprof] serving pprof endpoints")
+	assert.Contains(t, errBuf.String(), port2)
+
+	resp, err := http.Get("http://" + addr2 + "/debug/pprof/")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	_, err = net.DialTimeout("tcp", addr1, 100*time.Millisecond)
+	assert.Error(t, err, "expected port1 (%s) not to be listening", port1)
+
+	cancel()
+	require.Eventually(t, func() bool {
+		testLn, testErr := net.Listen("tcp", addr2)
+		if testErr == nil {
+			_ = testLn.Close()
+			return true
+		}
+		return false
+	}, 2*time.Second, 20*time.Millisecond, "expected port %s to be released", port2)
+}
+
+func TestPprofServerInvalidPort(t *testing.T) {
+	rootCmd := newRootCmd()
+	rootCmd.SetArgs([]string{"--pprof-port", "invalid-port-string", subcmdDetect})
+
+	err := rootCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "starting pprof server on port")
+}
+
+func TestPprofServerContextCancellation(t *testing.T) {
+	ln, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_, portStr, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	require.NoError(t, ln.Close())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var logBuf bytes.Buffer
+	err = startPprofServer(ctx, portStr, &logBuf)
+	require.NoError(t, err)
+	assert.Contains(t, logBuf.String(), "[microfat:pprof] serving pprof endpoints")
+
+	// Ensure the server responds
+	resp, err := http.Get("http://" + addr + "/debug/pprof/")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Cancel context and verify the port is freed
+	cancel()
+
+	// Wait for server to close and port to be bindable again
+	require.Eventually(t, func() bool {
+		testLn, testErr := net.Listen("tcp", addr)
+		if testErr == nil {
+			_ = testLn.Close()
+			return true
+		}
+		return false
+	}, 2*time.Second, 20*time.Millisecond, "expected port %s to be released after context cancellation", portStr)
+}
+
+func TestPprofBlockAndMutexFlags(t *testing.T) {
+	previous := runtime.SetMutexProfileFraction(-1)
+	t.Cleanup(func() {
+		runtime.SetBlockProfileRate(0)
+		runtime.SetMutexProfileFraction(previous)
+	})
+
+	p := pprof.Lookup("block")
+	require.NotNil(t, p)
+	before := p.Count()
+
+	rootCmd := newRootCmd()
+	rootCmd.SetArgs([]string{"--pprof-block-rate", "1", "--pprof-mutex-fraction", "2", subcmdDetect})
+	err := rootCmd.Execute()
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, runtime.SetMutexProfileFraction(-1))
+
+	// Provoke a deterministic channel blocking event to verify block profile count increases
+	ch := make(chan struct{})
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		close(ch)
+	}()
+	<-ch
+
+	assert.Greater(t, p.Count(), before)
+}
+
+func TestPprofBlockAndMutexEnvVars(t *testing.T) {
+	previous := runtime.SetMutexProfileFraction(-1)
+	t.Cleanup(func() {
+		runtime.SetBlockProfileRate(0)
+		runtime.SetMutexProfileFraction(previous)
+	})
+
+	p := pprof.Lookup("block")
+	require.NotNil(t, p)
+	before := p.Count()
+
+	t.Setenv("MICROFAT_PPROF_BLOCK_RATE", "1")
+	t.Setenv("MICROFAT_PPROF_MUTEX_FRACTION", "3")
+
+	rootCmd := newRootCmd()
+	rootCmd.SetArgs([]string{subcmdDetect})
+	err := rootCmd.Execute()
+	require.NoError(t, err)
+
+	assert.Equal(t, 3, runtime.SetMutexProfileFraction(-1))
+
+	// Provoke a deterministic channel blocking event to verify block profile count increases
+	ch := make(chan struct{})
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		close(ch)
+	}()
+	<-ch
+
+	assert.Greater(t, p.Count(), before)
+}

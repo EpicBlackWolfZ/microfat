@@ -220,7 +220,7 @@ func RunPropertyTest(t *testing.T, name string, iterations int, seed uint64, fn 
 
 		for i := range iterations {
 			iterSeed1 := seed ^ (uint64(i) * prngMultiplier)
-			iterSeed2 := (uint64(i) + 1) * prngMultiplier + prngAddend
+			iterSeed2 := (uint64(i)+1)*prngMultiplier + prngAddend
 
 			// #nosec G404 -- pseudo-random generator used exclusively for reproducible property testing seeds
 			rng := rand.New(rand.NewPCG(iterSeed1, iterSeed2))
@@ -279,7 +279,7 @@ func RunPropertyTestConcurrent(
 			}
 
 			iterSeed1 := seed ^ (uint64(i) * prngMultiplier)
-			iterSeed2 := (uint64(i) + 1) * prngMultiplier + prngAddend
+			iterSeed2 := (uint64(i)+1)*prngMultiplier + prngAddend
 
 			sem <- struct{}{}
 			wg.Add(1)

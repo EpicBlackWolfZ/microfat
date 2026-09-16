@@ -21,14 +21,14 @@ import (
 )
 
 const (
-	flagOutput     = "--output"
-	binMicrofat    = "microfat"
-	binStub        = "microfat-stub"
-	binStubMinimal = "microfat-stub-minimal"
-	testAppTarGz   = "dist/app.tar.gz"
-	fmtSPDXJSON    = "spdx-json"
-	fmtCycloneDX   = "cyclonedx-json"
-	testAppSPDX    = "dist/app.spdx.json"
+	flagOutput      = "--output"
+	binMicrofat     = "microfat"
+	binStub         = "microfat-stub"
+	binStubMinimal  = "microfat-stub-minimal"
+	testAppTarGz    = "dist/app.tar.gz"
+	fmtSPDXJSON     = "spdx-json"
+	fmtCycloneDX    = "cyclonedx-json"
+	testAppSPDX     = "dist/app.spdx.json"
 	testArchAMD64   = "amd64"
 	compressionNone = "none"
 )
@@ -111,7 +111,6 @@ func TestParseArgs(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			archive, output, formatName, err := parseArgs(tc.args)
@@ -1389,5 +1388,3 @@ func TestGenerate_ArchiveNameParsing(t *testing.T) {
 	// Must fail at archive opening/validation, NOT at name parsing
 	assert.Contains(t, err.Error(), "validating archive")
 }
-
-

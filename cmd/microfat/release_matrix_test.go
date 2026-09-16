@@ -217,8 +217,8 @@ func TestMinimalStubAndMatrixDistribution(t *testing.T) {
 		opts.FormatVersion = format.FormatVersion2
 		opts.Variants = map[string]string{
 			arm64LevelV80: v80Bin,
-			"v8.8": v88Bin,
-			"v8.9": v89Bin,
+			"v8.8":        v88Bin,
+			"v8.9":        v89Bin,
 		}
 
 		res, err := pack.Pack(opts)
@@ -267,7 +267,6 @@ func TestMinimalStubAndMatrixDistribution(t *testing.T) {
 func extractFileFromArchive(archivePath, targetName, destPath string) error {
 	return releasecheck.ExtractFileFromArchive(archivePath, targetName, destPath)
 }
-
 
 func verifyReleaseArchivesExist(t *testing.T, distDir string) {
 	t.Helper()

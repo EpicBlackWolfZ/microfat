@@ -20,10 +20,10 @@ const (
 
 // Sentinel runner configuration errors.
 var (
-	ErrNilWorkload        = errors.New("workload cannot be nil")
-	ErrInvalidTrialCount  = errors.New("trials count must be greater than zero")
-	ErrInvalidDuration    = errors.New("trial duration must be positive")
-	ErrInvalidWarmup      = errors.New("warmup duration cannot be negative")
+	ErrNilWorkload       = errors.New("workload cannot be nil")
+	ErrInvalidTrialCount = errors.New("trials count must be greater than zero")
+	ErrInvalidDuration   = errors.New("trial duration must be positive")
+	ErrInvalidWarmup     = errors.New("warmup duration cannot be negative")
 )
 
 // Config configures the parameters for a benchmark run.

@@ -1473,7 +1473,7 @@ func TestDictionaryPackingAndVerification(t *testing.T) {
 	for _, lvl := range []string{"v1", "v2", "v3", "v4"} {
 		p := filepath.Join(tempDir, "app_"+lvl)
 		var buf bytes.Buffer
-		for i := 0; i < 1200; i++ {
+		for i := range 1200 {
 			buf.WriteString(fmt.Sprintf("runtime_metadata_symbol_entry_%04d_hash_%x\n", i, (i*43)^0xA5A5A5A5))
 		}
 		buf.WriteString(fmt.Sprintf("variant_specific_code_segment_%s_optimization_pass\n", lvl))
@@ -1616,7 +1616,7 @@ func TestDictionaryCorruptedVerification(t *testing.T) {
 	for _, lvl := range []string{"v1", "v2"} {
 		p := filepath.Join(tempDir, "app_"+lvl)
 		var buf bytes.Buffer
-		for i := 0; i < 1200; i++ {
+		for i := range 1200 {
 			buf.WriteString(fmt.Sprintf("sample_payload_for_corruption_test_entry_%04d_hash_%x\n", i, (i*37)^0x5A5A5A5A))
 		}
 		buf.WriteString(fmt.Sprintf("level_specific_data_%s\n", lvl))
@@ -2130,15 +2130,13 @@ func TestPrewarmVariantWithDict_IntegrityAndAtomicReplacement(t *testing.T) {
 		var wg sync.WaitGroup
 		errs := make(chan error, concurrentWorkers)
 
-		for i := 0; i < concurrentWorkers; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range concurrentWorkers {
+			wg.Go(func() {
 				_, _, _, pErr := PrewarmVariantWithDict(f, entry, cacheDir, nil)
 				if pErr != nil {
 					errs <- pErr
 				}
-			}()
+			})
 		}
 
 		wg.Wait()

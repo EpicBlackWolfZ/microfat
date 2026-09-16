@@ -410,6 +410,55 @@ builds:
 
 ---
 
+## Development & Developer Workflow
+
+All daily development operations are automated through the root `Makefile`:
+
+```bash
+# View all targets and descriptions (respects NO_COLOR=1 and COLOR=0)
+make help
+
+# Run complete verification pipeline: tidy-check, fmt-check, lint, vuln, test, coverage gate, build
+make all
+
+# Format code across the repository with $(GOFMT) -s
+make fmt
+
+# Verify all Go source files are formatted cleanly (non-mutating)
+make fmt-check
+
+# Run Go API modernizations ('go fix'), linter auto-fixes, and format code
+make fix
+
+# Verify Go module dependencies are tidy (non-mutating 'go mod tidy -diff')
+make tidy-check
+
+# Run tests with Go 1.27 goroutine leak detection enabled (MICROFAT_TEST_LEAKS=1)
+make test-leaks
+
+# Check for Go 1.27 goroutine leaks on the running benchmark workload
+make check-leaks
+
+# Run regression tests for developer workflows (port safety, formatting, TTY detection)
+make test-dx
+
+# Open interactive browser UI for pprof profiles (heap, cpu, goroutine, allocs, mutex, block, goroutineleak)
+# (block and mutex sampling rates are enabled only when PROFILE=block or PROFILE=mutex)
+make pprof PROFILE=heap
+make pprof PROFILE=block PORT=6061 HTTP_PORT=8081
+
+# Verify finished fat binary stub commands (info, optimize-to, trim-to, prewarm)
+make demo-check
+```
+
+> **Terminal Detection & Port Safety**:
+> - Piped or redirected stdout automatically disables ANSI escapes and uses ASCII markers (`[OK]`, `[FAIL]`). Use `NO_COLOR=1` or `COLOR=0` to force disable colors.
+> - Profiling targets check port occupancy before spawning servers and fail cleanly without terminating unrelated processes. Cleanup sends graceful `SIGTERM` before `SIGKILL` strictly to target-spawned child processes.
+> - Developer workflow regressions (`test-dx`, `test-leaks`, `check-leaks`, `demo-check`) are CI-enforced in GitHub Actions.
+
+---
+
 ## License
 
 Apache 2.0
+

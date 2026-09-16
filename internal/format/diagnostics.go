@@ -44,7 +44,7 @@ const (
 		"Ensure the backing filesystem or tmpfs is not mounted with 'noexec'."
 	HintTextBusy = "Binary is currently open for writing by another process (ETXTBSY). " +
 		"Retrying or prewarming with --microfat:prewarm avoids concurrency contention."
-	HintExecFormat = "Binary format is invalid or incompatible with host kernel/architecture."
+	HintExecFormat       = "Binary format is invalid or incompatible with host kernel/architecture."
 	HintUnsupportedCodec = "Binary variant uses an unsupported compression algorithm. " +
 		"Update microfat launcher stub or re-package with a supported codec (e.g. zstd, lz4, none)."
 	HintDecompressFailed = "Payload decompression failed or corrupted. " +

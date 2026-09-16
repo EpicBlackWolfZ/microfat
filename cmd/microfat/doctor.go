@@ -57,13 +57,13 @@ type DoctorReport struct {
 
 // CPUReport contains CPU microarchitecture level and vector capability details.
 type CPUReport struct {
-	OS                    string                     `json:"os"`
-	Arch                  string                     `json:"arch"`
-	Level                 string                     `json:"level"`
-	Features              []string                   `json:"features"`
+	OS                    string                       `json:"os"`
+	Arch                  string                       `json:"arch"`
+	Level                 string                       `json:"level"`
+	Features              []string                     `json:"features"`
 	Levels                []microarch.ARM64LevelStatus `json:"levels,omitempty"`
-	AVX512DownclockRisk   bool                       `json:"avx512_downclock_risk,omitempty"`
-	AVX512DownclockNotice string                     `json:"avx512_downclock_notice,omitempty"`
+	AVX512DownclockRisk   bool                         `json:"avx512_downclock_risk,omitempty"`
+	AVX512DownclockNotice string                       `json:"avx512_downclock_notice,omitempty"`
 }
 
 // MemfdReport contains in-memory anonymous file descriptor capability details.

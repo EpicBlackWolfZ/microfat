@@ -10,23 +10,23 @@ import (
 )
 
 const (
-	testBytes1GB   = int64(1073741824)
-	testBytes512MB = int64(536870912)
-	testBytes2MB   = int64(2000000)
-	testBytes1MB   = int64(1000000)
-	testQuota200ms = int64(200000)
+	testBytes1GB    = int64(1073741824)
+	testBytes512MB  = int64(536870912)
+	testBytes2MB    = int64(2000000)
+	testBytes1MB    = int64(1000000)
+	testQuota200ms  = int64(200000)
 	testPeriod100ms = int64(100000)
-	testQuota50ms  = int64(50000)
-	testQuota40ms  = int64(40000)
-	testFreq800MHz = uint64(800000)
-	testFreq42GHz  = uint64(4200000)
-	testMem16GBKB  = uint64(16384000)
-	testMem12GBKB  = uint64(12288000)
-	testMemScaleKB = uint64(1024)
-	testCoresCount = 4
-	testSockCount  = 2
-	testNumaCount  = 2
-	testGOMAXPROCS = 6
+	testQuota50ms   = int64(50000)
+	testQuota40ms   = int64(40000)
+	testFreq800MHz  = uint64(800000)
+	testFreq42GHz   = uint64(4200000)
+	testMem16GBKB   = uint64(16384000)
+	testMem12GBKB   = uint64(12288000)
+	testMemScaleKB  = uint64(1024)
+	testCoresCount  = 4
+	testSockCount   = 2
+	testNumaCount   = 2
+	testGOMAXPROCS  = 6
 )
 
 func TestDetectHost(t *testing.T) {
@@ -936,5 +936,3 @@ core id		: 1
 		t.Errorf("expected 2 unique cores, got %v", cores)
 	}
 }
-
-

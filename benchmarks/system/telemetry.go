@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -129,16 +130,11 @@ func (s *Sandbox) Read(phase string) map[string]schema.Measurement {
 
 func isMemoryBytes(key string) bool {
 	key = strings.TrimPrefix(key, "total_") // v1 hierarchical counters preserve the base field's unit.
-	for _, name := range []string{"anon", "file", "shmem", "kernel", "kernel_stack", "pagetables", "sock", "slab",
+	return slices.Contains([]string{"anon", "file", "shmem", "kernel", "kernel_stack", "pagetables", "sock", "slab",
 		"sec_pagetables", "percpu", "vmalloc", "zswap", "zswapped", "file_mapped", "file_dirty", "file_writeback", "swapcached",
 		"anon_thp", "file_thp", "shmem_thp", "unevictable", "slab_reclaimable", "slab_unreclaimable", "hugetlb",
 		"rss", "rss_huge", "cache", "mapped_file", "swap", "dirty", "writeback", "hierarchical_memory_limit", "hierarchical_memsw_limit",
-		"active_anon", "inactive_anon", "active_file", "inactive_file"} {
-		if key == name {
-			return true
-		}
-	}
-	return false
+		"active_anon", "inactive_anon", "active_file", "inactive_file"}, key)
 }
 
 func Delta(before, after schema.Measurement) schema.Measurement {

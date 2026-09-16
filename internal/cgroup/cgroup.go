@@ -243,7 +243,7 @@ func parseProcCgroup(procPath string) (string, bool, map[string]string, error) {
 			v2Path = relPath
 			hasV2 = true
 		} else {
-			for _, ctrl := range strings.Split(controllers, ",") {
+			for ctrl := range strings.SplitSeq(controllers, ",") {
 				trimmedCtrl := strings.TrimSpace(ctrl)
 				if trimmedCtrl != "" {
 					v1Paths[trimmedCtrl] = relPath
@@ -719,10 +719,7 @@ func CalculateGOMAXPROCS(quota float64) (int, bool) {
 		return 0, false
 	}
 	// Floor rounding to prevent CFS scheduler period oversubscription and latency spikes
-	cpus := int(math.Floor(quota))
-	if cpus < MinimumCPUs {
-		cpus = MinimumCPUs
-	}
+	cpus := max(int(math.Floor(quota)), MinimumCPUs)
 	return cpus, true
 }
 

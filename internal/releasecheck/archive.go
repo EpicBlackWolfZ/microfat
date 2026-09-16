@@ -633,4 +633,3 @@ func validateISABuildSettings(expectedArch string, contract *ReleaseContract, fa
 	}
 	return nil
 }
-

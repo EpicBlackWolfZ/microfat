@@ -20,6 +20,7 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/report"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/system"
+	"github.com/EpicBlackWolfZ/microfat/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -51,7 +52,7 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	os.Exit(testutil.CheckLeaksIfEnabled(m))
 }
 
 func TestSuiteConfiguration(t *testing.T) {

@@ -365,17 +365,17 @@ func logDiagnostics(
 
 	var memLimit, maxProcs, gogcVal, gcProfileVal string
 	for _, e := range env {
-		if strings.HasPrefix(e, "GOMEMLIMIT=") {
-			memLimit = strings.TrimPrefix(e, "GOMEMLIMIT=")
+		if after, ok := strings.CutPrefix(e, "GOMEMLIMIT="); ok {
+			memLimit = after
 		}
-		if strings.HasPrefix(e, "GOMAXPROCS=") {
-			maxProcs = strings.TrimPrefix(e, "GOMAXPROCS=")
+		if after, ok := strings.CutPrefix(e, "GOMAXPROCS="); ok {
+			maxProcs = after
 		}
-		if strings.HasPrefix(e, "GOGC=") {
-			gogcVal = strings.TrimPrefix(e, "GOGC=")
+		if after, ok := strings.CutPrefix(e, "GOGC="); ok {
+			gogcVal = after
 		}
-		if strings.HasPrefix(e, format.EnvCgroupGCProfile+"=") {
-			gcProfileVal = strings.TrimPrefix(e, format.EnvCgroupGCProfile+"=")
+		if after, ok := strings.CutPrefix(e, format.EnvCgroupGCProfile+"="); ok {
+			gcProfileVal = after
 		}
 	}
 

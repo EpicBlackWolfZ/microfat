@@ -12,7 +12,7 @@ MICROFAT ?= $(shell [ -x "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat" ] && ech
 MICROFAT_STUB ?= $(shell [ -x "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat-stub" ] && echo "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat-stub" || command -v microfat-stub 2> /dev/null || echo "$(INSTALL_DIR)/microfat-stub")
 MICROFAT_STUB_ARM64 ?= $(shell [ -x "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat-stub-arm64" ] && echo "$$(cd ../.. 2>/dev/null && pwd)/bin/microfat-stub-arm64" || echo "$(BIN_DIR)/microfat-stub-arm64")
 
-.PHONY: all build fat fat-arm64 trim optimize run run-heavy run-ultra run-simd bench bench-heavy bench-ultra bench-simd bench-startup clean help
+.PHONY: all build fat fat-arm64 trim optimize check run run-heavy run-ultra run-simd bench bench-heavy bench-ultra bench-simd bench-startup clean help
 
 all: build fat
 
@@ -86,6 +86,20 @@ optimize: fat
 	@echo "==> Materializing raw native ELF..."
 	@$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:optimize-to=$(BIN_DIR)/$(BINARY_NAME)-optimized
 	@echo "==> Raw native ELF materialized at $(BIN_DIR)/$(BINARY_NAME)-optimized!"
+
+check: fat
+	@echo "==> Verifying finished fat binary stub commands..."
+	@bash -c '\
+		trap "rm -f $(BIN_DIR)/$(BINARY_NAME)-optimized $(BIN_DIR)/$(BINARY_NAME)-trimmed" EXIT INT TERM; \
+		$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:info > /dev/null && \
+		$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:info=json > /dev/null && \
+		$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:prewarm > /dev/null && \
+		$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:optimize-to=$(BIN_DIR)/$(BINARY_NAME)-optimized > /dev/null && \
+		$(BIN_DIR)/$(BINARY_NAME)-optimized --help > /dev/null && \
+		$(BIN_DIR)/$(BINARY_NAME)-fat --microfat:trim-to=$(BIN_DIR)/$(BINARY_NAME)-trimmed > /dev/null && \
+		$(BIN_DIR)/$(BINARY_NAME)-trimmed --microfat:info > /dev/null \
+	'
+	@echo "==> Finished binary stub commands (info, optimize, trim, prewarm) verified successfully!"
 
 run: fat
 	@echo "==> Running standard demo workloads..."

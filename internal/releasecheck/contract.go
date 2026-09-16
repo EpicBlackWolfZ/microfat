@@ -106,11 +106,11 @@ func NewReleaseContract(version string) (*ReleaseContract, error) {
 	arm64Archive := fmt.Sprintf("microfat_%s_linux_%s.tar.gz", v, ArchARM64)
 
 	payloads := map[string]bool{
-		amd64Archive:                    true,
-		arm64Archive:                    true,
-		amd64Archive + ".spdx.json":     true,
+		amd64Archive:                     true,
+		arm64Archive:                     true,
+		amd64Archive + ".spdx.json":      true,
 		amd64Archive + ".cyclonedx.json": true,
-		arm64Archive + ".spdx.json":     true,
+		arm64Archive + ".spdx.json":      true,
 		arm64Archive + ".cyclonedx.json": true,
 	}
 

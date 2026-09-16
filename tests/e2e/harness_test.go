@@ -24,13 +24,14 @@ import (
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/testutil"
 )
 
 const (
-	archAMD64             = "amd64"
-	archARM64             = "arm64"
-	envDebugTrue          = "MICROFAT_DEBUG=1"
-	envExecCache          = "MICROFAT_EXEC_MODE=cache"
+	archAMD64                         = "amd64"
+	archARM64                         = "arm64"
+	envDebugTrue                      = "MICROFAT_DEBUG=1"
+	envExecCache                      = "MICROFAT_EXEC_MODE=cache"
 	defaultFilePerm       os.FileMode = 0o755
 	privateDirPerm        os.FileMode = 0o700
 	privateFilePerm       os.FileMode = 0o600
@@ -81,6 +82,16 @@ func TestMain(m *testing.M) {
 
 	exitCode := runSetupAndExecute(m)
 	_ = os.RemoveAll(e2eRootDir)
+	if exitCode == 0 {
+		env := strings.TrimSpace(os.Getenv("MICROFAT_TEST_LEAKS"))
+		if env == "1" || strings.EqualFold(env, "true") {
+			var buf bytes.Buffer
+			if err := testutil.CheckGoroutineLeaks(&buf); err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "[microfat:leak-check] %v\n", err)
+				exitCode = 1
+			}
+		}
+	}
 	os.Exit(exitCode)
 }
 
@@ -241,8 +252,7 @@ func executeFatBinary(t testing.TB, binPath string, env []string, args ...string
 	err := cmd.Run()
 	exitCode := defaultExitCode
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = exitCodeUnknownError
@@ -266,8 +276,7 @@ func executeWithSeccompBlockedMemfd(t testing.TB, binPath string, env []string, 
 	err := cmd.Run()
 	exitCode := defaultExitCode
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = exitCodeUnknownError
@@ -334,7 +343,7 @@ func mutateFileBytes(t testing.TB, path string, offset int64, patch []byte) {
 	const maxOpenAttempts = 5
 	const openRetryDelay = 10 * time.Millisecond
 
-	for attempt := 0; attempt < maxOpenAttempts; attempt++ {
+	for range maxOpenAttempts {
 		f, err = os.OpenFile(path, os.O_WRONLY, 0)
 		if err != nil && errors.Is(err, syscall.ETXTBSY) {
 			time.Sleep(openRetryDelay)
@@ -367,7 +376,7 @@ func truncateFile(t testing.TB, path string, size int64) {
 	t.Helper()
 	const maxAttempts = 5
 	const retryDelay = 10 * time.Millisecond
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for range maxAttempts {
 		err := os.Truncate(path, size)
 		if err != nil && errors.Is(err, syscall.ETXTBSY) {
 			time.Sleep(retryDelay)
