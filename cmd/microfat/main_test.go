@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"strings"
 	"testing"
 	"time"
@@ -1535,28 +1536,48 @@ func TestPprofServerContextCancellation(t *testing.T) {
 }
 
 func TestPprofBlockAndMutexFlags(t *testing.T) {
+	previous := runtime.SetMutexProfileFraction(-1)
 	t.Cleanup(func() {
 		runtime.SetBlockProfileRate(0)
-		runtime.SetMutexProfileFraction(0)
+		runtime.SetMutexProfileFraction(previous)
 	})
 
 	rootCmd := newRootCmd()
-	rootCmd.SetArgs([]string{"--pprof-block-rate", "1", "--pprof-mutex-fraction", "1", subcmdDetect})
+	rootCmd.SetArgs([]string{"--pprof-block-rate", "1", "--pprof-mutex-fraction", "2", subcmdDetect})
 	err := rootCmd.Execute()
 	require.NoError(t, err)
+
+	assert.Equal(t, 2, runtime.SetMutexProfileFraction(-1))
+
+	// Verify block profile rate was applied by provoking a blocking event and checking pprof.Lookup("block")
+	ch := make(chan struct{})
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		close(ch)
+	}()
+	<-ch
+
+	p := pprof.Lookup("block")
+	require.NotNil(t, p)
+	var buf bytes.Buffer
+	require.NoError(t, p.WriteTo(&buf, 1))
+	assert.Positive(t, buf.Len())
 }
 
 func TestPprofBlockAndMutexEnvVars(t *testing.T) {
+	previous := runtime.SetMutexProfileFraction(-1)
 	t.Cleanup(func() {
 		runtime.SetBlockProfileRate(0)
-		runtime.SetMutexProfileFraction(0)
+		runtime.SetMutexProfileFraction(previous)
 	})
 
-	t.Setenv("MICROFAT_PPROF_BLOCK_RATE", "2")
-	t.Setenv("MICROFAT_PPROF_MUTEX_FRACTION", "2")
+	t.Setenv("MICROFAT_PPROF_BLOCK_RATE", "1")
+	t.Setenv("MICROFAT_PPROF_MUTEX_FRACTION", "3")
 
 	rootCmd := newRootCmd()
 	rootCmd.SetArgs([]string{subcmdDetect})
 	err := rootCmd.Execute()
 	require.NoError(t, err)
+
+	assert.Equal(t, 3, runtime.SetMutexProfileFraction(-1))
 }
