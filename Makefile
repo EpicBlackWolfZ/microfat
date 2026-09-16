@@ -9,6 +9,10 @@ BIN_DIR ?= bin
 COVERAGE_FILE ?= coverage.out
 COVERAGE_THRESHOLD ?= 95
 HOST_ARCH ?= $(shell $(GO) env GOARCH 2>/dev/null || echo "amd64")
+GOFMT ?= $(shell $(GO) env GOROOT 2>/dev/null)/bin/gofmt
+ifeq ($(wildcard $(GOFMT)),)
+  GOFMT := $(shell command -v gofmt 2>/dev/null || echo "gofmt")
+endif
 
 # Version metadata
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -49,7 +53,7 @@ ifeq ($(COLOR),false)
   COLOR := 0
 endif
 
-IS_TTY := $(shell [ -t 2 ] && echo 1 || echo 0)
+IS_TTY := $(shell [ -t 1 ] && echo 1 || echo 0)
 ifeq ($(IS_TTY),0)
   COLOR := 0
 endif
@@ -83,12 +87,12 @@ else
 endif
 
 .PHONY: all help build build-amd64 build-arm64 build-all \
-        test test-leaks e2e fuzz chaos coverage lint vuln tidy fmt fmt-check fix \
+        test test-leaks e2e fuzz chaos coverage lint vuln tidy tidy-check fmt fmt-check fix \
         snapshot demo demo-arm64 demo-check benchmark bench bench-heavy bench-ultra bench-simd bench-startup bench-matrix \
         check-leaks pprof profile-ui test-all clean \
         benchmark-tools benchmark-smoke benchmark-matrix benchmark-integration benchmark-kernel benchmark-kernel-v1
 
-all: tidy fmt-check lint vuln test coverage build ## Run complete verification pipeline (tidy, fmt-check, lint, vuln, test, coverage gate, build)
+all: tidy-check fmt-check lint vuln test coverage build ## Run complete verification pipeline (tidy-check, fmt-check, lint, vuln, test, coverage gate, build)
 
 help: ## Show this help message
 	@printf "%b\n" "$(C_BOLD)$(C_CYAN)==============================================================================$(C_RESET)"
@@ -107,13 +111,13 @@ help: ## Show this help message
 	@echo ""
 
 fmt: ## Format and simplify all Go source files across the codebase
-	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Formatting Go source files with gofmt -s..."
-	@gofmt -s -w .
+	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Formatting Go source files with $(GOFMT) -s..."
+	@$(GOFMT) -s -w .
 	@printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Codebase formatted successfully"
 
 fmt-check: ## Verify all Go source files are formatted with gofmt -s
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Checking Go source code formatting..."
-	@UNFORMATTED=$$(gofmt -s -l . 2>/dev/null); \
+	@UNFORMATTED=$$($(GOFMT) -s -l . 2>/dev/null); \
 	if [ -n "$$UNFORMATTED" ]; then \
 		printf "%b\n" "$(C_RED)$(SYM_FAIL)$(C_RESET) The following Go files need formatting (run 'make fmt' or 'make fix'):"; \
 		printf "%s\n" "$$UNFORMATTED" | sed 's/^/  • /'; \
@@ -126,7 +130,7 @@ fix: ## Run Go modernizer/fixer and golangci-lint automatic fixes, then format
 	@$(GO) fix ./...
 ifdef GOLANGCI_LINT
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Applying automated linter fixes via golangci-lint..."
-	@golangci-lint run --fix ./... || true
+	@golangci-lint run --fix ./...
 else
 	@printf "%b\n" "$(C_YELLOW)$(SYM_WARN)$(C_RESET) golangci-lint not found in PATH; skipping linter auto-fixes"
 endif
@@ -205,7 +209,7 @@ chaos: ## Run chaos and fault injection test suite
 	@$(GO) test -race -run=TestDictionaryTampering ./internal/pack/...
 	@printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Chaos tests passed"
 
-test-all: tidy fmt-check lint vuln test e2e chaos coverage build ## Run complete test suite including e2e, chaos, and coverage gate
+test-all: tidy-check fmt-check lint vuln test e2e chaos coverage build ## Run complete test suite including e2e, chaos, and coverage gate
 
 coverage: ## Union default/minimal atomic coverage and enforce >= 95% overall
 	@GO="$(GO)" COVERAGE_FILE="$(COVERAGE_FILE)" COVERAGE_THRESHOLD="$(COVERAGE_THRESHOLD)" bash scripts/test-profiles.sh coverage
@@ -232,11 +236,30 @@ else
 endif
 	@printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Vulnerability scan clean"
 
-tidy: fmt ## Run go mod tidy, verify module dependencies, and format source code
+tidy: ## Run go mod tidy and verify module dependencies
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Tidying Go modules..."
 	@$(GO) mod tidy
 	@$(GO) mod verify
 	@printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Modules tidied and verified"
+
+tidy-check: ## Verify Go module dependencies (go.mod, go.sum) are tidy and unchanged
+	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Verifying Go module dependencies are tidy..."
+	@TMPDIR=$$(mktemp -d); \
+	cp go.mod go.sum "$$TMPDIR/" 2>/dev/null || true; \
+	$(GO) mod tidy; \
+	DIFF_STATUS=0; \
+	if ! cmp -s go.mod "$$TMPDIR/go.mod" || ! cmp -s go.sum "$$TMPDIR/go.sum"; then \
+		DIFF_STATUS=1; \
+	fi; \
+	cp "$$TMPDIR/go.mod" go.mod 2>/dev/null || true; \
+	cp "$$TMPDIR/go.sum" go.sum 2>/dev/null || true; \
+	rm -rf "$$TMPDIR"; \
+	if [ $$DIFF_STATUS -ne 0 ]; then \
+		printf "%b\n" "$(C_RED)$(SYM_FAIL)$(C_RESET) go.mod or go.sum is not tidy. Run 'make tidy' to update."; \
+		exit 1; \
+	fi; \
+	$(GO) mod verify >/dev/null; \
+	printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Go modules are tidy and verified"
 
 snapshot: ## Test GoReleaser local snapshot build
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Testing GoReleaser snapshot build..."
