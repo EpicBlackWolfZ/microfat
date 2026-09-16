@@ -314,85 +314,35 @@ bench-matrix: build ## Run comprehensive combinatorial latency matrix benchmark 
 	@$(MAKE) -C examples/demo bench-startup
 
 check-leaks: build ## Probe Go 1.27 goroutine leak endpoint during benchmark workload
-	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Launching microfat benchmark with pprof server on port $(PORT)..."
-	@bash -c '\
-		LOG=$$(mktemp); \
-		cleanup() { \
-			trap - EXIT INT TERM HUP; \
-			rm -f "$$LOG" 2>/dev/null || true; \
-			if [ -n "$$PID" ]; then \
-				kill "$$PID" 2>/dev/null || true; \
-				kill -9 "$$PID" 2>/dev/null || true; \
-			fi; \
-			if command -v fuser >/dev/null 2>&1; then \
-				fuser -k -n tcp $(PORT) 2>/dev/null || true; \
-			elif command -v lsof >/dev/null 2>&1; then \
-				lsof -ti :$(PORT) | xargs -r kill -9 2>/dev/null || true; \
-			fi; \
-		}; \
-		trap cleanup EXIT INT TERM HUP; \
-		if command -v fuser >/dev/null 2>&1; then \
-			fuser -k -n tcp $(PORT) 2>/dev/null || true; \
-		elif command -v lsof >/dev/null 2>&1; then \
-			lsof -ti :$(PORT) | xargs -r kill -9 2>/dev/null || true; \
-		fi; \
-		MICROFAT_PPROF_PORT=$(PORT) $(BIN_DIR)/microfat benchmark --trials $(TRIALS) --trial-time $(DURATION) --warmup 200ms >"$$LOG" 2>&1 & \
-		PID=$$!; \
-		READY=0; \
-		for i in $$(seq 1 30); do \
-			if curl -s "http://localhost:$(PORT)/debug/pprof/" >/dev/null 2>&1; then \
-				READY=1; \
-				break; \
-			fi; \
-			if ! kill -0 "$$PID" 2>/dev/null; then \
-				break; \
-			fi; \
-			sleep 0.1; \
-		done; \
-		if [ $$READY -ne 1 ]; then \
-			printf "%b\n" "$(C_RED)$(SYM_FAIL)$(C_RESET) Failed to connect to pprof server on port $(PORT)"; \
-			if [ -s "$$LOG" ]; then \
-				cat "$$LOG"; \
-			fi; \
-			cleanup; \
-			exit 1; \
-		fi; \
-		printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Querying Go 1.27 /debug/pprof/goroutineleak endpoint..."; \
-		LEAK_REPORT=$$(curl -s "http://localhost:$(PORT)/debug/pprof/goroutineleak?debug=1"); \
-		cleanup; \
-		printf "%b\n" "$$LEAK_REPORT"; \
-		if echo "$$LEAK_REPORT" | grep -q "total 0"; then \
-			printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Goroutine leak check passed: zero leaked goroutines detected"; \
-		else \
-			printf "%b\n" "$(C_RED)$(SYM_FAIL)$(C_RESET) Goroutine leak check failed: leaked goroutines detected!"; \
-			exit 1; \
-		fi; \
-	'
+	@PORT="$(PORT)" DURATION="$(DURATION)" TRIALS="$(TRIALS)" BIN_DIR="$(BIN_DIR)" \
+		COLOR="$(COLOR)" bash scripts/check-leaks.sh
 
 test-leaks: build ## Run unit tests while probing Go 1.27 /debug/pprof/goroutineleak endpoint
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Running tests with Go 1.27 goroutine leak detection probe..."
 	@bash -c '\
 		PORT=$(PORT); \
 		LOG=$$(mktemp); \
+		if command -v python3 >/dev/null 2>&1; then \
+			if python3 -c "import socket, sys; s=socket.socket(); s.bind((\"127.0.0.1\", int(sys.argv[1]))); s.close()" "$$PORT" 2>/dev/null; then :; else \
+				printf "%b\n" "$(C_RED)$(SYM_FAIL)$(C_RESET) pprof port $$PORT is already in use."; \
+				printf "%b\n" "Choose another port with PORT=<port>."; \
+				exit 1; \
+			fi; \
+		fi; \
 		cleanup() { \
 			trap - EXIT INT TERM HUP; \
 			rm -f "$$LOG" 2>/dev/null || true; \
-			if [ -n "$$TEST_PID" ]; then \
-				kill "$$TEST_PID" 2>/dev/null || true; \
-				kill -9 "$$TEST_PID" 2>/dev/null || true; \
-			fi; \
-			if command -v fuser >/dev/null 2>&1; then \
-				fuser -k -n tcp $$PORT 2>/dev/null || true; \
-			elif command -v lsof >/dev/null 2>&1; then \
-				lsof -ti :$$PORT | xargs -r kill -9 2>/dev/null || true; \
+			if [ -n "$$TEST_PID" ] && kill -0 "$$TEST_PID" 2>/dev/null; then \
+				kill -TERM "$$TEST_PID" 2>/dev/null || true; \
+				for _ in $$(seq 1 20); do \
+					if ! kill -0 "$$TEST_PID" 2>/dev/null; then break; fi; \
+					sleep 0.1; \
+				done; \
+				if kill -0 "$$TEST_PID" 2>/dev/null; then kill -KILL "$$TEST_PID" 2>/dev/null || true; fi; \
+				wait "$$TEST_PID" 2>/dev/null || true; \
 			fi; \
 		}; \
 		trap cleanup EXIT INT TERM HUP; \
-		if command -v fuser >/dev/null 2>&1; then \
-			fuser -k -n tcp $$PORT 2>/dev/null || true; \
-		elif command -v lsof >/dev/null 2>&1; then \
-			lsof -ti :$$PORT | xargs -r kill -9 2>/dev/null || true; \
-		fi; \
 		MICROFAT_PPROF_PORT=$$PORT $(BIN_DIR)/microfat benchmark --trials 20 --trial-time 200ms --warmup 100ms >"$$LOG" 2>&1 & \
 		TEST_PID=$$!; \
 		READY=0; \
@@ -429,72 +379,8 @@ test-leaks: build ## Run unit tests while probing Go 1.27 /debug/pprof/goroutine
 pprof: profile-ui ## Alias for profile-ui
 
 profile-ui: build ## Open interactive browser UI for pprof profile (PROFILE=heap|cpu|goroutine|allocs|mutex|block)
-	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Starting workload with pprof server on port $(PORT) [Profile: $(PROFILE)]..."
-	@bash -c '\
-		if [ "$(PORT)" = "$(HTTP_PORT)" ]; then \
-			printf "%b\n" "$(C_RED)$(SYM_FAIL)$(C_RESET) PORT ($(PORT)) and HTTP_PORT ($(HTTP_PORT)) cannot be the same"; \
-			exit 1; \
-		fi; \
-		LOG=$$(mktemp); \
-		cleanup() { \
-			trap - EXIT INT TERM HUP; \
-			rm -f "$$LOG" 2>/dev/null || true; \
-			if [ -n "$$PID" ]; then \
-				kill "$$PID" 2>/dev/null || true; \
-				kill -9 "$$PID" 2>/dev/null || true; \
-			fi; \
-			if command -v fuser >/dev/null 2>&1; then \
-				fuser -k -n tcp $(PORT) 2>/dev/null || true; \
-				fuser -k -n tcp $(HTTP_PORT) 2>/dev/null || true; \
-			elif command -v lsof >/dev/null 2>&1; then \
-				lsof -ti :$(PORT) | xargs -r kill -9 2>/dev/null || true; \
-				lsof -ti :$(HTTP_PORT) | xargs -r kill -9 2>/dev/null || true; \
-			fi; \
-		}; \
-		trap cleanup EXIT INT TERM HUP; \
-		if command -v fuser >/dev/null 2>&1; then \
-			fuser -k -n tcp $(PORT) 2>/dev/null || true; \
-			fuser -k -n tcp $(HTTP_PORT) 2>/dev/null || true; \
-		elif command -v lsof >/dev/null 2>&1; then \
-			lsof -ti :$(PORT) | xargs -r kill -9 2>/dev/null || true; \
-			lsof -ti :$(HTTP_PORT) | xargs -r kill -9 2>/dev/null || true; \
-		fi; \
-		PNAME="$(PROFILE)"; \
-		PNAME="$$(echo "$$PNAME" | tr "[:upper:]" "[:lower:]")"; \
-		if [ "$$PNAME" = "cpu" ]; then PNAME="profile"; fi; \
-		SEC="$(DURATION)"; \
-		SEC="$${SEC%s}"; \
-		case "$$SEC" in \
-			""|*[!0-9]*) SEC=2 ;; \
-		esac; \
-		EXTRA_PARAM=""; \
-		if [ "$$PNAME" = "profile" ]; then EXTRA_PARAM="?seconds=$$SEC"; fi; \
-		MICROFAT_PPROF_PORT=$(PORT) $(BIN_DIR)/microfat benchmark --trials 50 --trial-time 1s --warmup 200ms >"$$LOG" 2>&1 & \
-		PID=$$!; \
-		READY=0; \
-		for i in $$(seq 1 30); do \
-			if curl -s "http://localhost:$(PORT)/debug/pprof/" >/dev/null 2>&1; then \
-				READY=1; \
-				break; \
-			fi; \
-			if ! kill -0 "$$PID" 2>/dev/null; then \
-				break; \
-			fi; \
-			sleep 0.1; \
-		done; \
-		if [ $$READY -ne 1 ]; then \
-			printf "%b\n" "$(C_RED)$(SYM_FAIL)$(C_RESET) Failed to connect to pprof server on port $(PORT)"; \
-			if [ -s "$$LOG" ]; then \
-				cat "$$LOG"; \
-			fi; \
-			cleanup; \
-			exit 1; \
-		fi; \
-		printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Pprof server listening at http://localhost:$(PORT)/debug/pprof/"; \
-		printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Launching interactive pprof web UI at http://localhost:$(HTTP_PORT)..."; \
-		$(GO) tool pprof -http=:$(HTTP_PORT) "http://localhost:$(PORT)/debug/pprof/$$PNAME$$EXTRA_PARAM" || true; \
-		cleanup; \
-	'
+	@PORT="$(PORT)" HTTP_PORT="$(HTTP_PORT)" PROFILE="$(PROFILE)" DURATION="$(DURATION)" \
+		BIN_DIR="$(BIN_DIR)" GO="$(GO)" COLOR="$(COLOR)" bash scripts/pprof-ui.sh
 
 clean: ## Remove build artifacts and coverage files
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Cleaning build artifacts..."
