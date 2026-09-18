@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 # Delegate only a transient, benchmark-owned subtree; leave the workflow runner outside it.
 set -euo pipefail
+IFS=$'\n\t'
+
 output="${1:?output controls JSON required}"
 root="/sys/fs/cgroup/microfat-ci-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-$$"
-test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs
-sudo mkdir "$root"
-trap 'sudo rmdir "$root" 2>/dev/null || true' ERR
-printf '+cpu +memory\n' | sudo tee "$root/cgroup.subtree_control" >/dev/null
-sudo chown "$(id -u):$(id -g)" "$root" "$root/cgroup.procs" "$root/cgroup.subtree_control"
-sudo mkdir "$root/manager"
-python3 - "$root" "$output" <<'PY'
+cgroup_fstype="$(stat -fc %T /sys/fs/cgroup)"
+test "${cgroup_fstype}" = cgroup2fs
+sudo mkdir "${root}"
+trap 'sudo rmdir "${root}" 2>/dev/null || true' ERR
+printf '+cpu +memory\n' | sudo tee "${root}/cgroup.subtree_control" >/dev/null
+current_uid="$(id -u)"
+current_gid="$(id -g)"
+sudo chown "${current_uid}:${current_gid}" "${root}" "${root}/cgroup.procs" "${root}/cgroup.subtree_control"
+sudo mkdir "${root}/manager"
+python3 - "${root}" "${output}" <<'PY'
 import json,os,pathlib,sys
 root,out=sys.argv[1:]
 cpus=sorted(os.sched_getaffinity(0))

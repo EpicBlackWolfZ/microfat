@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Common utilities for pprof profiling and leak detection scripts.
+set -euo pipefail
+IFS=$'\n\t'
 
 # Determine color and symbol mode
 COLOR="${COLOR:-1}"
@@ -7,7 +9,7 @@ if [ -n "${NO_COLOR:-}" ] || [ "${COLOR}" = "0" ] || [ "${COLOR}" = "false" ] ||
     COLOR=0
 fi
 
-if [ "$COLOR" -eq 1 ]; then
+if [ "${COLOR}" -eq 1 ]; then
     C_RESET="\033[0m"
     C_BOLD="\033[1m"
     C_CYAN="\033[36m"
@@ -32,9 +34,10 @@ else
     SYM_WARN="[WARN]"
     SYM_ARROW="==>"
 fi
+export C_RESET C_BOLD C_CYAN C_GREEN C_YELLOW C_BLUE C_RED SYM_OK SYM_FAIL SYM_WARN SYM_ARROW
 
 is_port_in_use() {
-    local port="$1"
+    local port="${1}"
     if command -v python3 >/dev/null 2>&1; then
         if python3 -c '
 import socket, sys
@@ -52,12 +55,12 @@ try:
 except OSError:
     pass
 sys.exit(0)
-' "$port" 2>/dev/null; then
+' "${port}" 2>/dev/null; then
             return 1 # Port is free
         else
             return 0 # Port is in use
         fi
-    elif (echo > "/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+    elif (echo > "/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
         return 0 # Port is in use
     else
         return 1 # Port is free
@@ -66,17 +69,17 @@ sys.exit(0)
 
 terminate_pid() {
     local pid="${1:-}"
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-        kill -TERM "$pid" 2>/dev/null || true
-        for _ in $(seq 1 20); do
-            if ! kill -0 "$pid" 2>/dev/null; then
+    if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+        kill -TERM "${pid}" 2>/dev/null || true
+        for _ in {1..20}; do
+            if ! kill -0 "${pid}" 2>/dev/null; then
                 break
             fi
             sleep 0.1
         done
-        if kill -0 "$pid" 2>/dev/null; then
-            kill -KILL "$pid" 2>/dev/null || true
+        if kill -0 "${pid}" 2>/dev/null; then
+            kill -KILL "${pid}" 2>/dev/null || true
         fi
-        wait "$pid" 2>/dev/null || true
+        wait "${pid}" 2>/dev/null || true
     fi
 }
