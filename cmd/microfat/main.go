@@ -517,7 +517,7 @@ func newPackCmd() *cobra.Command {
 					Compression:       compression,
 					CompressionLevel:  compressionLevel,
 					EnableDict:        enableDict,
-					DictSize:          dictSize,
+					DictSize:          explicitDictionarySize(cmd, dictSize),
 					FormatVersion:     formatVersion,
 					Stdout:            cmd.OutOrStdout(),
 					Stderr:            cmd.ErrOrStderr(),
@@ -641,6 +641,15 @@ func newPackCmd() *cobra.Command {
 	return cmd
 }
 
+// An omitted flag must not override a declarative manifest setting. Zero lets
+// the builder retain the manifest value (and the packer supply its default).
+func explicitDictionarySize(cmd *cobra.Command, size int) int {
+	if cmd.Flags().Changed("dict-size") {
+		return size
+	}
+	return 0
+}
+
 func newPgoPackCmd() *cobra.Command {
 	var (
 		manifestPath      string
@@ -689,7 +698,7 @@ then packages them into a self-dispatching microfat binary.`,
 				Compression:       compression,
 				CompressionLevel:  compressionLevel,
 				EnableDict:        enableDict,
-				DictSize:          dictSize,
+				DictSize:          explicitDictionarySize(cmd, dictSize),
 				FormatVersion:     formatVersion,
 				Stdout:            cmd.OutOrStdout(),
 				Stderr:            cmd.ErrOrStderr(),
