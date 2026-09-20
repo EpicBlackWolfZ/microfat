@@ -190,6 +190,17 @@ func AutoTune(opts ...Option) Result {
 		activeLiveHeap,
 	)
 	res.ConstrainingLimit = plan.ConstrainingLimit
+	resolveGOGCPlan(cfg, activeProfile, &plan)
+	res.SkippedReason = plan.GOGCSkippedReason
+
+	// 4. Apply configured limits and GC settings
+	applyTuningPlan(plan, activeProfile, activeLiveHeap, cfg.dryRun, &res)
+
+	logResult(cfg, res)
+	return res
+}
+
+func resolveGOGCPlan(cfg *config, activeProfile Profile, plan *cgroup.TuningPlan) {
 	// Environment values can be changed after runtime startup. When preserving
 	// an existing limit, query the runtime instead of trusting the environment.
 	if activeProfile == ProfileBatchETL && cfg.explicitGOGC == nil && getenvFunc("GOGC") == "" {
@@ -198,7 +209,7 @@ func AutoTune(opts ...Option) Result {
 			effectiveLimit = currentMemoryLimitFunc()
 		}
 		plan.ResolveBatchGOGC(effectiveLimit)
-		res.SkippedReason = plan.GOGCSkippedReason
+
 	}
 
 	if cfg.explicitGOGC != nil {
@@ -211,11 +222,6 @@ func AutoTune(opts ...Option) Result {
 		}
 	}
 
-	// 4. Apply configured limits and GC settings
-	applyTuningPlan(plan, activeProfile, activeLiveHeap, cfg.dryRun, &res)
-
-	logResult(cfg, res)
-	return res
 }
 
 func resolveProfileAndLiveHeap(cfg *config) (Profile, int64) {
