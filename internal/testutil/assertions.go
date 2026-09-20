@@ -363,6 +363,7 @@ func RandomPayload(rng *rand.Rand, length int) []byte {
 
 func x86FeaturesFromMap(m map[string]bool) microarch.X86Features {
 	return microarch.X86Features{
+		HasLAHFSAHF: m["lahf_lm"],
 		HasCX16:     m["cx16"],
 		HasPOPCNT:   m["popcnt"],
 		HasSSE3:     m["sse3"],

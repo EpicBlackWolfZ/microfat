@@ -84,7 +84,7 @@ func TestAssertLevelRequirements(t *testing.T) {
 
 	// AMD64 v3 features
 	v3Features := []string{
-		"cx16", "popcnt", "sse3", "ssse3", "sse4.1", "sse4.2",
+		"lahf_lm", "cx16", "popcnt", "sse3", "ssse3", "sse4.1", "sse4.2",
 		"avx", "avx2", "bmi1", "bmi2", "fma", "osxsave", "f16c", "lzcnt", "movbe",
 	}
 	testutil.AssertLevelRequirements(t, microarch.ArchAMD64, microarch.AMD64v3, v3Features)
