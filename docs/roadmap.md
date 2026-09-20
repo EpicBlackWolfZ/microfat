@@ -1,96 +1,164 @@
 # Production roadmap
 
-Updated 2026-09-10 after the v0.2.3 milestone readiness check on merged `main` at `cc589b1`.
-The v0.2.3 work below is implemented and verified; later milestones remain planned work.
-GitHub issues hold acceptance criteria and verification requirements.
+Updated 2026-09-21 against `main` at `de191f0`. GitHub issues define remaining scope,
+dependencies and acceptance criteria. Milestones group deliverable outcomes; they are not dates.
 
-## Release principles
+## Current baseline
 
-1. Ship a smaller, demonstrably safe production core before expanding optimization.
-2. Urgent security and compatibility fixes do not wait for a complete benchmark framework.
-3. Preserve mandatory payload/cache hashes, descriptor-bound execution, bounded decompression,
-   and mandatory memfd sealing. Policy changes must preserve those invariants.
-4. CPU requirements establish compatibility; ranking only chooses among compatible variants.
-5. Describe resource tuning as a soft runtime budget, not a guarantee against container OOM.
-6. Publish reproducible performance evidence and distinguish specialization from tuning effects.
-7. Keep experimental reconstruction formats out of the production decoder until correctness,
-   bounded resources and representative benefit are demonstrated.
+[v0.2.3](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.2.3) was published on
+2026-09-16. It includes the safety and hosted-measurement foundation, per-architecture fat CLI
+archives with companion full/minimal stubs, and release integrity/SBOM validation. Format v1
+is deprecated; support must follow the documented policy rather than disappear incidentally.
+See [release artifacts](release-artifacts.md) and [benchmark evidence](benchmarks/README.md).
+The historical release-note verification instructions need correction in
+[#197](https://github.com/EpicBlackWolfZ/microfat/issues/197); publication is already complete.
 
-## v0.2.3: urgent safety and measurement foundation
+Since that release, [PR #192](https://github.com/EpicBlackWolfZ/microfat/pull/192) added developer
+workflow/profiling/leak checks and [PR #194](https://github.com/EpicBlackWolfZ/microfat/pull/194)
+added ShellCheck. They are merged into `main`; they are not new work to implement again.
 
-[Milestone](https://github.com/EpicBlackWolfZ/microfat/milestone/7)
+## Delivery sequence
 
-All 18 milestone issues are closed. The patch includes the following completed safety work:
+| Milestone | Outcome | What must not delay it |
+| --- | --- | --- |
+| [v0.2.4](https://github.com/EpicBlackWolfZ/microfat/milestone/12) | Correct existing runtime, packaging, verification and documentation defects | Tooling migrations and new distribution features |
+| [v0.2.5](https://github.com/EpicBlackWolfZ/microfat/milestone/13) | Consolidate tooling, release trust and CI without losing validation | Installer/updater/tap features or speculative attestations |
+| [v0.3.0](https://github.com/EpicBlackWolfZ/microfat/milestone/2) | Coherent installation and executable lifecycle contracts | Native macOS support and new compression formats |
+| [v0.4.0](https://github.com/EpicBlackWolfZ/microfat/milestone/3) | Observability and performance improvements supported by evidence | Arbitrary latency targets and dedicated-hardware availability |
 
-| Scope | Issue |
+Urgent, independently validated corrections can ship earlier in the patch stream. A tooling
+migration must not hold a known runtime fix. Work can proceed independently where dependencies
+allow, but overlapping refactors follow correctness fixes and retain their regressions.
+
+## v0.2.4: correctness and compatibility
+
+The next patch fixes existing behavior using the current working build/release tools.
+
+| Scope | Issues |
 | --- | --- |
-| Terminating, bounded legacy JSON parsing | [#170](https://github.com/EpicBlackWolfZ/microfat/issues/170) |
-| Reject unsupported elevated launcher execution | [#171](https://github.com/EpicBlackWolfZ/microfat/issues/171) |
-| Feature-compatible ARM64 dispatch | [#172](https://github.com/EpicBlackWolfZ/microfat/issues/172) |
-| Nonblocking rejection of special cache files | [#173](https://github.com/EpicBlackWolfZ/microfat/issues/173) |
-| Cache owner/mode validation and mutable-inode boundary | [#174](https://github.com/EpicBlackWolfZ/microfat/issues/174) |
-| Descriptor-bound, bounded packaging and dictionary sampling | [#151](https://github.com/EpicBlackWolfZ/microfat/issues/151) |
-| Extraction and post-exec memory accounting | [#152](https://github.com/EpicBlackWolfZ/microfat/issues/152) |
-| CI parity with local full/minimal and benchmark tests | [#175](https://github.com/EpicBlackWolfZ/microfat/issues/175) |
-| Action pinning and job-scoped permissions | [#176](https://github.com/EpicBlackWolfZ/microfat/issues/176) |
-| Supported integration examples and qualified claims | [#177](https://github.com/EpicBlackWolfZ/microfat/issues/177) |
+| Kernel-held image identity, executable memfd, safe GC and complete AMD64 checks | [#206](https://github.com/EpicBlackWolfZ/microfat/issues/206), [#195](https://github.com/EpicBlackWolfZ/microfat/issues/195), [#208](https://github.com/EpicBlackWolfZ/microfat/issues/208), [#209](https://github.com/EpicBlackWolfZ/microfat/issues/209) |
+| Integrity exit status, nonblocking inputs, executable ELF validation and read-only cache checks | [#207](https://github.com/EpicBlackWolfZ/microfat/issues/207), [#211](https://github.com/EpicBlackWolfZ/microfat/issues/211), [#216](https://github.com/EpicBlackWolfZ/microfat/issues/216), [#214](https://github.com/EpicBlackWolfZ/microfat/issues/214) |
+| Manifest PGO paths and explicit dictionary-size precedence | [#212](https://github.com/EpicBlackWolfZ/microfat/issues/212), [#213](https://github.com/EpicBlackWolfZ/microfat/issues/213) |
+| Observed benchmark duration and completeness | [#210](https://github.com/EpicBlackWolfZ/microfat/issues/210) |
+| Existing installer regression, post-pack stripping guidance and signature instructions | [#215](https://github.com/EpicBlackWolfZ/microfat/issues/215), [#196](https://github.com/EpicBlackWolfZ/microfat/issues/196), [#197](https://github.com/EpicBlackWolfZ/microfat/issues/197) |
+| Executable-path, stale-hint and re-exec guidance after the image-identity fix | [#158](https://github.com/EpicBlackWolfZ/microfat/issues/158) |
 
-Measurement work #87–#93 is also merged. Native amd64/arm64 compatibility and hosted release
-rehearsals, cgroup v1/v2 enforcement, archive checksums and report replay passed. See the
-[benchmark documentation](benchmarks/README.md) and [v0.2.3 release notes](releases/v0.2.3.md).
-Hosted results remain comparative evidence with `release_eligible=false`; startup enforcement
-is report-only for the current calibration classes. Dedicated hardware certification remains
-separate future work in [#182](https://github.com/EpicBlackWolfZ/microfat/issues/182).
+Exit: targeted regressions and applicable full/minimal, memfd/cache and architecture checks pass.
+Benchmark qualification examines actual observations before accepting new release evidence.
+Documentation describes verified behavior. Passing a general test suite alone does not resolve a
+reproduced defect outside its assertions. Task, Python removal and SBOM migration are not prerequisites.
 
-Exit: targeted regressions, shared race/coverage checks, applicable execution matrix and release
-verification pass. Document any unavailable privileged or architecture-specific validation.
-An urgent independently validated fix can ship earlier in the patch stream at maintainer discretion.
+## v0.2.5: tooling and release trust
 
-## v0.3.0: runtime invariants, compatibility and lifecycle safety
+Preserve the agreed Go/Task direction and modern SBOM goals as a separate engineering release.
 
-[Milestone](https://github.com/EpicBlackWolfZ/microfat/milestone/2)
+| Scope | Issues |
+| --- | --- |
+| Complete the existing threat model, then external verification policy | [#85](https://github.com/EpicBlackWolfZ/microfat/issues/85), [#86](https://github.com/EpicBlackWolfZ/microfat/issues/86) |
+| Replace repository Python helpers with Go, then migrate Make callers to Task | [#198](https://github.com/EpicBlackWolfZ/microfat/issues/198), [#199](https://github.com/EpicBlackWolfZ/microfat/issues/199) |
+| Prove and migrate the cdxgen-based modern SBOM path | [#202](https://github.com/EpicBlackWolfZ/microfat/issues/202) |
+| Stage all PR work behind fast checks and a fail-closed final result | [#200](https://github.com/EpicBlackWolfZ/microfat/issues/200) |
+| Resolve actionable quality findings and scan the integrated candidate | [#201](https://github.com/EpicBlackWolfZ/microfat/issues/201) |
 
-- #85: complete the threat model after the immediate cache boundary correction in #174.
-- #150: one safe transformation policy for CLI and launcher trim/optimize operations.
-- #154: validate dynamic-linker and libc ABI consistency, with explicit override semantics.
-- #44: cache-first auto policy with mandatory verification and descriptor-bound execution.
-- #40: expose full/minimal stub selection while enforcing the same runtime security invariants.
-- #155, #158: artifact selection, deliberate v1 deprecation, and executable-path guidance.
-- #157: container mount/executable-path tests and release SBOM verification.
-- #15: supported runtime observability recipes.
-- #86: external artifact verification and publisher-identity policy before first execution.
+The dependency order is threat model → external verification, and Go helper contracts → Task callers.
+The SBOM experiment can proceed alongside helper design: prove CycloneDX 1.7 / SPDX 3.0.1 schema and
+archive/variant inventory fidelity without Python/BLINT before retiring the old generator. Final CI
+rollout consumes the completed commands and release contracts. Quality triage starts early; the final
+scan follows the integrated migrations and permits only narrow justified exceptions.
 
-Exit: policy and lifecycle contracts compose correctly across profiles, modes and architectures;
-external verification rejects wrong publishers and modified artifacts. No nanosecond target gates release.
-Legacy parser hardening remains necessary until support is actually removed by a documented policy.
+Exit: active workflows work without repository Python/Make dependencies; exact coverage, benchmark
+replay, verified downloads, process cleanup, developer workflows and meaningful validation remain
+intact. Modern SBOMs pass schema and independent semantic checks on both architectures. Keep historical
+schema support explicit. Signed checksums and draft-first publication remain mandatory. CDXA, new
+attestations and historical asset replacement are outside this milestone.
 
-## v0.4.0: focused, evidence-gated improvements
+## v0.3.0: installation and lifecycle contracts
 
-[Milestone](https://github.com/EpicBlackWolfZ/microfat/milestone/3)
+| Scope | Issues |
+| --- | --- |
+| Shared atomic trim/optimize identity and metadata policy | [#150](https://github.com/EpicBlackWolfZ/microfat/issues/150) |
+| Expose selection of the already shipped full/minimal stubs | [#40](https://github.com/EpicBlackWolfZ/microfat/issues/40) |
+| Dynamic-linker/ABI checks after basic executable validation | [#154](https://github.com/EpicBlackWolfZ/microfat/issues/154) |
+| Mount and executable-hint qualification; SBOM scope belongs to v0.2.5 | [#157](https://github.com/EpicBlackWolfZ/microfat/issues/157) |
+| Verified user installer with coherent transaction and ownership/layout metadata | [#203](https://github.com/EpicBlackWolfZ/microfat/issues/203) |
+| Explicit updater and Linux Homebrew tap consuming that installation contract | [#204](https://github.com/EpicBlackWolfZ/microfat/issues/204), [#205](https://github.com/EpicBlackWolfZ/microfat/issues/205) |
+| Cache-first auto policy after trust, memfd, image-identity and cache fixes | [#44](https://github.com/EpicBlackWolfZ/microfat/issues/44) |
 
-Scope is limited to compatible-level bitsets (#153), telemetry overhead (#41), codec selection and
-per-variant ergonomics (#42–#43), and tuning diagnostics (#156). Implement only after correctness
-contracts and measurement infrastructure can show benefit. A sub-50 ns selection time is a hypothesis,
-not a release requirement. Heuristics need a measured baseline and must retain explicit user overrides.
+Transformations follow the threat model and running-image fix, with deliberate ownership, mode,
+hard-link, ACL/xattr, capability and signature handling. Mount tests follow image-identity and path
+contracts. The installer comes before the updater; tap and updater implementations can proceed
+independently once ownership/layout is fixed. The installer defaults to a user directory, while
+system-wide writes are explicit. Ordinary commands do not gain background update checks. Homebrew
+covers Linux amd64/arm64 and retains control of package-managed upgrades; it does not imply macOS support.
+
+Exit: installation/update failure leaves a coherent usable prior release. Ownership and running-image
+identity are checked before replacement. CLI/full/minimal stubs remain discoverable through supported
+links and execution modes. Transformations and cache policy preserve the documented trust boundary;
+matching loader metadata does not prove a target system has a compatible libc.
+
+## v0.4.0: measured improvements and observability
+
+| Scope | Issues |
+| --- | --- |
+| Runtime metadata accessor/recipes and non-mutating doctor tuning preview | [#15](https://github.com/EpicBlackWolfZ/microfat/issues/15), [#156](https://github.com/EpicBlackWolfZ/microfat/issues/156) |
+| Attribute and reduce disabled-telemetry overhead | [#41](https://github.com/EpicBlackWolfZ/microfat/issues/41) |
+| Derive automatic codec policy from representative measurements | [#42](https://github.com/EpicBlackWolfZ/microfat/issues/42) |
+| Per-variant CLI compression with existing manifest support and explicit precedence | [#43](https://github.com/EpicBlackWolfZ/microfat/issues/43) |
+| Exact compatible-level bitsets with independent requirements-based equivalence tests | [#153](https://github.com/EpicBlackWolfZ/microfat/issues/153) |
+
+Exit: metadata fields/profiles and unknowns are accurate, previews preserve safe GC prerequisites,
+and optimizations demonstrate useful benefit without weakening correctness. Include AMD64 missing-feature
+and cross-branch ARM64 cases. Fixed codec thresholds, sub-50ns selection and sub-100us startup are
+hypotheses, not portable release requirements. Retaining a simpler default is a valid result.
+
+## Research / uncommitted
+
+[Research milestone](https://github.com/EpicBlackWolfZ/microfat/milestone/4)
+
+The old v0.5.0/v0.6.0/v0.7.0/v1.0.0-lab sequence implied releases before feasibility was known.
+These proposals now share an uncommitted track. Empty successor placeholders are retired; closing
+them does not mean the research was delivered.
+
+| Scope | Issues |
+| --- | --- |
+| Delta baseline → bounded reconstruction → bounded-depth topology | [#45](https://github.com/EpicBlackWolfZ/microfat/issues/45), [#46](https://github.com/EpicBlackWolfZ/microfat/issues/46), [#162](https://github.com/EpicBlackWolfZ/microfat/issues/162) |
+| Section study, reversible normalization, instruction streams and joint representation | [#47](https://github.com/EpicBlackWolfZ/microfat/issues/47), [#163](https://github.com/EpicBlackWolfZ/microfat/issues/163), [#164](https://github.com/EpicBlackWolfZ/microfat/issues/164), [#165](https://github.com/EpicBlackWolfZ/microfat/issues/165) |
+| Advanced feasibility: post-link rewriting, lazy materialization and simple entropy models | [#166](https://github.com/EpicBlackWolfZ/microfat/issues/166), [#167](https://github.com/EpicBlackWolfZ/microfat/issues/167), [#168](https://github.com/EpicBlackWolfZ/microfat/issues/168) |
+
+Start with isolated, bounded experiments. Require byte-exact reconstruction for reversible encoding
+and explicit semantic proof obligations for code-changing transforms. Count model/metadata/base sizes,
+packaging cost, peak memory and full startup. A compression ratio alone is insufficient. Production
+promotion requires an explicit format/decoder design, corruption/fuzz validation, the complete supported
+format/profile/codec/mode matrix and a compatibility/rollback plan.
 
 ## Future / uncommitted
 
-Fleet policy (#16), macOS (#17), Pareto tuning (#48), FinOps (#94), user-facing benefit analysis (#95),
-generalized capability solving (#159), empirical compression prediction (#160), and dictionary mining
-(#161) are separate proposals in an uncommitted milestone. Each requires a focused design, demonstrated
-operator need, dependencies and an evidence gate before promotion. None is silently closed or promised
-for v0.4.0. More elaborate authentication envelopes/launcher hooks require a follow-up to external
-verification #86 rather than delaying the initial trust workflow.
+[Future milestone](https://github.com/EpicBlackWolfZ/microfat/milestone/11)
 
-## Experimental releases and lab
+| Scope | Issues |
+| --- | --- |
+| Fleet files, native macOS and generalized non-level CPU capabilities | [#16](https://github.com/EpicBlackWolfZ/microfat/issues/16), [#17](https://github.com/EpicBlackWolfZ/microfat/issues/17), [#159](https://github.com/EpicBlackWolfZ/microfat/issues/159) |
+| Workload analysis first; packaging search and capacity/cost models consume its evidence | [#95](https://github.com/EpicBlackWolfZ/microfat/issues/95), [#48](https://github.com/EpicBlackWolfZ/microfat/issues/48), [#94](https://github.com/EpicBlackWolfZ/microfat/issues/94) |
+| Bounded compression prediction and dictionary-mining experiments | [#160](https://github.com/EpicBlackWolfZ/microfat/issues/160), [#161](https://github.com/EpicBlackWolfZ/microfat/issues/161) |
+| Optional dedicated-hardware qualification with explicit host availability/ownership | [#182](https://github.com/EpicBlackWolfZ/microfat/issues/182) |
 
-| Milestone | Scope | Promotion gate |
-| --- | --- | --- |
-| v0.5.0 | Delta codecs/reconstruction, bounded delta trees, ELF section deduplication (#45–#47, #162) | Byte-exact reconstruction, bounded resources and representative startup/size evidence |
-| v0.6.0 | Instruction normalization, decomposition, joint representation (#163–#165) | Reconstruction/semantic correctness, resource bounds and measured benefit |
-| v0.7.0 | Post-link optimization (#166) | Semantic validation and steady-state parity |
-| v1.0.0-lab | Predictive materialization and entropy modeling (#167–#168) | Independent research evidence before production consideration |
+These proposals have no promised release/date. A concrete user need, focused design, owner and
+reproducible evidence are required before promotion. Dedicated hardware is optional; hosted results
+remain comparative evidence and cannot be relabeled as exclusive-hardware certification. No paid
+resources or homelab changes are committed by this roadmap.
 
-Keep research isolated. Any format/decoder promotion requires a complete supported matrix of format
-versions, profiles, codecs and execution modes, corruption/fuzz tests, and a compatibility/rollback plan.
-A compression ratio alone is insufficient evidence.
+## Shared release gates
+
+- Keep Go 1.27.1, race checks, exact default/minimal statement coverage of at least 95%, lint,
+  ShellCheck, vulnerability/security checks and the applicable integration/packaging matrix.
+- Preserve mandatory payload/cache hashes, descriptor-bound reads/execution, bounded decompression,
+  mandatory memfd seals and elevated-launch rejection. Same-UID cache writers remain trusted.
+- Establish CPU compatibility before ranking; describe Go resource tuning as a soft budget.
+- Verify publisher identity and exact downloaded bytes externally before first execution. A launcher
+  cannot establish its own authenticity merely by checking embedded hashes.
+- Compare native baseline, native specialized, fat memfd and fat cache with identical tuning;
+  distinguish microbenchmarks, full startup, steady-state effects and environment limitations.
+- Keep routine PR checks bounded; deep sustained/stress work stays scheduled/manual/release-specific.
+  Report unavailable architecture/privileged checks explicitly rather than treating skips as success.
+- Attach and verify all release assets while still in draft. Merged code, passing tests, milestone
+  closure and publication are separate states; maintainer review governs merge and release actions.
