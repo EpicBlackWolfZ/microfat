@@ -19,7 +19,7 @@ const (
 	// ProfileMemoryConstrained tunes GOGC=40 and default MemoryRatio=0.80 for tight memory containers.
 	ProfileMemoryConstrained Profile = cgroup.GCProfileMemoryConstrained
 
-	// ProfileBatchETL tunes GOGC=-1 (off) to rely on GOMEMLIMIT soft ceiling and maximize CPU throughput.
+	// ProfileBatchETL tunes GOGC=-1 (off) only with a finite effective GOMEMLIMIT soft ceiling.
 	ProfileBatchETL Profile = cgroup.GCProfileBatchETL
 
 	// ProfileAdaptive dynamically calculates GOGC based on estimated steady-state live heap and headroom.

@@ -162,9 +162,25 @@ $$\text{Recommended GOGC} \le \min\left(100, \; \max\left(10, \; \left(\frac{\te
 | :--- | :--- | :--- | :--- | :--- |
 | **Latency-Critical** | `latency_critical` | `75` | `0.90` | Strict SLA APIs, gRPC services, HTTP gateways (< 10ms p99). |
 | **Memory-Constrained** | `memory_constrained` | `40` | `0.80` | Micro-containers (< 256MB/512MB RAM), sidecars, microVMs. |
-| **Batch / ETL** | `batch_etl` | `off` (`-1`) | `0.90` | Kafka stream consumers, data pipelines, compression workloads. |
+| **Batch / ETL** | `batch_etl` | `off` (`-1`) when a finite ceiling is active | `0.90` | Kafka stream consumers, data pipelines, compression workloads. |
 | **Adaptive** | `adaptive` | Dynamic | `0.90` | Dynamic sizing via `MICROFAT_LIVE_HEAP_ESTIMATE` (e.g. `150MB`). |
 | **Default** | `default` | `100` | `0.90` | General cloud microservices and daemons. |
+
+`batch_etl` disables heap-triggered GC only when a finite effective `GOMEMLIMIT`
+will be applied or is already active. Unlimited or unavailable memory limits,
+and budgets exhausted by retained executable storage, preserve the existing GC
+setting. A retained-storage inspection failure also prevents a new memory budget.
+The launcher reports a skipped batch GC adjustment in
+`MICROFAT_CGROUP_GOGC_SKIPPED_REASON`; `runtimeinit.AutoTune` reports it in
+`Result.SkippedReason` and its logging telemetry.
+
+An explicit finite user `GOMEMLIMIT` can satisfy this prerequisite. `GOMEMLIMIT=off`
+does not. Programmatic tuning queries the actual Go runtime limit when preserving
+an existing setting, since the environment can have changed after startup.
+Explicit `GOGC` environment values and `WithGOGC` choices retain precedence,
+including a deliberate user choice of `off`. Dry runs do not change runtime
+settings. `GOMEMLIMIT` remains a soft Go runtime limit, not a hard process-memory
+or OOM guarantee.
 
 ---
 

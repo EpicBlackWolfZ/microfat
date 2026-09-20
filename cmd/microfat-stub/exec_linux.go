@@ -199,7 +199,7 @@ func isMicrofatInternalEnv(k string) bool {
 		format.EnvCgroupGOMEMLIMIT,
 		format.EnvCgroupGOMAXPROCS,
 		format.EnvCgroupGOGC,
-		format.EnvCgroupGCProfile:
+		format.EnvCgroupGCProfile, format.EnvCgroupGOGCSkippedReason:
 		return true
 	default:
 		return false
@@ -289,6 +289,9 @@ func buildAutoTunedEnviron(
 		gcProfile,
 		liveHeap,
 	)
+
+	env = resolveBatchGCEnviron(env, keyIndex, &plan)
+
 	if plan.GOMEMLIMITStr != "" {
 		env = upsertEnv(env, keyIndex, format.EnvCgroupGOMEMLIMIT, plan.GOMEMLIMITStr)
 	}
@@ -315,6 +318,17 @@ func buildAutoTunedEnviron(
 	env = applyRuntimeTuningPlan(env, keyIndex, plan)
 
 	return env, &limits
+}
+
+func resolveBatchGCEnviron(env []string, keyIndex map[string]int, plan *cgroup.TuningPlan) []string {
+	if index, exists := keyIndex["GOMEMLIMIT"]; exists {
+		_, value, _ := strings.Cut(env[index], "=")
+		plan.ResolveBatchGOGC(cgroup.RuntimeMemoryLimit(value))
+	}
+	if _, explicitGC := keyIndex["GOGC"]; !explicitGC && plan.GOGCSkippedReason != "" {
+		env = upsertEnv(env, keyIndex, format.EnvCgroupGOGCSkippedReason, plan.GOGCSkippedReason)
+	}
+	return env
 }
 
 func populateCgroupEnviron(env []string, keyIndex map[string]int, limits cgroup.Limits) []string {

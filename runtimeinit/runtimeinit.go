@@ -34,6 +34,7 @@ const (
 var (
 	retainedExecutableMemoryFunc           = cgroup.RetainedExecutableMemory
 	setMemoryLimitFunc                     = debug.SetMemoryLimit
+	currentMemoryLimitFunc                 = func() int64 { return debug.SetMemoryLimit(-1) }
 	setMaxProcsFunc                        = runtime.GOMAXPROCS
 	setGCPercentFunc                       = debug.SetGCPercent
 	readLimitsFunc                         = cgroup.ReadLimits
@@ -189,6 +190,16 @@ func AutoTune(opts ...Option) Result {
 		activeLiveHeap,
 	)
 	res.ConstrainingLimit = plan.ConstrainingLimit
+	// Environment values can be changed after runtime startup. When preserving
+	// an existing limit, query the runtime instead of trusting the environment.
+	if activeProfile == ProfileBatchETL && cfg.explicitGOGC == nil && getenvFunc("GOGC") == "" {
+		effectiveLimit := plan.GOMEMLIMITBytes
+		if getenvFunc("GOMEMLIMIT") != "" || effectiveLimit <= 0 {
+			effectiveLimit = currentMemoryLimitFunc()
+		}
+		plan.ResolveBatchGOGC(effectiveLimit)
+		res.SkippedReason = plan.GOGCSkippedReason
+	}
 
 	if cfg.explicitGOGC != nil {
 		plan.GOGC = *cfg.explicitGOGC

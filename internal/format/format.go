@@ -77,6 +77,7 @@ const (
 	EnvCgroupEffectiveLimitBytes = "MICROFAT_CGROUP_EFFECTIVE_LIMIT_BYTES"
 	EnvCgroupCPUs                = "MICROFAT_CGROUP_CPUS"
 	EnvCgroupGOGC                = "MICROFAT_CGROUP_GOGC"
+	EnvCgroupGOGCSkippedReason   = "MICROFAT_CGROUP_GOGC_SKIPPED_REASON"
 	EnvCgroupGCProfile           = "MICROFAT_CGROUP_GC_PROFILE"
 	EnvDebug                     = "MICROFAT_DEBUG"
 	EnvLog                       = "MICROFAT_LOG"
