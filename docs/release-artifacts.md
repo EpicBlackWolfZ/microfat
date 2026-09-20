@@ -114,6 +114,29 @@ microfat pack -v v1=bin/app_v1 -v v3=bin/app_v3 -o dist/app
 > **Minimal Stub Selection**: `microfat-stub-minimal` is **never** silently selected by auto-discovery. To package with the minimal stub, you must pass `--stub /path/to/microfat-stub-minimal` explicitly.
 > **Security Boundaries**: Implicit repository-relative paths (`bin/microfat-stub`, `../bin/microfat-stub`) are prohibited to prevent arbitrary stub injection.
 
+### Preserve packed bytes during packaging and installation
+
+Strip/debug-split the native payloads and launcher **before** packing. The final packed executable stores payloads, index and trailer after the stub ELF; ELF rewriting tools can discard those bytes. Do not run `strip`, `objcopy`, automatic debug splitting, or `install -s` on it. This applies to the published fat `microfat` CLI as well as your own packed applications, for both formats and launcher profiles.
+
+```bash
+# Native inputs only; collect separate debug information here if needed.
+strip bin/app_v1 bin/app_v3 bin/microfat-stub
+microfat pack --stub bin/microfat-stub -v v1=bin/app_v1 -v v3=bin/app_v3 -o dist/app
+microfat verify dist/app
+install -m 0755 dist/app /desired/prefix/bin/app
+```
+
+In a Debian `debian/rules` recipe, exclude the final packed file from `dh_strip` (the recipe line needs a tab):
+
+```make
+override_dh_strip:
+	dh_strip --exclude=usr/bin/app
+```
+
+Alternatively, `DEB_BUILD_OPTIONS=nostrip` disables stripping for the build. `noautodbgsym` alone is insufficient because debuglink rewriting can still happen; see [dh_strip's documented controls](https://manpages.debian.org/unstable/debhelper/dh_strip.1.en.html). Also exclude the packed file from any separate `dh_dwz`, `objcopy`, or custom ELF rewriting steps. For RPM and other packaging pipelines, configure their strip/debug extraction hooks to skip the final packed file, or pack after those hooks finish. Verify the actual extracted package binary with `microfat verify` and a smoke run, and compare its hash with the packed input before signing/publishing the package.
+
+GNU strip removal is covered by a bounded regression test; this is not a claim of compatibility with every GNU/LLVM transformation. A damaged artifact must be obtained again or rebuilt; see [trailer failure diagnostics](troubleshooting.md#7-tampering--payload-integrity-verification-failures).
+
 ### Scenario C: Deploying to Fleets and Containers
 Do not distribute separate `v1` and `v3` container images or RPM/DEB packages. Produce one fat binary using `microfat pack` and distribute that single binary across your entire fleet. The binary will automatically run `v3` on modern nodes and `v1` on legacy nodes with zero manual configuration.
 

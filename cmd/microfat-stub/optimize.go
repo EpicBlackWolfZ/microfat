@@ -17,6 +17,9 @@ const (
 
 // optimizeInPlace extracts the selected variant over the current executable on disk.
 func optimizeInPlace(selfPath string, selfFile *os.File, entry *format.VariantEntry, idx *format.Index) error {
+	if err := validateDeploymentPath(selfPath, selfFile); err != nil {
+		return err
+	}
 	realPath, err := filepath.EvalSymlinks(selfPath)
 	if err != nil {
 		realPath = selfPath
@@ -57,6 +60,9 @@ func optimizeInPlace(selfPath string, selfFile *os.File, entry *format.VariantEn
 	}
 
 	// #nosec G703 -- atomic replace of binary
+	if err := validateDeploymentPath(realPath, selfFile); err != nil {
+		return err
+	}
 	if err := os.Rename(tmpPath, realPath); err != nil {
 		return fmt.Errorf("replacing binary %s: %w", realPath, err)
 	}

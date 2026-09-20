@@ -43,6 +43,11 @@ func handleMetaCommand(
 	selectedEntry *format.VariantEntry,
 	policyRes microarch.PolicyResult,
 ) (bool, error) {
+	if isImageMutation(arg1) {
+		if err := validateDeploymentPath(selfPath, selfFile); err != nil {
+			return true, err
+		}
+	}
 	switch {
 	case arg1 == flagHelp:
 		printHelp(idx, hostInfo, selectedEntry, policyRes)
@@ -65,6 +70,11 @@ func handleMetaCommand(
 	default:
 		return false, nil
 	}
+}
+
+func isImageMutation(arg string) bool {
+	return arg == flagTrim || arg == flagSpecialize || arg == flagOptimize ||
+		isPrefixOrExact(arg, flagTrimTo) || isPrefixOrExact(arg, flagSpecializeTo) || isPrefixOrExact(arg, flagOptimizeTo)
 }
 
 func handleTrimInPlace(selfPath string, selfFile *os.File, statSize int64, selectedLevel string) error {

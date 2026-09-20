@@ -507,7 +507,7 @@ func executeViaMemfd(
 	}
 	env, limits := buildAutoTunedEnviron(selfPath, baseEnv, entry, format.ExecModeMemfd, hostInfo, policyRes)
 
-	fd, err := memfdCreateFunc("microfat_payload", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
+	fd, err := createExecutableMemfd()
 	if err != nil {
 		logErrorDiagnostics(format.StageMemfdCreate, err, hostInfo, entry, policyRes, "falling back to disk cache")
 		return fmt.Errorf("%w: memfd_create failed: %w", format.ErrMemfdCreate, err)

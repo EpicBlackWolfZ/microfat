@@ -520,7 +520,7 @@ func TestExtractVariantAndOptimize(t *testing.T) {
 
 	// Test optimizeInPlace
 	replaceTarget := filepath.Join(tempDir, "to_replace")
-	_ = os.WriteFile(replaceTarget, []byte("old-data"), 0o755)
+	_ = os.Link(rawFile.Name(), replaceTarget)
 	if err := optimizeInPlace(replaceTarget, rawFile, entry, nil); err != nil {
 		t.Fatalf("optimizeInPlace failed: %v", err)
 	}
@@ -576,6 +576,12 @@ func TestTrimToAndInPlace(t *testing.T) {
 		t.Fatalf("trimInPlace failed: %v", err)
 	}
 
+	// The first trim replaced the inode. Reopen before a deliberate second transformation.
+	_ = copyFile.Close()
+	copyFile, err = os.Open(copyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Test trimInPlace via symlink
 	symPath := filepath.Join(tempDir, "fat_symlink")
 	if err := os.Symlink(copyPath, symPath); err != nil {
@@ -908,7 +914,7 @@ func TestOptimizeInPlaceSymlink(t *testing.T) {
 	defer func() { _ = rawFile.Close() }()
 
 	realTarget := filepath.Join(tempDir, "real_opt_file")
-	_ = os.WriteFile(realTarget, []byte("original"), 0o755)
+	_ = os.Link(rawFile.Name(), realTarget)
 
 	symTarget := filepath.Join(tempDir, "sym_opt_file")
 	if err := os.Symlink(realTarget, symTarget); err != nil {
@@ -1093,7 +1099,7 @@ func TestTrimAndOptimizeErrorPaths(t *testing.T) {
 
 	// Test optimizeInPlace error when extractVariantToWriter fails
 	optTarget := filepath.Join(tempDir, "opt_target")
-	_ = os.WriteFile(optTarget, []byte("target"), 0o755)
+	_ = os.Link(corruptFile.Name(), optTarget)
 	if err := optimizeInPlace(optTarget, corruptFile, corruptEntry, nil); err == nil {
 		t.Errorf("expected optimizeInPlace to fail on corrupt variant")
 	}
@@ -2275,7 +2281,7 @@ func TestStubDictionaryExecutionAndMetaCommands(t *testing.T) {
 
 	// 4. Test optimizeInPlace on dict binary
 	optInPlaceTarget := filepath.Join(tempDir, "opt_inplace_target")
-	_ = os.WriteFile(optInPlaceTarget, []byte("old"), 0o755)
+	_ = os.Link(selfFile.Name(), optInPlaceTarget)
 	if err := optimizeInPlace(optInPlaceTarget, selfFile, v3Entry, idx); err != nil {
 		t.Fatalf("optimizeInPlace failed on dict binary: %v", err)
 	}

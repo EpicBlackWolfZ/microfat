@@ -321,34 +321,51 @@ func main() {
 
 ### Locating Original Executable & Sibling Assets (`runtimeinit.Executable`)
 
-When a payload binary executes in-memory via anonymous Linux `memfd_create`, Linux maps the process executable to `/proc/self/fd/<fd>`, which causes standard `os.Executable()` calls to return strings like `memfd:microfat_payload (deleted)`.
+On Linux, three paths have different meanings:
 
-To resolve the path to the original fat executable (for locating adjacent assets, config files, plugins, or sibling CLI tools), call `runtimeinit.Executable()`:
+| Path/API | Meaning |
+| :--- | :--- |
+| `/proc/self/exe` | Kernel-held image of the current process: the fat image during launcher startup, then the extracted payload after dispatch. |
+| `os.Executable()` | Payload path: an anonymous `memfd:... (deleted)` name in memfd mode, or a content-addressed cache path in cache mode. Native binaries report their own executable path. |
+| `runtimeinit.Executable()` / `MICROFAT_ORIGINAL_EXE` | Informational original deployment path supplied by the launcher, with `os.Executable()` as the native fallback. |
+
+For application-owned configuration, prefer an explicit asset directory. This complete example also supports assets beside the deployment when that layout is intentional:
 
 ```go
 package main
 
 import (
-	"log"
+	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/EpicBlackWolfZ/microfat/runtimeinit"
 )
 
 func main() {
-	exePath, err := runtimeinit.Executable()
-	if err != nil {
-		log.Fatalf("failed to determine executable path: %v", err)
+	dir := os.Getenv("APP_ASSET_DIR")
+	if dir == "" {
+		exe, err := runtimeinit.Executable()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		dir = filepath.Dir(exe)
 	}
-
-	configPath := filepath.Join(filepath.Dir(exePath), "config.yaml")
-	log.Printf("Loading configuration from %s", configPath)
+	data, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Print(string(data))
 }
 ```
 
-> [!WARNING]
-> **Authenticity & Security Boundary Invariant**:
-> `MICROFAT_ORIGINAL_EXE` and `runtimeinit.Executable()` provide an **informational asset-resolution hint** indicating where the launching binary resided on disk. Because this value is propagated through the process environment, it can be manipulated by parent execution contexts. Applications and libraries must **NEVER** rely on `MICROFAT_ORIGINAL_EXE` as a cryptographic identity, access-control token, or trusted binary origin.
+With `config.yaml` beside a native or packed `app`, run `./app`; for a packed binary, both `MICROFAT_EXEC_MODE=memfd ./app` and `MICROFAT_EXEC_MODE=cache ./app` find that deployment's assets. `APP_ASSET_DIR=/opt/app/assets ./app` uses the explicit directory in all modes. On Linux, invoking a symlink to `app` uses the physical executable's directory, not the symlink's directory. The [tested example](../runtimeinit/testdata/assets_app/main.go) covers these modes and symlink invocation.
+
+The launcher reads its kernel-held image, so startup continues with the original payload after the deployment is unlinked or atomically replaced. The exported pathname can then be absent or name a newer deployment; adjacent assets can also belong to that newer deployment. Use a stable, explicitly configured versioned asset directory when code and assets must remain paired through updates. Cache mode does not restore the original directory layout or repair every library that derives assets from `os.Executable()`.
+
+`MICROFAT_ORIGINAL_EXE` is inherited environment data and `runtimeinit.Executable()` does not authenticate it. Neither is an identity, authorization token, or authority to overwrite a deployment. See [replacement and deliberate re-exec choices](troubleshooting.md#9-executable-paths-assets-and-deliberate-re-exec) and [transformation guards](lifecycle-modes.md#4-symlinks--atomic-in-place-operations).
 
 ---
 
