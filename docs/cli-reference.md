@@ -296,6 +296,17 @@ microfat pack --manifest pgo.yaml -o bin/myapp
 
 Compile and package multiple microarchitecture variants with Profile-Guided Optimization (`-pgo`) profiles concurrently in a single step using a declarative YAML/JSON manifest.
 
+Both `pgo-pack` and `pack --manifest` anchor the manifest directory before starting
+the compiler. Per-variant `pgo` and top-level `default_pgo` paths are relative to
+that directory; automatic `default.pgo` discovery uses the package directory.
+Relative and absolute manifest arguments work from other working directories,
+including paths containing spaces. `pgo: off` disables profile discovery for that
+variant. Manifest-relative output placement and explicit `--stub` precedence
+apply as before.
+
+A manifest's `compression.dict_size` is retained unless `--dict-size` is explicitly
+supplied. Omitting the size from both sources uses the normal 112 KiB default.
+
 ```bash
 microfat pgo-pack --manifest pgo.yaml -o bin/myapp
 ```

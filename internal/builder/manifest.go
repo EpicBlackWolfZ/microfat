@@ -52,7 +52,7 @@ type Manifest struct {
 	Compression *CompressionConfig `json:"compression,omitempty" yaml:"compression,omitempty"`
 	Variants    []VariantConfig    `json:"variants" yaml:"variants"`
 
-	// Dir stores the directory containing the manifest file for relative path resolution.
+	// Dir stores the absolute directory containing the loaded manifest for relative path resolution.
 	Dir string `json:"-" yaml:"-"`
 }
 
@@ -67,7 +67,10 @@ type VariantConfig struct {
 
 // LoadManifest reads, unmarshals, and validates a YAML or JSON build manifest from the specified file path.
 func LoadManifest(manifestPath string) (*Manifest, error) {
-	cleanPath := filepath.Clean(manifestPath)
+	cleanPath, err := filepath.Abs(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolving manifest path: %w", err)
+	}
 	file, err := inputfile.Open(cleanPath)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s (%w)", ErrManifestNotFound, cleanPath, err)
