@@ -105,7 +105,7 @@ make clean         # Remove build artifacts and coverage files
 
 > **Terminal Output & Colors**: All make targets support the standard [`NO_COLOR`](https://no-color.org) environment variable (`NO_COLOR=1`) and `COLOR=0` make variable to strip ANSI escape codes and switch Unicode symbols (`✔`/`✖`) to clean ASCII markers (`[OK]`/`[FAIL]`). Terminal detection checks standard output (`[ -t 1 ]`) to automatically disable colors when redirected or non-interactive.
 > **Port Safety & Profiling**: Profiling targets (`check-leaks`, `pprof`) detect occupied ports cleanly and fail with an actionable message (`PORT=<port>`, `HTTP_PORT=<port>`) rather than terminating external processes. Profiling cleanup sends graceful SIGTERM before SIGKILL strictly to spawned child processes. Mutex and block profile sampling rates (`MICROFAT_PPROF_BLOCK_RATE`, `MICROFAT_PPROF_MUTEX_FRACTION`) are enabled only when `PROFILE=block` or `PROFILE=mutex` is requested.
-> **CI Regression Gates**: Developer workflow regression tests (`test-dx`, `test-leaks`, `check-leaks`, `demo-check`) are CI-enforced in GitHub Actions on every pull request.
+> **CI Regression Gates**: Developer workflow regression tests (`test-dx`, `test-leaks`, `check-leaks`, `demo-check`) are CI-enforced on code-changing pull requests. Documentation-only pull requests still run required CI classification, title validation and secret scanning; see the documentation-only policy in `CONTRIBUTING.md`. Push and manual CI runs retain the full checks.
 
 
 ---
