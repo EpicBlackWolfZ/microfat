@@ -3,19 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE*'
-      - '.gitignore'
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, edited]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE*'
-      - '.gitignore'
   workflow_dispatch:
 
 permissions:
@@ -55,17 +45,43 @@ jobs:
   lint:
     name: Lint (golangci-lint)
     runs-on: ubuntu-latest
+    outputs:
+      run-code-checks: ${{ steps.changes.outputs.run-code-checks }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      # Classification lives in an existing required check. If checkout, Git, or
+      # the classifier fails, lint fails rather than approving skipped code jobs.
+      - name: Test CI change classification
+        run: bash scripts/ci-code-changes-test.sh
+
+      - name: Classify changes
+        id: changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          run_code_checks=true
+          if [[ "${EVENT_NAME}" == pull_request ]]; then
+            # Checkout uses the PR merge commit; compare the merged result to
+            # its first parent (the target branch), without API file-list limits.
+            run_code_checks=$(bash scripts/ci-code-changes.sh HEAD^1 HEAD)
+          fi
+          echo "run-code-checks=${run_code_checks}" >> "${GITHUB_OUTPUT}"
+          echo "Run code checks: ${run_code_checks}. Title and secret checks remain enabled." >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Set up Go
+        if: steps.changes.outputs.run-code-checks != 'false'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
           cache: true
 
       - name: Install ShellCheck (v0.11.0)
+        if: steps.changes.outputs.run-code-checks != 'false'
         run: |
           SHELLCHECK_VERSION="0.11.0"
           SHELLCHECK_SHA256="8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
@@ -77,6 +93,7 @@ jobs:
           shellcheck --version
 
       - name: Run golangci-lint
+        if: steps.changes.outputs.run-code-checks != 'false'
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.13.2
@@ -84,10 +101,13 @@ jobs:
           args: --timeout=5m
 
       - name: Run ShellCheck
+        if: steps.changes.outputs.run-code-checks != 'false'
         run: make lint-shell
 
   test:
     name: Unit Tests & Coverage Gate (>= 95%)
+    needs: lint
+    if: needs.lint.outputs.run-code-checks != 'false'
     permissions:
       contents: read
       checks: write
@@ -137,24 +157,28 @@ jobs:
 
       - name: Evaluate Coverage & Generate Summary Table
         run: |
-          echo "### 📊 Code Coverage Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Package / File | Coverage |" >> $GITHUB_STEP_SUMMARY
-          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "### 📊 Code Coverage Summary"
+            echo ""
+            echo "| Package / File | Coverage |"
+            echo "| :--- | :--- |"
 
-          go tool cover -func=coverage.out | while read -r line; do
-            pkg=$(echo "$line" | awk '{print $1}')
-            pct=$(echo "$line" | awk '{print $NF}')
-            if [ "$pkg" = "total:" ]; then
-              echo "| **Total (Default/Minimal Source Union)** | **$pct** |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| \`$pkg\` | $pct |" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
+            go tool cover -func=coverage.out | while read -r line; do
+              pkg=$(echo "$line" | awk '{print $1}')
+              pct=$(echo "$line" | awk '{print $NF}')
+              if [ "$pkg" = "total:" ]; then
+                echo "| **Total (Default/Minimal Source Union)** | **$pct** |"
+              else
+                echo "| \`$pkg\` | $pct |"
+              fi
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
 
 
   dx:
     name: Developer Workflow Regression Tests
+    needs: lint
+    if: needs.lint.outputs.run-code-checks != 'false'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -180,6 +204,8 @@ jobs:
 
   vulncheck:
     name: Vulnerability Scan (govulncheck)
+    needs: lint
+    if: needs.lint.outputs.run-code-checks != 'false'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -213,6 +239,8 @@ jobs:
 
   build:
     name: Build, GoReleaser Snapshot & Self-Bundling Verification
+    needs: lint
+    if: needs.lint.outputs.run-code-checks != 'false'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code

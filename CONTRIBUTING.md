@@ -106,7 +106,8 @@ We strictly follow the [Conventional Commits](https://www.conventionalcommits.or
 
 ## 6. Automated Quality & Security Gates
 
-Every Pull Request must pass **7 required automated CI and Security checks**:
+The `main` ruleset requires these **six CI checks**, including legitimate documentation-only skips
+as described below:
 
 1. **`Validate Conventional PR Title`**: Verifies PR title follows Conventional Commits.
 2. **`Lint (golangci-lint)`**: Zero tolerance for Go linter errors (`errcheck`, `goconst`, `lll`, `mnd`, `govet`, etc.) and ShellCheck (v0.11.0) static analysis violations across all tracked Bash scripts.
@@ -114,7 +115,9 @@ Every Pull Request must pass **7 required automated CI and Security checks**:
 4. **`Vulnerability Scan (govulncheck)`**: Automated scanning against the official Go Vulnerability Database.
 5. **`Secrets Detection (gitleaks)`**: Audits commits for accidental credential leaks.
 6. **`Build, GoReleaser Snapshot & Self-Bundling Verification`**: Verifies multi-architecture builds and self-dispatching stubs.
-7. **`CodeQL Advanced (Go & Actions)`**: Deep semantic AST static security analysis.
+
+CodeQL (Go and Actions), developer workflow regressions, benchmarks and CodeFactor provide additional
+validation; they are not currently named as required checks in the branch ruleset.
 
 ---
 
@@ -143,4 +146,17 @@ Every Pull Request must pass **7 required automated CI and Security checks**:
 6. **Code Review & Resolution**:
    - Address any reviewer comments. All conversation threads must be resolved before merging.
 7. **Merge**:
-   - Once all 7 status checks turn green and reviews are complete, the PR is squash-merged to `main`, and the feature branch is automatically deleted.
+   - Once required checks are satisfied and reviews are complete, the maintainer can merge the PR.
+
+## 8. Documentation-only pull requests
+
+The required CI workflow runs on every pull request to `main`. PR title validation, secret scanning
+and change-classification regression checks also run for documentation changes. A nonempty diff
+limited to root Markdown files, Markdown under `docs/`, and `LICENSE` skips Go lint, tests, developer
+runtime checks, vulnerability analysis and snapshots at the step/job level, so required statuses
+finish instead of remaining pending. Other paths, mixed changes and empty diffs run code checks.
+
+Classification uses the complete Git diff of the PR merge result against its first parent, with
+rename detection disabled. A Git or classifier failure fails the required lint job; it cannot approve
+a documentation-only skip. Push and manual runs retain the full CI checks. No required check names
+or branch protection rules are changed. Run `bash scripts/ci-code-changes-test.sh` to verify the policy.
