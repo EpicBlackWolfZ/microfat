@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
 )
 
 // ResolveStubPath resolves the path to the microfat launcher stub binary using strict precedence:
@@ -37,7 +39,7 @@ func resolveExplicitStub(stubPath, baseDir, sourceDesc string) (string, error) {
 	if err != nil || stat.IsDir() || !stat.Mode().IsRegular() {
 		return "", fmt.Errorf("%w: %s (%s)", ErrStubNotFound, stubPath, sourceDesc)
 	}
-	f, err := os.Open(realFile)
+	f, err := inputfile.Open(realFile)
 	if err != nil {
 		return "", fmt.Errorf("%w: %s cannot be read: %w", ErrStubNotFound, stubPath, err)
 	}
@@ -59,7 +61,7 @@ func findSiblingStub() (string, error) {
 	if err != nil || stat.IsDir() || !stat.Mode().IsRegular() {
 		return "", ErrStubNotFound
 	}
-	f, err := os.Open(realCandidate)
+	f, err := inputfile.Open(realCandidate)
 	if err != nil {
 		return "", ErrStubNotFound
 	}
@@ -126,7 +128,7 @@ func findStubInPATH(stubName string) (string, error) {
 		}
 		// Verify readable regular file
 		// #nosec G703 -- absolute PATH entries verified
-		f, err := os.Open(realCandidate)
+		f, err := inputfile.Open(realCandidate)
 		if err != nil {
 			continue
 		}

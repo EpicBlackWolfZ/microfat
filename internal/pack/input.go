@@ -1,12 +1,14 @@
 package pack
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
 )
 
 // snapshotInputs consumes each input descriptor once into a private staging directory.
@@ -57,7 +59,7 @@ func snapshotInputs(opts *Options) (func(), error) {
 const inputSnapshotMode = 0o600
 
 func snapshotInput(source, destination string, limit int64) error {
-	input, err := os.Open(filepath.Clean(source))
+	input, err := openInput(source)
 	if err != nil {
 		return err
 	}
@@ -104,7 +106,7 @@ func copyBoundedInput(output io.Writer, input io.Reader, limit, expectedSize int
 }
 
 func readBoundedInput(path string, limit int64) ([]byte, error) {
-	f, err := os.Open(filepath.Clean(path))
+	f, err := openInput(path)
 	if err != nil {
 		return nil, err
 	}
@@ -130,4 +132,13 @@ func readBoundedInput(path string, limit int64) ([]byte, error) {
 		return nil, fmt.Errorf("%w: input size changed", ErrSizeMismatch)
 	}
 	return data, nil
+}
+
+// Keep packaging error identities while sharing nonblocking descriptor validation.
+func openInput(path string) (*os.File, error) {
+	f, err := inputfile.Open(path)
+	if errors.Is(err, inputfile.ErrNotRegular) {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidELF, err)
+	}
+	return f, err
 }

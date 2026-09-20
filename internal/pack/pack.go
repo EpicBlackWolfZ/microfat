@@ -125,7 +125,7 @@ func sampleVariantPayloads(variantPaths map[string]string, levels []string) ([][
 }
 
 func sampleInput(path string, budget int) ([][]byte, error) {
-	f, err := os.Open(filepath.Clean(path))
+	f, err := openInput(path)
 	if err != nil {
 		return nil, err
 	}
@@ -698,6 +698,10 @@ func ValidateELFBinary(path string, targetOS, targetArch string) error {
 				ErrInvalidELF, path, f.Machine, targetArch)
 		}
 	}
+	if err := validateExecutableELF(f, uint64(len(data))); err != nil {
+		return fmt.Errorf("%w (%s): %w", ErrInvalidELF, path, err)
+	}
+
 	return nil
 }
 

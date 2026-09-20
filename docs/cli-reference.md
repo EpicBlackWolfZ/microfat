@@ -195,6 +195,11 @@ Embedded Variants (3 total):
 
 Validate the 56-byte trailer magic, index SHA-256 hash, and payload integrity checksums of all embedded variants.
 
+Both text and `--json` modes exit nonzero if any variant is invalid. JSON mode emits the
+structured result to stdout before reporting an integrity failure on stderr. A malformed
+index can fail before a structured result is available. Successful integrity verification
+does not certify executable ELF structure or runtime compatibility.
+
 ```bash
 # Verify binary integrity
 microfat verify bin/myapp
@@ -220,6 +225,16 @@ microfat verify bin/myapp --json
 ### `microfat pack`
 
 Package multiple pre-compiled microarchitecture-specific ELF binaries into a self-dispatching fat executable.
+
+The stub and variants must be nonempty regular files (symlinks to regular files are supported).
+Inputs are opened without waiting for FIFO peers and validated through their open descriptors.
+Each packaging input is limited to 1 GiB and snapshotted before validation and compression.
+ELF validation accepts 64-bit `ET_EXEC` and `ET_DYN` executables, including dynamically linked
+executables and PIE/static PIE, with an entry point in a file-backed executable load segment.
+Relocatable objects, core dumps and nonexecutable shared libraries are rejected before replacing
+any output. This does not certify interpreter/libc compatibility across variants.
+`--skip-elf-validation` bypasses ELF structure checks only; regular-file, size and snapshot
+checks still apply, and a bypassed input is not guaranteed to execute.
 
 ```bash
 # AMD64 packaging (launcher stub auto-discovered from same directory or $PATH)
@@ -269,7 +284,7 @@ microfat pack --manifest pgo.yaml -o bin/myapp
 | `--dict`, `--zstd-dict` | *(none)* | `bool` | `false` | Enable shared Zstandard inter-variant dictionary compression. |
 | `--dict-size` | *(none)* | `int` | `114688` | Target shared dictionary size in bytes (default: 112 KB). |
 | `--format-version` | *(none)* | `int` | `2` | Binary format version: `2` (compact binary table, default) or `1` (legacy JSON, deprecated). |
-| `--skip-elf-validation` | *(none)* | `bool` | `false` | Skip ELF header architecture and machine type validation. |
+| `--skip-elf-validation` | *(none)* | `bool` | `false` | Skip ELF architecture, executable type, load segment and entry-point checks. |
 | `--manifest` | `-m` | `string` | `""` | Path to YAML or JSON declarative build manifest. |
 | `--concurrency` | `-j` | `int` | `NumCPU` | Concurrent compiler workers when building via manifest. |
 | `--keep-intermediates` | *(none)* | `bool` | `false` | Retain intermediate compiled variant binaries when building via manifest. |

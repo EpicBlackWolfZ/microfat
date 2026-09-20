@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
+	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"gopkg.in/yaml.v3"
 )
@@ -68,7 +68,7 @@ type VariantConfig struct {
 // LoadManifest reads, unmarshals, and validates a YAML or JSON build manifest from the specified file path.
 func LoadManifest(manifestPath string) (*Manifest, error) {
 	cleanPath := filepath.Clean(manifestPath)
-	file, err := os.Open(cleanPath)
+	file, err := inputfile.Open(cleanPath)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s (%w)", ErrManifestNotFound, cleanPath, err)
 	}
