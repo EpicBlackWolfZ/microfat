@@ -24,6 +24,7 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/builder"
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"github.com/EpicBlackWolfZ/microfat/internal/version"
@@ -196,7 +197,7 @@ func newInspectCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := filepath.Clean(args[0])
 			// #nosec G304 -- user-supplied binary path to inspect
-			f, err := os.Open(path)
+			f, err := inputfile.Open(path)
 			if err != nil {
 				return fmt.Errorf("opening %s: %w", path, err)
 			}
@@ -269,7 +270,7 @@ func newVerifyCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := filepath.Clean(args[0])
 			// #nosec G304 -- user-supplied binary path to verify
-			f, err := os.Open(path)
+			f, err := inputfile.Open(path)
 			if err != nil {
 				return fmt.Errorf("opening %s: %w", path, err)
 			}
@@ -305,6 +306,9 @@ func newVerifyCmd() *cobra.Command {
 					return fmt.Errorf("encoding json: %w", err)
 				}
 				_, _ = fmt.Fprintln(cmd.OutOrStdout())
+				if !out.Valid {
+					return fmt.Errorf("one or more variants failed checksum/integrity verification")
+				}
 				return nil
 			}
 
@@ -349,7 +353,7 @@ func newTrimCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			srcPath := filepath.Clean(args[0])
 			// #nosec G304 -- user-supplied binary path to trim
-			f, err := os.Open(srcPath)
+			f, err := inputfile.Open(srcPath)
 			if err != nil {
 				return fmt.Errorf("opening %s: %w", srcPath, err)
 			}
@@ -629,7 +633,7 @@ func newPackCmd() *cobra.Command {
 	cmd.Flags().IntVar(&dictSize, "dict-size", codec.DefaultDictSize, "Target shared Zstandard dictionary size in bytes (default: 112 KB)")
 	cmd.Flags().IntVar(&formatVersion, "format-version", format.FormatVersionCurrent,
 		"Binary format specification version (1 for JSON, 2 for binary table)")
-	cmd.Flags().BoolVar(&skipELFValidation, "skip-elf-validation", false, "Skip ELF header architecture validation")
+	cmd.Flags().BoolVar(&skipELFValidation, "skip-elf-validation", false, "Skip ELF architecture and executable structure validation")
 	cmd.Flags().IntVarP(&concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (when using --manifest)")
 	cmd.Flags().BoolVar(&keepIntermediates, "keep-intermediates", false, "Keep intermediate compiled variant ELF binaries")
 	cmd.Flags().StringVar(&goBinary, "go-binary", "", "Path to Go toolchain binary (defaults to $GO or 'go')")
@@ -721,7 +725,7 @@ then packages them into a self-dispatching microfat binary.`,
 	cmd.Flags().IntVarP(&concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (defaults to NumCPU)")
 	cmd.Flags().BoolVar(&keepIntermediates, "keep-intermediates", false, "Keep intermediate compiled variant ELF binaries")
 	cmd.Flags().StringVar(&goBinary, "go-binary", "", "Path to Go toolchain binary (defaults to $GO or 'go')")
-	cmd.Flags().BoolVar(&skipELFValidation, "skip-elf-validation", false, "Skip ELF header architecture validation")
+	cmd.Flags().BoolVar(&skipELFValidation, "skip-elf-validation", false, "Skip ELF architecture and executable structure validation")
 
 	return cmd
 }
@@ -753,7 +757,7 @@ func newPrewarmCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := filepath.Clean(args[0])
 			// #nosec G304 -- user-supplied binary path to prewarm
-			f, err := os.Open(path)
+			f, err := inputfile.Open(path)
 			if err != nil {
 				return fmt.Errorf("opening %s: %w", path, err)
 			}

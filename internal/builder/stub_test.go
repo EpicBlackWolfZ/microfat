@@ -3,6 +3,7 @@ package builder
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"os"
@@ -48,6 +49,20 @@ func createDummyELF(t *testing.T, dir, name string, arch string) string {
 	payload := make([]byte, 0, len(elfHeader)+dummyELFExtraBytes)
 	payload = append(payload, elfHeader...)
 	payload = append(payload, make([]byte, dummyELFExtraBytes)...)
+	const baseAddress = 0x400000
+	const entryAddress = baseAddress + 120
+	binary.LittleEndian.PutUint64(payload[24:32], entryAddress)
+	binary.LittleEndian.PutUint64(payload[32:40], 64)
+	binary.LittleEndian.PutUint16(payload[52:54], 64)
+	binary.LittleEndian.PutUint16(payload[54:56], 56)
+	binary.LittleEndian.PutUint16(payload[56:58], 1)
+	binary.LittleEndian.PutUint32(payload[64:68], 1)
+	binary.LittleEndian.PutUint32(payload[68:72], 5)
+	binary.LittleEndian.PutUint64(payload[80:88], baseAddress)
+	binary.LittleEndian.PutUint64(payload[96:104], uint64(len(payload)))
+	binary.LittleEndian.PutUint64(payload[104:112], uint64(len(payload)))
+	binary.LittleEndian.PutUint64(payload[112:120], 1)
+
 	if err := os.WriteFile(p, payload, 0o755); err != nil {
 		t.Fatalf("failed to write dummy ELF %s: %v", p, err)
 	}

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
 )
 
 var (
@@ -21,7 +22,7 @@ var (
 	evalSymlinksFunc      = filepath.EvalSymlinks
 	readlinkProcSelfExe   = func() (string, error) { return os.Readlink("/proc/self/exe") }
 	readAndHashSelfExe    = defaultReadAndHashProcSelfExe
-	openFileFunc          = os.Open
+	openFileFunc          = inputfile.Open
 	resolveCacheDirFDFunc = func(string) (int, string, error) { return -1, defaultResolveCacheDir(), nil }
 )
 

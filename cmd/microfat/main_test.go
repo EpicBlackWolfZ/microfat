@@ -302,9 +302,7 @@ func TestVerifyCorruptedOutput(t *testing.T) {
 
 	verifyJSONCmd := newVerifyCmd()
 	verifyJSONCmd.SetArgs([]string{"--json", fatPath})
-	if err := verifyJSONCmd.Execute(); err != nil {
-		t.Fatalf("unexpected error running verify --json: %v", err)
-	}
+	require.Error(t, verifyJSONCmd.Execute())
 }
 
 func TestMainInvocation(t *testing.T) {

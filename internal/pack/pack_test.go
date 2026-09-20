@@ -730,7 +730,7 @@ func TestPackVerifyTrimARM64MultiVariant(t *testing.T) {
 func createDummyELF(t *testing.T, dir, name string, machine uint16, class byte) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	hdr := make([]byte, 64)
+	hdr := make([]byte, 128)
 	copy(hdr[0:4], []byte{0x7f, 'E', 'L', 'F'})
 	hdr[4] = class // EI_CLASS (2 = 64-bit, 1 = 32-bit)
 	hdr[5] = 1     // EI_DATA (1 = little endian)
@@ -745,6 +745,19 @@ func createDummyELF(t *testing.T, dir, name string, machine uint16, class byte) 
 	hdr[20] = 1
 	// e_ehsize = 64
 	hdr[52] = 64
+	// One file-backed executable PT_LOAD containing the entry point.
+	const baseAddress = 0x400000
+	const entryAddress = baseAddress + 120
+	binary.LittleEndian.PutUint64(hdr[24:32], entryAddress)
+	binary.LittleEndian.PutUint64(hdr[32:40], 64)
+	binary.LittleEndian.PutUint16(hdr[54:56], 56)
+	binary.LittleEndian.PutUint16(hdr[56:58], 1)
+	binary.LittleEndian.PutUint32(hdr[64:68], 1)
+	binary.LittleEndian.PutUint32(hdr[68:72], 5)
+	binary.LittleEndian.PutUint64(hdr[80:88], baseAddress)
+	binary.LittleEndian.PutUint64(hdr[96:104], uint64(len(hdr)))
+	binary.LittleEndian.PutUint64(hdr[104:112], uint64(len(hdr)))
+	binary.LittleEndian.PutUint64(hdr[112:120], 1)
 
 	if err := os.WriteFile(path, hdr, 0o755); err != nil {
 		t.Fatalf("writing dummy elf: %v", err)
