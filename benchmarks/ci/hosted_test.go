@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/internal/testfixture"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
@@ -35,7 +36,7 @@ func hostedFixture() *schema.ExperimentV2 {
 				Position: len(exp.Schedule), ConfigurationID: cfg.ID}
 			exp.Schedule = append(exp.Schedule, scheduled)
 			trial := schema.ProcessTrial{ScheduledTrial: scheduled, Outcome: schema.OutcomeOK, StartedAt: exp.CreatedAt,
-				SampleCount: 2, SampleIntervalMS: 25, TelemetryPath: "trials/" + scheduled.ID + "/telemetry.json",
+				DurationNS: int64(42 * time.Second), SampleIntervalMS: releaseSampleMS, TelemetryPath: "trials/" + scheduled.ID + "/telemetry.json",
 				Metrics: make(map[string]schema.Measurement)}
 			for _, name := range coreMetrics() {
 				trial.Metrics[name] = schema.Measured(100, "count", "test", "fixture")
@@ -47,7 +48,24 @@ func hostedFixture() *schema.ExperimentV2 {
 				}
 			}
 			load := testfixture.HTTP()
+			load.DurationSeconds = 30
+			load.RawPath = "trials/" + scheduled.ID + "/fortio.json"
 			trial.Load = &load
+			warmup := load
+			warmup.DurationSeconds = 10
+			warmup.RawPath = "trials/" + scheduled.ID + "/warmup.json"
+			trial.Warmup = &warmup
+			for elapsed := time.Duration(0); elapsed < 41*time.Second; elapsed += releaseSampleMS * time.Millisecond {
+				phase := "startup"
+				if elapsed >= time.Second {
+					phase = "warmup"
+				}
+				if elapsed >= 11*time.Second {
+					phase = "steady_state"
+				}
+				trial.Samples = append(trial.Samples, schema.ResourceSample{ElapsedNS: int64(elapsed), Phase: phase})
+			}
+			trial.SampleCount = len(trial.Samples)
 			exp.Trials = append(exp.Trials, trial)
 		}
 	}

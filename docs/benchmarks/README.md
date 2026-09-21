@@ -153,7 +153,11 @@ Release trials use 20 blocks, 10-second warmup and 30-second measurement. The co
 `microfat benchmark qualify --policy hosted-release --input <bundle>` verifies publication completeness:
 clean matching harness/source, 20 paired blocks with at least 10-second warmup and 30-second measurement,
 sampling at most every 250 ms, effective target/generator controls, core measurements,
-and valid telemetry. It prints a JSON verdict and exits nonzero on failure. `release_eligible` retains its strict
+and valid telemetry. Qualification checks the recorded warmup and steady-state load durations against the declared schedule, allowing at most 50 ms for timer/reporting precision. Both loads must have successful requests, and the total trial duration must contain their sum. Missing warmup observations cannot establish the requirement and fail publication qualification.
+
+The effective per-trial sampling interval must match the configuration and be at most 250 ms. Offline readers load the checksummed telemetry samples: counts must match, timestamps must increase within the trial duration, and warmup must precede steady state. Each phase's first-to-last span must cover its observed load duration within two sample intervals plus 50 ms (edge sampling tolerance); adjacent samples may be separated by no more than two intervals plus 50 ms (one missed tick). A positive but short load, sparse or partial telemetry, or contradictory duration fails even when the configuration declares a complete window. These are completeness tolerances, not confidence bounds or claims about physical clock synchronization.
+
+The command prints a JSON verdict and exits nonzero on failure. `release_eligible` retains its strict
 controlled-hardware meaning and is always false on hosted runners. A measured regression can still be published
 as evidence; the publication verdict does not claim improved performance. Partial exec diagnostics and host noise
 remain visible qualifications. Dedicated hardware certification is future work in issue #182.
