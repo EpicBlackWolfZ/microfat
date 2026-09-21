@@ -58,12 +58,27 @@ curl --fail -sSL -o "${WORK_DIR}/checksums.txt.sig" "${RELEASE_URL}/checksums.tx
 
 # 4. Verify keyless Cosign signature against official release identity
 echo "==> Verifying signature with cosign..."
-if ! command -v cosign >/dev/null 2>&1; then
+COSIGN=cosign
+if [[ -n "${MICROFAT_COSIGN:-}" || -n "${MICROFAT_COSIGN_SHA256:-}" ]]; then
+    if [[ "${MICROFAT_COSIGN:-}" != /* || ! -f "${MICROFAT_COSIGN:-}" ||
+          -L "${MICROFAT_COSIGN:-}" || ! -x "${MICROFAT_COSIGN:-}" ||
+          ! "${MICROFAT_COSIGN_SHA256:-}" =~ ^[0-9a-f]{64}$ ]]; then
+        echo 'Error: Verifier pin requires an absolute regular executable and trusted lowercase SHA-256' >&2
+        exit 1
+    fi
+    VERIFIER_HASH="$(sha256sum -- "${MICROFAT_COSIGN}")"
+    if [[ "${VERIFIER_HASH%% *}" != "${MICROFAT_COSIGN_SHA256}" ]]; then
+        echo 'Error: Untrusted verifier: SHA-256 differs from the supplied trust pin' >&2
+        exit 1
+    fi
+    COSIGN="${MICROFAT_COSIGN}"
+fi
+if ! command -v "${COSIGN}" >/dev/null 2>&1; then
     echo "Error: cosign executable not found in PATH; required for signature verification" >&2
     exit 1
 fi
 
-cosign verify-blob \
+"${COSIGN}" verify-blob \
     --bundle "${WORK_DIR}/checksums.txt.sig" \
     --certificate-identity "https://github.com/EpicBlackWolfZ/microfat/.github/workflows/release.yml@refs/tags/v${VERSION}" \
     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
