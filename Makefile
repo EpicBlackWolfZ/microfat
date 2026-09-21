@@ -295,7 +295,7 @@ benchmark-matrix: build ## Validate all supported format/profile/codec/mode comb
 
 benchmark-integration: ## Run benchmark integrations with the pinned external tool
 	@$(GO) test ./internal/benchmarkmatrix ./internal/cmd/benchmark-matrix
-	@python3 scripts/benchmark_evidence_test.py
+	@$(GO) test ./internal/benchmarkevidence ./internal/releaseworkflow ./internal/cmd/benchmark-evidence
 	@MICROFAT_BENCH_FORTIO="$(CURDIR)/.work/benchmark-tools/fortio" $(GO) test -race ./benchmarks/...
 
 benchmark-kernel: ## Prove native kernel enforcement in an explicitly delegated cgroup
