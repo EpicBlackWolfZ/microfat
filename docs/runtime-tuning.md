@@ -6,6 +6,10 @@
 
 This guide explains how Microfat automatically discovers container resource constraints from Linux cgroups v1 and v2, configures Go runtime parameters (`GOMEMLIMIT` and `GOMAXPROCS`) before execution, and balances memory footprint against CPU utilization using workload GC profiles.
 
+These are resource estimates and soft runtime settings. Unavailable cgroup evidence does not prove
+unlimited resources, and a configured memory limit does not guarantee freedom from OOM kills.
+See the [resource bounds and trust assumptions](../SECURITY.md#resource-bounds-and-unavailable-observations).
+
 ---
 
 ## 1. The Container Performance Challenge

@@ -6,6 +6,11 @@
 
 Microfat supports three distinct binary operational modes to accommodate different stages of the application lifecycle, from multi-architecture release distribution to tight container image optimization and raw host performance.
 
+All modes inherit the [documented trust boundary](../SECURITY.md#8-threat-model-and-enforcement-map).
+Authenticate the original distribution before first execution. Trimming or optimizing changes the
+artifact bytes: the original whole-archive signature does not authenticate the transformed output.
+Verify the result and establish a new trusted digest/signature when distributing it onward.
+
 ---
 
 ## 1. Lifecycle Modes Overview

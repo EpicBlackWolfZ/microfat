@@ -57,6 +57,9 @@ The last 56 bytes of every Microfat fat binary contain fixed-width binary fields
 > [!NOTE]
 > **Integrity vs Authenticity**: The 56-byte trailer and metadata index record SHA-256 digests to guarantee payload integrity against storage corruption, network bit-flips, and partial binary modification. They do not provide digital signatures or publisher authenticity against an adversary who rewrites the entire executable. For end-to-end supply-chain provenance, sign the resulting fat binary with Sigstore Cosign or GPG.
 
+See the [threat model and enforcement map](../SECURITY.md#8-threat-model-and-enforcement-map)
+for trusted actors, parser/resource bounds and the regression tests behind each runtime boundary.
+
 ---
 
 ## 3. Format v2: Reflection-Free Compact Binary Index Table

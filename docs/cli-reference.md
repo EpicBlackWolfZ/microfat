@@ -218,7 +218,7 @@ microfat verify bin/myapp --json
 - `1`: One or more variants failed verification or trailer was corrupted.
 
 > [!NOTE]
-> `microfat verify` performs payload and index integrity validation (detecting bit-rot, transmission corruption, and tampering). It does not authenticate the producer of the fat binary; publisher authenticity requires digital signatures via tools like Sigstore Cosign or GPG. See [SECURITY.md](../SECURITY.md#payload-integrity-vs-producer-authenticity-hashing-vs-signing).
+> `microfat verify` performs payload and index integrity validation (detecting bit-rot, transmission corruption, and partial tampering). It does not authenticate the producer of the fat binary; publisher authenticity requires external signature verification before first execution. See [SECURITY.md](../SECURITY.md#6-payload-integrity-vs-producer-authenticity-hashing-vs-signing).
 
 ---
 

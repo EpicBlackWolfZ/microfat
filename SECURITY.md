@@ -46,7 +46,9 @@ If you discover a potential security vulnerability, memory safety flaw, or privi
 
 ## 4. Continuous Security & Supply-Chain Guarantees
 
-Every contribution and release in `microfat` undergoes automated multi-layer security auditing:
+Code-changing contributions and releases use the following automated checks. Documentation-only
+changes follow the [CI classification policy](CONTRIBUTING.md); passing checks is evidence about
+their tested scope, not proof that a program is free of vulnerabilities.
 
 - **Static Application Security Testing (SAST)**: Automated **CodeQL Advanced** workflows continuously scan Go 1.27 abstract syntax trees (ASTs) and GitHub Actions configurations.
 - **Secret Scanning & Push Protection**: Automated server-side push protection actively blocks commits containing API tokens, private keys, or credentials.
@@ -64,7 +66,10 @@ Every contribution and release in `microfat` undergoes automated multi-layer sec
 
 - **Trailer & Payload Integrity Verification (SHA-256)**: Fixed 56-byte trailers (`\x00\xFA\x7FMICRO` magic) require a matching SHA-256 index before metadata use. Extracted payload bytes must match their SHA-256 digest before execution.
 - **Mandatory Kernel Memory Sealing (`memfd_create`)**:
-  - In-memory execution creates an anonymous RAM descriptor via `memfd_create("microfat_payload", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)`.
+  - In-memory execution creates an anonymous RAM descriptor with close-on-exec and sealing support.
+    Executable memfd flags and a bounded compatibility retry account for kernel policy; see
+    [the implementation](cmd/microfat-stub/exec_linux.go) and
+    [kernel-policy regression tests](cmd/microfat-stub/memfd_policy_linux_test.go).
   - Once variant payloads are extracted and validated against their embedded SHA-256 digests, the descriptor is sealed using `F_ADD_SEALS` with `F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL`.
   - `F_SEAL_WRITE` prevents any modification of the decompressed ELF binary in memory.
   - `F_SEAL_SHRINK` and `F_SEAL_GROW` prevent resizing or truncation of the executable memory region.
@@ -73,7 +78,9 @@ Every contribution and release in `microfat` undergoes automated multi-layer sec
   - The launcher strictly treats unsealed descriptors as unsafe. If sealing is unsupported (`ENOSYS`, `EINVAL`) or blocked (`EPERM`), auto mode falls back cleanly to disk cache execution, while explicit memfd mode aborts immediately.
 - **Descriptor-Bound Cache Fallback & TOCTOU Defense**:
   - New cache directories in `$XDG_CACHE_HOME/microfat` (or `/tmp/.microfat-<uid>`) are created with `0700` (`rwx------`). Existing directories must have the expected owner and no group/other write permission.
-  - Binaries are opened exclusively using `unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK` to guarantee refusal of symlink traversal with `ELOOP`.
+  - Cache entry opens use `O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK` relative to the validated
+    cache directory descriptor. `O_NOFOLLOW` rejects a symlink in the final entry component; it is
+    not a general promise that every user-supplied path forbids ancestor symlinks.
   - Execution operates directly on the verified file descriptor via `/proc/self/fd/<fd>`, ensuring validation and execution bind to the exact same VFS inode and preventing pathname replacement from redirecting execution to a different inode.
 - **Resource Boundary Defense**: Cgroup v1/v2 information informs extraction estimates and soft Go-runtime tuning. This does not guarantee freedom from OOM kills, CPU throttling or noisy-neighbor interference.
 
@@ -122,3 +129,63 @@ boundary on fallback. A hostile same-UID isolation design requires separate revi
 The kernel and privileged administrators are trusted. The ambient environment is configuration,
 not authenticated provenance. Embedded hashes do not authenticate a hostile whole artifact: verify
 publisher identity and exact artifact bytes externally **before first execution**.
+
+## 8. Threat model and enforcement map
+
+The protected assets are the selected executable bytes, predictable parsing/extraction, cache
+isolation from other unprivileged identities, and the identity of published release downloads.
+Neither the launcher nor `microfat verify` is a sandbox for an untrusted executable: the kernel
+and Go runtime load the launcher before it can check its own embedded data. Authenticate the whole
+archive before extracting/installing/running it, following the
+[release verification instructions](docs/release-artifacts.md#scenario-a-installing-the-microfat-cli).
+
+| Input or actor | Trust assumption and consequence |
+| :--- | :--- |
+| Source, compiler, dependencies and publisher | The selected publisher and its build process are trusted to produce suitable code. A checksum signature authenticates signed bytes, not source correctness, reproducibility or an assessed SLSA level. A compromised publisher can sign malicious code. |
+| Download transport and storage | May corrupt or substitute archives, metadata or signatures. External verification must match the exact version, workflow identity and issuer, then the exact archive digest. An embedded hash can be recomputed by a whole-artifact attacker. |
+| Packed metadata and payloads | Treat as bounded, untrusted parser input even after signature verification. Reject invalid ranges, sizes, codecs, tiers and hashes. Authentication does not eliminate malformed-input risks. |
+| Same-UID processes and privileged administrators | Trusted. Same-UID cache writers, debuggers, existing writable descriptors and root are outside the isolation boundary. Pinning an inode stops pathname substitution, not writes to that inode. |
+| Kernel, procfs and filesystem | Trusted Linux kernel/procfs identity, descriptor semantics, ownership checks and atomic rename are required. Hostile mounts, a malicious kernel and remote filesystems with different consistency semantics are outside the reviewed boundary. |
+| Environment, arguments and manifests | Caller-controlled configuration, not provenance. Explicit paths select input; discovery avoids relative PATH directories. `MICROFAT_ORIGINAL_EXE` is only a location hint and requires running-payload consistency checks for stub discovery. It does not grant producer trust. |
+| Payload application | Executes with the caller's ordinary authority and owns its behavior. Argument/environment fidelity and runtime tuning do not restrict filesystem, network, subprocess or syscall access. |
+
+The following map links the implemented contract to regression coverage. Tests exercise the
+listed boundaries; they are not a claim of protection against the out-of-scope actors above.
+
+| Boundary | Implementation | Representative regression coverage |
+| :--- | :--- | :--- |
+| Refuse elevated launch before application side effects; permit same-ID root absent elevation signals | [privilege probes](cmd/microfat-stub/privilege_linux.go) | [probe ordering/failures](cmd/microfat-stub/privilege_linux_test.go), [real launch cases](tests/e2e/privilege_test.go) |
+| Use the actual running launcher image across deployment unlink/replacement | [launcher entry](cmd/microfat-stub/main.go) | [paused-image replacement and metadata commands](tests/e2e/running_image_test.go) |
+| Bounded trailer/index parsing and payload integrity | [format validation](internal/format/format.go), [bounded decoding](internal/codec/codec.go) | [malformed legacy JSON](tests/e2e/legacy_json_test.go), [corruption](tests/e2e/corruption_test.go), [format fuzzing](internal/format/format_fuzz_test.go) |
+| Nonblocking regular-file inputs before parsing/building | [input descriptor validation](internal/inputfile/input.go) | [FIFO CLI rejection](tests/e2e/input_safety_test.go), [input unit tests](internal/inputfile/input_test.go) |
+| Mandatory sealed memfd and explicit-mode failure | [execution](cmd/microfat-stub/exec_linux.go) | [sealing/fallback fault tests](cmd/microfat-stub/chaos_test.go), [executable memfd policy](cmd/microfat-stub/memfd_policy_linux_test.go) |
+| Validated cache directory/entry descriptors; read-only verification | [cache descriptor operations](internal/format/cache_unix.go), [cache management](internal/cache/cache_unix.go) | [cache security](tests/e2e/cache_security_test.go), [FIFO entries](tests/e2e/cache_fifo_test.go), [read-only checks](tests/e2e/cache_readonly_test.go) |
+| Consistency-checked executable location hints | [origin resolution](internal/builder/origin.go) | [origin regressions](internal/builder/origin_test.go), [stub discovery](internal/builder/stub_test.go) |
+| Resource estimates with explicit unknown/unavailable observations | [cgroup observations](internal/cgroup/cgroup.go), [memory arithmetic](internal/cgroup/memory.go) | [unresolved/root cgroups](internal/cgroup/cgroup_test.go), [overflow and retained storage](internal/cgroup/memory_test.go) |
+
+### Resource bounds and unavailable observations
+
+These are current implementation limits, not a promise that allocating up to them succeeds on a
+particular host. The linked constants and checks are authoritative when versions differ.
+
+| Input | Current bound | Source |
+| :--- | :--- | :--- |
+| Serialized metadata index | 1,048,576 bytes (1 MiB) | `MaxIndexSize` in [format.go](internal/format/format.go) |
+| One uncompressed variant | 1,073,741,824 bytes (1 GiB) | `MaxPayloadSize` in [format.go](internal/format/format.go); decoder output is also capped |
+| Shared dictionary | 1,048,576 bytes (1 MiB) | `MaxDictionarySize` in [format.go](internal/format/format.go) |
+| Legacy JSON nesting, including unknown fields | 128 levels | `MaxJSONDepth` in [format.go](internal/format/format.go) |
+| Build manifest | 1,048,576 bytes (1 MiB) | `maxManifestBytes` in [manifest.go](internal/builder/manifest.go) |
+| Secure-execution auxiliary vector read | 4,096 bytes | `maxAuxvBytes` in [privilege_linux.go](cmd/microfat-stub/privilege_linux.go) |
+
+Range checks reject negative/overflowing or overlapping offsets and inconsistent declared sizes.
+These per-input bounds do not cap total process RSS, the sum of variants, concurrent launchers or
+all kernel accounting. Extraction estimates add output storage, dictionary, decoder and reserve;
+sealed executable storage is deducted once from the raw memory ceiling before runtime headroom.
+Cache page reclaimability and other processes' resource use can change available memory.
+
+Missing, unreadable, malformed or unresolved cgroup observations do not establish unlimited
+resources or available headroom. A known limit may inform a conservative estimate; an unavailable
+one cannot establish OOM safety. `GOMEMLIMIT` is a Go soft limit, not a kernel reservation, and
+`GOMAXPROCS` does not enforce CPU isolation. See [runtime tuning](docs/runtime-tuning.md),
+[architecture](docs/architecture.md), and [lifecycle modes](docs/lifecycle-modes.md) for operational
+effects and the limits of in-place transformations.
