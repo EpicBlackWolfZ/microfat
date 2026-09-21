@@ -123,8 +123,10 @@ jobs:
           go-version: '1.27.1'
           cache: true
 
-      - name: Install Syft (SBOM Generation)
-        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+      - name: Install pinned cdxgen converter
+        run: |
+          bash scripts/install-cdxgen.sh "$RUNNER_TEMP/microfat-tools"
+          echo "$RUNNER_TEMP/microfat-tools" >> "$GITHUB_PATH"
 
       - name: Install gotestsum
         run: go install gotest.tools/gotestsum@v1.13.0
@@ -141,6 +143,8 @@ jobs:
           version: '3.53.1'
 
       - name: Run Unit Tests with Race Detection & Coverage
+        env:
+          MICROFAT_SBOM_TESTS: required
         run: |
           tooling_path=$(bash scripts/tooling-path.sh)
           export PATH="$tooling_path"
@@ -291,8 +295,10 @@ jobs:
           go-version: '1.27.1'
           cache: true
 
-      - name: Install Syft (SBOM Generation)
-        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+      - name: Install pinned cdxgen converter
+        run: |
+          bash scripts/install-cdxgen.sh "$RUNNER_TEMP/microfat-tools"
+          echo "$RUNNER_TEMP/microfat-tools" >> "$GITHUB_PATH"
 
       - name: Verify release publication contracts
         run: |

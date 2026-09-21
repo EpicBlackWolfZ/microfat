@@ -31,7 +31,7 @@ done
 # The CI path filter removes Make and Python without hiding the Go/Task tools.
 CI_TOOL_PATH="$(bash "${ROOT}/scripts/tooling-path.sh")"
 PATH="${CI_TOOL_PATH}" bash -c '
-    for retired in python python3 python3.14 pypy pypy3 make gmake; do
+    for retired in python python3 python3.14 pypy pypy3 make gmake blint blint-cli; do
         if command -v "${retired}"; then exit 1; fi
     done
     command -v go >/dev/null

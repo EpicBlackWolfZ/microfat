@@ -15,7 +15,7 @@ for tool_directory in "${tool_directories[@]}"; do
             continue
         fi
         candidate_name="${candidate##*/}"
-        case "${candidate_name}" in python*|pypy*|make|gmake) continue ;; esac
+        case "${candidate_name}" in python*|pypy*|make|gmake|blint|blint-*|blint_*) continue ;; esac
         if [ ! -e "${TOOLING_PATH}/${candidate_name}" ] && [ ! -L "${TOOLING_PATH}/${candidate_name}" ]; then
             ln -s -- "${candidate}" "${TOOLING_PATH}/${candidate_name}"
         fi

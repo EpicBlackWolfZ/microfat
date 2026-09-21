@@ -329,7 +329,7 @@ func verifyReleaseArchiveRawEntries(t *testing.T, distDir string) {
 	}
 }
 
-func verifyReleaseChecksums(t *testing.T, distDir string, hasSyft, releaseTestsRequired bool) {
+func verifyReleaseChecksums(t *testing.T, distDir string, hasSBOMTool, releaseTestsRequired bool) {
 	t.Helper()
 	version, err := releasecheck.DeriveVersion(distDir, "")
 	if err != nil {
@@ -341,7 +341,7 @@ func verifyReleaseChecksums(t *testing.T, distDir string, hasSyft, releaseTestsR
 		t.Fatalf("creating release contract: %v", err)
 	}
 
-	if !hasSyft && !releaseTestsRequired {
+	if !hasSBOMTool && !releaseTestsRequired {
 		contract.ExpectedPayloadNames = map[string]bool{
 			contract.ExpectedArchives[releasecheck.ArchAMD64]: true,
 			contract.ExpectedArchives[releasecheck.ArchARM64]: true,
@@ -353,7 +353,7 @@ func verifyReleaseChecksums(t *testing.T, distDir string, hasSyft, releaseTestsR
 	}
 }
 
-func verifyReleaseSBOMs(t *testing.T, distDir string, hasSyft, releaseTestsRequired bool) {
+func verifyReleaseSBOMs(t *testing.T, distDir string, hasSBOMTool, releaseTestsRequired bool) {
 	t.Helper()
 
 	version, err := releasecheck.DeriveVersion(distDir, "")
@@ -366,10 +366,10 @@ func verifyReleaseSBOMs(t *testing.T, distDir string, hasSyft, releaseTestsRequi
 		t.Fatalf("creating contract: %v", err)
 	}
 
-	if !hasSyft && !releaseTestsRequired {
+	if !hasSBOMTool && !releaseTestsRequired {
 		spdxFiles, _ := filepath.Glob(filepath.Join(distDir, "*.spdx.json"))
 		if len(spdxFiles) == 0 {
-			t.Skip("syft not installed in PATH and no SBOMs generated, skipping SBOM inspection")
+			t.Skip("cdx-convert not installed in PATH and no SBOMs generated, skipping SBOM inspection")
 			return
 		}
 	}
@@ -664,7 +664,7 @@ func TestGoReleaserSnapshotArtifacts(t *testing.T) {
 		strings.EqualFold(os.Getenv("MICROFAT_RELEASE_TESTS"), "true")
 
 	var distDir string
-	var hasSyft bool
+	var hasSBOMTool bool
 	customDist := os.Getenv("MICROFAT_RELEASE_DIST")
 	if customDist != "" {
 		absDist, err := filepath.Abs(customDist)
@@ -672,12 +672,12 @@ func TestGoReleaserSnapshotArtifacts(t *testing.T) {
 			t.Fatalf("resolving MICROFAT_RELEASE_DIST: %v", err)
 		}
 		distDir = absDist
-		// Static validation-only mode: does not need goreleaser or syft installed.
+		// Static validation-only mode: does not need goreleaser or cdx-convert installed.
 		if releaseTestsRequired {
-			hasSyft = true
+			hasSBOMTool = true
 		} else {
 			matches, _ := filepath.Glob(filepath.Join(distDir, "*.spdx.json"))
-			hasSyft = len(matches) > 0
+			hasSBOMTool = len(matches) > 0
 		}
 	} else {
 		if _, err := exec.LookPath("goreleaser"); err != nil {
@@ -700,15 +700,15 @@ func TestGoReleaserSnapshotArtifacts(t *testing.T) {
 		})
 
 		args := []string{"release", "--snapshot", "--clean", "--skip=publish,sign,announce,validate"}
-		_, syftErr := exec.LookPath("syft")
-		if syftErr != nil {
+		_, sbomToolErr := exec.LookPath("cdx-convert")
+		if sbomToolErr != nil {
 			if releaseTestsRequired {
-				t.Fatalf("syft required for release generation but not found in PATH: %v", syftErr)
+				t.Fatalf("cdx-convert required for release generation but not found in PATH: %v", sbomToolErr)
 			}
 			args = append(args, "--skip=sbom")
-			hasSyft = false
+			hasSBOMTool = false
 		} else {
-			hasSyft = true
+			hasSBOMTool = true
 		}
 
 		cmd := exec.Command("goreleaser", args...)
@@ -722,8 +722,8 @@ func TestGoReleaserSnapshotArtifacts(t *testing.T) {
 
 	t.Run("VerifyArchivesExist", func(t *testing.T) { verifyReleaseArchivesExist(t, distDir) })
 	t.Run("VerifyArchiveRawEntries", func(t *testing.T) { verifyReleaseArchiveRawEntries(t, distDir) })
-	t.Run("VerifyChecksums", func(t *testing.T) { verifyReleaseChecksums(t, distDir, hasSyft, releaseTestsRequired) })
-	t.Run("VerifySBOMs", func(t *testing.T) { verifyReleaseSBOMs(t, distDir, hasSyft, releaseTestsRequired) })
+	t.Run("VerifyChecksums", func(t *testing.T) { verifyReleaseChecksums(t, distDir, hasSBOMTool, releaseTestsRequired) })
+	t.Run("VerifySBOMs", func(t *testing.T) { verifyReleaseSBOMs(t, distDir, hasSBOMTool, releaseTestsRequired) })
 	t.Run("VerifyStubBehaviorAndSizes", func(t *testing.T) { verifyReleaseStubBehaviorAndSizes(t, distDir) })
 	t.Run("VerifyARM64VariantBuildSettings", func(t *testing.T) { verifyReleaseARM64VariantBuildSettings(t, distDir) })
 }

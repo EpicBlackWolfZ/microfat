@@ -16,9 +16,39 @@ Starting in `v0.2.3`, `microfat` eliminates artifact fragmentation by distributi
 | `microfat_<version>_linux_arm64.tar.gz` | Linux AArch64 (`aarch64`) | `microfat`, `microfat-stub`, `microfat-stub-minimal` |
 
 Each archive is accompanied by:
+
 - A SHA-256 checksum in `checksums.txt` signed with Cosign (`checksums.txt.sig`).
-- Software Bill of Materials (SBOM) in both **SPDX 2.3** (`.spdx.json`) and **CycloneDX 1.5** (`.cyclonedx.json`) formats.
+- From **v0.2.5**, Software Bill of Materials (SBOM) in **SPDX 3.0.1 JSON-LD** (`.spdx.json`)
+  and **CycloneDX 1.7 JSON** (`.cyclonedx.json`). Published v0.2.3/v0.2.4 documents retain
+  their historical SPDX 2.3 and CycloneDX 1.5 formats.
 - Verified hosted benchmark evidence (`benchmark-evidence-<tag>-<run>-<attempt>.tar.gz` and `.sha256`).
+
+### SBOM inventory and verification
+
+The Go generator reads the archive, all three executable files and every embedded variant.
+It records their SHA-256 hashes, architecture, variant tier, build settings, source revision
+when present, and each binary's linked Go module versions, replacements and module sums.
+Different dependency versions in different variants remain separate components.
+
+CycloneDX expresses archive/executable/variant containment through nested components and
+linked modules through dependency edges. The pinned cdxgen **cdx-convert v13.1.0** tool receives
+a flattened conversion view; Go verifies that conversion preserves all components, hashes,
+package identifiers, metadata and dependencies, then supplies explicit SPDX containment,
+creator-tool and declared-license relationships. The standalone converter requires neither
+Python, BLINT nor a separately installed Node runtime.
+
+Project license text comes from the archived `LICENSE` file. The known Apache-2.0 text is
+identified by its verified content hash. Go build information does not supply dependency
+licenses; those components explicitly record that the license is unavailable from this source.
+Local module replacements without a registry version do not receive an invented package URL.
+
+Both documents must pass pinned offline official schemas and independent checks against the
+archive's actual bytes and Go build information before they enter the signed checksum inventory.
+The CycloneDX schema package is **1.7.2**, while documents use `specVersion: "1.7"`.
+SPDX documents use the official **3.0.1 JSON-LD context and graph**, rather than the historical
+`spdxVersion`/`packages` layout. Asset filename suffixes remain unchanged, so consumers should
+inspect document markers when selecting a parser. Historical readers remain available, while
+new releases and v0.2.5 snapshots reject the historical schemas.
 
 ---
 

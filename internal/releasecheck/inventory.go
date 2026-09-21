@@ -10,8 +10,10 @@ import (
 type ModuleDep struct {
 	Path        string `json:"path"`
 	Version     string `json:"version"`
+	Sum         string `json:"sum,omitempty"`
 	ReplacePath string `json:"replace_path,omitempty"`
 	ReplaceVer  string `json:"replace_ver,omitempty"`
+	ReplaceSum  string `json:"replace_sum,omitempty"`
 }
 
 // BinaryInventory contains the linked module inventory extracted directly from a binary's buildinfo.
@@ -59,10 +61,12 @@ func extractBinaryInventory(identifier, binName, tier string, bi *buildinfo.Buil
 		dep := ModuleDep{
 			Path:    d.Path,
 			Version: d.Version,
+			Sum:     d.Sum,
 		}
 		if d.Replace != nil {
 			dep.ReplacePath = d.Replace.Path
 			dep.ReplaceVer = d.Replace.Version
+			dep.ReplaceSum = d.Replace.Sum
 		}
 		binInv.Dependencies[d.Path] = dep
 	}

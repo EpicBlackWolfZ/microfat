@@ -27,6 +27,11 @@ All participants in the `microfat` community are expected to adhere to the [Code
   - `shellcheck` (v0.11.0)
   - `govulncheck`
 - **Additional tools**: `gotestsum` is optional for test presentation; `goreleaser` is required for `task snapshot`.
+- **Release SBOM tests and packaging**: install pinned standalone cdxgen `cdx-convert` **v13.1.0**
+  with `bash scripts/install-cdxgen.sh "$HOME/.local/bin"` and add that directory to `PATH`.
+  CI and the release gate set `MICROFAT_SBOM_TESTS=required`, which fails when the tool is missing.
+  Run `MICROFAT_SBOM_TESTS=required task test` to require the real AMD64/ARM64 SBOM tests locally.
+  These tests build variants with differing dependency versions and local replacements.
 
 Missing mandatory linters or scanners fail the task; no weaker fallback is substituted.
 ### Quickstart

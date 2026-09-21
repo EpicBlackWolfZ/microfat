@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/releasecheck"
+	"github.com/EpicBlackWolfZ/microfat/internal/sbom"
 )
 
 const Repository = "EpicBlackWolfZ/microfat"
@@ -64,7 +65,7 @@ func Authenticate(options Options, runner Runner) (map[string]string, error) {
 	}
 	for name := range verified {
 		if strings.HasSuffix(name, ".json") {
-			if err := historicalSchema(filepath.Join(options.Dist, name)); err != nil {
+			if err := releaseSchema(filepath.Join(options.Dist, name), options.Version); err != nil {
 				return nil, err
 			}
 		}
@@ -90,10 +91,13 @@ func lowercaseChecksums(filename string) error {
 	return nil
 }
 
-func historicalSchema(filename string) error {
+func releaseSchema(filename, version string) error {
 	data, err := os.ReadFile(filename) // #nosec G304 -- checksum-verified SBOM input.
 	if err != nil {
 		return err
+	}
+	if releasecheck.UsesModernSBOM(version) {
+		return sbom.ValidateSchema(data, strings.HasSuffix(filename, ".spdx.json"))
 	}
 	var document map[string]any
 	if err := json.Unmarshal(data, &document); err != nil {
