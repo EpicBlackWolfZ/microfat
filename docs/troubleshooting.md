@@ -225,7 +225,7 @@ export MICROFAT_GC_PROFILE=latency_critical   # Sets GOGC=75
 export MICROFAT_GC_PROFILE=memory_constrained # Sets GOGC=40, MICROFAT_MEM_RATIO=0.80
 
 # For High-Throughput Batch/ETL Streams:
-export MICROFAT_GC_PROFILE=batch_etl          # Sets GOGC=off (triggers only at 90% ceiling)
+export MICROFAT_GC_PROFILE=batch_etl          # Uses GOGC=off only with a finite effective GOMEMLIMIT
 
 # For Dynamic Formula Sizing:
 export MICROFAT_GC_PROFILE=adaptive

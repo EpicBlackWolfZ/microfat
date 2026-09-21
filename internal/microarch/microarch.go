@@ -118,7 +118,7 @@ const (
 	rankARM64v9_4 = 94
 	rankARM64v9_5 = 95
 
-	maxX86Features   = 20
+	maxX86Features   = 21
 	maxARM64Features = 40
 
 	cpuInfoSplitParts = 2
@@ -128,9 +128,10 @@ const (
 	cpuidExtLeafInfo       = 0x80000000
 	cpuidExtLeafFeatures   = 0x80000001
 
-	cpuidLeaf1ECXMOVBEBit  = 22
-	cpuidLeaf1ECXF16CBit   = 29
-	cpuidLeafExt1ECXABMBit = 5
+	cpuidLeaf1ECXMOVBEBit   = 22
+	cpuidLeaf1ECXF16CBit    = 29
+	cpuidLeafExt1ECXABMBit  = 5
+	cpuidLeafExt1ECXLAHFBit = 0
 
 	auxvAT_HWCAP2 = 26
 	hwcap2BF16    = uint64(1) << 14
@@ -174,6 +175,7 @@ type Info struct {
 
 // X86Features represents an inspectable set of x86/amd64 CPU feature flags.
 type X86Features struct {
+	HasLAHFSAHF bool
 	HasCX16     bool
 	HasPOPCNT   bool
 	HasSSE3     bool
@@ -635,8 +637,8 @@ func Compare(arch, a, b string) int {
 
 // EvaluateAMD64 computes the highest AMD64 level supported by the given feature set.
 func EvaluateAMD64(f X86Features) string {
-	// v2: CMPXCHG16B, POPCNT, SSE3, SSSE3, SSE4.1, SSE4.2
-	hasV2 := f.HasCX16 && f.HasPOPCNT && f.HasSSE3 && f.HasSSSE3 && f.HasSSE41 && f.HasSSE42
+	// v2: LAHF/SAHF (64-bit mode), CMPXCHG16B, POPCNT, SSE3, SSSE3, SSE4.1, SSE4.2
+	hasV2 := f.HasLAHFSAHF && f.HasCX16 && f.HasPOPCNT && f.HasSSE3 && f.HasSSSE3 && f.HasSSE41 && f.HasSSE42
 	if !hasV2 {
 		return AMD64v1
 	}
@@ -1005,10 +1007,10 @@ func hasARM64NamedFeature(name string, f ARM64Features) bool {
 func currentX86Features() X86Features {
 	// CPUID is the exclusive authoritative source of truth for AMD64 instruction feature flags.
 	// We query golang.org/x/sys/cpu alongside native assembly CPUID leaf probing for extra features.
-	hasF16C, hasLZCNT, hasMOVBE := probeX86ExtraFeaturesFunc()
+	hasF16C, hasLZCNT, hasMOVBE, hasLAHFSAHF := probeX86ExtraFeaturesFunc()
 
 	return X86Features{
-		HasCX16:     cpu.X86.HasCX16,
+		HasLAHFSAHF: hasLAHFSAHF, HasCX16: cpu.X86.HasCX16,
 		HasPOPCNT:   cpu.X86.HasPOPCNT,
 		HasSSE3:     cpu.X86.HasSSE3,
 		HasSSSE3:    cpu.X86.HasSSSE3,
@@ -1092,25 +1094,32 @@ var (
 	isSkylakeXOrCascadeLakeFunc = isHostSkylakeXOrCascadeLake
 )
 
-func probeX86ExtraFeatures() (hasF16C, hasLZCNT, hasMOVBE bool) {
+func probeX86ExtraFeatures() (hasF16C, hasLZCNT, hasMOVBE, hasLAHFSAHF bool) {
 	if runtime.GOARCH != ArchAMD64 {
-		return false, false, false
+		return false, false, false, false
 	}
 
-	maxBasic, _, _, _ := cpuid(cpuidBasicLeafInfo, 0)
+	return probeX86ExtraFeaturesWithCPUID(cpuid)
+}
+
+func probeX86ExtraFeaturesWithCPUID(query func(uint32, uint32) (uint32, uint32, uint32, uint32)) (
+	hasF16C, hasLZCNT, hasMOVBE, hasLAHFSAHF bool,
+) {
+	maxBasic, _, _, _ := query(cpuidBasicLeafInfo, 0)
 	if maxBasic >= cpuidBasicLeafFeatures {
-		_, _, ecx, _ := cpuid(cpuidBasicLeafFeatures, 0)
+		_, _, ecx, _ := query(cpuidBasicLeafFeatures, 0)
 		hasMOVBE = (ecx & (1 << cpuidLeaf1ECXMOVBEBit)) != 0
 		hasF16C = (ecx & (1 << cpuidLeaf1ECXF16CBit)) != 0
 	}
 
-	maxExt, _, _, _ := cpuid(cpuidExtLeafInfo, 0)
+	maxExt, _, _, _ := query(cpuidExtLeafInfo, 0)
 	if maxExt >= cpuidExtLeafFeatures {
-		_, _, ecx, _ := cpuid(cpuidExtLeafFeatures, 0)
+		_, _, ecx, _ := query(cpuidExtLeafFeatures, 0)
 		hasLZCNT = (ecx & (1 << cpuidLeafExt1ECXABMBit)) != 0
+		hasLAHFSAHF = (ecx & (1 << cpuidLeafExt1ECXLAHFBit)) != 0
 	}
 
-	return hasF16C, hasLZCNT, hasMOVBE
+	return hasF16C, hasLZCNT, hasMOVBE, hasLAHFSAHF
 }
 
 // IsAVX512DownclockingRisk reports whether the host CPU is an AMD64 processor subject to
@@ -1224,6 +1233,9 @@ func readLinuxAuxvARM64() (hasBF16, hasWFxT, hasSME, hasSME2 bool) {
 
 func extractX86FeatureList(f X86Features) []string {
 	list := make([]string, 0, maxX86Features)
+	if f.HasLAHFSAHF {
+		list = append(list, "lahf_lm")
+	}
 	if f.HasCX16 {
 		list = append(list, "cx16")
 	}

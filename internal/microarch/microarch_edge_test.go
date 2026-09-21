@@ -183,21 +183,22 @@ func TestX86FeaturePermutationsFallback(t *testing.T) {
 	t.Parallel()
 
 	baseV3 := X86Features{
-		HasCX16:    true,
-		HasPOPCNT:  true,
-		HasSSE3:    true,
-		HasSSSE3:   true,
-		HasSSE41:   true,
-		HasSSE42:   true,
-		HasAVX:     true,
-		HasAVX2:    true,
-		HasBMI1:    true,
-		HasBMI2:    true,
-		HasFMA:     true,
-		HasOSXSAVE: true,
-		HasF16C:    true,
-		HasLZCNT:   true,
-		HasMOVBE:   true,
+		HasLAHFSAHF: true,
+		HasCX16:     true,
+		HasPOPCNT:   true,
+		HasSSE3:     true,
+		HasSSSE3:    true,
+		HasSSE41:    true,
+		HasSSE42:    true,
+		HasAVX:      true,
+		HasAVX2:     true,
+		HasBMI1:     true,
+		HasBMI2:     true,
+		HasFMA:      true,
+		HasOSXSAVE:  true,
+		HasF16C:     true,
+		HasLZCNT:    true,
+		HasMOVBE:    true,
 	}
 
 	if got := EvaluateAMD64(baseV3); got != AMD64v3 {
@@ -242,20 +243,20 @@ func TestCurrentX86FeaturesExclusiveCPUID(t *testing.T) {
 	}()
 
 	// Verify currentX86Features strictly reflects CPUID probe responses without any fallback
-	probeX86ExtraFeaturesFunc = func() (bool, bool, bool) {
-		return true, false, true
+	probeX86ExtraFeaturesFunc = func() (bool, bool, bool, bool) {
+		return true, false, true, true
 	}
 	feat1 := currentX86Features()
-	if !feat1.HasF16C || feat1.HasLZCNT || !feat1.HasMOVBE {
+	if !feat1.HasF16C || feat1.HasLZCNT || !feat1.HasMOVBE || !feat1.HasLAHFSAHF {
 		t.Errorf("expected feat1: f16c=true, lzcnt=false, movbe=true; got f16c=%v, lzcnt=%v, movbe=%v",
 			feat1.HasF16C, feat1.HasLZCNT, feat1.HasMOVBE)
 	}
 
-	probeX86ExtraFeaturesFunc = func() (bool, bool, bool) {
-		return false, true, false
+	probeX86ExtraFeaturesFunc = func() (bool, bool, bool, bool) {
+		return false, true, false, false
 	}
 	feat2 := currentX86Features()
-	if feat2.HasF16C || !feat2.HasLZCNT || feat2.HasMOVBE {
+	if feat2.HasF16C || !feat2.HasLZCNT || feat2.HasMOVBE || feat2.HasLAHFSAHF {
 		t.Errorf("expected feat2: f16c=false, lzcnt=true, movbe=false; got f16c=%v, lzcnt=%v, movbe=%v",
 			feat2.HasF16C, feat2.HasLZCNT, feat2.HasMOVBE)
 	}

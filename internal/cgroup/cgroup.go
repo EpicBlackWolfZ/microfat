@@ -63,7 +63,7 @@ const (
 	// GCProfileMemoryConstrained tunes GOGC=40 and default MemoryRatio=0.80 for tight memory containers.
 	GCProfileMemoryConstrained GCProfile = "memory_constrained"
 
-	// GCProfileBatchETL tunes GOGC=-1 (off) to rely on GOMEMLIMIT soft ceiling and maximize CPU throughput.
+	// GCProfileBatchETL tunes GOGC=-1 (off) only with a finite effective GOMEMLIMIT soft ceiling.
 	GCProfileBatchETL GCProfile = "batch_etl"
 
 	// GCProfileAdaptive dynamically calculates GOGC based on estimated steady-state live heap and headroom.
@@ -132,6 +132,7 @@ type TuningPlan struct {
 	GOGCStr           string    `json:"gogc_str,omitempty"` // Formatted GOGC string (e.g. "75", "40", "off", empty if unset)
 	GCProfile         GCProfile `json:"gc_profile,omitempty"`
 	GOGCApplied       bool      `json:"gogc_applied"`
+	GOGCSkippedReason string    `json:"gogc_skipped_reason,omitempty"`
 }
 
 // Sentinel errors for cgroup inspection and hierarchy resolution.
@@ -848,9 +849,7 @@ func applyProfileGOGC(plan *TuningPlan, profile GCProfile, liveHeapEstimateBytes
 		plan.GOGCStr = strconv.Itoa(DefaultMemoryConstrainedGOGC)
 		plan.GOGCApplied = true
 	case GCProfileBatchETL:
-		plan.GOGC = DefaultBatchETLGOGC
-		plan.GOGCStr = "off"
-		plan.GOGCApplied = true
+		plan.ResolveBatchGOGC(plan.GOMEMLIMITBytes)
 	case GCProfileAdaptive:
 		if liveHeapEstimateBytes > 0 && plan.GOMEMLIMITBytes > 0 {
 			if gogc, ok := CalculateAdaptiveGOGC(plan.GOMEMLIMITBytes, liveHeapEstimateBytes); ok {

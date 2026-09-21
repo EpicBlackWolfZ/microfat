@@ -10,7 +10,7 @@ import (
 
 const (
 	propMicroarchIters = 50
-	amd64FeatureCount  = 20
+	amd64FeatureCount  = 21
 	arm64FeatureCount  = 30
 )
 
@@ -20,6 +20,7 @@ func TestMicroarch_AMD64MonotonicityInvariants(t *testing.T) {
 	testutil.RunPropertyTest(t, "AMD64_Monotonicity", propMicroarchIters, 0, func(subT *testing.T, iter int, rng *rand.Rand) {
 		feat := microarch.X86Features{
 			HasCX16:     rng.IntN(2) == 1,
+			HasLAHFSAHF: rng.IntN(2) == 1,
 			HasPOPCNT:   rng.IntN(2) == 1,
 			HasSSE3:     rng.IntN(2) == 1,
 			HasSSSE3:    rng.IntN(2) == 1,
@@ -57,7 +58,7 @@ func TestMicroarch_AMD64MonotonicityInvariants(t *testing.T) {
 			if !feat.HasAVX || !feat.HasAVX2 || !feat.HasBMI1 || !feat.HasBMI2 || !feat.HasFMA {
 				subT.Fatalf("detected v4 but missing v3 features")
 			}
-			if !feat.HasCX16 || !feat.HasPOPCNT || !feat.HasSSE3 || !feat.HasSSE41 || !feat.HasSSE42 {
+			if !feat.HasLAHFSAHF || !feat.HasSSSE3 || !feat.HasCX16 || !feat.HasPOPCNT || !feat.HasSSE3 || !feat.HasSSE41 || !feat.HasSSE42 {
 				subT.Fatalf("detected v4 but missing v2 features")
 			}
 		}
@@ -67,14 +68,14 @@ func TestMicroarch_AMD64MonotonicityInvariants(t *testing.T) {
 			if !feat.HasAVX || !feat.HasAVX2 || !feat.HasBMI1 || !feat.HasBMI2 || !feat.HasFMA {
 				subT.Fatalf("detected v3 but missing v3 features")
 			}
-			if !feat.HasCX16 || !feat.HasPOPCNT || !feat.HasSSE3 || !feat.HasSSE41 || !feat.HasSSE42 {
+			if !feat.HasLAHFSAHF || !feat.HasSSSE3 || !feat.HasCX16 || !feat.HasPOPCNT || !feat.HasSSE3 || !feat.HasSSE41 || !feat.HasSSE42 {
 				subT.Fatalf("detected v3 but missing v2 features")
 			}
 		}
 
 		// Invariant 4: If v2 is detected, all v2 features must be true
 		if detected == microarch.AMD64v2 {
-			if !feat.HasCX16 || !feat.HasPOPCNT || !feat.HasSSE3 || !feat.HasSSE41 || !feat.HasSSE42 {
+			if !feat.HasLAHFSAHF || !feat.HasSSSE3 || !feat.HasCX16 || !feat.HasPOPCNT || !feat.HasSSE3 || !feat.HasSSE41 || !feat.HasSSE42 {
 				subT.Fatalf("detected v2 but missing v2 features")
 			}
 		}

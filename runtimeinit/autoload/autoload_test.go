@@ -72,6 +72,13 @@ func TestAutoload_Subprocess(t *testing.T) {
 		unexpectedStderr  string
 	}{
 		{
+			name: "BatchWithExplicitUnlimitedMemory",
+			env: []string{
+				format.EnvGCProfile + "=batch_etl", "GOMEMLIMIT=off", "GOGC=", format.EnvAutotune + "=1",
+			},
+			expectedStdout: "gogc=100",
+		},
+		{
 			name: "AutoTuneOnStartupWithDebug",
 			env: []string{
 				format.EnvDebug + "=1",
