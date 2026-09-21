@@ -1,10 +1,12 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"debug/buildinfo"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -208,13 +210,13 @@ func compile(ctx context.Context, opts RunOptions, output, pkg, level, tags stri
 }
 
 func identify(path, id, source string) (schema.Artifact, error) {
-	data, err := report.ReadBounded(path)
+	data, err := readArtifact(path)
 	if err != nil {
 		return schema.Artifact{}, err
 	}
 	artifact := schema.Artifact{ID: id, Path: path, SHA256: schema.Digest(data), Bytes: int64(len(data)),
 		SourceSHA: source, Settings: make(map[string]string)}
-	if info, err := buildinfo.ReadFile(path); err == nil {
+	if info, err := buildinfo.Read(bytes.NewReader(data)); err == nil {
 		artifact.GoVersion = info.GoVersion
 		artifact.ModuleDigest = schema.Digest([]byte(info.String()))
 		for _, setting := range info.Settings {
@@ -222,6 +224,24 @@ func identify(path, id, source string) (schema.Artifact, error) {
 		}
 	}
 	return artifact, nil
+}
+
+func readArtifact(path string) ([]byte, error) {
+	if runtime.GOOS != "linux" || path != fmt.Sprintf("/proc/%d/exe", os.Getpid()) {
+		return report.ReadBounded(path)
+	}
+	// Only our exact kernel executable reference may follow a magic link.
+	// User-supplied tool/artifact paths retain the no-symlink evidence policy.
+	file, err := os.Open("/proc/self/exe")
+	if err != nil {
+		return nil, err
+	}
+	data, readErr := io.ReadAll(io.LimitReader(file, schema.MaxEvidenceBytes+1))
+	err = errors.Join(readErr, file.Close())
+	if len(data) > schema.MaxEvidenceBytes {
+		return nil, errors.New("running harness exceeds evidence size limit")
+	}
+	return data, err
 }
 
 func cleanEnvironment() []string {

@@ -129,19 +129,22 @@ INSTALL_USE_SUDO=0
 current_uid="$(id -u)"
 if [[ -n "${INSTALL_RUNNER:-}" ]]; then
     IFS=' ' read -r -a INSTALL_CMD <<< "${INSTALL_RUNNER}"
-elif [[ "${current_uid}" -ne 0 ]] && [[ ! -w "${INSTALL_DIR}" ]]; then
-    INSTALL_CMD=(sudo install)
-    INSTALL_USE_SUDO=1
 fi
 
 mkdir -p "${INSTALL_DIR}" 2>/dev/null || {
-    if [[ "${INSTALL_USE_SUDO}" -eq 1 ]]; then
+    if [[ -z "${INSTALL_RUNNER:-}" && "${current_uid}" -ne 0 ]]; then
         sudo mkdir -p "${INSTALL_DIR}"
+        INSTALL_USE_SUDO=1
     else
         echo "Error: Cannot create installation directory '${INSTALL_DIR}'" >&2
         exit 1
     fi
 }
+
+if [[ -z "${INSTALL_RUNNER:-}" && "${current_uid}" -ne 0 ]] &&
+    [[ "${INSTALL_USE_SUDO}" -eq 1 || ! -w "${INSTALL_DIR}" ]]; then
+    INSTALL_CMD=(sudo install)
+fi
 
 for bin in "${REQUIRED_BINARIES[@]}"; do
     "${INSTALL_CMD[@]}" -m 0755 "${WORK_DIR}/${bin}" "${INSTALL_DIR}/${bin}" || {

@@ -2,8 +2,10 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/internal/testfixture"
@@ -12,6 +14,32 @@ import (
 )
 
 const missingExperimentPath = "/missing"
+
+func TestRunningHarnessIdentity(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux kernel executable references")
+	}
+	t.Setenv("MICROFAT_ORIGINAL_EXE", missingExperimentPath)
+	opts := RunOptions{Fortio: "fortio", OutputDir: t.TempDir()}
+	require.NoError(t, opts.resolve())
+	require.Equal(t, fmt.Sprintf("/proc/%d/exe", os.Getpid()), opts.Helper)
+	actual, err := identify(opts.Helper, "harness", "source")
+	require.NoError(t, err)
+	path, err := os.Executable()
+	require.NoError(t, err)
+	expected, err := identify(path, "harness", "source")
+	require.NoError(t, err)
+	require.Equal(t, expected.SHA256, actual.SHA256)
+	require.Equal(t, expected.ModuleDigest, actual.ModuleDigest)
+	require.Equal(t, expected.Settings, actual.Settings)
+	link := filepath.Join(t.TempDir(), "untrusted-link")
+	require.NoError(t, os.Symlink(path, link))
+	_, err = identify(link, "tool", "source")
+	require.Error(t, err, "ordinary tool paths must not follow symlinks")
+	opts.Helper = path
+	require.NoError(t, opts.resolve())
+	require.Equal(t, path, opts.Helper, "explicit helper remains authoritative")
+}
 
 func fixtureCompiler(t *testing.T, behavior string) string {
 	t.Helper()
