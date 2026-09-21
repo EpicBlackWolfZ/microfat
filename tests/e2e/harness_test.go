@@ -241,15 +241,15 @@ func packBinaryCustom(cli, stub, name, outPath string, variants map[string]strin
 
 func executeFatBinary(t testing.TB, binPath string, env []string, args ...string) (string, string, int, error) {
 	t.Helper()
-	cmd := exec.Command(binPath, args...)
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
-	}
 	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
-
-	err := cmd.Run()
+	err := runFixtureCommand(func() *exec.Cmd {
+		cmd := exec.Command(binPath, args...)
+		if len(env) > 0 {
+			cmd.Env = append(os.Environ(), env...)
+		}
+		cmd.Stdout, cmd.Stderr = &stdoutBuf, &stderrBuf
+		return cmd
+	})
 	exitCode := defaultExitCode
 	if err != nil {
 		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
@@ -260,6 +260,29 @@ func executeFatBinary(t testing.TB, binPath string, env []string, args ...string
 	}
 
 	return stdoutBuf.String(), stderrBuf.String(), exitCode, err
+}
+
+// Retry only a kernel refusal before a fixture process starts. A concurrent
+// fork can retain a recently closed writer until exec closes its CLOEXEC copy.
+// Once Start succeeds, every exit status and I/O error is returned unchanged.
+func runFixtureCommand(newCommand func() *exec.Cmd) error {
+	const attempts = 10
+	const delay = 25 * time.Millisecond
+	var err error
+	for attempt := range attempts {
+		cmd := newCommand()
+		err = cmd.Start()
+		if !errors.Is(err, syscall.ETXTBSY) {
+			if err != nil {
+				return err
+			}
+			return cmd.Wait()
+		}
+		if attempt+1 < attempts {
+			time.Sleep(delay)
+		}
+	}
+	return err
 }
 
 func executeWithSeccompBlockedMemfd(t testing.TB, binPath string, env []string, args ...string) (string, string, int, error) {
@@ -324,11 +347,6 @@ func copyFile(t testing.TB, src, dst string) int64 {
 	if err := dstFile.Close(); err != nil {
 		t.Fatalf("closing destination file %s: %v", dst, err)
 	}
-
-	// On Linux, closing a write descriptor defers inode writecount decrement to kernel
-	// delayed_fput. Yield briefly during fixture creation to ensure writecount reaches 0
-	// before any subsequent process executes the binary.
-	time.Sleep(10 * time.Millisecond)
 
 	return n
 }
