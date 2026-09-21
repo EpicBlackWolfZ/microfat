@@ -9,6 +9,11 @@ import (
 // Object retains all SPDX JSON-LD fields, including conversion extensions.
 type Object = map[string]any
 
+const (
+	spdxFile    = "software_File"
+	spdxPackage = "software_Package"
+)
+
 // SPDXGraph indexes the SPDX 3.0.1 release document and its local references.
 // Schema validation alone does not establish referential integrity or inventory.
 type SPDXGraph struct {
@@ -71,7 +76,7 @@ func (g *SPDXGraph) addNode(node Object) error {
 			return fmt.Errorf("multiple SPDX creation records")
 		}
 		g.Creation = node
-	case "software_File", "software_Package":
+	case spdxFile, spdxPackage:
 		return g.addComponent(node)
 	}
 	return nil

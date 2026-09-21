@@ -3,6 +3,7 @@ package sbom
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
@@ -58,9 +59,9 @@ func componentFromSPDX(ref string, node Object) (cdx.Component, error) {
 	if component.Type == cdx.ComponentTypeFile {
 		component.Version = ext["properties.microfat:release_version"]
 	}
-	expected := "software_Package"
+	expected := spdxPackage
 	if component.Type == cdx.ComponentTypeFile {
-		expected = "software_File"
+		expected = spdxFile
 	}
 	if text(node["type"]) != expected {
 		return cdx.Component{}, fmt.Errorf("SPDX type contradicts preserved component metadata")
@@ -168,6 +169,9 @@ func (g *SPDXGraph) ValidateAttribution(c *Catalog) error {
 			return fmt.Errorf("unexpected SPDX relationship kind %s", kind)
 		}
 	}
+	if err := g.checkAttributionNodes(); err != nil {
+		return err
+	}
 	for ref, component := range c.Components {
 		node := g.Components[ref]
 		ids := g.Edges["hasDeclaredLicense"][text(node["spdxId"])]
@@ -176,6 +180,36 @@ func (g *SPDXGraph) ValidateAttribution(c *Catalog) error {
 		}
 	}
 	return g.checkTools(c.BOM.Metadata.Tools)
+}
+
+// Every tool and license must be attributed, and licenses must describe actual
+// inventoried components. Schema-valid extra nodes are not release inventory.
+func (g *SPDXGraph) checkAttributionNodes() error {
+	used := map[string]bool{}
+	for _, id := range array(g.Creation["createdUsing"]) {
+		used[text(id)] = true
+	}
+	for from, ids := range g.Edges["hasDeclaredLicense"] {
+		kind := text(g.Nodes[from]["type"])
+		if kind != spdxFile && kind != spdxPackage {
+			return fmt.Errorf("SPDX declared license source is not a component")
+		}
+		for _, id := range ids {
+			used[id] = true
+		}
+	}
+	for id, node := range g.Nodes {
+		switch text(node["type"]) {
+		case "CreationInfo", "SpdxDocument", "Relationship", spdxFile, spdxPackage:
+		case "Tool", "simplelicensing_LicenseExpression", "simplelicensing_SimpleLicensingText":
+			if !used[id] {
+				return fmt.Errorf("unattributed SPDX tool or license %s", id)
+			}
+		default:
+			return fmt.Errorf("unexpected SPDX release node type %s", text(node["type"]))
+		}
+	}
+	return nil
 }
 
 func (g *SPDXGraph) checkLicenses(licenses *cdx.Licenses, ids []string) error {
@@ -188,22 +222,36 @@ func (g *SPDXGraph) checkLicenses(licenses *cdx.Licenses, ids []string) error {
 	if len(*licenses) != len(ids) {
 		return fmt.Errorf("declared license relationship count differs")
 	}
-	for index, choice := range *licenses {
-		node := g.Nodes[ids[index]]
+	expected, actual := []string{}, []string{}
+	for _, choice := range *licenses {
 		expression := choice.Expression
 		if choice.License != nil {
 			expression = choice.License.ID
 		}
 		if expression != "" {
-			if text(node["type"]) != "simplelicensing_LicenseExpression" || text(node["simplelicensing_licenseExpression"]) != expression {
-				return fmt.Errorf("declared license expression differs")
-			}
+			expected = append(expected, "expression:"+expression)
 			continue
 		}
-		if choice.License == nil || choice.License.Text == nil || text(node["type"]) != "simplelicensing_SimpleLicensingText" ||
-			text(node["simplelicensing_licenseText"]) != choice.License.Text.Content {
-			return fmt.Errorf("declared license text differs")
+		if choice.License == nil || choice.License.Text == nil {
+			return fmt.Errorf("declared license has no expression or text")
 		}
+		expected = append(expected, "text:"+choice.License.Text.Content)
+	}
+	for _, id := range ids {
+		node := g.Nodes[id]
+		switch text(node["type"]) {
+		case "simplelicensing_LicenseExpression":
+			actual = append(actual, "expression:"+text(node["simplelicensing_licenseExpression"]))
+		case "simplelicensing_SimpleLicensingText":
+			actual = append(actual, "text:"+text(node["simplelicensing_licenseText"]))
+		default:
+			return fmt.Errorf("declared license target has the wrong type")
+		}
+	}
+	slices.Sort(expected)
+	slices.Sort(actual)
+	if !slices.Equal(expected, actual) {
+		return fmt.Errorf("declared license expression or text differs")
 	}
 	return nil
 }

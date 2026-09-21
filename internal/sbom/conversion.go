@@ -39,7 +39,11 @@ func CompleteSPDX(catalog *Catalog, converted []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := ReadSPDX(data); err != nil {
+	completed, err := ReadSPDX(data)
+	if err != nil {
+		return nil, err
+	}
+	if err := completed.ValidateAttribution(catalog); err != nil {
 		return nil, err
 	}
 	return data, nil
@@ -88,9 +92,9 @@ func compareComponent(component cdx.Component, node Object) error {
 	if text(node["name"]) != component.Name || text(node["software_packageUrl"]) != component.PackageURL {
 		return fmt.Errorf("SPDX name or package URL differs")
 	}
-	expectedType := "software_Package"
+	expectedType := spdxPackage
 	if component.Type == cdx.ComponentTypeFile {
-		expectedType = "software_File"
+		expectedType = spdxFile
 	}
 	if text(node["type"]) != expectedType {
 		return fmt.Errorf("SPDX component type differs")

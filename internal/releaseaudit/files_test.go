@@ -78,11 +78,11 @@ func TestArtifactFilesystemErrors(t *testing.T) {
 	_, err = Digest(directory)
 	require.Error(t, err)
 	require.Error(t, lowercaseChecksums(absent))
-	require.Error(t, historicalSchema(absent))
+	require.Error(t, releaseSchema(absent, "0.2.4"))
 	write(t, packed, "invalid json")
-	require.Error(t, historicalSchema(packed))
+	require.Error(t, releaseSchema(packed, "0.2.4"))
 	write(t, packed, `{}`)
-	require.Error(t, historicalSchema(packed))
+	require.Error(t, releaseSchema(packed, "0.2.4"))
 	index := packedIndex{}
 	index.Variants = append(index.Variants, struct {
 		Offset int64 `json:"offset"`

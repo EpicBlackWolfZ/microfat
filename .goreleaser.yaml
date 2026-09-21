@@ -218,13 +218,25 @@ archives:
 sboms:
   - id: spdx
     cmd: go
-    args: ["run", "github.com/EpicBlackWolfZ/microfat/internal/cmd/release-sbom", "$artifact", "--output", "spdx-json=$document"]
+    args:
+      - run
+      - '-ldflags=-X github.com/EpicBlackWolfZ/microfat/internal/version.Version={{ .Version }} -X github.com/EpicBlackWolfZ/microfat/internal/version.Commit={{ .FullCommit }}'
+      - github.com/EpicBlackWolfZ/microfat/internal/cmd/release-sbom
+      - $artifact
+      - --output
+      - spdx-json=$document
     artifacts: archive
     documents:
       - "${artifact}.spdx.json"
   - id: cyclonedx
     cmd: go
-    args: ["run", "github.com/EpicBlackWolfZ/microfat/internal/cmd/release-sbom", "$artifact", "--output", "cyclonedx-json=$document"]
+    args:
+      - run
+      - '-ldflags=-X github.com/EpicBlackWolfZ/microfat/internal/version.Version={{ .Version }} -X github.com/EpicBlackWolfZ/microfat/internal/version.Commit={{ .FullCommit }}'
+      - github.com/EpicBlackWolfZ/microfat/internal/cmd/release-sbom
+      - $artifact
+      - --output
+      - cyclonedx-json=$document
     artifacts: archive
     documents:
       - "${artifact}.cyclonedx.json"

@@ -90,7 +90,7 @@ func archiveLicense(dir string) (cdx.Licenses, error) {
 func metadata(meta Metadata, root cdx.Component) *cdx.Metadata {
 	tools := []cdx.Component{
 		{Type: cdx.ComponentTypeApplication, Name: generatorName, Version: meta.Version,
-			ExternalReferences: &[]cdx.ExternalReference{{Type: cdx.ERTypeVCS, URL: projectURL + "/tree/" + meta.Commit}}},
+			ExternalReferences: sourceReferences(map[string]string{"vcs.revision": meta.Commit})},
 		{Type: cdx.ComponentTypeApplication, Name: "cdxgen cdx-convert", Version: converterVersion,
 			ExternalReferences: &[]cdx.ExternalReference{{Type: cdx.ERTypeVCS, URL: "https://github.com/cdxgen/cdxgen/tree/v" + converterVersion}}},
 	}

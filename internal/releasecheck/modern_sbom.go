@@ -122,6 +122,7 @@ func checkModernLicenses(c *sbom.Catalog, facts *ArchiveFacts) error {
 
 func indexModernComponents(c *sbom.Catalog) (map[string]cdx.Component, map[string]cdx.Component, error) {
 	bins, mods := map[string]cdx.Component{}, map[string]cdx.Component{}
+	coordinates := map[ModuleDep]bool{}
 	for ref, component := range c.Components {
 		if ref == c.Root {
 			continue
@@ -131,6 +132,13 @@ func indexModernComponents(c *sbom.Catalog) (map[string]cdx.Component, map[strin
 			return nil, nil, err
 		}
 		if component.Type == cdx.ComponentTypeLibrary {
+			coordinate := ModuleDep{Path: properties["microfat:module:path"], Version: properties["microfat:module:version"],
+				Sum: properties["microfat:module:sum"], ReplacePath: properties["microfat:module:replace_path"],
+				ReplaceVer: properties["microfat:module:replace_version"], ReplaceSum: properties["microfat:module:replace_sum"]}
+			if coordinates[coordinate] {
+				return nil, nil, fmt.Errorf("duplicate module coordinate %s", coordinate.Path)
+			}
+			coordinates[coordinate] = true
 			mods[ref] = component
 			continue
 		}

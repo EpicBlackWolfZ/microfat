@@ -130,7 +130,45 @@ func TestBuilderRejectsMissingFacts(t *testing.T) {
 func TestIndependentValidationRejectsChangedMetadata(t *testing.T) {
 	t.Parallel()
 	for name, mutate := range map[string]func(*cdx.BOM){
-		"archive_version":   func(b *cdx.BOM) { b.Metadata.Component.Version = "9.9.9" },
+		"archive_version":        func(b *cdx.BOM) { b.Metadata.Component.Version = "9.9.9" },
+		"archive_properties":     func(b *cdx.BOM) { b.Metadata.Component.Properties = nil },
+		"missing_hash":           func(b *cdx.BOM) { b.Metadata.Component.Hashes = nil },
+		"unattributed_component": func(b *cdx.BOM) { (*b.Components)[0].Type = cdx.ComponentTypeFile },
+		"missing_binary": func(b *cdx.BOM) {
+			children := b.Metadata.Component.Components
+			b.Components = &[]cdx.Component{(*children)[0]}
+		},
+		"duplicate_binary": func(b *cdx.BOM) {
+			copy := (*b.Metadata.Component.Components)[1]
+			copy.BOMRef = "urn:duplicate:binary"
+			*b.Components = append(*b.Components, copy)
+		},
+		"duplicate_module_coordinate": func(b *cdx.BOM) {
+			copy := (*b.Components)[0]
+			copy.BOMRef = "urn:duplicate:module"
+			*b.Components = append(*b.Components, copy)
+		},
+		"unused_module": func(b *cdx.BOM) {
+			copy := moduleComponent(releasecheck.ModuleDep{Path: "example.com/unused", Version: fixtureModuleVersion})
+			*b.Components = append(*b.Components, copy)
+		},
+		"missing_license": func(b *cdx.BOM) { b.Metadata.Component.Licenses = nil },
+		"invalid_binary_settings": func(b *cdx.BOM) {
+			props := (*b.Metadata.Component.Components)[0].Properties
+			for index := range *props {
+				if (*props)[index].Name == "microfat:build_settings" {
+					(*props)[index].Value = "not JSON"
+				}
+			}
+		},
+		"wrong_binary_settings": func(b *cdx.BOM) {
+			props := (*b.Metadata.Component.Components)[0].Properties
+			for index := range *props {
+				if (*props)[index].Name == "microfat:build_settings" {
+					(*props)[index].Value = "{}"
+				}
+			}
+		},
 		"archive_hash":      func(b *cdx.BOM) { (*b.Metadata.Component.Hashes)[0].Value = strings.Repeat("f", 64) },
 		"binary_hash":       func(b *cdx.BOM) { (*(*b.Metadata.Component.Components)[0].Hashes)[0].Value = strings.Repeat("f", 64) },
 		"binary_name":       func(b *cdx.BOM) { (*b.Metadata.Component.Components)[0].Name = "unexpected" },
@@ -156,4 +194,36 @@ func TestIndependentValidationRejectsChangedMetadata(t *testing.T) {
 			require.Error(t, releasecheck.ValidateModernCycloneDXBytes(changed, f, i))
 		})
 	}
+}
+
+func TestModernValidationRequiresIndependentFacts(t *testing.T) {
+	t.Parallel()
+	for name, mutate := range map[string]func(*releasecheck.ArchiveFacts, *releasecheck.ArchiveInventory){
+		"invalid_archive_identity": func(f *releasecheck.ArchiveFacts, _ *releasecheck.ArchiveInventory) { f.ArchiveName = "invalid" },
+		"missing_independent_license": func(f *releasecheck.ArchiveFacts, _ *releasecheck.ArchiveInventory) {
+			f.ExtractedDir = filepath.Join(f.ExtractedDir, "missing")
+		},
+		"missing_executable_bytes": func(f *releasecheck.ArchiveFacts, _ *releasecheck.ArchiveInventory) {
+			f.Executables["microfat-stub"] = nil
+		},
+		"missing_variant_bytes": func(f *releasecheck.ArchiveFacts, _ *releasecheck.ArchiveInventory) {
+			f.EmbeddedVariants["v2"] = nil
+		},
+		"missing_binary_record":  func(_ *releasecheck.ArchiveFacts, i *releasecheck.ArchiveInventory) { i.Binaries["microfat"] = nil },
+		"changed_inventory_size": func(_ *releasecheck.ArchiveFacts, i *releasecheck.ArchiveInventory) { delete(i.Binaries, "microfat") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			facts, inv, meta := inventoryFixture(t, releasecheck.ArchAMD64)
+			data, err := CycloneDX(facts, inv, meta)
+			require.NoError(t, err)
+			mutate(facts, inv)
+			require.Error(t, releasecheck.ValidateModernCycloneDXBytes(data, facts, inv))
+		})
+	}
+	facts, inv, meta := inventoryFixture(t, releasecheck.ArchAMD64)
+	data, err := CycloneDX(facts, inv, meta)
+	require.NoError(t, err)
+	require.ErrorContains(t, releasecheck.ValidateModernCycloneDXBytes(data, nil, inv), "independent")
+	require.ErrorContains(t, releasecheck.ValidateModernCycloneDXBytes(data, facts, nil), "independent")
 }

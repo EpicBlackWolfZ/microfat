@@ -281,6 +281,18 @@ func ValidateSPDXBytes(data []byte, facts *ArchiveFacts, inv *ArchiveInventory) 
 	if facts == nil || inv == nil {
 		return fmt.Errorf("archive facts and inventory cannot be nil")
 	}
+	var header struct {
+		Context json.RawMessage `json:"@context"`
+	}
+	if err := json.Unmarshal(data, &header); err != nil {
+		return fmt.Errorf("parsing SPDX JSON: %w", err)
+	}
+	if len(header.Context) != 0 {
+		return ValidateModernSPDXBytes(data, facts, inv)
+	}
+	if modernArchive(facts) {
+		return fmt.Errorf("v0.2.5 and later require SPDX 3.0.1 JSON-LD")
+	}
 
 	var doc SPDXDocument
 	if err := json.Unmarshal(data, &doc); err != nil {
@@ -574,6 +586,12 @@ func ValidateCycloneDXBytes(data []byte, facts *ArchiveFacts, inv *ArchiveInvent
 	var doc CDXDocument
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return fmt.Errorf("parsing CycloneDX JSON: %w", err)
+	}
+	if doc.SpecVersion == "1.7" {
+		return ValidateModernCycloneDXBytes(data, facts, inv)
+	}
+	if modernArchive(facts) {
+		return fmt.Errorf("v0.2.5 and later require CycloneDX 1.7")
 	}
 
 	if err := validateCDXHeader(&doc, facts); err != nil {
