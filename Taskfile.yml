@@ -155,12 +155,13 @@ tasks:
       {{.TASK_ENV}}
       bash scripts/test-profiles.sh test
   e2e:
-    desc: Build and run black-box end-to-end tests with race detection
+    desc: Build and run both black-box test profiles with race detection
     cmds:
     - task: build
     - |-
       {{.TASK_ENV}}
       "$GO" test -race -v ./tests/e2e/...
+      "$GO" test -race -tags minimal -v ./tests/e2e/...
   fuzz:
     desc: Run all format, codec, cgroup, microarch and pack fuzz targets (FUZZTIME=5s)
     cmds:
@@ -193,6 +194,21 @@ tasks:
     - |-
       {{.TASK_ENV}}
       "$GO" tool cover -func="$COVERAGE_FILE"
+  coverage-unit:
+    desc: Enforce exact default/minimal coverage before the staged black-box suite
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/test-profiles.sh coverage-unit
+    - |-
+      {{.TASK_ENV}}
+      "$GO" tool cover -func="$COVERAGE_FILE"
+  ci-complete:
+    desc: Verify the complete GitHub Actions prerequisite result contract
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      "$GO" run ./internal/cmd/ci-gate "$CI_EVENT" <<< "$CI_NEEDS"
   lint:
     desc: Run mandatory Go and shell linters
     cmds:
