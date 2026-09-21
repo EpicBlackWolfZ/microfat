@@ -23,6 +23,9 @@ set +e
 is_port_in_use "${PORT}"
 port_status=$?
 set -e
+if [ "${port_status}" -gt 1 ]; then
+    exit 1
+fi
 if [ "${port_status}" -eq 0 ]; then
     printf "%b\n" "${C_RED}${SYM_FAIL}${C_RESET} pprof port ${PORT} is already in use."
     printf "%b\n" "Choose another port with PORT=<port>."

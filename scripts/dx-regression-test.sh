@@ -10,6 +10,7 @@ cd "${ROOT_DIR}"
 FIXTURE_FILE=""
 DUMMY_PID=""
 DUMMY_PID_2=""
+DX_TEMP="$(mktemp -d)"
 
 cleanup() {
     if [ -n "${DUMMY_PID:-}" ]; then
@@ -22,21 +23,31 @@ cleanup() {
         wait "${DUMMY_PID_2}" 2>/dev/null || true
     fi
 
+    rm -rf "${DX_TEMP}"
+
     if [ -n "${FIXTURE_FILE:-}" ]; then
         rm -f "${FIXTURE_FILE}"
     fi
 }
 trap cleanup EXIT INT TERM HUP
 
-get_free_port() {
-    python3 - <<'PY'
-import socket
+"${GO:-go}" build -o "${DX_TEMP}/dx-net" ./internal/cmd/dx-net
 
-s = socket.socket()
-s.bind(("127.0.0.1", 0))
-print(s.getsockname()[1])
-s.close()
-PY
+wait_for_port() {
+    local pid="${1}" ready="${2}"
+    for _ in {1..50}; do
+        if [ -s "${ready}" ]; then
+            cat "${ready}"
+            return 0
+        fi
+        if ! kill -0 "${pid}" 2>/dev/null; then
+            echo "FAIL: temporary server exited before readiness" >&2
+            return 1
+        fi
+        sleep 0.1
+    done
+    echo "FAIL: temporary server did not become ready" >&2
+    return 1
 }
 
 echo "==> Running DX regression test suite..."
@@ -124,10 +135,9 @@ echo "    PASS: Formatting verification pipeline is strictly non-mutating"
 # 3. Port Safety & Non-Destructive Occupant Preservation
 # -----------------------------------------------------------------------------
 echo "--> Test 4: Occupied pprof port fails cleanly without killing occupant"
-DUMMY_PORT="$(get_free_port)"
-python3 -m http.server "${DUMMY_PORT}" --bind 127.0.0.1 >/dev/null 2>&1 &
+"${DX_TEMP}/dx-net" serve > "${DX_TEMP}/port" &
 DUMMY_PID=$!
-sleep 0.2
+DUMMY_PORT="$(wait_for_port "${DUMMY_PID}" "${DX_TEMP}/port")"
 
 if ! kill -0 "${DUMMY_PID}" 2>/dev/null; then
     echo "FAIL: Test setup failed - dummy server could not start on port ${DUMMY_PORT}"
@@ -153,10 +163,9 @@ DUMMY_PID=""
 echo "    PASS: Port collision on check-leaks preserved occupant process"
 
 echo "--> Test 5: Occupied HTTP_PORT on pprof fails cleanly without killing occupant"
-DUMMY_HTTP_PORT="$(get_free_port)"
-python3 -m http.server "${DUMMY_HTTP_PORT}" --bind 127.0.0.1 >/dev/null 2>&1 &
+"${DX_TEMP}/dx-net" serve > "${DX_TEMP}/http-port" &
 DUMMY_PID_2=$!
-sleep 0.2
+DUMMY_HTTP_PORT="$(wait_for_port "${DUMMY_PID_2}" "${DX_TEMP}/http-port")"
 
 if ! kill -0 "${DUMMY_PID_2}" 2>/dev/null; then
     echo "FAIL: Test setup failed - dummy server could not start on port ${DUMMY_HTTP_PORT}"
@@ -220,5 +229,16 @@ if [ "${BEFORE_SUM}" != "${AFTER_SUM}" ]; then
     exit 1
 fi
 echo "    PASS: make tidy-check is non-mutating and verified dependencies"
+
+echo "--> Test 8: Missing mandatory port helper fails closed"
+if GO=/nonexistent/microfat-go BIN_DIR=/nonexistent bash scripts/check-leaks.sh > "${DX_TEMP}/missing-go.log" 2>&1; then
+    echo "FAIL: missing Go port helper did not stop profiling"
+    exit 1
+fi
+if ! grep -q "Unable to determine port availability" "${DX_TEMP}/missing-go.log"; then
+    echo "FAIL: missing helper did not explain the failed probe"
+    exit 1
+fi
+echo "    PASS: Missing mandatory probe cannot report a free port"
 
 echo "==> All DX regression tests passed successfully!"
