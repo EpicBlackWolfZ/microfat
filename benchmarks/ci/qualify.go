@@ -43,9 +43,11 @@ func QualifyHosted(exp *schema.ExperimentV2) Qualification {
 		!exp.Complete || exp.Dirty || exp.SourceSHA == "" || exp.SourceSHA == "unknown" {
 		q.Reasons = append(q.Reasons, "release schedule or clean source requirements not met")
 	}
+	var schedule hostedSchedule
+	_ = json.Unmarshal(exp.Config, &schedule) // Invalid configuration is already rejected by qualifiedSchedule.
 	q.Reasons = append(q.Reasons, qualifyArtifacts(exp)...)
 	for _, t := range exp.Trials {
-		q.Reasons = append(q.Reasons, qualifyTrial(t)...)
+		q.Reasons = append(q.Reasons, qualifyTrial(t, schedule)...)
 	}
 	comparisons, err := compare.Revisions(exp)
 	if err != nil {
@@ -63,14 +65,16 @@ func QualifyHosted(exp *schema.ExperimentV2) Qualification {
 	return q
 }
 
+type hostedSchedule struct {
+	Blocks          int  `json:"blocks"`
+	DurationMS      int  `json:"duration_ms"`
+	WarmupMS        int  `json:"warmup_ms"`
+	SampleMS        int  `json:"sample_ms"`
+	DisableObserver bool `json:"disable_observer"`
+}
+
 func qualifiedSchedule(config []byte) bool {
-	var cfg struct {
-		Blocks          int  `json:"blocks"`
-		DurationMS      int  `json:"duration_ms"`
-		WarmupMS        int  `json:"warmup_ms"`
-		SampleMS        int  `json:"sample_ms"`
-		DisableObserver bool `json:"disable_observer"`
-	}
+	var cfg hostedSchedule
 	return json.Unmarshal(config, &cfg) == nil && cfg.Blocks >= ReleaseBlocks && !cfg.DisableObserver &&
 		cfg.DurationMS >= releaseDurationMS && cfg.WarmupMS >= releaseWarmupMS && cfg.SampleMS > 0 && cfg.SampleMS <= releaseSampleMS
 }
@@ -79,8 +83,8 @@ func coreMetrics() []string {
 	return []string{startupMetric, "artifact_bytes", "throughput_qps", "peak_rss_bytes", "user_cpu_seconds", "system_cpu_seconds"}
 }
 
-func qualifyTrial(t schema.ProcessTrial) []string {
-	var reasons []string
+func qualifyTrial(t schema.ProcessTrial, schedule hostedSchedule) []string {
+	reasons := qualifyObservedWindows(t, schedule)
 	if t.Outcome != schema.OutcomeOK || t.SampleCount < 2 || t.TelemetryPath == "" || t.Load == nil ||
 		t.Load.Requests == 0 || t.Load.Successful != t.Load.Requests {
 		reasons = append(reasons, t.ID+": successful trial and complete telemetry required")

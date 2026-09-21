@@ -345,6 +345,7 @@ func measureTrial(ctx context.Context, cfg ExperimentConfig, opts RunOptions, ge
 		warm, err := driver.Run(ctx, url+"/"+cfg.Workload)
 		if warm != nil {
 			files[warmOptions.RawPath] = warm.Raw
+			trial.Warmup = &warm.HTTP
 		}
 		if err != nil {
 			trial.Reason = "warmup: " + err.Error()

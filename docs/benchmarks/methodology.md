@@ -107,7 +107,7 @@ and last available samples; a reset or single sample yields an unavailable value
 
 Resource samples are stored once in each trial's checksummed `telemetry.json`;
 `raw.json` records its path, count, interval, and derived phase summaries. Readers verify
-both the referenced sample count and sample schema. In-memory raw trial files have a
+both the referenced sample count and sample schema, and hydrate those verified observations for offline qualification. New trials also record the parsed warmup HTTP result and its raw evidence path. Older bundles remain readable; a missing observed warmup cannot satisfy the hosted publication gate. See the [observed window tolerances](README.md#hosted-release-evidence) in the publication policy. In-memory raw trial files have a
 256 MiB budget; exceeding it stops the experiment and preserves its incomplete journal.
 Shard large suites or increase the sampling interval. Release suites initially use 250 ms
 sampling; the separate exec diagnostic keeps its finer interval and explicit limitations.

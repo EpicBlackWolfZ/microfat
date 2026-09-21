@@ -253,7 +253,8 @@ func ReadBundle(root string) (*schema.ExperimentV2, error) {
 	if err := schema.ValidateV2(&exp); err != nil {
 		return nil, err
 	}
-	for _, trial := range exp.Trials {
+	for i := range exp.Trials {
+		trial := &exp.Trials[i]
 		if trial.TelemetryPath != "" {
 			data, ok := files[trial.TelemetryPath]
 			if !ok {
@@ -264,10 +265,13 @@ func ReadBundle(root string) (*schema.ExperimentV2, error) {
 				schema.ValidateResourceSamples(samples) != nil {
 				return nil, errors.New("invalid telemetry evidence or sample count")
 			}
+			trial.Samples = samples
 		}
-		if trial.Load != nil {
-			if _, ok := files[trial.Load.RawPath]; !ok {
-				return nil, errors.New("missing raw load evidence")
+		for _, result := range []*schema.HTTPResult{trial.Warmup, trial.Load} {
+			if result != nil {
+				if _, ok := files[result.RawPath]; !ok {
+					return nil, errors.New("missing raw load evidence")
+				}
 			}
 		}
 	}

@@ -129,6 +129,7 @@ type ProcessTrial struct {
 	TelemetryPath    string                 `json:"telemetry_path,omitempty"`
 	SampleCount      int                    `json:"sample_count"`
 	SampleIntervalMS int                    `json:"sample_interval_ms"`
+	Warmup           *HTTPResult            `json:"warmup,omitempty"`
 	Load             *HTTPResult            `json:"load,omitempty"`
 	Warnings         []string               `json:"warnings"`
 }
@@ -303,9 +304,11 @@ func validateProcessTrials(trials []ProcessTrial, schedule map[string]ScheduledT
 		if err := ValidateResourceSamples(trial.Samples); err != nil {
 			return err
 		}
-		if trial.Load != nil {
-			if err := ValidateHTTP(trial.Load); err != nil {
-				return err
+		for _, result := range []*HTTPResult{trial.Warmup, trial.Load} {
+			if result != nil {
+				if err := ValidateHTTP(result); err != nil {
+					return err
+				}
 			}
 		}
 	}
