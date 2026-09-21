@@ -390,7 +390,7 @@ microfat prewarm bin/myapp --json
 | `--level` | `-l` | `string` | `""` | Specific variant level to prewarm (defaults to selected compatible). |
 | `--all` | *(none)* | `bool` | `false` | Prewarm all embedded variants into the cache directory. |
 | `--cache-dir` | *(none)* | `string` | `""` | Custom cache directory path. |
-| `--verify` | *(none)* | `bool` | `false` | Verify existing cache entry integrity without extracting. |
+| `--verify` | *(none)* | `bool` | `false` | Verify existing cache entries without creating directories, repairing permissions, extracting, or removing entries. |
 | `--json` | *(none)* | `bool` | `false` | Output results in JSON telemetry format. |
 
 ---

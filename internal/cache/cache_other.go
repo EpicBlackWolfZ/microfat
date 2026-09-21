@@ -135,7 +135,7 @@ func VerifyVariant(entry *format.VariantEntry, cacheDir string) format.PrewarmRe
 	}
 
 	if cacheDir == "" {
-		resolved, err := format.ResolveCacheDir("")
+		resolved, err := format.ResolveExistingCacheDir("")
 		if err != nil {
 			res.Status = format.PrewarmStatusMissing
 			res.Error = fmt.Sprintf("resolving cache directory: %v", err)

@@ -903,7 +903,7 @@ func VerifyCacheBinary(
 	}
 
 	if cacheDir == "" {
-		resolved, err := format.ResolveCacheDir("")
+		resolved, err := format.ResolveExistingCacheDir("")
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolving cache directory: %w", err)
 		}

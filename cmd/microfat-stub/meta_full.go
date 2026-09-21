@@ -156,7 +156,11 @@ func prewarmStub(
 		verifyOnly = true
 	}
 
-	dirFD, cacheDir, err := resolveCacheDirFunc("")
+	resolveDir := resolveCacheDirFunc
+	if verifyOnly {
+		resolveDir = format.ResolveExistingCacheDirFD
+	}
+	dirFD, cacheDir, err := resolveDir("")
 	if err != nil {
 		return fmt.Errorf("resolving cache directory: %w", err)
 	}

@@ -750,6 +750,13 @@ func formatVersionName(version int) string {
 	}
 }
 
+func resolvePrewarmCacheDir(dir string, verifyOnly bool) (string, error) {
+	if verifyOnly {
+		return format.ResolveExistingCacheDir(dir)
+	}
+	return format.ResolveCacheDir(dir)
+}
+
 func newPrewarmCmd() *cobra.Command {
 	var (
 		targetLevel string
@@ -786,7 +793,7 @@ func newPrewarmCmd() *cobra.Command {
 				return fmt.Errorf("reading binary manifest: %w", err)
 			}
 
-			resolvedDir, err := format.ResolveCacheDir(cacheDir)
+			resolvedDir, err := resolvePrewarmCacheDir(cacheDir, verifyOnly)
 			if err != nil {
 				return fmt.Errorf("resolving cache directory: %w", err)
 			}
