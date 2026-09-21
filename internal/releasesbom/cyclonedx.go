@@ -103,7 +103,8 @@ func metadata(meta Metadata, root cdx.Component) *cdx.Metadata {
 
 func (b *cdxBuilder) root() (cdx.Component, error) {
 	root := product(archiveRef, cdx.ComponentTypeFile, b.facts.ArchiveName, b.version, b.facts.ArchiveSHA256)
-	root.Properties = properties("microfat:target_arch", b.facts.TargetArch)
+	root.Properties = properties("microfat:target_arch", b.facts.TargetArch,
+		"microfat:release_version", b.version, "microfat:component_type", "file")
 	root.Licenses = &b.license
 	children := []cdx.Component{}
 	for _, name := range sortedKeys(b.facts.Executables) {
@@ -158,6 +159,7 @@ func (b *cdxBuilder) binary(id, name, digest string) (cdx.Component, error) {
 		return cdx.Component{}, err
 	}
 	component.Properties = properties("microfat:target_arch", b.facts.TargetArch,
+		"microfat:component_type", "application",
 		"microfat:binary_id", id, "microfat:variant_tier", inv.VariantTier,
 		"microfat:go_version", inv.GoVersion, "microfat:main_path", inv.MainPath,
 		"microfat:main_module", inv.MainModule, "microfat:main_version", inv.MainVersion,
@@ -184,6 +186,8 @@ func moduleComponent(dep releasecheck.ModuleDep) cdx.Component {
 	component := cdx.Component{Type: cdx.ComponentTypeLibrary, BOMRef: "module-" + hex.EncodeToString(digest[:]),
 		Name: path, Version: version,
 		Properties: properties("microfat:module:path", dep.Path, "microfat:module:version", dep.Version,
+			"microfat:component_type", "library",
+			"microfat:module:sum", dep.Sum, "microfat:module:replace_sum", dep.ReplaceSum,
 			"microfat:module:replace_path", dep.ReplacePath, "microfat:module:replace_version", dep.ReplaceVer,
 			"microfat:license_status", "not available in Go build information")}
 	// Local replacements have no registry identity; do not invent a package URL.
@@ -228,7 +232,7 @@ func product(ref string, kind cdx.ComponentType, name, version, digest string) c
 func properties(values ...string) *[]cdx.Property {
 	const pairSize = 2
 	props := make([]cdx.Property, 0, len(values)/pairSize)
-	for index := 0; index < len(values); index += pairSize {
+	for index := 0; index+1 < len(values); index += pairSize {
 		props = append(props, cdx.Property{Name: values[index], Value: values[index+1]})
 	}
 	return &props
@@ -254,8 +258,9 @@ func sortedComponents(values map[string]cdx.Component) []cdx.Component {
 func contentUUID(archiveHash string, meta Metadata) string {
 	// A UUIDv8 identifies this archive, generator and generation timestamp.
 	const versionIndex, variantIndex, versionMask, variantMask = 6, 8, 0x80, 0x80
+	const versionRetainMask, variantRetainMask = 0x0f, 0x3f
 	digest := sha256.Sum256([]byte(archiveHash + "\n" + meta.Version + "\n" + meta.Commit + "\n" + meta.Created.Format(time.RFC3339Nano)))
-	digest[versionIndex] = digest[versionIndex]&0x0f | versionMask
-	digest[variantIndex] = digest[variantIndex]&0x3f | variantMask
+	digest[versionIndex] = digest[versionIndex]&versionRetainMask | versionMask
+	digest[variantIndex] = digest[variantIndex]&variantRetainMask | variantMask
 	return fmt.Sprintf("urn:uuid:%x-%x-%x-%x-%x", digest[0:4], digest[4:6], digest[6:8], digest[8:10], digest[10:16])
 }

@@ -96,6 +96,9 @@ func ValidateSchema(data []byte, spdx bool) error {
 	if len(data) > MaxDocumentBytes {
 		return fmt.Errorf("SBOM exceeds %d bytes", MaxDocumentBytes)
 	}
+	if err := checkJSON(data); err != nil {
+		return err
+	}
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("SBOM JSON: %w", err)
