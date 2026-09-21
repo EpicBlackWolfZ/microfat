@@ -7,6 +7,12 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
+    inputs:
+      failure_probe:
+        description: Controlled failure proof (none runs normal qualification)
+        type: choice
+        default: none
+        options: [none, fast, unit, late, matrix, skip, cancel]
 
 permissions:
   contents: read
@@ -21,9 +27,13 @@ jobs:
     permissions:
       pull-requests: read
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    timeout-minutes: 5
     steps:
+      - name: No pull-request title on this event
+        if: github.event_name != 'pull_request'
+        run: echo 'Title validation is required only for pull requests.'
       - name: Verify PR Title Conventional Commits Format
+        if: github.event_name == 'pull_request'
         uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -45,9 +55,13 @@ jobs:
   lint:
     name: Lint (golangci-lint)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       run-code-checks: ${{ steps.changes.outputs.run-code-checks }}
     steps:
+      - name: Controlled fast-gate failure
+        if: github.event_name == 'workflow_dispatch' && inputs.failure_probe == 'fast'
+        run: exit 1
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -87,6 +101,24 @@ jobs:
           bash scripts/install-shellcheck.sh "$RUNNER_TEMP/microfat-tools"
           echo "$RUNNER_TEMP/microfat-tools" >> "$GITHUB_PATH"
 
+      - name: Install pinned Task
+        if: steps.changes.outputs.run-code-checks == 'true'
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
+      - name: Check formatting and module definitions
+        if: steps.changes.outputs.run-code-checks == 'true'
+        run: task fmt-check tidy-check lint-shell
+
+      - name: Validate workflow and configuration contracts
+        if: steps.changes.outputs.run-code-checks == 'true'
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          actionlint
+          go test ./internal/cigate ./internal/cmd/ci-gate
+          go test ./cmd/microfat -run '^TestGoReleaserConfiguration$' -count=1
+
       - name: Run golangci-lint
         if: steps.changes.outputs.run-code-checks != 'false'
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -95,27 +127,26 @@ jobs:
           install-mode: binary
           args: --timeout=5m
 
-      - name: Install pinned Task
-        if: steps.changes.outputs.run-code-checks != 'false'
-        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
-        with:
-          version: '3.53.1'
-
-      - name: Run ShellCheck
-        if: steps.changes.outputs.run-code-checks != 'false'
-        run: task lint-shell
-
   test:
     name: Unit Tests & Coverage Gate (>= 95%)
-    needs: lint
-    if: needs.lint.outputs.run-code-checks != 'false'
+    needs: [pr-lint, lint, gitleaks, vulncheck]
+    if: needs.lint.outputs.run-code-checks == 'true'
     permissions:
       contents: read
       checks: write
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
+      - name: Controlled unit-stage failure
+        if: github.event_name == 'workflow_dispatch' && inputs.failure_probe == 'unit'
+        run: exit 1
+      - name: Controlled cancellation window
+        if: github.event_name == 'workflow_dispatch' && inputs.failure_probe == 'cancel'
+        run: sleep 120
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -131,12 +162,6 @@ jobs:
       - name: Install gotestsum
         run: go install gotest.tools/gotestsum@v1.13.0
 
-      - name: Install user-mode CPU emulator
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-user
-          command -v qemu-x86_64
-
       - name: Install pinned Task
         uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
         with:
@@ -148,25 +173,7 @@ jobs:
         run: |
           tooling_path=$(bash scripts/tooling-path.sh)
           export PATH="$tooling_path"
-          task coverage
-
-      - name: Run Chaos and Fault Injection Test Suite
-        run: |
-          tooling_path=$(bash scripts/tooling-path.sh)
-          export PATH="$tooling_path"
-          task chaos
-
-      - name: Run End-to-End (E2E) Test Suite
-        run: |
-          tooling_path=$(bash scripts/tooling-path.sh)
-          export PATH="$tooling_path"
-          task e2e
-
-      - name: Run Fuzz Sanity Checks (2s per target)
-        run: |
-          tooling_path=$(bash scripts/tooling-path.sh)
-          export PATH="$tooling_path"
-          task fuzz FUZZTIME=2s
+          task coverage-unit
 
       - name: Publish Test Results to GitHub View
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3
@@ -201,12 +208,15 @@ jobs:
 
   dx:
     name: Developer Workflow Regression Tests
-    needs: lint
-    if: needs.lint.outputs.run-code-checks != 'false'
+    needs: [lint, test]
+    if: needs.lint.outputs.run-code-checks == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -246,11 +256,14 @@ jobs:
   vulncheck:
     name: Vulnerability Scan (govulncheck)
     needs: lint
-    if: needs.lint.outputs.run-code-checks != 'false'
+    if: needs.lint.outputs.run-code-checks == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -267,11 +280,13 @@ jobs:
   gitleaks:
     name: Secrets Detection (gitleaks)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Run Gitleaks Action
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
@@ -280,14 +295,16 @@ jobs:
 
   build:
     name: Build, GoReleaser Snapshot & Self-Bundling Verification
-    needs: lint
-    if: needs.lint.outputs.run-code-checks != 'false'
+    needs: [lint, test]
+    if: needs.lint.outputs.run-code-checks == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -356,3 +373,109 @@ jobs:
           tooling_path=$(bash scripts/tooling-path.sh)
           export PATH="$tooling_path"
           MICROFAT_RELEASE_TESTS=required MICROFAT_RELEASE_DIST=$(pwd)/dist go test -v ./cmd/microfat -run '^TestGoReleaserSnapshotArtifacts$' -count=1
+
+      - name: Preserve snapshot validation evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: snapshot-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          path: |
+            dist/*.tar.gz
+            dist/*.json
+            dist/checksums.txt
+
+  integration:
+    name: Integration, Chaos and Fuzz Smoke
+    needs: [lint, test]
+    if: needs.lint.outputs.run-code-checks == 'true' && inputs.failure_probe != 'skip'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Controlled final-stage failure
+        if: github.event_name == 'workflow_dispatch' && inputs.failure_probe == 'late'
+        run: exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+      - name: Install user-mode CPU emulator
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-user
+          command -v qemu-x86_64
+      - name: Run integration, fault and fuzz checks
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task e2e chaos fuzz FUZZTIME=2s
+
+  archive-contracts:
+    name: Archive verification contracts
+    needs: [lint, test]
+    if: needs.lint.outputs.run-code-checks == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - run: go test ./internal/benchmarkevidence ./internal/releaseworkflow ./internal/cmd/benchmark-evidence
+
+  benchmark-smoke:
+    name: Benchmark Smoke
+    needs: [lint, test]
+    if: needs.lint.outputs.run-code-checks == 'true'
+    uses: ./.github/workflows/benchmark-smoke.yml
+
+  kernel:
+    name: Kernel Controls
+    needs: [lint, test]
+    if: needs.lint.outputs.run-code-checks == 'true'
+    uses: ./.github/workflows/benchmark-kernel.yml
+    with:
+      failure_mode: ${{ github.event_name == 'workflow_dispatch' && inputs.failure_probe == 'matrix' && 'v2-arm64' || '' }}
+
+  codeql:
+    name: CodeQL
+    needs: [lint, test]
+    if: needs.lint.outputs.run-code-checks == 'true'
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+      actions: read
+    uses: ./.github/workflows/codeql.yml
+
+  complete:
+    name: CI Complete
+    if: always()
+    needs: [pr-lint, lint, gitleaks, vulncheck, test, integration, dx, build, benchmark-smoke, kernel, codeql, archive-contracts]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+      - name: Verify every prerequisite result
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: task ci-complete

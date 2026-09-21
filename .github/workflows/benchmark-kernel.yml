@@ -1,13 +1,21 @@
 name: Benchmark Kernel Controls
 
 on:
-  pull_request:
-    branches: [main]
-    paths-ignore: ['**.md', 'docs/**']
+  workflow_call:
+    inputs:
+      failure_mode:
+        description: Matrix member to fail during a controlled CI proof
+        type: string
+        required: false
+        default: ''
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: kernel-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   kernel:
@@ -22,6 +30,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
+      - name: Controlled matrix-member failure
+        if: inputs.failure_mode == matrix.mode
+        run: exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

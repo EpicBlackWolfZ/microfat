@@ -1,0 +1,53 @@
+name: Benchmark Smoke
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Benchmark Smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+          path: .work/benchmark-base
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Install pinned Task
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
+      - run: task benchmark-tools
+      - name: Run paired smoke with trusted baseline policy
+        env:
+          BENCHMARK_BASE: ${{ github.workspace }}/.work/benchmark-base
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          if [ -f "$BENCHMARK_BASE/benchmarks/config/calibration.json" ]; then
+            export BENCHMARK_CALIBRATION="$BENCHMARK_BASE/benchmarks/config/calibration.json"
+          fi
+          task benchmark-smoke
+      - name: Preserve smoke evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .work/benchmark-ci
+          include-hidden-files: true
+          retention-days: 7
+
