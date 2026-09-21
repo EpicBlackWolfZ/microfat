@@ -44,9 +44,4 @@ timeout 240 qemu-system-x86_64 -accel tcg -m 512 -smp 2 -nodefaults -no-reboot -
   -serial stdio -monitor none -nic none -kernel "${root}/kernel"/boot/vmlinuz-* -initrd "${root}/initramfs.gz" \
   -append 'console=ttyS0 rdinit=/init panic=-1 cgroup_enable=memory' > "${root}/serial.log" 2>&1
 cat "${root}/serial.log"
-python3 - "${root}/serial.log" <<'PY'
-import pathlib,sys
-text=pathlib.Path(sys.argv[1]).read_text()
-if text.count('MICROFAT_KERNEL_RESULT=0')!=1 or '--- SKIP:' in text or '--- FAIL:' in text:
-    raise SystemExit('required real-kernel tests failed, skipped, or did not complete')
-PY
+"${GO:-go}" run ./internal/cmd/benchmark-tools kernel-result "${root}/serial.log"

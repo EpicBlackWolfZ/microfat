@@ -97,7 +97,7 @@ jobs:
           tier=nightly
           if [[ "$REQUESTED_TIER" == release || "$EVENT_REF" == refs/tags/v* ]]; then
             tier=release
-            base=$(python3 scripts/benchmark-baseline.py)
+            base=$(go run ./internal/cmd/benchmark-tools baseline)
           else
             base=$(git rev-parse HEAD^)
           fi
