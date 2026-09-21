@@ -38,33 +38,16 @@ export C_RESET C_BOLD C_CYAN C_GREEN C_YELLOW C_BLUE C_RED SYM_OK SYM_FAIL SYM_W
 
 is_port_in_use() {
     local port="${1}"
-    if command -v python3 >/dev/null 2>&1; then
-        if python3 -c '
-import socket, sys
-port = int(sys.argv[1])
-try:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(("127.0.0.1", port))
-    s.close()
-except OSError:
-    sys.exit(1)
-try:
-    s = socket.create_connection(("localhost", port), timeout=0.1)
-    s.close()
-    sys.exit(1)
-except OSError:
-    pass
-sys.exit(0)
-' "${port}" 2>/dev/null; then
-            return 1 # Port is free
-        else
-            return 0 # Port is in use
-        fi
-    elif (echo > "/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
-        return 0 # Port is in use
-    else
-        return 1 # Port is free
+    local state
+    if ! state="$("${GO:-go}" run ./internal/cmd/dx-net probe-port "${port}")"; then
+        echo "Unable to determine port availability: ${port}" >&2
+        return 2
     fi
+    case "${state}" in
+        occupied) return 0 ;;
+        free) return 1 ;;
+        *) echo "Invalid port probe result" >&2; return 2 ;;
+    esac
 }
 
 terminate_pid() {
