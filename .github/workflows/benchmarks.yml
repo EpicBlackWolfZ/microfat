@@ -113,7 +113,7 @@ jobs:
           INTENSITY: ${{ matrix.intensity }}
         run: >-
           bash scripts/benchmark-enter.sh "$MICROFAT_BENCH_CGROUP_ROOT"
-          python3 scripts/benchmark-matrix.py "$BENCHMARK_TIER" --workload "$WORKLOAD"
+          go run ./internal/cmd/benchmark-matrix "$BENCHMARK_TIER" --workload "$WORKLOAD"
           --intensity "$INTENSITY" --controls .work/controls.json
       - name: Verify successful hosted shard
         if: success() && env.BENCHMARK_TIER == 'release'

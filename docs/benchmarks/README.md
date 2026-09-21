@@ -95,8 +95,8 @@ Process separation alone cannot eliminate shared cache, memory-bandwidth, or ker
 ```bash
 make benchmark-integration
 make benchmark-matrix
-python3 scripts/benchmark-matrix.py compatibility --list
-python3 scripts/benchmark-matrix.py nightly --workload cpu
+go run ./internal/cmd/benchmark-matrix compatibility --list
+go run ./internal/cmd/benchmark-matrix nightly --workload cpu
 ```
 
 The compatibility matrix enumerates 16 format/profile/codec/dictionary combinations. Each case includes native,
