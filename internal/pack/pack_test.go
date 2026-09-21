@@ -19,6 +19,9 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/klauspost/compress/zstd"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -37,28 +40,20 @@ func TestPackAndVerify(t *testing.T) {
 	// 1. Create fake stub binary
 	stubPath := filepath.Join(tempDir, "microfat-stub")
 	stubContent := []byte("#!/bin/sh\necho Stub Launcher\n")
-	if err := os.WriteFile(stubPath, stubContent, 0o755); err != nil {
-		t.Fatalf("failed to write stub: %v", err)
-	}
+	require.NoError(t, os.WriteFile(stubPath, stubContent, 0o755), "failed to write stub")
 
 	// 2. Create fake variant binaries
 	v1Path := filepath.Join(tempDir, "bin-v1")
 	v1Content := []byte("#!/bin/sh\necho Executing Variant v1 (Baseline SSE2)\n")
-	if err := os.WriteFile(v1Path, v1Content, 0o755); err != nil {
-		t.Fatalf("failed to write v1: %v", err)
-	}
+	require.NoError(t, os.WriteFile(v1Path, v1Content, 0o755), "failed to write v1")
 
 	v3Path := filepath.Join(tempDir, "bin-v3")
 	v3Content := []byte("#!/bin/sh\necho Executing Variant v3 (AVX2/FMA/BMI2)\n")
-	if err := os.WriteFile(v3Path, v3Content, 0o755); err != nil {
-		t.Fatalf("failed to write v3: %v", err)
-	}
+	require.NoError(t, os.WriteFile(v3Path, v3Content, 0o755), "failed to write v3")
 
 	v4Path := filepath.Join(tempDir, "bin-v4")
 	v4Content := []byte("#!/bin/sh\necho Executing Variant v4 (AVX-512)\n")
-	if err := os.WriteFile(v4Path, v4Content, 0o755); err != nil {
-		t.Fatalf("failed to write v4: %v", err)
-	}
+	require.NoError(t, os.WriteFile(v4Path, v4Content, 0o755), "failed to write v4")
 
 	// 3. Pack into fat binary
 	fatBinaryPath := filepath.Join(tempDir, "output-fat-app")
@@ -78,9 +73,7 @@ func TestPackAndVerify(t *testing.T) {
 	}
 
 	idx, err := Pack(opts)
-	if err != nil {
-		t.Fatalf("Pack failed: %v", err)
-	}
+	require.NoError(t, err, "Pack failed")
 
 	if len(idx.Variants) != 3 {
 		t.Fatalf("expected 3 variants in index, got %d", len(idx.Variants))
@@ -91,24 +84,18 @@ func TestPackAndVerify(t *testing.T) {
 
 	// 4. Verify the generated binary
 	file, err := os.Open(fatBinaryPath)
-	if err != nil {
-		t.Fatalf("failed to open packed binary: %v", err)
-	}
+	require.NoError(t, err, "failed to open packed binary")
 	defer func() { _ = file.Close() }()
 
 	stat, err := file.Stat()
-	if err != nil {
-		t.Fatalf("failed to stat file: %v", err)
-	}
+	require.NoError(t, err, "failed to stat file")
 
 	if !format.IsFatBinary(file, stat.Size()) {
 		t.Errorf("expected IsFatBinary to be true")
 	}
 
 	verifiedIdx, results, err := VerifyBinary(file, stat.Size())
-	if err != nil {
-		t.Fatalf("VerifyBinary failed: %v", err)
-	}
+	require.NoError(t, err, "VerifyBinary failed")
 
 	if verifiedIdx.AppName != "test-fat-app" {
 		t.Errorf("expected AppName test-fat-app, got %s", verifiedIdx.AppName)
@@ -794,28 +781,20 @@ func TestPrewarmVariantAndBinary(t *testing.T) {
 	}
 
 	_, err := Pack(opts)
-	if err != nil {
-		t.Fatalf("Pack failed: %v", err)
-	}
+	require.NoError(t, err, "Pack failed")
 
 	f, err := os.Open(fatPath)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
+	require.NoError(t, err, "Open failed")
 	defer func() { _ = f.Close() }()
 
 	stat, err := f.Stat()
-	if err != nil {
-		t.Fatalf("Stat failed: %v", err)
-	}
+	require.NoError(t, err, "Stat failed")
 
 	cacheDir := filepath.Join(tempDir, "prewarm_cache")
 
 	// 1. Prewarm specific level "v3"
 	idx, results, err := PrewarmBinary(f, stat.Size(), []string{"v3"}, cacheDir)
-	if err != nil {
-		t.Fatalf("PrewarmBinary(v3) failed: %v", err)
-	}
+	require.NoError(t, err, "PrewarmBinary(v3) failed")
 	if len(results) != 1 || results[0].Level != "v3" {
 		t.Fatalf("unexpected results for v3: %+v", results)
 	}
@@ -825,27 +804,21 @@ func TestPrewarmVariantAndBinary(t *testing.T) {
 
 	// Verify cached file content
 	cachedData, err := os.ReadFile(results[0].CachedPath)
-	if err != nil {
-		t.Fatalf("failed reading cached file: %v", err)
-	}
+	require.NoError(t, err, "failed reading cached file")
 	if !bytes.Equal(cachedData, v3Content) {
 		t.Errorf("cached content mismatch: expected %q, got %q", v3Content, cachedData)
 	}
 
 	// 2. Prewarm again (should be cache hit)
 	_, results2, err := PrewarmBinary(f, stat.Size(), []string{"v3"}, cacheDir)
-	if err != nil {
-		t.Fatalf("PrewarmBinary second time failed: %v", err)
-	}
+	require.NoError(t, err, "PrewarmBinary second time failed")
 	if len(results2) != 1 || !results2[0].AlreadyCached {
 		t.Errorf("expected alreadyCached=true on second prewarm, got %+v", results2)
 	}
 
 	// 3. Prewarm all variants (v3 is hit, v1 is extracted)
 	_, resultsAll, err := PrewarmBinary(f, stat.Size(), nil, cacheDir)
-	if err != nil {
-		t.Fatalf("PrewarmBinary(all) failed: %v", err)
-	}
+	require.NoError(t, err, "PrewarmBinary(all) failed")
 	if len(resultsAll) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(resultsAll))
 	}
@@ -867,32 +840,24 @@ func TestPrewarmVariantAndBinary(t *testing.T) {
 
 	// 4. Prewarm with non-existent level
 	_, _, err = PrewarmBinary(f, stat.Size(), []string{"v4"}, cacheDir)
-	if err == nil {
-		t.Errorf("expected error when prewarming non-existent level v4")
-	}
+	assert.Error(t, err, "expected error when prewarming non-existent level v4")
 
 	// 5. Prewarm with auto-resolved cacheDir (empty string)
 	t.Setenv(format.EnvCacheDir, filepath.Join(tempDir, "auto_cache"))
 	_, _, err = PrewarmBinary(f, stat.Size(), []string{"v1"}, "")
-	if err != nil {
-		t.Fatalf("PrewarmBinary with empty cacheDir failed: %v", err)
-	}
+	require.NoError(t, err, "PrewarmBinary with empty cacheDir failed")
 	t.Setenv(format.EnvCacheDir, "")
 
 	// 6. PrewarmVariant missing SHA256 error
 	badEntry := &format.VariantEntry{Level: "v1", SHA256: ""}
 	_, _, _, err = PrewarmVariant(f, badEntry, cacheDir)
-	if err == nil {
-		t.Errorf("expected error for missing SHA256")
-	}
+	assert.Error(t, err, "expected error for missing SHA256")
 
 	// 7. PrewarmVariant bad cache directory error
 	blocker := filepath.Join(tempDir, "blocker")
 	_ = os.WriteFile(blocker, []byte("x"), 0o600)
 	_, _, _, err = PrewarmVariant(f, &idx.Variants[0], filepath.Join(blocker, "sub"))
-	if err == nil {
-		t.Errorf("expected error for unwritable cache directory")
-	}
+	assert.Error(t, err, "expected error for unwritable cache directory")
 
 	// 8. PrewarmVariant with bad compression payload
 	corruptEntry := &format.VariantEntry{
@@ -903,9 +868,7 @@ func TestPrewarmVariantAndBinary(t *testing.T) {
 		SHA256:           "0123456789abcdef",
 	}
 	_, _, _, err = PrewarmVariant(f, corruptEntry, cacheDir)
-	if err == nil {
-		t.Errorf("expected error decompressing corrupt entry")
-	}
+	assert.Error(t, err, "expected error decompressing corrupt entry")
 
 	// 9. PrewarmVariant size mismatch
 	sizeMismatchEntry := &format.VariantEntry{
@@ -916,9 +879,7 @@ func TestPrewarmVariantAndBinary(t *testing.T) {
 		SHA256:           idx.Variants[0].SHA256,
 	}
 	_, _, _, err = PrewarmVariant(f, sizeMismatchEntry, cacheDir)
-	if err == nil {
-		t.Errorf("expected error for size mismatch")
-	}
+	assert.Error(t, err, "expected error for size mismatch")
 
 	// 10. PrewarmVariant hash mismatch
 	hashMismatchEntry := &format.VariantEntry{
@@ -929,11 +890,10 @@ func TestPrewarmVariantAndBinary(t *testing.T) {
 		SHA256:           "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 	}
 	_, _, _, err = PrewarmVariant(f, hashMismatchEntry, cacheDir)
-	if err == nil {
-		t.Errorf("expected error for hash mismatch")
-	}
+	assert.Error(t, err, "expected error for hash mismatch")
 }
 
+//revive:disable-next-line:cyclomatic Keep successive missing, mixed, valid and corrupted cache states visible in one lifecycle.
 func TestVerifyCacheVariantAndBinary(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -963,28 +923,20 @@ func TestVerifyCacheVariantAndBinary(t *testing.T) {
 	}
 
 	idx, err := Pack(opts)
-	if err != nil {
-		t.Fatalf("Pack failed: %v", err)
-	}
+	require.NoError(t, err, "Pack failed")
 
 	f, err := os.Open(fatPath)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
+	require.NoError(t, err, "Open failed")
 	defer func() { _ = f.Close() }()
 
 	stat, err := f.Stat()
-	if err != nil {
-		t.Fatalf("Stat failed: %v", err)
-	}
+	require.NoError(t, err, "Stat failed")
 
 	cacheDir := filepath.Join(tempDir, "cache_verify_dir")
 
 	// 1. Clean cache: VerifyCacheBinary should report missing for all variants
 	_, missingResults, err := VerifyCacheBinary(f, stat.Size(), nil, cacheDir)
-	if err != nil {
-		t.Fatalf("VerifyCacheBinary failed on clean cache: %v", err)
-	}
+	require.NoError(t, err, "VerifyCacheBinary failed on clean cache")
 	if len(missingResults) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(missingResults))
 	}
@@ -996,14 +948,10 @@ func TestVerifyCacheVariantAndBinary(t *testing.T) {
 
 	// 2. Prewarm v1 and verify: v1 should be valid, v3 should be missing
 	_, _, err = PrewarmBinary(f, stat.Size(), []string{"v1"}, cacheDir)
-	if err != nil {
-		t.Fatalf("prewarming v1 failed: %v", err)
-	}
+	require.NoError(t, err, "prewarming v1 failed")
 
 	_, mixedResults, err := VerifyCacheBinary(f, stat.Size(), nil, cacheDir)
-	if err != nil {
-		t.Fatalf("VerifyCacheBinary failed on mixed cache: %v", err)
-	}
+	require.NoError(t, err, "VerifyCacheBinary failed on mixed cache")
 	for _, r := range mixedResults {
 		switch r.Level {
 		case "v1":
@@ -1019,14 +967,10 @@ func TestVerifyCacheVariantAndBinary(t *testing.T) {
 
 	// 3. Prewarm all variants: both v1 and v3 should be valid
 	_, _, err = PrewarmBinary(f, stat.Size(), nil, cacheDir)
-	if err != nil {
-		t.Fatalf("prewarming all failed: %v", err)
-	}
+	require.NoError(t, err, "prewarming all failed")
 
 	_, allValidResults, err := VerifyCacheBinary(f, stat.Size(), nil, cacheDir)
-	if err != nil {
-		t.Fatalf("VerifyCacheBinary failed on fully populated cache: %v", err)
-	}
+	require.NoError(t, err, "VerifyCacheBinary failed on fully populated cache")
 	for _, r := range allValidResults {
 		if !r.Valid || r.Status != format.PrewarmStatusValid {
 			t.Errorf("expected variant %s to be valid, got %+v", r.Level, r)
@@ -1059,16 +1003,12 @@ func TestVerifyCacheVariantAndBinary(t *testing.T) {
 
 	// 6. VerifyCacheBinary with specific nonexistent variant level
 	_, _, err = VerifyCacheBinary(f, stat.Size(), []string{"v99"}, cacheDir)
-	if err == nil {
-		t.Errorf("expected error for nonexistent variant level v99")
-	}
+	assert.Error(t, err, "expected error for nonexistent variant level v99")
 
 	// 7. VerifyCacheBinary with empty cacheDir (uses resolved default)
 	t.Setenv(format.EnvCacheDir, cacheDir)
 	_, _, err = VerifyCacheBinary(f, stat.Size(), []string{"v1"}, "")
-	if err != nil {
-		t.Errorf("expected success with auto-resolved cacheDir: %v", err)
-	}
+	assert.NoError(t, err, "expected success with auto-resolved cacheDir")
 	t.Setenv(format.EnvCacheDir, "")
 
 	// 8. VerifyCacheVariant with invalid cacheDir
@@ -1096,9 +1036,7 @@ func TestVerifyCacheVariantAndBinary(t *testing.T) {
 	}
 
 	_, _, err = VerifyCacheBinary(f, stat.Size(), []string{"v1"}, "")
-	if err == nil {
-		t.Errorf("expected error from VerifyCacheBinary when cache resolution fails")
-	}
+	assert.Error(t, err, "expected error from VerifyCacheBinary when cache resolution fails")
 	t.Setenv("XDG_CACHE_HOME", "")
 	t.Setenv("TMPDIR", "")
 }
@@ -1108,9 +1046,7 @@ func TestMultiCodecPackagingAndVerification(t *testing.T) {
 
 	stubPath := filepath.Join(tempDir, "microfat-stub")
 	stubContent := []byte("#!/bin/sh\necho Stub Launcher\n")
-	if err := os.WriteFile(stubPath, stubContent, 0o755); err != nil {
-		t.Fatalf("failed to write stub: %v", err)
-	}
+	require.NoError(t, os.WriteFile(stubPath, stubContent, 0o755), "failed to write stub")
 
 	// v1: tiny payload (100KB) -> under ProfileLatency should auto-promote to none
 	v1Path := filepath.Join(tempDir, "bin-v1")
@@ -1159,9 +1095,7 @@ func TestMultiCodecPackagingAndVerification(t *testing.T) {
 	}
 
 	idx, err := Pack(opts)
-	if err != nil {
-		t.Fatalf("Pack failed: %v", err)
-	}
+	require.NoError(t, err, "Pack failed")
 
 	v1Entry, _ := idx.FindVariant("v1")
 	if v1Entry.Compression != codec.AlgorithmNone {
@@ -1180,16 +1114,12 @@ func TestMultiCodecPackagingAndVerification(t *testing.T) {
 
 	// Verify the binary
 	f, err := os.Open(fatBinaryPath)
-	if err != nil {
-		t.Fatalf("failed to open fat binary: %v", err)
-	}
+	require.NoError(t, err, "failed to open fat binary")
 	defer func() { _ = f.Close() }()
 
 	stat, _ := f.Stat()
 	_, results, err := VerifyBinary(f, stat.Size())
-	if err != nil {
-		t.Fatalf("VerifyBinary failed: %v", err)
-	}
+	require.NoError(t, err, "VerifyBinary failed")
 	for _, r := range results {
 		if !r.Valid {
 			t.Errorf("variant %s verification failed: %v", r.Level, r.Error)
@@ -1199,9 +1129,7 @@ func TestMultiCodecPackagingAndVerification(t *testing.T) {
 	// Prewarm all variants
 	cacheDir := filepath.Join(tempDir, "cache")
 	_, prewarmResults, err := PrewarmBinary(f, stat.Size(), nil, cacheDir)
-	if err != nil {
-		t.Fatalf("PrewarmBinary failed: %v", err)
-	}
+	require.NoError(t, err, "PrewarmBinary failed")
 	if len(prewarmResults) != 3 {
 		t.Fatalf("expected 3 prewarm results, got %d", len(prewarmResults))
 	}
@@ -1216,9 +1144,7 @@ func TestMultiCodecPackagingAndVerification(t *testing.T) {
 	trimmedFile, _ := os.Create(trimmedPath)
 	trimmedIdx, err := TrimBinary(f, stat.Size(), "v3", trimmedFile)
 	_ = trimmedFile.Close()
-	if err != nil {
-		t.Fatalf("TrimBinary failed: %v", err)
-	}
+	require.NoError(t, err, "TrimBinary failed")
 	if len(trimmedIdx.Variants) != 1 || trimmedIdx.Variants[0].Compression != "lz4" {
 		t.Errorf("trimmed variant compression mismatch: %+v", trimmedIdx.Variants)
 	}
@@ -1506,16 +1432,12 @@ func TestDictionaryPackingAndVerification(t *testing.T) {
 		SkipELFValidation: true,
 	}
 	idxNoDict, err := Pack(optsNoDict)
-	if err != nil {
-		t.Fatalf("Pack without dict failed: %v", err)
-	}
+	require.NoError(t, err, "Pack without dict failed")
 	if idxNoDict.DictionarySize != 0 {
 		t.Errorf("expected 0 DictionarySize for no-dict pack, got %d", idxNoDict.DictionarySize)
 	}
 	statNoDict, err := os.Stat(fatWithoutDict)
-	if err != nil {
-		t.Fatalf("stat no dict failed: %v", err)
-	}
+	require.NoError(t, err, "stat no dict failed")
 
 	fatWithDict := filepath.Join(tempDir, "fat_with_dict")
 	optsWithDict := Options{
@@ -1530,13 +1452,9 @@ func TestDictionaryPackingAndVerification(t *testing.T) {
 		SkipELFValidation: true,
 	}
 	idxWithDict, err := Pack(optsWithDict)
-	if err != nil {
-		t.Fatalf("Pack with dict failed: %v", err)
-	}
+	require.NoError(t, err, "Pack with dict failed")
 	statWithDict, err := os.Stat(fatWithDict)
-	if err != nil {
-		t.Fatalf("stat with dict failed: %v", err)
-	}
+	require.NoError(t, err, "stat with dict failed")
 
 	if idxWithDict.DictionarySize <= 0 {
 		t.Errorf("expected DictionarySize > 0, got %d", idxWithDict.DictionarySize)
@@ -1555,15 +1473,11 @@ func TestDictionaryPackingAndVerification(t *testing.T) {
 
 	// Verify binary integrity
 	fDict, err := os.Open(fatWithDict)
-	if err != nil {
-		t.Fatalf("open fatWithDict: %v", err)
-	}
+	require.NoError(t, err, "open fatWithDict")
 	defer func() { _ = fDict.Close() }()
 
 	vIdx, results, err := VerifyBinary(fDict, statWithDict.Size())
-	if err != nil {
-		t.Fatalf("VerifyBinary failed: %v", err)
-	}
+	require.NoError(t, err, "VerifyBinary failed")
 	if len(results) != 4 {
 		t.Fatalf("expected 4 results, got %d", len(results))
 	}
@@ -1579,22 +1493,16 @@ func TestDictionaryPackingAndVerification(t *testing.T) {
 	// Verify TrimBinary on dictionary-backed fat binary
 	trimmedPath := filepath.Join(tempDir, "trimmed_v3")
 	trimmedFile, err := os.Create(trimmedPath)
-	if err != nil {
-		t.Fatalf("create trimmed file: %v", err)
-	}
+	require.NoError(t, err, "create trimmed file")
 	trimIdx, err := TrimBinary(fDict, statWithDict.Size(), "v3", trimmedFile)
 	_ = trimmedFile.Close()
-	if err != nil {
-		t.Fatalf("TrimBinary on dict binary failed: %v", err)
-	}
+	require.NoError(t, err, "TrimBinary on dict binary failed")
 	if trimIdx.DictionarySize != idxWithDict.DictionarySize {
 		t.Errorf("Trimmed binary lost dictionary size: %d", trimIdx.DictionarySize)
 	}
 
 	trimmedOpen, err := os.Open(trimmedPath)
-	if err != nil {
-		t.Fatalf("open trimmed binary: %v", err)
-	}
+	require.NoError(t, err, "open trimmed binary")
 	defer func() { _ = trimmedOpen.Close() }()
 	trimStat, _ := trimmedOpen.Stat()
 	_, trimResults, err := VerifyBinary(trimmedOpen, trimStat.Size())
@@ -1605,9 +1513,7 @@ func TestDictionaryPackingAndVerification(t *testing.T) {
 	// Verify PrewarmBinary on dictionary-backed fat binary
 	cacheDir := filepath.Join(tempDir, "prewarm_cache")
 	_, prewarmRes, err := PrewarmBinary(fDict, statWithDict.Size(), []string{"v1", "v4"}, cacheDir)
-	if err != nil {
-		t.Fatalf("PrewarmBinary failed on dict binary: %v", err)
-	}
+	require.NoError(t, err, "PrewarmBinary failed on dict binary")
 	if len(prewarmRes) != 2 {
 		t.Fatalf("expected 2 prewarm results, got %d", len(prewarmRes))
 	}
@@ -1754,19 +1660,13 @@ func TestDefaultOptions(t *testing.T) {
 		tempDir := t.TempDir()
 
 		stubPath := filepath.Join(tempDir, "stub")
-		if err := os.WriteFile(stubPath, []byte("#!/bin/sh\necho Stub\n"), 0o755); err != nil {
-			t.Fatalf("failed to write stub: %v", err)
-		}
+		require.NoError(t, os.WriteFile(stubPath, []byte("#!/bin/sh\necho Stub\n"), 0o755), "failed to write stub")
 
 		v1Path := filepath.Join(tempDir, "bin-v1")
-		if err := os.WriteFile(v1Path, []byte("#!/bin/sh\necho v1\n"), 0o755); err != nil {
-			t.Fatalf("failed to write v1: %v", err)
-		}
+		require.NoError(t, os.WriteFile(v1Path, []byte("#!/bin/sh\necho v1\n"), 0o755), "failed to write v1")
 
 		v3Path := filepath.Join(tempDir, "bin-v3")
-		if err := os.WriteFile(v3Path, []byte("#!/bin/sh\necho v3\n"), 0o755); err != nil {
-			t.Fatalf("failed to write v3: %v", err)
-		}
+		require.NoError(t, os.WriteFile(v3Path, []byte("#!/bin/sh\necho v3\n"), 0o755), "failed to write v3")
 
 		outputPath := filepath.Join(tempDir, "packed.fat")
 
@@ -1779,9 +1679,7 @@ func TestDefaultOptions(t *testing.T) {
 		opts.Variants["v3"] = v3Path
 
 		idx, err := Pack(opts)
-		if err != nil {
-			t.Fatalf("Pack with DefaultOptions failed: %v", err)
-		}
+		require.NoError(t, err, "Pack with DefaultOptions failed")
 
 		if idx.Version != format.FormatVersionCurrent {
 			t.Errorf("expected index version %d, got %d", format.FormatVersionCurrent, idx.Version)
@@ -1791,24 +1689,18 @@ func TestDefaultOptions(t *testing.T) {
 		}
 
 		f, err := os.Open(outputPath)
-		if err != nil {
-			t.Fatalf("failed to open generated fat binary: %v", err)
-		}
+		require.NoError(t, err, "failed to open generated fat binary")
 		defer func() { _ = f.Close() }()
 
 		stat, err := f.Stat()
-		if err != nil {
-			t.Fatalf("stat failed: %v", err)
-		}
+		require.NoError(t, err, "stat failed")
 
 		if !format.IsFatBinary(f, stat.Size()) {
 			t.Error("expected IsFatBinary to be true")
 		}
 
 		vIdx, results, err := VerifyBinary(f, stat.Size())
-		if err != nil {
-			t.Fatalf("VerifyBinary failed: %v", err)
-		}
+		require.NoError(t, err, "VerifyBinary failed")
 		if vIdx.Version != format.FormatVersionCurrent {
 			t.Errorf("verified index version mismatch: expected %d, got %d", format.FormatVersionCurrent, vIdx.Version)
 		}
@@ -1989,6 +1881,7 @@ func TestVerifyCachedBinary(t *testing.T) {
 	})
 }
 
+//revive:disable-next-line:cyclomatic Keep cache recovery, atomic replacement and concurrent-writer outcomes explicit.
 func TestPrewarmVariantWithDict_IntegrityAndAtomicReplacement(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -2013,25 +1906,17 @@ func TestPrewarmVariantWithDict_IntegrityAndAtomicReplacement(t *testing.T) {
 	}
 
 	_, err := Pack(opts)
-	if err != nil {
-		t.Fatalf("Pack failed: %v", err)
-	}
+	require.NoError(t, err, "Pack failed")
 
 	f, err := os.Open(fatPath)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
+	require.NoError(t, err, "Open failed")
 	defer func() { _ = f.Close() }()
 
 	stat, err := f.Stat()
-	if err != nil {
-		t.Fatalf("Stat failed: %v", err)
-	}
+	require.NoError(t, err, "Stat failed")
 
 	idx, err := format.ReadTrailerAndIndex(f, stat.Size())
-	if err != nil {
-		t.Fatalf("ReadTrailerAndIndex failed: %v", err)
-	}
+	require.NoError(t, err, "ReadTrailerAndIndex failed")
 	if len(idx.Variants) != 1 {
 		t.Fatalf("expected 1 variant, got %d", len(idx.Variants))
 	}
@@ -2468,20 +2353,14 @@ func TestPrewarmAndVerify_AliasNormalization(t *testing.T) {
 	}
 
 	_, err := Pack(opts)
-	if err != nil {
-		t.Fatalf("Pack failed: %v", err)
-	}
+	require.NoError(t, err, "Pack failed")
 
 	f, err := os.Open(fatPath)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
+	require.NoError(t, err, "Open failed")
 	t.Cleanup(func() { _ = f.Close() })
 
 	stat, err := f.Stat()
-	if err != nil {
-		t.Fatalf("Stat failed: %v", err)
-	}
+	require.NoError(t, err, "Stat failed")
 
 	t.Run("PrewarmBinary with aliases", func(t *testing.T) {
 		t.Parallel()
@@ -2561,9 +2440,7 @@ func TestPrewarmAndVerify_AliasNormalization(t *testing.T) {
 
 		cacheDir := filepath.Join(tempDir, "verify_cache")
 		_, _, err := PrewarmBinary(f, stat.Size(), nil, cacheDir)
-		if err != nil {
-			t.Fatalf("prewarming all variants failed: %v", err)
-		}
+		require.NoError(t, err, "prewarming all variants failed")
 
 		tests := []struct {
 			name           string
@@ -2635,6 +2512,7 @@ func TestPrewarmAndVerify_AliasNormalization(t *testing.T) {
 	})
 }
 
+//revive:disable-next-line:cyclomatic Keep explicit versus automatic dictionary failure policy and its warning expectations together.
 func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 	t.Parallel()
 
@@ -2647,19 +2525,13 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 
 	tempDir := t.TempDir()
 	stubPath := filepath.Join(tempDir, "stub")
-	if err := os.WriteFile(stubPath, []byte("DUMMY_STUB_HEADER_DATA_1234567890"), 0o755); err != nil {
-		t.Fatalf("failed to write stub: %v", err)
-	}
+	require.NoError(t, os.WriteFile(stubPath, []byte("DUMMY_STUB_HEADER_DATA_1234567890"), 0o755), "failed to write stub")
 
 	// Create small dummy variants (< 8 bytes total across variants)
 	smallVar1 := filepath.Join(tempDir, "small_v1")
 	smallVar3 := filepath.Join(tempDir, "small_v3")
-	if err := os.WriteFile(smallVar1, make([]byte, smallByteLen), 0o755); err != nil {
-		t.Fatalf("failed to write small_v1: %v", err)
-	}
-	if err := os.WriteFile(smallVar3, make([]byte, smallByteLen), 0o755); err != nil {
-		t.Fatalf("failed to write small_v3: %v", err)
-	}
+	require.NoError(t, os.WriteFile(smallVar1, make([]byte, smallByteLen), 0o755), "failed to write small_v1")
+	require.NoError(t, os.WriteFile(smallVar3, make([]byte, smallByteLen), 0o755), "failed to write small_v3")
 
 	// Create large repetitive dummy variants (> 10 KB with repetitive symbols for valid dict training)
 	largeVar1 := filepath.Join(tempDir, "large_v1")
@@ -2668,12 +2540,10 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 	for i := range dictPatternIterCount {
 		repBuf.WriteString(fmt.Sprintf("runtime_metadata_symbol_entry_%04d_hash_%x\n", i, (i*dictPatternMultiplier)^dictPatternMask))
 	}
-	if err := os.WriteFile(largeVar1, append(repBuf.Bytes(), []byte("variant_v1_code_segment\n")...), 0o755); err != nil {
-		t.Fatalf("failed to write large_v1: %v", err)
-	}
-	if err := os.WriteFile(largeVar3, append(repBuf.Bytes(), []byte("variant_v3_code_segment\n")...), 0o755); err != nil {
-		t.Fatalf("failed to write large_v3: %v", err)
-	}
+	require.NoError(t, os.WriteFile(largeVar1, append(repBuf.Bytes(), []byte("variant_v1_code_segment\n")...), 0o755),
+		"failed to write large_v1")
+	require.NoError(t, os.WriteFile(largeVar3, append(repBuf.Bytes(), []byte("variant_v3_code_segment\n")...), 0o755),
+		"failed to write large_v3")
 
 	t.Run("ProfileSize with small variants emits diagnostic warning and proceeds", func(t *testing.T) {
 		t.Parallel()
@@ -2695,9 +2565,7 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 		}
 
 		idx, err := Pack(opts)
-		if err != nil {
-			t.Fatalf("expected Pack to succeed, got error: %v", err)
-		}
+		require.NoError(t, err, "expected Pack to succeed, got error")
 		if idx == nil {
 			t.Fatalf("expected non-nil index")
 		}
@@ -2715,19 +2583,13 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 
 		// Verify produced binary is structurally sound and verifiable
 		f, err := os.Open(outPath)
-		if err != nil {
-			t.Fatalf("failed to open output: %v", err)
-		}
+		require.NoError(t, err, "failed to open output")
 		defer func() { _ = f.Close() }()
 
 		stat, err := f.Stat()
-		if err != nil {
-			t.Fatalf("failed to stat output: %v", err)
-		}
+		require.NoError(t, err, "failed to stat output")
 		vIdx, results, err := VerifyBinary(f, stat.Size())
-		if err != nil {
-			t.Fatalf("VerifyBinary failed: %v", err)
-		}
+		require.NoError(t, err, "VerifyBinary failed")
 		if vIdx.DictionarySize != 0 {
 			t.Errorf("expected 0 DictionarySize in verified index, got %d", vIdx.DictionarySize)
 		}
@@ -2758,9 +2620,7 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 		}
 
 		idx, err := Pack(opts)
-		if err != nil {
-			t.Fatalf("expected Pack to succeed, got error: %v", err)
-		}
+		require.NoError(t, err, "expected Pack to succeed, got error")
 		if idx == nil {
 			t.Fatalf("expected non-nil index")
 		}
@@ -2789,9 +2649,7 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 		}
 
 		idx, err := Pack(opts)
-		if err != nil {
-			t.Fatalf("expected Pack to succeed, got error: %v", err)
-		}
+		require.NoError(t, err, "expected Pack to succeed, got error")
 		if idx == nil {
 			t.Fatalf("expected non-nil index")
 		}
@@ -2826,9 +2684,7 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 		}
 
 		idx, err := Pack(opts)
-		if err != nil {
-			t.Fatalf("expected Pack to succeed, got error: %v", err)
-		}
+		require.NoError(t, err, "expected Pack to succeed, got error")
 		if idx == nil {
 			t.Fatalf("expected non-nil index")
 		}
@@ -2860,9 +2716,7 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 		}
 
 		idx, err := Pack(opts)
-		if err == nil {
-			t.Fatalf("expected Pack to fail, but succeeded with idx: %+v", idx)
-		}
+		require.Errorf(t, err, "expected Pack to fail, but succeeded with idx: %+v", idx)
 		if !strings.Contains(err.Error(), "training shared dictionary: sample data too small for dictionary training (< 8 bytes)") {
 			t.Errorf("error %q does not contain expected message", err.Error())
 		}
@@ -2887,9 +2741,7 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 		}
 
 		_, err := Pack(opts)
-		if err == nil {
-			t.Fatalf("expected Pack to fail for single variant with EnableDict, but got nil error")
-		}
+		require.Error(t, err, "expected Pack to fail for single variant with EnableDict, but got nil error")
 		if !strings.Contains(err.Error(), "training shared dictionary: requires at least two variants") {
 			t.Errorf("error %q does not contain expected message", err.Error())
 		}
@@ -2911,9 +2763,7 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 		}
 
 		_, err := Pack(opts)
-		if err == nil {
-			t.Fatalf("expected Pack to fail on missing variant with EnableDict")
-		}
+		require.Error(t, err, "expected Pack to fail on missing variant with EnableDict")
 		if !strings.Contains(err.Error(), "snapshot variant") {
 			t.Errorf("error %q does not contain sampling variants error", err.Error())
 		}
@@ -2939,9 +2789,7 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 		}
 
 		_, err := Pack(opts)
-		if err == nil {
-			t.Fatalf("expected Pack to fail on missing variant")
-		}
+		require.Error(t, err, "expected Pack to fail on missing variant")
 		if len(warnings) != 0 {
 			t.Fatalf("input rejection must precede dictionary training: %v", warnings)
 		}
@@ -2955,12 +2803,8 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 
 		emptyVar1 := filepath.Join(tempDir, "empty_v1")
 		emptyVar3 := filepath.Join(tempDir, "empty_v3")
-		if err := os.WriteFile(emptyVar1, []byte{}, 0o755); err != nil {
-			t.Fatalf("failed to write empty_v1: %v", err)
-		}
-		if err := os.WriteFile(emptyVar3, []byte{}, 0o755); err != nil {
-			t.Fatalf("failed to write empty_v3: %v", err)
-		}
+		require.NoError(t, os.WriteFile(emptyVar1, []byte{}, 0o755), "failed to write empty_v1")
+		require.NoError(t, os.WriteFile(emptyVar3, []byte{}, 0o755), "failed to write empty_v3")
 
 		var warnings []string
 		outPath := filepath.Join(tempDir, "out_empty_size.fat")
@@ -2993,12 +2837,8 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 
 		emptyVar1 := filepath.Join(tempDir, "empty_v1_fail")
 		emptyVar3 := filepath.Join(tempDir, "empty_v3_fail")
-		if err := os.WriteFile(emptyVar1, []byte{}, 0o755); err != nil {
-			t.Fatalf("failed to write empty_v1: %v", err)
-		}
-		if err := os.WriteFile(emptyVar3, []byte{}, 0o755); err != nil {
-			t.Fatalf("failed to write empty_v3: %v", err)
-		}
+		require.NoError(t, os.WriteFile(emptyVar1, []byte{}, 0o755), "failed to write empty_v1")
+		require.NoError(t, os.WriteFile(emptyVar3, []byte{}, 0o755), "failed to write empty_v3")
 
 		outPath := filepath.Join(tempDir, "out_empty_dict.fat")
 		opts := Options{
@@ -3013,9 +2853,7 @@ func TestAutoDictionaryTrainingDiagnostics(t *testing.T) {
 		}
 
 		_, err := Pack(opts)
-		if err == nil {
-			t.Fatalf("expected Pack to fail on empty variants with EnableDict")
-		}
+		require.Error(t, err, "expected Pack to fail on empty variants with EnableDict")
 		if !strings.Contains(err.Error(), "nonempty regular file") {
 			t.Errorf("error %q does not contain expected message", err.Error())
 		}
@@ -3044,22 +2882,16 @@ func TestPrewarm_RequiresValidDictionaryChecksum(t *testing.T) {
 	opts.SkipELFValidation = true
 
 	_, err := Pack(opts)
-	if err != nil {
-		t.Fatalf("Pack failed: %v", err)
-	}
+	require.NoError(t, err, "Pack failed")
 
 	fatBytes, err := os.ReadFile(fatPath)
-	if err != nil {
-		t.Fatalf("reading fat file: %v", err)
-	}
+	require.NoError(t, err, "reading fat file")
 
 	fatReader := bytes.NewReader(fatBytes)
 	statSize := int64(len(fatBytes))
 
 	origIdx, err := format.ReadTrailerAndIndex(fatReader, statSize)
-	if err != nil {
-		t.Fatalf("ReadTrailerAndIndex failed: %v", err)
-	}
+	require.NoError(t, err, "ReadTrailerAndIndex failed")
 	if origIdx.DictionarySize <= 0 || origIdx.DictionarySHA256 == "" {
 		t.Fatalf("expected packed binary to have shared dictionary with SHA-256")
 	}
@@ -3079,9 +2911,7 @@ func TestPrewarm_RequiresValidDictionaryChecksum(t *testing.T) {
 		}
 
 		f, err := os.CreateTemp(t.TempDir(), "poisoned_dict_*.fat")
-		if err != nil {
-			t.Fatalf("failed to create temp file: %v", err)
-		}
+		require.NoError(t, err, "failed to create temp file")
 		if _, err := f.Write(buf.Bytes()); err != nil {
 			_ = f.Close()
 			t.Fatalf("failed to write temp file: %v", err)
@@ -3125,15 +2955,11 @@ func TestPrewarm_RequiresValidDictionaryChecksum(t *testing.T) {
 		t.Parallel()
 		cacheDir := filepath.Join(t.TempDir(), "cache")
 		f, err := os.Open(fatPath)
-		if err != nil {
-			t.Fatalf("failed to open authentic fat file: %v", err)
-		}
+		require.NoError(t, err, "failed to open authentic fat file")
 		defer func() { _ = f.Close() }()
 
 		idx, results, err := PrewarmBinary(f, statSize, nil, cacheDir)
-		if err != nil {
-			t.Fatalf("expected PrewarmBinary to succeed with authentic dictionary, got: %v", err)
-		}
+		require.NoError(t, err, "expected PrewarmBinary to succeed with authentic dictionary, got")
 		if idx == nil || len(results) != 2 {
 			t.Fatalf("expected 2 prewarm results, got: %v", results)
 		}

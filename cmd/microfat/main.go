@@ -702,6 +702,21 @@ func resolvePrewarmCacheDir(dir string, verifyOnly bool) (string, error) {
 	return format.ResolveCacheDir(dir)
 }
 
+func printPrewarmJSON(idx *format.Index, results []format.PrewarmResult, cacheDir string) error {
+	telem := format.PrewarmTelemetry{
+		Event:             format.EventPrewarm,
+		TimestampUnixNano: time.Now().UnixNano(),
+		AppName:           idx.AppName,
+		CacheDir:          cacheDir,
+		Results:           results,
+	}
+	if err := json.MarshalWrite(os.Stdout, telem, jsontext.WithIndent("  ")); err != nil {
+		return fmt.Errorf("encoding json: %w", err)
+	}
+	fmt.Println()
+	return nil
+}
+
 func newPrewarmCmd() *cobra.Command {
 	var (
 		targetLevel string
@@ -777,17 +792,9 @@ func newPrewarmCmd() *cobra.Command {
 				}
 
 				if jsonOutput {
-					telem := format.PrewarmTelemetry{
-						Event:             format.EventPrewarm,
-						TimestampUnixNano: time.Now().UnixNano(),
-						AppName:           idx.AppName,
-						CacheDir:          resolvedDir,
-						Results:           results,
+					if err := printPrewarmJSON(idx, results, resolvedDir); err != nil {
+						return err
 					}
-					if err := json.MarshalWrite(os.Stdout, telem, jsontext.WithIndent("  ")); err != nil {
-						return fmt.Errorf("encoding json: %w", err)
-					}
-					fmt.Println()
 					if !allValid {
 						return errors.New("cache verification failed for one or more variants")
 					}
@@ -818,18 +825,7 @@ func newPrewarmCmd() *cobra.Command {
 			}
 
 			if jsonOutput {
-				telem := format.PrewarmTelemetry{
-					Event:             format.EventPrewarm,
-					TimestampUnixNano: time.Now().UnixNano(),
-					AppName:           idx.AppName,
-					CacheDir:          resolvedDir,
-					Results:           results,
-				}
-				if err := json.MarshalWrite(os.Stdout, telem, jsontext.WithIndent("  ")); err != nil {
-					return fmt.Errorf("encoding json: %w", err)
-				}
-				fmt.Println()
-				return nil
+				return printPrewarmJSON(idx, results, resolvedDir)
 			}
 
 			fmt.Printf("Prewarming cache for '%s' (%s - %s/%s)...\n", path, idx.AppName, idx.TargetOS, idx.TargetArch)

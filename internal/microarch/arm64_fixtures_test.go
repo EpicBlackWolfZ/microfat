@@ -336,6 +336,7 @@ func TestARM64Fixtures_EvaluationMatches(t *testing.T) {
 	}
 }
 
+//revive:disable-next-line:cyclomatic Keep explicit feature mutations independent of production feature lookup.
 func TestARM64Fixtures_PrerequisiteDegradation(t *testing.T) {
 	t.Parallel()
 

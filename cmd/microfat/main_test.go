@@ -21,6 +21,7 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"github.com/EpicBlackWolfZ/microfat/internal/testutil"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -58,32 +59,24 @@ func TestRootCmdAndSubcommands(t *testing.T) {
 
 	rootVersion := newRootCmd()
 	rootVersion.SetArgs([]string{"--version"})
-	if err := rootVersion.Execute(); err != nil {
-		t.Fatalf("root --version failed: %v", err)
-	}
+	require.NoError(t, rootVersion.Execute(), "root --version failed")
 
 	rootHelp := newRootCmd()
 	rootHelp.SetArgs([]string{})
-	if err := rootHelp.Execute(); err != nil {
-		t.Fatalf("root default execution failed: %v", err)
-	}
+	require.NoError(t, rootHelp.Execute(), "root default execution failed")
 
 	// 2. Test Detect Command
 	detectText := newDetectCmd()
 	detectText.SetArgs([]string{})
 	var detectBuf bytes.Buffer
 	detectText.SetOut(&detectBuf)
-	if err := detectText.Execute(); err != nil {
-		t.Fatalf("detect command failed: %v", err)
-	}
+	require.NoError(t, detectText.Execute(), "detect command failed")
 
 	detectJSON := newDetectCmd()
 	detectJSON.SetArgs([]string{flagJSON})
 	var jsonBuf bytes.Buffer
 	detectJSON.SetOut(&jsonBuf)
-	if err := detectJSON.Execute(); err != nil {
-		t.Fatalf("detect --json command failed: %v", err)
-	}
+	require.NoError(t, detectJSON.Execute(), "detect --json command failed")
 
 	// 3. Create real fat binary for testing inspect, verify, trim
 	stubPath := filepath.Join(tempDir, "stub")
@@ -103,22 +96,16 @@ func TestRootCmdAndSubcommands(t *testing.T) {
 		"-v", "v3=" + v3Path,
 		flagSkipELF,
 	})
-	if err := packCmd.Execute(); err != nil {
-		t.Fatalf("pack command failed: %v", err)
-	}
+	require.NoError(t, packCmd.Execute(), "pack command failed")
 
 	// 4. Test Inspect Command
 	inspectText := newInspectCmd()
 	inspectText.SetArgs([]string{fatPath})
-	if err := inspectText.Execute(); err != nil {
-		t.Fatalf("inspect command failed: %v", err)
-	}
+	require.NoError(t, inspectText.Execute(), "inspect command failed")
 
 	inspectJSON := newInspectCmd()
 	inspectJSON.SetArgs([]string{flagJSON, fatPath})
-	if err := inspectJSON.Execute(); err != nil {
-		t.Fatalf("inspect --json command failed: %v", err)
-	}
+	require.NoError(t, inspectJSON.Execute(), "inspect --json command failed")
 
 	inspectNonFat := newInspectCmd()
 	inspectNonFat.SetArgs([]string{stubPath})
@@ -162,15 +149,11 @@ func TestRootCmdAndSubcommands(t *testing.T) {
 	// 5. Test Verify Command
 	verifyText := newVerifyCmd()
 	verifyText.SetArgs([]string{fatPath})
-	if err := verifyText.Execute(); err != nil {
-		t.Fatalf("verify command failed: %v", err)
-	}
+	require.NoError(t, verifyText.Execute(), "verify command failed")
 
 	verifyJSON := newVerifyCmd()
 	verifyJSON.SetArgs([]string{flagJSON, fatPath})
-	if err := verifyJSON.Execute(); err != nil {
-		t.Fatalf("verify --json command failed: %v", err)
-	}
+	require.NoError(t, verifyJSON.Execute(), "verify --json command failed")
 
 	verifyNonFat := newVerifyCmd()
 	verifyNonFat.SetArgs([]string{stubPath})
@@ -188,9 +171,7 @@ func TestRootCmdAndSubcommands(t *testing.T) {
 	trimmedPath := filepath.Join(tempDir, "trimmed.fat")
 	trimCmd := newTrimCmd()
 	trimCmd.SetArgs([]string{flagLevel, "v1", "-o", trimmedPath, fatPath})
-	if err := trimCmd.Execute(); err != nil {
-		t.Fatalf("trim command failed: %v", err)
-	}
+	require.NoError(t, trimCmd.Execute(), "trim command failed")
 
 	// Test Trim with policy and symlink resolution
 	symlinkFat := filepath.Join(tempDir, "symlink_fat")
@@ -210,9 +191,7 @@ func TestRootCmdAndSubcommands(t *testing.T) {
 	_ = os.WriteFile(fatForInPlaceTrim, dataFat, 0o755)
 	trimInPlaceCmd := newTrimCmd()
 	trimInPlaceCmd.SetArgs([]string{fatForInPlaceTrim})
-	if err := trimInPlaceCmd.Execute(); err != nil {
-		t.Fatalf("trim in-place command failed: %v", err)
-	}
+	require.NoError(t, trimInPlaceCmd.Execute(), "trim in-place command failed")
 
 	// Test trim with invalid level error
 	trimInvalidLevel := newTrimCmd()

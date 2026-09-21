@@ -13,6 +13,8 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"golang.org/x/sys/unix"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestVerifyBinary(t *testing.T) {
@@ -73,11 +75,10 @@ func TestVerifyBinary(t *testing.T) {
 	})
 }
 
+//revive:disable-next-line:cyclomatic Keep the missing, truncated, corrupted and valid cache status matrix explicit.
 func TestVerifyVariant(t *testing.T) {
 	tempDir := t.TempDir()
-	if err := os.Chmod(tempDir, 0o700); err != nil {
-		t.Fatalf("chmod tempDir: %v", err)
-	}
+	require.NoError(t, os.Chmod(tempDir, 0o700), "chmod tempDir")
 	payload := []byte("cache test variant payload")
 	h := sha256.Sum256(payload)
 	validSHA := hex.EncodeToString(h[:])
@@ -108,9 +109,7 @@ func TestVerifyVariant(t *testing.T) {
 
 	t.Run("InsecurePermissionsCacheDir", func(t *testing.T) {
 		insecureDir := filepath.Join(tempDir, "insecure_perms")
-		if err := os.MkdirAll(insecureDir, 0o777); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(insecureDir, 0o777), "mkdir")
 		_ = os.Chmod(insecureDir, 0o777)
 		res := VerifyVariant(entry, insecureDir)
 		if res.Valid || res.Status != format.PrewarmStatusCorrupted {
@@ -120,13 +119,9 @@ func TestVerifyVariant(t *testing.T) {
 
 	t.Run("SymlinkCacheDir", func(t *testing.T) {
 		realDir := filepath.Join(tempDir, "real_cache")
-		if err := os.MkdirAll(realDir, 0o700); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(realDir, 0o700), "mkdir")
 		symlinkDir := filepath.Join(tempDir, "symlink_cache")
-		if err := os.Symlink(realDir, symlinkDir); err != nil {
-			t.Fatalf("symlink: %v", err)
-		}
+		require.NoError(t, os.Symlink(realDir, symlinkDir), "symlink")
 		res := VerifyVariant(entry, symlinkDir)
 		if res.Valid || res.Status != format.PrewarmStatusCorrupted {
 			t.Errorf("expected status 'corrupted' for symlink cacheDir root, got %+v", res)
@@ -135,13 +130,9 @@ func TestVerifyVariant(t *testing.T) {
 
 	t.Run("SymlinkCacheDirWithTrailingSlash", func(t *testing.T) {
 		realDir := filepath.Join(tempDir, "real_cache_slash")
-		if err := os.MkdirAll(realDir, 0o700); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(realDir, 0o700), "mkdir")
 		symlinkDir := filepath.Join(tempDir, "symlink_cache_slash")
-		if err := os.Symlink(realDir, symlinkDir); err != nil {
-			t.Fatalf("symlink: %v", err)
-		}
+		require.NoError(t, os.Symlink(realDir, symlinkDir), "symlink")
 		res := VerifyVariant(entry, symlinkDir+"/")
 		if res.Valid || res.Status != format.PrewarmStatusCorrupted {
 			t.Errorf("expected status 'corrupted' for symlink cacheDir root with trailing slash, got %+v", res)
@@ -166,13 +157,9 @@ func TestVerifyVariant(t *testing.T) {
 
 	t.Run("TruncatedBinary", func(t *testing.T) {
 		cacheDir := filepath.Join(tempDir, "trunc_dir")
-		if err := os.MkdirAll(cacheDir, 0o700); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(cacheDir, 0o700), "mkdir")
 		targetPath := filepath.Join(cacheDir, entry.SHA256)
-		if err := os.WriteFile(targetPath, []byte("short"), 0o700); err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		require.NoError(t, os.WriteFile(targetPath, []byte("short"), 0o700), "write")
 
 		res := VerifyVariant(entry, cacheDir)
 		if res.Valid || res.Status != format.PrewarmStatusCorrupted || !res.AlreadyCached {
@@ -186,14 +173,10 @@ func TestVerifyVariant(t *testing.T) {
 
 	t.Run("CorruptedBinary", func(t *testing.T) {
 		cacheDir := filepath.Join(tempDir, "corrupt_dir")
-		if err := os.MkdirAll(cacheDir, 0o700); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(cacheDir, 0o700), "mkdir")
 		targetPath := filepath.Join(cacheDir, entry.SHA256)
 		corruptBytes := bytes.Repeat([]byte{0xEE}, int(entry.UncompressedSize))
-		if err := os.WriteFile(targetPath, corruptBytes, 0o700); err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		require.NoError(t, os.WriteFile(targetPath, corruptBytes, 0o700), "write")
 
 		res := VerifyVariant(entry, cacheDir)
 		if res.Valid || res.Status != format.PrewarmStatusCorrupted || !res.AlreadyCached {
@@ -207,13 +190,9 @@ func TestVerifyVariant(t *testing.T) {
 
 	t.Run("ValidBinary", func(t *testing.T) {
 		cacheDir := filepath.Join(tempDir, "valid_dir")
-		if err := os.MkdirAll(cacheDir, 0o700); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(cacheDir, 0o700), "mkdir")
 		targetPath := filepath.Join(cacheDir, entry.SHA256)
-		if err := os.WriteFile(targetPath, payload, 0o700); err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		require.NoError(t, os.WriteFile(targetPath, payload, 0o700), "write")
 
 		res := VerifyVariant(entry, cacheDir)
 		if !res.Valid || res.Status != format.PrewarmStatusValid || !res.AlreadyCached {
@@ -222,6 +201,7 @@ func TestVerifyVariant(t *testing.T) {
 	})
 }
 
+//revive:disable-next-line:cyclomatic Keep descriptor lifetime, unlink replacement and purge decisions visible in the same fixture matrix.
 func TestOpenAndValidateFD_LifecycleAndPurge(t *testing.T) {
 	t.Parallel()
 
@@ -258,9 +238,7 @@ func TestOpenAndValidateFD_LifecycleAndPurge(t *testing.T) {
 
 	t.Run("NonRegularDirectory_NeverPurged", func(t *testing.T) {
 		dirPath := filepath.Join(tempDir, "test_dir_target")
-		if err := os.MkdirAll(dirPath, 0o700); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(dirPath, 0o700), "mkdir")
 
 		fd, err := OpenAndValidateFD(dirPath, validSize, validSHA, true)
 		if !errors.Is(err, ErrNonRegularFile) {
@@ -279,9 +257,7 @@ func TestOpenAndValidateFD_LifecycleAndPurge(t *testing.T) {
 
 	t.Run("TruncatedFile_PurgedWhenRequested", func(t *testing.T) {
 		path := filepath.Join(tempDir, "trunc_purge_test")
-		if err := os.WriteFile(path, []byte("short"), 0o700); err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		require.NoError(t, os.WriteFile(path, []byte("short"), 0o700), "write")
 
 		fd, err := OpenAndValidateFD(path, validSize, validSHA, true)
 		if !errors.Is(err, ErrSizeMismatch) {
@@ -299,9 +275,7 @@ func TestOpenAndValidateFD_LifecycleAndPurge(t *testing.T) {
 
 	t.Run("TruncatedFile_RetainedWhenNotRequested", func(t *testing.T) {
 		path := filepath.Join(tempDir, "trunc_retain_test")
-		if err := os.WriteFile(path, []byte("short"), 0o700); err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		require.NoError(t, os.WriteFile(path, []byte("short"), 0o700), "write")
 
 		fd, err := OpenAndValidateFD(path, validSize, validSHA, false)
 		if !errors.Is(err, ErrSizeMismatch) {
@@ -320,9 +294,7 @@ func TestOpenAndValidateFD_LifecycleAndPurge(t *testing.T) {
 	t.Run("CorruptedFile_PurgedWhenRequested", func(t *testing.T) {
 		path := filepath.Join(tempDir, "corrupt_purge_test")
 		tampered := bytes.Repeat([]byte{0x77}, int(validSize))
-		if err := os.WriteFile(path, tampered, 0o700); err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		require.NoError(t, os.WriteFile(path, tampered, 0o700), "write")
 
 		fd, err := OpenAndValidateFD(path, validSize, validSHA, true)
 		if !errors.Is(err, ErrChecksumMismatch) {
@@ -340,9 +312,7 @@ func TestOpenAndValidateFD_LifecycleAndPurge(t *testing.T) {
 
 	t.Run("ValidFile_PinnedOpenFD", func(t *testing.T) {
 		path := filepath.Join(tempDir, "valid_pinned_test")
-		if err := os.WriteFile(path, payload, 0o700); err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		require.NoError(t, os.WriteFile(path, payload, 0o700), "write")
 
 		entry := &format.VariantEntry{
 			Level:            "v1",
@@ -351,9 +321,7 @@ func TestOpenAndValidateFD_LifecycleAndPurge(t *testing.T) {
 		}
 
 		fd, err := OpenAndValidateVariantFD(path, entry, true)
-		if err != nil {
-			t.Fatalf("expected success, got: %v", err)
-		}
+		require.NoError(t, err, "expected success, got")
 		_ = closeFD(fd)
 
 		fd2, err2 := OpenAndValidateVariantFDWithOpener(path, entry, true, OpenFileFunc)
@@ -371,9 +339,7 @@ func TestOpenAndValidateFD_LifecycleAndPurge(t *testing.T) {
 
 	t.Run("ValidFile_DescriptorPinningSurvivesUnlinkAndReplace", func(t *testing.T) {
 		path := filepath.Join(tempDir, "pinning_unlink_test")
-		if err := os.WriteFile(path, payload, 0o700); err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		require.NoError(t, os.WriteFile(path, payload, 0o700), "write")
 
 		entry := &format.VariantEntry{
 			Level:            "v1",
@@ -382,20 +348,14 @@ func TestOpenAndValidateFD_LifecycleAndPurge(t *testing.T) {
 		}
 
 		fd, err := OpenAndValidateVariantFD(path, entry, true)
-		if err != nil {
-			t.Fatalf("expected success, got: %v", err)
-		}
+		require.NoError(t, err, "expected success, got")
 		defer func() { _ = closeFD(fd) }()
 
 		// Attacker replaces pathname by renaming a tampered file over it
 		tamperedBytes := bytes.Repeat([]byte{0xBA, 0xAD}, int(validSize))
 		tamperedPath := path + ".tampered"
-		if err := os.WriteFile(tamperedPath, tamperedBytes, 0o700); err != nil {
-			t.Fatalf("write tampered replacement: %v", err)
-		}
-		if err := os.Rename(tamperedPath, path); err != nil {
-			t.Fatalf("rename over path: %v", err)
-		}
+		require.NoError(t, os.WriteFile(tamperedPath, tamperedBytes, 0o700), "write tampered replacement")
+		require.NoError(t, os.Rename(tamperedPath, path), "rename over path")
 
 		// Verify that reading from the pinned FD still yields the EXACT original validated bytes
 		readBuf := make([]byte, validSize)
@@ -411,9 +371,7 @@ func TestOpenAndValidateFD_LifecycleAndPurge(t *testing.T) {
 		}
 
 		// Also test unlinking completely
-		if err := os.Remove(path); err != nil {
-			t.Fatalf("unlink path: %v", err)
-		}
+		require.NoError(t, os.Remove(path), "unlink path")
 
 		// The unlinked descriptor remains completely readable and valid
 		n2, preadErr2 := unix.Pread(fd, readBuf, 0)
@@ -428,9 +386,7 @@ func TestOpenAndValidateAtFD_LifecycleAndPurge(t *testing.T) {
 
 	tempDir := t.TempDir()
 	dirFD, err := unix.Open(tempDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
-	if err != nil {
-		t.Fatalf("open tempDir: %v", err)
-	}
+	require.NoError(t, err, "open tempDir")
 	defer func() { _ = unix.Close(dirFD) }()
 
 	payload := []byte("descriptor-bound at-fd lifecycle test content 12345")
@@ -465,22 +421,16 @@ func TestOpenAndValidateAtFD_LifecycleAndPurge(t *testing.T) {
 
 	t.Run("NilOpenerDefaultsToOpenFileAtFunc", func(t *testing.T) {
 		fileName := "nil_opener_test"
-		if err := os.WriteFile(filepath.Join(tempDir, fileName), payload, 0o700); err != nil {
-			t.Fatalf("write file: %v", err)
-		}
+		require.NoError(t, os.WriteFile(filepath.Join(tempDir, fileName), payload, 0o700), "write file")
 		fd, err := OpenAndValidateAtFDWithOpener(dirFD, fileName, validSize, validSHA, false, nil)
-		if err != nil {
-			t.Fatalf("expected nil opener to use default opener, got: %v", err)
-		}
+		require.NoError(t, err, "expected nil opener to use default opener, got")
 		_ = closeFD(fd)
 	})
 
 	t.Run("NonRegularDirectory_NeverPurged", func(t *testing.T) {
 		subDirName := "test_subdir_target"
 		subDirPath := filepath.Join(tempDir, subDirName)
-		if err := os.MkdirAll(subDirPath, 0o700); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(subDirPath, 0o700), "mkdir")
 
 		fd, err := OpenAndValidateAtFD(dirFD, subDirName, validSize, validSHA, true)
 		if !errors.Is(err, ErrNonRegularFile) {
@@ -500,9 +450,7 @@ func TestOpenAndValidateAtFD_LifecycleAndPurge(t *testing.T) {
 	t.Run("TruncatedFile_PurgedWhenRequested", func(t *testing.T) {
 		fileName := "trunc_purge_at_test"
 		filePath := filepath.Join(tempDir, fileName)
-		if err := os.WriteFile(filePath, []byte("short"), 0o700); err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		require.NoError(t, os.WriteFile(filePath, []byte("short"), 0o700), "write")
 
 		fd, err := OpenAndValidateAtFD(dirFD, fileName, validSize, validSHA, true)
 		if !errors.Is(err, ErrSizeMismatch) {
@@ -521,9 +469,7 @@ func TestOpenAndValidateAtFD_LifecycleAndPurge(t *testing.T) {
 	t.Run("TruncatedFile_RetainedWhenNotRequested", func(t *testing.T) {
 		fileName := "trunc_retain_at_test"
 		filePath := filepath.Join(tempDir, fileName)
-		if err := os.WriteFile(filePath, []byte("short"), 0o700); err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		require.NoError(t, os.WriteFile(filePath, []byte("short"), 0o700), "write")
 
 		fd, err := OpenAndValidateAtFD(dirFD, fileName, validSize, validSHA, false)
 		if !errors.Is(err, ErrSizeMismatch) {
@@ -543,9 +489,7 @@ func TestOpenAndValidateAtFD_LifecycleAndPurge(t *testing.T) {
 		fileName := "corrupt_purge_at_test"
 		filePath := filepath.Join(tempDir, fileName)
 		tampered := bytes.Repeat([]byte{0x77}, int(validSize))
-		if err := os.WriteFile(filePath, tampered, 0o700); err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		require.NoError(t, os.WriteFile(filePath, tampered, 0o700), "write")
 
 		fd, err := OpenAndValidateAtFD(dirFD, fileName, validSize, validSHA, true)
 		if !errors.Is(err, ErrChecksumMismatch) {
@@ -564,9 +508,7 @@ func TestOpenAndValidateAtFD_LifecycleAndPurge(t *testing.T) {
 	t.Run("ValidFile_VariantEntryAndOpener", func(t *testing.T) {
 		fileName := "valid_variant_at_test"
 		filePath := filepath.Join(tempDir, fileName)
-		if err := os.WriteFile(filePath, payload, 0o700); err != nil {
-			t.Fatalf("write: %v", err)
-		}
+		require.NoError(t, os.WriteFile(filePath, payload, 0o700), "write")
 
 		entry := &format.VariantEntry{
 			Level:            "v1",
@@ -575,29 +517,22 @@ func TestOpenAndValidateAtFD_LifecycleAndPurge(t *testing.T) {
 		}
 
 		fd, err := OpenAndValidateVariantAtFD(dirFD, fileName, entry, true)
-		if err != nil {
-			t.Fatalf("expected success with OpenAndValidateVariantAtFD, got: %v", err)
-		}
+		require.NoError(t, err, "expected success with OpenAndValidateVariantAtFD, got")
 		_ = closeFD(fd)
 
 		fd2, err := OpenAndValidateVariantAtFDWithOpener(dirFD, fileName, entry, true, OpenFileAtFunc)
-		if err != nil {
-			t.Fatalf("expected success with OpenAndValidateVariantAtFDWithOpener, got: %v", err)
-		}
+		require.NoError(t, err, "expected success with OpenAndValidateVariantAtFDWithOpener, got")
 		_ = closeFD(fd2)
 	})
 }
 
+//revive:disable-next-line:cyclomatic Keep write, checksum, rename and post-rename fault injection beside temporary-file cleanup assertions.
 func TestMaterializeVariantAtFD(t *testing.T) {
 	tempDir := t.TempDir()
-	if err := os.Chmod(tempDir, 0o700); err != nil {
-		t.Fatalf("chmod: %v", err)
-	}
+	require.NoError(t, os.Chmod(tempDir, 0o700), "chmod")
 
 	dirFD, err := unix.Open(tempDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
-	if err != nil {
-		t.Fatalf("open dirFD: %v", err)
-	}
+	require.NoError(t, err, "open dirFD")
 	defer func() { _ = unix.Close(dirFD) }()
 
 	payload := []byte("materialize-test-payload-bytes-1234567890")
@@ -616,9 +551,7 @@ func TestMaterializeVariantAtFD(t *testing.T) {
 			_, writeErr := w.Write(payload)
 			return writeErr
 		})
-		if err != nil {
-			t.Fatalf("unexpected error from MaterializeVariantAtFD: %v", err)
-		}
+		require.NoError(t, err, "unexpected error from MaterializeVariantAtFD")
 		expectedPath := filepath.Join(tempDir, validSHA)
 		if path != expectedPath {
 			t.Errorf("expected path %q, got %q", expectedPath, path)
@@ -626,18 +559,14 @@ func TestMaterializeVariantAtFD(t *testing.T) {
 
 		// Verify content
 		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("failed reading materialized file: %v", err)
-		}
+		require.NoError(t, err, "failed reading materialized file")
 		if !bytes.Equal(data, payload) {
 			t.Errorf("content mismatch")
 		}
 
 		// Verify permissions (0700)
 		fi, err := os.Stat(path)
-		if err != nil {
-			t.Fatalf("stat: %v", err)
-		}
+		require.NoError(t, err, "stat")
 		if fi.Mode().Perm() != 0o700 {
 			t.Errorf("expected permissions 0700, got %04o", fi.Mode().Perm())
 		}
@@ -646,21 +575,15 @@ func TestMaterializeVariantAtFD(t *testing.T) {
 	t.Run("AtomicOverwrite_CorruptedFile", func(t *testing.T) {
 		targetPath := filepath.Join(tempDir, validSHA)
 		corrupt := bytes.Repeat([]byte{0xAA}, int(validSize))
-		if err := os.WriteFile(targetPath, corrupt, 0o700); err != nil {
-			t.Fatalf("write corrupted: %v", err)
-		}
+		require.NoError(t, os.WriteFile(targetPath, corrupt, 0o700), "write corrupted")
 
 		path, err := MaterializeVariantAtFD(dirFD, tempDir, entry, func(w io.Writer) error {
 			_, writeErr := w.Write(payload)
 			return writeErr
 		})
-		if err != nil {
-			t.Fatalf("unexpected error on atomic overwrite: %v", err)
-		}
+		require.NoError(t, err, "unexpected error on atomic overwrite")
 		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("reading overwritten file: %v", err)
-		}
+		require.NoError(t, err, "reading overwritten file")
 		if !bytes.Equal(data, payload) {
 			t.Errorf("expected recovered payload, got corrupted data")
 		}
@@ -746,22 +669,14 @@ func TestMaterializeVariantAtFD(t *testing.T) {
 
 	t.Run("RenameFailure_CleansUpTemp", func(t *testing.T) {
 		renameSubDir := filepath.Join(tempDir, "rename_sub")
-		if err := os.MkdirAll(renameSubDir, 0o700); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(renameSubDir, 0o700), "mkdir")
 		renameFD, err := unix.Open(renameSubDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
-		if err != nil {
-			t.Fatalf("open: %v", err)
-		}
+		require.NoError(t, err, "open")
 		defer func() { _ = unix.Close(renameFD) }()
 
 		dirTarget := filepath.Join(renameSubDir, validSHA)
-		if err := os.MkdirAll(dirTarget, 0o700); err != nil {
-			t.Fatalf("mkdir dirTarget: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dirTarget, "child"), []byte("data"), 0o600); err != nil {
-			t.Fatalf("write child: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(dirTarget, 0o700), "mkdir dirTarget")
+		require.NoError(t, os.WriteFile(filepath.Join(dirTarget, "child"), []byte("data"), 0o600), "write child")
 
 		_, err = MaterializeVariantAtFD(renameFD, renameSubDir, entry, func(w io.Writer) error {
 			_, writeErr := w.Write(payload)
@@ -782,13 +697,9 @@ func TestMaterializeVariantAtFD(t *testing.T) {
 
 	t.Run("PostRenameValidationFailure_PurgesCorruptedTarget", func(t *testing.T) {
 		failSubDir := filepath.Join(tempDir, "fail_sub")
-		if err := os.MkdirAll(failSubDir, 0o700); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(failSubDir, 0o700), "mkdir")
 		failFD, err := unix.Open(failSubDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
-		if err != nil {
-			t.Fatalf("open: %v", err)
-		}
+		require.NoError(t, err, "open")
 		defer func() { _ = unix.Close(failFD) }()
 
 		origOpener := OpenFileAtFunc

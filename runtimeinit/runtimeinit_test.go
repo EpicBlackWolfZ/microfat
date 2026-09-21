@@ -13,11 +13,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
 	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -785,18 +785,10 @@ func TestAutoTune_WithCgroupRoot_MemoryHighFilesystem(t *testing.T) {
 		expectedCPUs     = 2
 	)
 
-	if err := os.WriteFile(v2MemMax, []byte("max\n"), testFilePerm); err != nil {
-		t.Fatalf("writing memory.max: %v", err)
-	}
-	if err := os.WriteFile(v2MemHigh, []byte(testMemHighStr+"\n"), testFilePerm); err != nil {
-		t.Fatalf("writing memory.high: %v", err)
-	}
-	if err := os.WriteFile(v2CPUMax, []byte(testCPUQuota+"\n"), testFilePerm); err != nil {
-		t.Fatalf("writing cpu.max: %v", err)
-	}
-	if err := os.WriteFile(procFile, []byte("0::/\n"), testFilePerm); err != nil {
-		t.Fatalf("writing proc_cgroup: %v", err)
-	}
+	require.NoError(t, os.WriteFile(v2MemMax, []byte("max\n"), testFilePerm), "writing memory.max")
+	require.NoError(t, os.WriteFile(v2MemHigh, []byte(testMemHighStr+"\n"), testFilePerm), "writing memory.high")
+	require.NoError(t, os.WriteFile(v2CPUMax, []byte(testCPUQuota+"\n"), testFilePerm), "writing cpu.max")
+	require.NoError(t, os.WriteFile(procFile, []byte("0::/\n"), testFilePerm), "writing proc_cgroup")
 
 	origReadFrom := readLimitsFromFunc
 	readLimitsFromFunc = func(root string) (cgroup.Limits, error) {
@@ -862,9 +854,7 @@ func TestAutoTune_DiagnosticsLogging(t *testing.T) {
 			cleanJSON := strings.TrimPrefix(strings.TrimSpace(output), "[microfat] ")
 
 			var telem Telemetry
-			if err := json.Unmarshal([]byte(cleanJSON), &telem); err != nil {
-				t.Fatalf("unmarshaling json telemetry: %v", err)
-			}
+			require.NoError(t, json.Unmarshal([]byte(cleanJSON), &telem), "unmarshaling json telemetry")
 			if telem.Event != eventRuntimeInit {
 				t.Errorf("expected event %s, got %s", eventRuntimeInit, telem.Event)
 			}
@@ -940,9 +930,7 @@ func TestAutoTune_DiagnosticsLogging(t *testing.T) {
 			output := stderrBuf.String()
 			cleanJSON := strings.TrimPrefix(strings.TrimSpace(output), "[microfat] ")
 			var telem Telemetry
-			if err := json.Unmarshal([]byte(cleanJSON), &telem); err != nil {
-				t.Fatalf("unmarshaling json telemetry: %v", err)
-			}
+			require.NoError(t, json.Unmarshal([]byte(cleanJSON), &telem), "unmarshaling json telemetry")
 			if telem.ConstrainingLimit != cgroup.LimitConstraintHigh {
 				t.Errorf("expected telem.ConstrainingLimit 'high', got %q", telem.ConstrainingLimit)
 			}

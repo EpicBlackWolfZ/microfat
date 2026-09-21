@@ -7,8 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
+//revive:disable-next-line:cyclomatic Keep the ordered release lifecycle and launcher meta-command outcomes visible together.
 func TestLifecycleReleaseSmoke(t *testing.T) {
 	t.Parallel()
 
@@ -18,17 +21,13 @@ func TestLifecycleReleaseSmoke(t *testing.T) {
 		fatPath := filepath.Join(tempDir, "lifecycle.fat")
 
 		// 1. Pack
-		if err := packBinary(cliPath, stubPath, "lifecycle-app", fatPath, goldenVariantBins); err != nil {
-			t.Fatalf("microfat pack failed: %v", err)
-		}
+		require.NoError(t, packBinary(cliPath, stubPath, "lifecycle-app", fatPath, goldenVariantBins), "microfat pack failed")
 
 		// 2. Inspect CLI command
 		inspectCmd := exec.Command(cliPath, "inspect", fatPath)
 		var inspectBuf bytes.Buffer
 		inspectCmd.Stdout = &inspectBuf
-		if err := inspectCmd.Run(); err != nil {
-			t.Fatalf("microfat inspect failed: %v", err)
-		}
+		require.NoError(t, inspectCmd.Run(), "microfat inspect failed")
 		inspectOut := inspectBuf.String()
 		if !strings.Contains(inspectOut, "App Name:          lifecycle-app") || !strings.Contains(inspectOut, currentHostLevel) {
 			t.Fatalf("unexpected inspect output:\n%s", inspectOut)
@@ -99,13 +98,9 @@ func TestLifecycleReleaseSmoke(t *testing.T) {
 		}
 
 		trimmedStat, err := os.Stat(trimmedPath)
-		if err != nil {
-			t.Fatalf("stat trimmed binary: %v", err)
-		}
+		require.NoError(t, err, "stat trimmed binary")
 		originalStat, err := os.Stat(goldenFatBin)
-		if err != nil {
-			t.Fatalf("stat original fat binary: %v", err)
-		}
+		require.NoError(t, err, "stat original fat binary")
 
 		if trimmedStat.Size() >= originalStat.Size() {
 			t.Fatalf("expected trimmed size (%d) to be smaller than fat binary (%d)", trimmedStat.Size(), originalStat.Size())
@@ -130,9 +125,7 @@ func TestLifecycleReleaseSmoke(t *testing.T) {
 		}
 
 		matStat, err := os.Stat(matPath)
-		if err != nil {
-			t.Fatalf("stat materialized binary: %v", err)
-		}
+		require.NoError(t, err, "stat materialized binary")
 		if matStat.Size() == 0 {
 			t.Fatalf("materialized binary is empty")
 		}

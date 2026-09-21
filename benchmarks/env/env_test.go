@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
+
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -75,36 +77,20 @@ func TestCustomDetector_MockCgroupV2_FiniteLimits(t *testing.T) {
 	procDir := filepath.Join(tmpDir, "proc")
 	sysDir := filepath.Join(tmpDir, "sys")
 
-	if err := os.MkdirAll(cgroupRoot, 0o755); err != nil {
-		t.Fatalf("mkdir cgroupRoot: %v", err)
-	}
-	if err := os.MkdirAll(procDir, 0o755); err != nil {
-		t.Fatalf("mkdir procDir: %v", err)
-	}
-	if err := os.MkdirAll(sysDir, 0o755); err != nil {
-		t.Fatalf("mkdir sysDir: %v", err)
-	}
+	require.NoError(t, os.MkdirAll(cgroupRoot, 0o755), "mkdir cgroupRoot")
+	require.NoError(t, os.MkdirAll(procDir, 0o755), "mkdir procDir")
+	require.NoError(t, os.MkdirAll(sysDir, 0o755), "mkdir sysDir")
 
-	if err := os.WriteFile(filepath.Join(cgroupRoot, cgroupV2ControllersFile), []byte("cpu memory\n"), 0o600); err != nil {
-		t.Fatalf("writing controllers: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(cgroupRoot, cgroupV2MemoryMaxFile), []byte("1073741824\n"), 0o600); err != nil {
-		t.Fatalf("writing memory.max: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(cgroupRoot, cgroupV2CPUMaxFile), []byte("200000 100000\n"), 0o600); err != nil {
-		t.Fatalf("writing cpu.max: %v", err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(cgroupRoot, cgroupV2ControllersFile), []byte("cpu memory\n"), 0o600), "writing controllers")
+	require.NoError(t, os.WriteFile(filepath.Join(cgroupRoot, cgroupV2MemoryMaxFile), []byte("1073741824\n"), 0o600), "writing memory.max")
+	require.NoError(t, os.WriteFile(filepath.Join(cgroupRoot, cgroupV2CPUMaxFile), []byte("200000 100000\n"), 0o600), "writing cpu.max")
 
 	procCgroupPath := filepath.Join(procDir, "self_cgroup")
-	if err := os.WriteFile(procCgroupPath, []byte("0::/\n"), 0o600); err != nil {
-		t.Fatalf("writing proc cgroup: %v", err)
-	}
+	require.NoError(t, os.WriteFile(procCgroupPath, []byte("0::/\n"), 0o600), "writing proc cgroup")
 
 	detector := NewCustomDetector(cgroupRoot, procCgroupPath, procDir, sysDir)
 	snap, err := detector.Detect()
-	if err != nil {
-		t.Fatalf("detect failed: %v", err)
-	}
+	require.NoError(t, err, "detect failed")
 
 	if snap.Host.Cgroup.Version != cgroupVersionV2 {
 		t.Errorf("expected version %s, got %s", cgroupVersionV2, snap.Host.Cgroup.Version)
@@ -254,39 +240,21 @@ func TestCustomDetector_MockCgroupV1(t *testing.T) {
 	procDir := filepath.Join(tmpDir, "proc")
 	sysDir := filepath.Join(tmpDir, "sys")
 
-	if err := os.MkdirAll(memDir, 0o755); err != nil {
-		t.Fatalf("mkdir memDir: %v", err)
-	}
-	if err := os.MkdirAll(cpuDir, 0o755); err != nil {
-		t.Fatalf("mkdir cpuDir: %v", err)
-	}
-	if err := os.MkdirAll(procDir, 0o755); err != nil {
-		t.Fatalf("mkdir procDir: %v", err)
-	}
-	if err := os.MkdirAll(sysDir, 0o755); err != nil {
-		t.Fatalf("mkdir sysDir: %v", err)
-	}
+	require.NoError(t, os.MkdirAll(memDir, 0o755), "mkdir memDir")
+	require.NoError(t, os.MkdirAll(cpuDir, 0o755), "mkdir cpuDir")
+	require.NoError(t, os.MkdirAll(procDir, 0o755), "mkdir procDir")
+	require.NoError(t, os.MkdirAll(sysDir, 0o755), "mkdir sysDir")
 
-	if err := os.WriteFile(filepath.Join(memDir, cgroupV1MemoryLimitFile), []byte("536870912\n"), 0o600); err != nil {
-		t.Fatalf("writing v1 memory.limit: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(cpuDir, cgroupV1CPUQuotaFile), []byte("40000\n"), 0o600); err != nil {
-		t.Fatalf("writing v1 cpu quota: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(cpuDir, cgroupV1CPUPeriodFile), []byte("100000\n"), 0o600); err != nil {
-		t.Fatalf("writing v1 cpu period: %v", err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(memDir, cgroupV1MemoryLimitFile), []byte("536870912\n"), 0o600), "writing v1 memory.limit")
+	require.NoError(t, os.WriteFile(filepath.Join(cpuDir, cgroupV1CPUQuotaFile), []byte("40000\n"), 0o600), "writing v1 cpu quota")
+	require.NoError(t, os.WriteFile(filepath.Join(cpuDir, cgroupV1CPUPeriodFile), []byte("100000\n"), 0o600), "writing v1 cpu period")
 
 	procCgroupPath := filepath.Join(procDir, "self_cgroup")
-	if err := os.WriteFile(procCgroupPath, []byte("2:memory:/sub\n1:cpu:/sub\n"), 0o600); err != nil {
-		t.Fatalf("writing proc cgroup: %v", err)
-	}
+	require.NoError(t, os.WriteFile(procCgroupPath, []byte("2:memory:/sub\n1:cpu:/sub\n"), 0o600), "writing proc cgroup")
 
 	detector := NewCustomDetector(cgroupRoot, procCgroupPath, procDir, sysDir)
 	snap, err := detector.Detect()
-	if err != nil {
-		t.Fatalf("detect failed: %v", err)
-	}
+	require.NoError(t, err, "detect failed")
 
 	if snap.Host.Cgroup.Version != cgroupVersionV1 {
 		t.Errorf("expected version %s, got %s", cgroupVersionV1, snap.Host.Cgroup.Version)
@@ -374,40 +342,22 @@ func TestCustomDetector_HybridCgroup_PrefersV1WhenV1MountPresent(t *testing.T) {
 	procDir := filepath.Join(tmpDir, "proc")
 	sysDir := filepath.Join(tmpDir, "sys")
 
-	if err := os.MkdirAll(memDir, 0o755); err != nil {
-		t.Fatalf("mkdir memDir: %v", err)
-	}
-	if err := os.MkdirAll(cpuDir, 0o755); err != nil {
-		t.Fatalf("mkdir cpuDir: %v", err)
-	}
-	if err := os.MkdirAll(procDir, 0o755); err != nil {
-		t.Fatalf("mkdir procDir: %v", err)
-	}
-	if err := os.MkdirAll(sysDir, 0o755); err != nil {
-		t.Fatalf("mkdir sysDir: %v", err)
-	}
+	require.NoError(t, os.MkdirAll(memDir, 0o755), "mkdir memDir")
+	require.NoError(t, os.MkdirAll(cpuDir, 0o755), "mkdir cpuDir")
+	require.NoError(t, os.MkdirAll(procDir, 0o755), "mkdir procDir")
+	require.NoError(t, os.MkdirAll(sysDir, 0o755), "mkdir sysDir")
 
-	if err := os.WriteFile(filepath.Join(memDir, cgroupV1MemoryLimitFile), []byte("536870912\n"), 0o600); err != nil {
-		t.Fatalf("writing v1 memory.limit: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(cpuDir, cgroupV1CPUQuotaFile), []byte("40000\n"), 0o600); err != nil {
-		t.Fatalf("writing v1 cpu quota: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(cpuDir, cgroupV1CPUPeriodFile), []byte("100000\n"), 0o600); err != nil {
-		t.Fatalf("writing v1 cpu period: %v", err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(memDir, cgroupV1MemoryLimitFile), []byte("536870912\n"), 0o600), "writing v1 memory.limit")
+	require.NoError(t, os.WriteFile(filepath.Join(cpuDir, cgroupV1CPUQuotaFile), []byte("40000\n"), 0o600), "writing v1 cpu quota")
+	require.NoError(t, os.WriteFile(filepath.Join(cpuDir, cgroupV1CPUPeriodFile), []byte("100000\n"), 0o600), "writing v1 cpu period")
 
 	// Contains both cgroup v2 (0::) and v1 controller hierarchies
 	procCgroupPath := filepath.Join(procDir, "self_cgroup")
-	if err := os.WriteFile(procCgroupPath, []byte("2:memory:/sub\n1:cpu:/sub\n0::/sub\n"), 0o600); err != nil {
-		t.Fatalf("writing proc cgroup: %v", err)
-	}
+	require.NoError(t, os.WriteFile(procCgroupPath, []byte("2:memory:/sub\n1:cpu:/sub\n0::/sub\n"), 0o600), "writing proc cgroup")
 
 	detector := NewCustomDetector(cgroupRoot, procCgroupPath, procDir, sysDir)
 	snap, err := detector.Detect()
-	if err != nil {
-		t.Fatalf("detect failed: %v", err)
-	}
+	require.NoError(t, err, "detect failed")
 
 	if snap.Host.Cgroup.Version != cgroupVersionV1 {
 		t.Errorf("expected version %s for hybrid system with v1 controllers, got %s",
@@ -434,9 +384,7 @@ func TestCustomDetector_InaccessibleAndCorruptedCgroup(t *testing.T) {
 		t.Parallel()
 		d := NewCustomDetector("/nonexistent/cgroup/mount", "/nonexistent/proc", "/nonexistent/proc", "/nonexistent/sys")
 		snap, err := d.Detect()
-		if err != nil {
-			t.Fatalf("expected no fatal error, got %v", err)
-		}
+		require.NoError(t, err, "expected no fatal error, got")
 		if snap.Host.Cgroup.Version != cgroupVersionUnavailable {
 			t.Errorf("expected %s, got %s", cgroupVersionUnavailable, snap.Host.Cgroup.Version)
 		}
@@ -456,9 +404,7 @@ func TestCustomDetector_InaccessibleAndCorruptedCgroup(t *testing.T) {
 		tmpDir := t.TempDir()
 		d := NewCustomDetector(tmpDir, filepath.Join(tmpDir, "proc_cgroup"), tmpDir, tmpDir)
 		snap, err := d.Detect()
-		if err != nil {
-			t.Fatalf("expected no fatal error, got %v", err)
-		}
+		require.NoError(t, err, "expected no fatal error, got")
 		if snap.Host.Cgroup.Version != cgroupVersionUnavailable {
 			t.Errorf("expected %s, got %s", cgroupVersionUnavailable, snap.Host.Cgroup.Version)
 		}
@@ -467,21 +413,13 @@ func TestCustomDetector_InaccessibleAndCorruptedCgroup(t *testing.T) {
 	t.Run("cgroup_v2_corrupted_limits", func(t *testing.T) {
 		t.Parallel()
 		tmpDir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(tmpDir, cgroupV2ControllersFile), []byte("cpu memory\n"), 0o600); err != nil {
-			t.Fatalf("write controllers: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(tmpDir, cgroupV2MemoryMaxFile), []byte("not_a_number\n"), 0o600); err != nil {
-			t.Fatalf("write memory.max: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(tmpDir, cgroupV2CPUMaxFile), []byte("invalid_format\n"), 0o600); err != nil {
-			t.Fatalf("write cpu.max: %v", err)
-		}
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, cgroupV2ControllersFile), []byte("cpu memory\n"), 0o600), "write controllers")
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, cgroupV2MemoryMaxFile), []byte("not_a_number\n"), 0o600), "write memory.max")
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, cgroupV2CPUMaxFile), []byte("invalid_format\n"), 0o600), "write cpu.max")
 
 		d := NewCustomDetector(tmpDir, filepath.Join(tmpDir, "nonexistent_proc_cgroup"), tmpDir, tmpDir)
 		snap, err := d.Detect()
-		if err != nil {
-			t.Fatalf("detect failed: %v", err)
-		}
+		require.NoError(t, err, "detect failed")
 		if snap.Host.Cgroup.MemoryMaxBytes.State != schema.LimitStateUnavailable {
 			t.Errorf("expected unavailable memory limit, got %s", snap.Host.Cgroup.MemoryMaxBytes.State)
 		}
@@ -495,29 +433,17 @@ func TestCustomDetector_InaccessibleAndCorruptedCgroup(t *testing.T) {
 		tmpDir := t.TempDir()
 		memDir := filepath.Join(tmpDir, "memory")
 		cpuDir := filepath.Join(tmpDir, "cpu")
-		if err := os.MkdirAll(memDir, 0o755); err != nil {
-			t.Fatalf("mkdir memDir: %v", err)
-		}
-		if err := os.MkdirAll(cpuDir, 0o755); err != nil {
-			t.Fatalf("mkdir cpuDir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(memDir, cgroupV1MemoryLimitFile), []byte("not_a_number\n"), 0o600); err != nil {
-			t.Fatalf("write memory.limit: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(cpuDir, cgroupV1CPUQuotaFile), []byte("bad_quota\n"), 0o600); err != nil {
-			t.Fatalf("write cpu quota: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(memDir, 0o755), "mkdir memDir")
+		require.NoError(t, os.MkdirAll(cpuDir, 0o755), "mkdir cpuDir")
+		require.NoError(t, os.WriteFile(filepath.Join(memDir, cgroupV1MemoryLimitFile), []byte("not_a_number\n"), 0o600), "write memory.limit")
+		require.NoError(t, os.WriteFile(filepath.Join(cpuDir, cgroupV1CPUQuotaFile), []byte("bad_quota\n"), 0o600), "write cpu quota")
 
 		procCgroupPath := filepath.Join(tmpDir, "proc_cgroup")
-		if err := os.WriteFile(procCgroupPath, []byte("2:memory:/\n1:cpu:/\n"), 0o600); err != nil {
-			t.Fatalf("write proc cgroup: %v", err)
-		}
+		require.NoError(t, os.WriteFile(procCgroupPath, []byte("2:memory:/\n1:cpu:/\n"), 0o600), "write proc cgroup")
 
 		d := NewCustomDetector(tmpDir, procCgroupPath, tmpDir, tmpDir)
 		snap, err := d.Detect()
-		if err != nil {
-			t.Fatalf("detect failed: %v", err)
-		}
+		require.NoError(t, err, "detect failed")
 		if snap.Host.Cgroup.MemoryMaxBytes.State != schema.LimitStateUnavailable {
 			t.Errorf("expected unavailable memory limit, got %s", snap.Host.Cgroup.MemoryMaxBytes.State)
 		}
@@ -535,28 +461,14 @@ func TestCustomDetector_MockHardwareDiscovery(t *testing.T) {
 	sysDir := filepath.Join(tmpDir, "sys")
 	cgroupDir := filepath.Join(tmpDir, "cgroup")
 
-	if err := os.MkdirAll(procDir, 0o755); err != nil {
-		t.Fatalf("mkdir proc: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(procDir, "sys/kernel"), 0o755); err != nil {
-		t.Fatalf("mkdir sys/kernel: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(sysDir, "devices/system/node/node0"), 0o755); err != nil {
-		t.Fatalf("mkdir node0: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(sysDir, "devices/system/node/node1"), 0o755); err != nil {
-		t.Fatalf("mkdir node1: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(sysDir, "devices/system/cpu/cpu0/cpufreq"), 0o755); err != nil {
-		t.Fatalf("mkdir cpufreq: %v", err)
-	}
-	if err := os.MkdirAll(cgroupDir, 0o755); err != nil {
-		t.Fatalf("mkdir cgroup: %v", err)
-	}
+	require.NoError(t, os.MkdirAll(procDir, 0o755), "mkdir proc")
+	require.NoError(t, os.MkdirAll(filepath.Join(procDir, "sys/kernel"), 0o755), "mkdir sys/kernel")
+	require.NoError(t, os.MkdirAll(filepath.Join(sysDir, "devices/system/node/node0"), 0o755), "mkdir node0")
+	require.NoError(t, os.MkdirAll(filepath.Join(sysDir, "devices/system/node/node1"), 0o755), "mkdir node1")
+	require.NoError(t, os.MkdirAll(filepath.Join(sysDir, "devices/system/cpu/cpu0/cpufreq"), 0o755), "mkdir cpufreq")
+	require.NoError(t, os.MkdirAll(cgroupDir, 0o755), "mkdir cgroup")
 
-	if err := os.WriteFile(filepath.Join(procDir, "sys/kernel/osrelease"), []byte("6.8.0-test\n"), 0o600); err != nil {
-		t.Fatalf("write osrelease: %v", err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "sys/kernel/osrelease"), []byte("6.8.0-test\n"), 0o600), "write osrelease")
 
 	cpuinfoContent := `processor	: 0
 model name	: Test Virtual CPU
@@ -570,34 +482,22 @@ physical id	: 1
 cpu cores	: 4
 flags		: fpu vme de sse sse2 avx avx2
 `
-	if err := os.WriteFile(filepath.Join(procDir, "cpuinfo"), []byte(cpuinfoContent), 0o600); err != nil {
-		t.Fatalf("write cpuinfo: %v", err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "cpuinfo"), []byte(cpuinfoContent), 0o600), "write cpuinfo")
 
 	meminfoContent := `MemTotal:       16384000 kB
 MemFree:         8192000 kB
 MemAvailable:   12288000 kB
 `
-	if err := os.WriteFile(filepath.Join(procDir, "meminfo"), []byte(meminfoContent), 0o600); err != nil {
-		t.Fatalf("write meminfo: %v", err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "meminfo"), []byte(meminfoContent), 0o600), "write meminfo")
 
 	freqDir := filepath.Join(sysDir, "devices/system/cpu/cpu0/cpufreq")
-	if err := os.WriteFile(filepath.Join(freqDir, "scaling_governor"), []byte("performance\n"), 0o600); err != nil {
-		t.Fatalf("write governor: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(freqDir, "scaling_min_freq"), []byte("800000\n"), 0o600); err != nil {
-		t.Fatalf("write min_freq: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(freqDir, "scaling_max_freq"), []byte("4200000\n"), 0o600); err != nil {
-		t.Fatalf("write max_freq: %v", err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(freqDir, "scaling_governor"), []byte("performance\n"), 0o600), "write governor")
+	require.NoError(t, os.WriteFile(filepath.Join(freqDir, "scaling_min_freq"), []byte("800000\n"), 0o600), "write min_freq")
+	require.NoError(t, os.WriteFile(filepath.Join(freqDir, "scaling_max_freq"), []byte("4200000\n"), 0o600), "write max_freq")
 
 	detector := NewCustomDetector(cgroupDir, filepath.Join(procDir, "self_cgroup"), procDir, sysDir)
 	snap, err := detector.Detect()
-	if err != nil {
-		t.Fatalf("detect failed: %v", err)
-	}
+	require.NoError(t, err, "detect failed")
 
 	if snap.Host.KernelRelease != "6.8.0-test" {
 		t.Errorf("expected kernel release 6.8.0-test, got %s", snap.Host.KernelRelease)

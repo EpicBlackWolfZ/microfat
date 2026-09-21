@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -1066,22 +1068,14 @@ func TestReadLimitsCgroupV1Nested_AliasedCpuController(t *testing.T) {
 func TestReadLimitsProcCgroup_EdgeCases(t *testing.T) {
 	tempDir := t.TempDir()
 	cgroupRoot := filepath.Join(tempDir, "sys_fs_cgroup")
-	if err := os.MkdirAll(cgroupRoot, 0o755); err != nil {
-		t.Fatalf("mkdir cgroupRoot: %v", err)
-	}
+	require.NoError(t, os.MkdirAll(cgroupRoot, 0o755), "mkdir cgroupRoot")
 
-	if err := os.WriteFile(filepath.Join(cgroupRoot, "memory.max"), []byte("1073741824\n"), 0o600); err != nil {
-		t.Fatalf("writing root memory.max: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(cgroupRoot, "cpu.max"), []byte("200000 100000\n"), 0o600); err != nil {
-		t.Fatalf("writing root cpu.max: %v", err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(cgroupRoot, "memory.max"), []byte("1073741824\n"), 0o600), "writing root memory.max")
+	require.NoError(t, os.WriteFile(filepath.Join(cgroupRoot, "cpu.max"), []byte("200000 100000\n"), 0o600), "writing root cpu.max")
 
 	t.Run("MissingProcFileReturnsVersionUnknown", func(t *testing.T) {
 		limits, err := ReadLimitsCustom(cgroupRoot, filepath.Join(tempDir, "non_existent_proc"))
-		if err == nil {
-			t.Fatalf("expected error on missing proc file")
-		}
+		require.Error(t, err, "expected error on missing proc file")
 		if limits.CgroupVersion != VersionUnknown {
 			t.Errorf("expected VersionUnknown on missing proc, got %d", limits.CgroupVersion)
 		}
@@ -1098,14 +1092,10 @@ func TestReadLimitsProcCgroup_EdgeCases(t *testing.T) {
 	t.Run("MalformedLinesAndCommentsWithValidEntry", func(t *testing.T) {
 		corruptProc := filepath.Join(t.TempDir(), "corrupt_proc")
 		corruptContent := "# Comment header\n\nmalformed_line_no_colons\n1:only_two_parts\n:::\n0::/\n"
-		if err := os.WriteFile(corruptProc, []byte(corruptContent), 0o600); err != nil {
-			t.Fatalf("writing corruptProc: %v", err)
-		}
+		require.NoError(t, os.WriteFile(corruptProc, []byte(corruptContent), 0o600), "writing corruptProc")
 
 		limits, err := ReadLimitsCustom(cgroupRoot, corruptProc)
-		if err != nil {
-			t.Fatalf("ReadLimitsCustom failed on corrupt proc with valid entry: %v", err)
-		}
+		require.NoError(t, err, "ReadLimitsCustom failed on corrupt proc with valid entry")
 		if limits.MemoryLimitBytes != testBytes1GB {
 			t.Errorf("expected root memory %d, got %d", testBytes1GB, limits.MemoryLimitBytes)
 		}
@@ -1114,14 +1104,10 @@ func TestReadLimitsProcCgroup_EdgeCases(t *testing.T) {
 	t.Run("ProcFileWithNoValidEntriesFails", func(t *testing.T) {
 		invalidProc := filepath.Join(t.TempDir(), "invalid_proc")
 		invalidContent := "# Only comments\n\nmalformed_line_no_colons\n1:only_two_parts\n"
-		if err := os.WriteFile(invalidProc, []byte(invalidContent), 0o600); err != nil {
-			t.Fatalf("writing invalidProc: %v", err)
-		}
+		require.NoError(t, os.WriteFile(invalidProc, []byte(invalidContent), 0o600), "writing invalidProc")
 
 		limits, err := ReadLimitsCustom(cgroupRoot, invalidProc)
-		if err == nil {
-			t.Fatalf("expected error on proc with no valid entries")
-		}
+		require.Error(t, err, "expected error on proc with no valid entries")
 		if limits.CgroupVersion != VersionUnknown {
 			t.Errorf("expected VersionUnknown, got %d", limits.CgroupVersion)
 		}
@@ -1133,14 +1119,10 @@ func TestReadLimitsProcCgroup_EdgeCases(t *testing.T) {
 	t.Run("PathEscapeSanitization", func(t *testing.T) {
 		escapeProc := filepath.Join(t.TempDir(), "escape_proc")
 		escapeContent := "0::../../../../../../etc\n"
-		if err := os.WriteFile(escapeProc, []byte(escapeContent), 0o600); err != nil {
-			t.Fatalf("writing escapeProc: %v", err)
-		}
+		require.NoError(t, os.WriteFile(escapeProc, []byte(escapeContent), 0o600), "writing escapeProc")
 
 		limits, err := ReadLimitsCustom(cgroupRoot, escapeProc)
-		if err == nil {
-			t.Fatalf("expected error on path escape attempt")
-		}
+		require.Error(t, err, "expected error on path escape attempt")
 		if limits.CgroupVersion != VersionUnknown {
 			t.Errorf("expected VersionUnknown on escape attempt, got %d", limits.CgroupVersion)
 		}
@@ -1152,14 +1134,10 @@ func TestReadLimitsProcCgroup_EdgeCases(t *testing.T) {
 	t.Run("NonExistentHierarchySubpathFails", func(t *testing.T) {
 		missingSubpathProc := filepath.Join(t.TempDir(), "missing_subpath_proc")
 		procContent := "0::/docker/non_existent_container_id\n"
-		if err := os.WriteFile(missingSubpathProc, []byte(procContent), 0o600); err != nil {
-			t.Fatalf("writing missingSubpathProc: %v", err)
-		}
+		require.NoError(t, os.WriteFile(missingSubpathProc, []byte(procContent), 0o600), "writing missingSubpathProc")
 
 		limits, err := ReadLimitsCustom(cgroupRoot, missingSubpathProc)
-		if err == nil {
-			t.Fatalf("expected error on missing cgroup subpath")
-		}
+		require.Error(t, err, "expected error on missing cgroup subpath")
 		if limits.CgroupVersion != VersionUnknown {
 			t.Errorf("expected VersionUnknown on missing hierarchy, got %d", limits.CgroupVersion)
 		}
@@ -1198,25 +1176,16 @@ func TestCgroupV1FlatLayoutAndEdgeCases(t *testing.T) {
 	t.Run("FlatV1MountAtRoot", func(t *testing.T) {
 		tempDir := t.TempDir()
 		procFile := filepath.Join(tempDir, "proc_cgroup")
-		if err := os.WriteFile(procFile, []byte("1:memory:/\n2:cpu:/\n"), 0o600); err != nil {
-			t.Fatalf("writing procFile: %v", err)
-		}
+		require.NoError(t, os.WriteFile(procFile, []byte("1:memory:/\n2:cpu:/\n"), 0o600), "writing procFile")
 
 		// Write limit files directly at root of tempDir (flat v1 mount)
-		if err := os.WriteFile(filepath.Join(tempDir, "memory.limit_in_bytes"), []byte("1073741824\n"), 0o600); err != nil {
-			t.Fatalf("writing memory.limit_in_bytes: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(tempDir, "cpu.cfs_quota_us"), []byte("200000\n"), 0o600); err != nil {
-			t.Fatalf("writing cpu.cfs_quota_us: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(tempDir, "cpu.cfs_period_us"), []byte("100000\n"), 0o600); err != nil {
-			t.Fatalf("writing cpu.cfs_period_us: %v", err)
-		}
+		require.NoError(t, os.WriteFile(filepath.Join(tempDir, "memory.limit_in_bytes"), []byte("1073741824\n"), 0o600),
+			"writing memory.limit_in_bytes")
+		require.NoError(t, os.WriteFile(filepath.Join(tempDir, "cpu.cfs_quota_us"), []byte("200000\n"), 0o600), "writing cpu.cfs_quota_us")
+		require.NoError(t, os.WriteFile(filepath.Join(tempDir, "cpu.cfs_period_us"), []byte("100000\n"), 0o600), "writing cpu.cfs_period_us")
 
 		limits, err := ReadLimitsCustom(tempDir, procFile)
-		if err != nil {
-			t.Fatalf("ReadLimitsCustom failed on flat v1 layout: %v", err)
-		}
+		require.NoError(t, err, "ReadLimitsCustom failed on flat v1 layout")
 		if limits.CgroupVersion != VersionV1 {
 			t.Errorf("expected VersionV1, got %d", limits.CgroupVersion)
 		}
@@ -1231,9 +1200,7 @@ func TestCgroupV1FlatLayoutAndEdgeCases(t *testing.T) {
 	t.Run("V1UnlimitedQuotaAndMemory", func(t *testing.T) {
 		tempDir := t.TempDir()
 		procFile := filepath.Join(tempDir, "proc_cgroup")
-		if err := os.WriteFile(procFile, []byte("1:memory:/\n2:cpu:/\n"), 0o600); err != nil {
-			t.Fatalf("writing procFile: %v", err)
-		}
+		require.NoError(t, os.WriteFile(procFile, []byte("1:memory:/\n2:cpu:/\n"), 0o600), "writing procFile")
 
 		memDir := filepath.Join(tempDir, "memory")
 		cpuDir := filepath.Join(tempDir, "cpu")
@@ -1245,9 +1212,7 @@ func TestCgroupV1FlatLayoutAndEdgeCases(t *testing.T) {
 		_ = os.WriteFile(filepath.Join(cpuDir, "cpu.cfs_period_us"), []byte("100000\n"), 0o600)
 
 		limits, err := ReadLimitsCustom(tempDir, procFile)
-		if err != nil {
-			t.Fatalf("ReadLimitsCustom failed on v1 unlimited: %v", err)
-		}
+		require.NoError(t, err, "ReadLimitsCustom failed on v1 unlimited")
 		if limits.MemoryLimitBytes != 0 {
 			t.Errorf("expected MemoryLimitBytes 0 on -1, got %d", limits.MemoryLimitBytes)
 		}

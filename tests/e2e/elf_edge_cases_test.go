@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestELFEdgeCases(t *testing.T) {
@@ -15,15 +17,11 @@ func TestELFEdgeCases(t *testing.T) {
 		tempDir := t.TempDir()
 		strippedBinPath := filepath.Join(tempDir, "stripped_v1")
 		ldflags := "-ldflags=-s -w -X main.Variant=v1"
-		if err := compileBinaryWithFlags(goldenAppPkg, strippedBinPath, nil, ldflags); err != nil {
-			t.Fatalf("compiling stripped variant: %v", err)
-		}
+		require.NoError(t, compileBinaryWithFlags(goldenAppPkg, strippedBinPath, nil, ldflags), "compiling stripped variant")
 
 		fatPath := filepath.Join(tempDir, "stripped.fat")
 		variants := map[string]string{"v1": strippedBinPath}
-		if err := packBinary(cliPath, stubPath, "stripped-app", fatPath, variants); err != nil {
-			t.Fatalf("packing stripped ELF binary: %v", err)
-		}
+		require.NoError(t, packBinary(cliPath, stubPath, "stripped-app", fatPath, variants), "packing stripped ELF binary")
 
 		stdout, stderr, exitCode, err := executeFatBinary(t, fatPath, nil)
 		if err != nil || exitCode != defaultExitCode {
@@ -39,15 +37,11 @@ func TestELFEdgeCases(t *testing.T) {
 		tempDir := t.TempDir()
 		pieBinPath := filepath.Join(tempDir, "pie_v1")
 		flags := []string{"-buildmode=pie", "-ldflags=-s -w -X main.Variant=v1"}
-		if err := compileBinaryWithFlags(goldenAppPkg, pieBinPath, nil, flags...); err != nil {
-			t.Fatalf("compiling PIE variant: %v", err)
-		}
+		require.NoError(t, compileBinaryWithFlags(goldenAppPkg, pieBinPath, nil, flags...), "compiling PIE variant")
 
 		fatPath := filepath.Join(tempDir, "pie.fat")
 		variants := map[string]string{"v1": pieBinPath}
-		if err := packBinary(cliPath, stubPath, "pie-app", fatPath, variants); err != nil {
-			t.Fatalf("packing PIE binary: %v", err)
-		}
+		require.NoError(t, packBinary(cliPath, stubPath, "pie-app", fatPath, variants), "packing PIE binary")
 
 		stdout, stderr, exitCode, err := executeFatBinary(t, fatPath, nil)
 		if err != nil || exitCode != defaultExitCode {
@@ -63,16 +57,12 @@ func TestELFEdgeCases(t *testing.T) {
 		tempDir := t.TempDir()
 		fakeBinPath := filepath.Join(tempDir, "script.sh")
 		scriptContent := "#!/bin/sh\necho 'hello world'\n"
-		if err := os.WriteFile(fakeBinPath, []byte(scriptContent), defaultFilePerm); err != nil {
-			t.Fatalf("writing non-ELF file: %v", err)
-		}
+		require.NoError(t, os.WriteFile(fakeBinPath, []byte(scriptContent), defaultFilePerm), "writing non-ELF file")
 
 		fatPath := filepath.Join(tempDir, "non_elf.fat")
 		variants := map[string]string{"v1": fakeBinPath}
 		err := packBinary(cliPath, stubPath, "non-elf-app", fatPath, variants)
-		if err == nil {
-			t.Fatalf("expected microfat pack to reject non-ELF input, but succeeded")
-		}
+		require.Error(t, err, "expected microfat pack to reject non-ELF input, but succeeded")
 		if !strings.Contains(err.Error(), "invalid ELF") && !strings.Contains(err.Error(), "bad magic") {
 			t.Fatalf("expected invalid ELF error, got: %v", err)
 		}
@@ -96,9 +86,7 @@ func TestELFEdgeCases(t *testing.T) {
 		fatPath := filepath.Join(tempDir, "arch_mismatch.fat")
 		variants := map[string]string{"v1": foreignBinPath}
 		err := packBinary(cliPath, stubPath, "arch-mismatch-app", fatPath, variants)
-		if err == nil {
-			t.Fatalf("expected microfat pack to reject foreign architecture ELF, but succeeded")
-		}
+		require.Error(t, err, "expected microfat pack to reject foreign architecture ELF, but succeeded")
 		if !strings.Contains(err.Error(), "architecture") && !strings.Contains(err.Error(), "match") {
 			t.Fatalf("expected architecture mismatch error, got: %v", err)
 		}

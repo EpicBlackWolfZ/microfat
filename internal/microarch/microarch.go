@@ -560,6 +560,8 @@ func Normalize(level string) string {
 
 // Rank maps a normalized level string to an integer rank for comparison.
 // Returns -1 if the level is unknown.
+//
+//revive:disable-next-line:cyclomatic Keep the static architecture rank mapping explicit; Revive counts default arms unlike gocyclo.
 func Rank(arch, level string) int {
 	norm := Normalize(level)
 	switch strings.ToLower(arch) {
@@ -949,6 +951,7 @@ func findMissingARM64Features(required []string, f ARM64Features) []string {
 	return missing
 }
 
+//revive:disable-next-line:cyclomatic Keep the static feature mapping explicit without reflection or runtime dispatch tables.
 func hasARM64NamedFeature(name string, f ARM64Features) bool {
 	switch name {
 	case "fp":

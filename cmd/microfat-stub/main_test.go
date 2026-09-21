@@ -25,6 +25,9 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/testutil"
 	"github.com/klauspost/compress/zstd"
 	"golang.org/x/sys/unix"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -104,80 +107,28 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 
 	// 1. Standard auto-tune with metadata injection
 	env, _ := buildAutoTunedEnviron("", base, entry, format.ExecModeMemfd, hostInfo, testPolicyRes)
-	hasVariant := false
-	hasHostArch := false
-	hasHostLevel := false
-	hasExecMode := false
-	hasDispatchMode := false
-	hasSHA := false
-	hasSize := false
-	hasPolicyApplied := false
-	hasOverrideReason := false
-	for _, e := range env {
-		if e == "MICROFAT_SELECTED_VARIANT=v3" {
-			hasVariant = true
-		}
-		if e == "MICROFAT_HOST_ARCH=amd64" {
-			hasHostArch = true
-		}
-		if e == "MICROFAT_HOST_LEVEL=v3" {
-			hasHostLevel = true
-		}
-		if e == "MICROFAT_EXEC_MODE=memfd" {
-			hasExecMode = true
-		}
-		if e == "MICROFAT_DISPATCH_MODE=memfd" {
-			hasDispatchMode = true
-		}
-		if e == "MICROFAT_SELECTED_SHA256=abcdef123456" {
-			hasSHA = true
-		}
-		if e == "MICROFAT_SELECTED_SIZE=1000" {
-			hasSize = true
-		}
-		if e == "MICROFAT_POLICY_APPLIED=force_level" {
-			hasPolicyApplied = true
-		}
-		if e == "MICROFAT_OVERRIDE_REASON=MICROFAT_FORCE_LEVEL=v3" {
-			hasOverrideReason = true
-		}
-	}
-	hasAllFlags := hasVariant && hasHostArch && hasHostLevel && hasExecMode &&
-		hasDispatchMode && hasSHA && hasSize && hasPolicyApplied && hasOverrideReason
-	if !hasAllFlags {
-		t.Errorf("expected telemetry and policy env vars in env: %v", env)
-	}
+	assert.Subset(t, env, []string{
+		"MICROFAT_SELECTED_VARIANT=v3", "MICROFAT_HOST_ARCH=amd64", "MICROFAT_HOST_LEVEL=v3",
+		"MICROFAT_EXEC_MODE=memfd", "MICROFAT_DISPATCH_MODE=memfd", "MICROFAT_SELECTED_SHA256=abcdef123456",
+		"MICROFAT_SELECTED_SIZE=1000", "MICROFAT_POLICY_APPLIED=force_level",
+		"MICROFAT_OVERRIDE_REASON=MICROFAT_FORCE_LEVEL=v3",
+	})
 
 	// 2. Opt-out via MICROFAT_AUTOTUNE=0
 	t.Setenv("MICROFAT_AUTOTUNE", "0")
 	envOptOut, _ := buildAutoTunedEnviron("", base, entry, format.ExecModeCache, hostInfo, microarch.PolicyResult{})
-	if len(envOptOut) < len(base)+7 { // base + 7 injected metadata vars
-		t.Errorf("expected opt-out env to have at least len %d, got %d", len(base)+7, len(envOptOut))
-	}
+	assert.GreaterOrEqual(t, len(envOptOut), len(base)+7, "base plus seven injected metadata variables")
 
 	// 3. Opt-out via MICROFAT_AUTOTUNE=false
 	t.Setenv("MICROFAT_AUTOTUNE", "false")
 	envFalse, _ := buildAutoTunedEnviron("", base, entry, format.ExecModeCache, hostInfo, microarch.PolicyResult{})
-	if len(envFalse) != len(envOptOut) {
-		t.Errorf("expected opt-out false to match length")
-	}
+	assert.Len(t, envFalse, len(envOptOut), "both opt-out spellings preserve metadata")
 
 	// 4. Preserve existing GOMEMLIMIT and GOMAXPROCS
 	t.Setenv("MICROFAT_AUTOTUNE", "1")
 	existing := []string{"GOMEMLIMIT=1GiB", "GOMAXPROCS=8"}
 	envPreserve, _ := buildAutoTunedEnviron("", existing, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
-	var foundMem, foundProcs bool
-	for _, e := range envPreserve {
-		if e == "GOMEMLIMIT=1GiB" {
-			foundMem = true
-		}
-		if e == "GOMAXPROCS=8" {
-			foundProcs = true
-		}
-	}
-	if !foundMem || !foundProcs {
-		t.Errorf("failed to preserve existing user env: %v", envPreserve)
-	}
+	assert.Subset(t, envPreserve, existing, "preserve user runtime settings")
 
 	// 5. Custom memory ratio variations
 	t.Setenv("MICROFAT_MEM_RATIO", "0.85")
@@ -202,13 +153,11 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 	}
 	t.Setenv(format.EnvDebug, "1")
 	envErr, limitsErr := buildAutoTunedEnviron("", []string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
-	if limitsErr != nil {
-		t.Fatalf("expected nil limits on cgroup read error, got %+v", limitsErr)
-	}
+	require.Nil(t, limitsErr, "failed cgroup inspection must not yield active limits")
 	for _, e := range envErr {
-		if strings.HasPrefix(e, "GOMEMLIMIT=") || strings.HasPrefix(e, "GOMAXPROCS=") || strings.HasPrefix(e, "MICROFAT_CGROUP_") {
-			t.Errorf("unexpected autotuning var in env on cgroup read error: %s", e)
-		}
+		assert.False(t, strings.HasPrefix(e, "GOMEMLIMIT="), e)
+		assert.False(t, strings.HasPrefix(e, "GOMAXPROCS="), e)
+		assert.False(t, strings.HasPrefix(e, "MICROFAT_CGROUP_"), e)
 	}
 
 	// cgroup unknown version
@@ -218,13 +167,11 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 	envUnknown, limitsUnknown := buildAutoTunedEnviron(
 		"", []string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{},
 	)
-	if limitsUnknown != nil {
-		t.Fatalf("expected nil limits on VersionUnknown, got %+v", limitsUnknown)
-	}
+	require.Nil(t, limitsUnknown, "unknown cgroups must not yield active limits")
 	for _, e := range envUnknown {
-		if strings.HasPrefix(e, "GOMEMLIMIT=") || strings.HasPrefix(e, "GOMAXPROCS=") || strings.HasPrefix(e, "MICROFAT_CGROUP_") {
-			t.Errorf("unexpected autotuning var in env on VersionUnknown: %s", e)
-		}
+		assert.False(t, strings.HasPrefix(e, "GOMEMLIMIT="), e)
+		assert.False(t, strings.HasPrefix(e, "GOMAXPROCS="), e)
+		assert.False(t, strings.HasPrefix(e, "MICROFAT_CGROUP_"), e)
 	}
 	t.Setenv(format.EnvDebug, "")
 
@@ -238,63 +185,30 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 	}
 
 	envCgroup, limits := buildAutoTunedEnviron("", []string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
-	if limits == nil || limits.CgroupVersion != cgroup.VersionV2 {
-		t.Fatalf("expected active cgroup limits, got %+v", limits)
-	}
-	var foundAutoMem, foundAutoCPU, foundCgroupVer, foundCgroupMem, foundCgroupCPU bool
-	for _, e := range envCgroup {
-		if strings.HasPrefix(e, "GOMEMLIMIT=") {
-			foundAutoMem = true
-		}
-		if strings.HasPrefix(e, "GOMAXPROCS=4") {
-			foundAutoCPU = true
-		}
-		if e == "MICROFAT_CGROUP_VERSION=2" {
-			foundCgroupVer = true
-		}
-		if e == "MICROFAT_CGROUP_LIMIT_BYTES=1073741824" {
-			foundCgroupMem = true
-		}
-		if e == "MICROFAT_CGROUP_CPUS=4.00" {
-			foundCgroupCPU = true
-		}
-	}
-	if !foundAutoMem || !foundAutoCPU || !foundCgroupVer || !foundCgroupMem || !foundCgroupCPU {
-		t.Errorf("expected auto-tuned GOMEMLIMIT, GOMAXPROCS, and cgroup telemetry in env: %v", envCgroup)
-	}
+	require.NotNil(t, limits)
+	require.Equal(t, cgroup.VersionV2, limits.CgroupVersion)
+	assert.True(t, slices.ContainsFunc(envCgroup, func(e string) bool { return strings.HasPrefix(e, "GOMEMLIMIT=") }))
+	assert.Contains(t, envCgroup, "GOMAXPROCS=4")
+	assert.Subset(t, envCgroup, []string{
+		"MICROFAT_CGROUP_VERSION=2", "MICROFAT_CGROUP_LIMIT_BYTES=1073741824", "MICROFAT_CGROUP_CPUS=4.00",
+	})
 
 	// 6b. Test dry-run simulation via MICROFAT_DRY_RUN
 	for _, dryRunVal := range []string{"1", "true", "TRUE"} {
 		t.Setenv("MICROFAT_AUTOTUNE", "1")
 		t.Setenv("MICROFAT_DRY_RUN", dryRunVal)
 		envDry, limitsDry := buildAutoTunedEnviron("", []string{testPathEnv}, entry, format.ExecModeMemfd, hostInfo, microarch.PolicyResult{})
-		if limitsDry == nil || limitsDry.CgroupVersion != cgroup.VersionV2 {
-			t.Fatalf("expected active cgroup limits in dry-run mode for %q, got %+v", dryRunVal, limitsDry)
-		}
-		var foundDryCgroupVer, foundDryCgroupMem, foundDryCgroupCPU bool
+		require.NotNil(t, limitsDry, dryRunVal)
+		require.Equal(t, cgroup.VersionV2, limitsDry.CgroupVersion, dryRunVal)
 		for _, e := range envDry {
-			if strings.HasPrefix(e, "GOMEMLIMIT=") {
-				t.Errorf("unexpected GOMEMLIMIT injected under dry-run %q: %s", dryRunVal, e)
-			}
-			if strings.HasPrefix(e, "GOMAXPROCS=") {
-				t.Errorf("unexpected GOMAXPROCS injected under dry-run %q: %s", dryRunVal, e)
-			}
-			if strings.HasPrefix(e, "GOGC=") {
-				t.Errorf("unexpected GOGC injected under dry-run %q: %s", dryRunVal, e)
-			}
-			if e == "MICROFAT_CGROUP_VERSION=2" {
-				foundDryCgroupVer = true
-			}
-			if strings.HasPrefix(e, "MICROFAT_CGROUP_GOMEMLIMIT=") {
-				foundDryCgroupMem = true
-			}
-			if e == "MICROFAT_CGROUP_GOMAXPROCS=4" {
-				foundDryCgroupCPU = true
-			}
+			assert.False(t, strings.HasPrefix(e, "GOMEMLIMIT="), "%s: %s", dryRunVal, e)
+			assert.False(t, strings.HasPrefix(e, "GOMAXPROCS="), "%s: %s", dryRunVal, e)
+			assert.False(t, strings.HasPrefix(e, "GOGC="), "%s: %s", dryRunVal, e)
 		}
-		if !foundDryCgroupVer || !foundDryCgroupMem || !foundDryCgroupCPU {
-			t.Errorf("expected cgroup simulation vars populated under dry-run %q: %v", dryRunVal, envDry)
-		}
+		assert.Subset(t, envDry, []string{"MICROFAT_CGROUP_VERSION=2", "MICROFAT_CGROUP_GOMAXPROCS=4"}, dryRunVal)
+		assert.True(t, slices.ContainsFunc(envDry, func(e string) bool {
+			return strings.HasPrefix(e, "MICROFAT_CGROUP_GOMEMLIMIT=")
+		}), dryRunVal)
 	}
 	t.Setenv("MICROFAT_DRY_RUN", "")
 
@@ -609,38 +523,28 @@ func TestRunBinaryMetaCommands(t *testing.T) {
 		SkipELFValidation: true,
 		Variants:          map[string]string{"v1": v1Path},
 	})
-	if err != nil {
-		t.Fatalf("pack failed: %v", err)
-	}
+	require.NoError(t, err, "pack failed")
 
 	oldArgs := os.Args
 	defer func() { os.Args = oldArgs }()
 
 	// 1. --microfat:help
 	os.Args = []string{fatPath, "--microfat:help"}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("runBinary --microfat:help failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "runBinary --microfat:help failed")
 
 	// 2. --microfat:info
 	os.Args = []string{fatPath, "--microfat:info"}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("runBinary --microfat:info failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "runBinary --microfat:info failed")
 
 	// 3. --microfat:trim-to
 	destTrim := filepath.Join(tempDir, "trimmed_via_run")
 	os.Args = []string{fatPath, "--microfat:trim-to=" + destTrim}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("runBinary --microfat:trim-to failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "runBinary --microfat:trim-to failed")
 
 	// 3b. --microfat:specialize-to alias
 	destSpec := filepath.Join(tempDir, "specialized_via_run")
 	os.Args = []string{fatPath, "--microfat:specialize-to=" + destSpec}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("runBinary --microfat:specialize-to failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "runBinary --microfat:specialize-to failed")
 
 	// 3c. --microfat:trim-to without argument
 	os.Args = []string{fatPath, "--microfat:trim-to"}
@@ -651,16 +555,12 @@ func TestRunBinaryMetaCommands(t *testing.T) {
 	// 3d. --microfat:trim-to with separate target path argument
 	destTrimSep := filepath.Join(tempDir, "trimmed_via_run_sep")
 	os.Args = []string{fatPath, "--microfat:trim-to", destTrimSep}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("runBinary --microfat:trim-to separate arg failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "runBinary --microfat:trim-to separate arg failed")
 
 	// 4. --microfat:optimize-to
 	destOpt := filepath.Join(tempDir, "optimized_via_run")
 	os.Args = []string{fatPath, "--microfat:optimize-to=" + destOpt}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("runBinary --microfat:optimize-to failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "runBinary --microfat:optimize-to failed")
 
 	// 4b. --microfat:optimize-to without path
 	os.Args = []string{fatPath, "--microfat:optimize-to"}
@@ -671,9 +571,7 @@ func TestRunBinaryMetaCommands(t *testing.T) {
 	// 4c. --microfat:optimize-to with separate arg
 	destOptSep := filepath.Join(tempDir, "optimized_via_run_sep")
 	os.Args = []string{fatPath, "--microfat:optimize-to", destOptSep}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("runBinary --microfat:optimize-to separate arg failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "runBinary --microfat:optimize-to separate arg failed")
 
 	// 4d. --microfat:optimize-to with forbidden path
 	os.Args = []string{fatPath, "--microfat:optimize-to=/dev/null/forbidden/opt"}
@@ -692,9 +590,7 @@ func TestRunBinaryMetaCommands(t *testing.T) {
 	data, _ := os.ReadFile(fatPath)
 	_ = os.WriteFile(copyFat, data, 0o755)
 	os.Args = []string{copyFat, "--microfat:trim"}
-	if err := runBinary(copyFat); err != nil {
-		t.Fatalf("runBinary --microfat:trim failed: %v", err)
-	}
+	require.NoError(t, runBinary(copyFat), "runBinary --microfat:trim failed")
 
 	// 5b. --microfat:trim in read-only directory
 	roDir := filepath.Join(tempDir, "ro_run_dir")
@@ -712,9 +608,7 @@ func TestRunBinaryMetaCommands(t *testing.T) {
 	copyFat2 := filepath.Join(tempDir, "fat_for_opt")
 	_ = os.WriteFile(copyFat2, data, 0o755)
 	os.Args = []string{copyFat2, "--microfat:optimize"}
-	if err := runBinary(copyFat2); err != nil {
-		t.Fatalf("runBinary --microfat:optimize failed: %v", err)
-	}
+	require.NoError(t, runBinary(copyFat2), "runBinary --microfat:optimize failed")
 
 	// 6b. --microfat:optimize in read-only directory
 	os.Args = []string{roFat, "--microfat:optimize"}
@@ -729,9 +623,7 @@ func TestRunBinaryMetaCommands(t *testing.T) {
 		return nil
 	}
 	os.Args = []string{fatPath, "myarg1", "--flag"}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("runBinary standard execution failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "runBinary standard execution failed")
 
 	// 8. Error cases
 	os.Args = []string{stubPath, "--microfat:info"}
@@ -1194,22 +1086,14 @@ func TestPolicyDispatchIntegration(t *testing.T) {
 	fatPath := filepath.Join(tempDir, "policy_app_fat")
 
 	stubPath := filepath.Join(tempDir, "stub_binary")
-	if err := os.WriteFile(stubPath, []byte("\x7fELF_DUMMY_STUB"), 0o755); err != nil {
-		t.Fatalf("writing stub: %v", err)
-	}
+	require.NoError(t, os.WriteFile(stubPath, []byte("\x7fELF_DUMMY_STUB"), 0o755), "writing stub")
 
 	v1Path := filepath.Join(tempDir, "app_v1")
 	v2Path := filepath.Join(tempDir, "app_v2")
 	v3Path := filepath.Join(tempDir, "app_v3")
-	if err := os.WriteFile(v1Path, []byte("\x7fELF_PAYLOAD_V1"), 0o755); err != nil {
-		t.Fatalf("writing v1: %v", err)
-	}
-	if err := os.WriteFile(v2Path, []byte("\x7fELF_PAYLOAD_V2"), 0o755); err != nil {
-		t.Fatalf("writing v2: %v", err)
-	}
-	if err := os.WriteFile(v3Path, []byte("\x7fELF_PAYLOAD_V3"), 0o755); err != nil {
-		t.Fatalf("writing v3: %v", err)
-	}
+	require.NoError(t, os.WriteFile(v1Path, []byte("\x7fELF_PAYLOAD_V1"), 0o755), "writing v1")
+	require.NoError(t, os.WriteFile(v2Path, []byte("\x7fELF_PAYLOAD_V2"), 0o755), "writing v2")
+	require.NoError(t, os.WriteFile(v3Path, []byte("\x7fELF_PAYLOAD_V3"), 0o755), "writing v3")
 
 	opts := pack.Options{
 		StubPath:   stubPath,
@@ -1252,9 +1136,7 @@ func TestPolicyDispatchIntegration(t *testing.T) {
 	t.Setenv(format.EnvForceLevel, "v1")
 	t.Setenv(format.EnvMaxLevel, "")
 	t.Setenv(format.EnvDisableVariants, "")
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("runBinary force v1 failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "runBinary force v1 failed")
 	if lastExecVariant != "v1" || lastPolicyApplied != testPolicyForceLevel {
 		t.Errorf("expected force v1, got variant=%s policy=%s", lastExecVariant, lastPolicyApplied)
 	}
@@ -1264,9 +1146,7 @@ func TestPolicyDispatchIntegration(t *testing.T) {
 	t.Setenv(format.EnvMaxLevel, "v2")
 	t.Setenv(format.EnvDisableVariants, "")
 	lastPolicyApplied = ""
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("runBinary max v2 failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "runBinary max v2 failed")
 	if lastExecVariant != "v2" || lastPolicyApplied != "max_level" {
 		t.Errorf("expected max v2, got variant=%s policy=%s", lastExecVariant, lastPolicyApplied)
 	}
@@ -1276,9 +1156,7 @@ func TestPolicyDispatchIntegration(t *testing.T) {
 	t.Setenv(format.EnvMaxLevel, "")
 	t.Setenv(format.EnvDisableVariants, "v3")
 	lastPolicyApplied = ""
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("runBinary disable v3 failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "runBinary disable v3 failed")
 	if lastExecVariant != "v2" || lastPolicyApplied != "disable_variants" {
 		t.Errorf("expected disable v3 to select v2, got variant=%s policy=%s", lastExecVariant, lastPolicyApplied)
 	}
@@ -1306,9 +1184,7 @@ func TestStubPrewarmAndCacheDispatch(t *testing.T) {
 			"v2": v2Path,
 		},
 	})
-	if err != nil {
-		t.Fatalf("packing test binary: %v", err)
-	}
+	require.NoError(t, err, "packing test binary")
 
 	oldArgs := os.Args
 	defer func() { os.Args = oldArgs }()
@@ -1318,57 +1194,39 @@ func TestStubPrewarmAndCacheDispatch(t *testing.T) {
 
 	// 1. Default --microfat:prewarm
 	os.Args = []string{fatPath, flagPrewarm}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("--microfat:prewarm failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "--microfat:prewarm failed")
 
 	// 2. Second time default --microfat:prewarm (already cached path)
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("second --microfat:prewarm failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "second --microfat:prewarm failed")
 
 	// 3. --microfat:prewarm=all
 	os.Args = []string{fatPath, "--microfat:prewarm=all"}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("--microfat:prewarm=all failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "--microfat:prewarm=all failed")
 
 	// 4. --microfat:prewarm=v1
 	os.Args = []string{fatPath, "--microfat:prewarm=v1"}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("--microfat:prewarm=v1 failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "--microfat:prewarm=v1 failed")
 
 	// 4a. Multi-variant comma-separated --microfat:prewarm=v1,v2
 	os.Args = []string{fatPath, "--microfat:prewarm=v1,v2"}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("--microfat:prewarm=v1,v2 failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "--microfat:prewarm=v1,v2 failed")
 
 	// 4b. Multi-variant with all and duplicates --microfat:prewarm=all,v1
 	os.Args = []string{fatPath, "--microfat:prewarm=all,v1"}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("--microfat:prewarm=all,v1 failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "--microfat:prewarm=all,v1 failed")
 
 	// 5. --microfat:prewarm=json
 	os.Args = []string{fatPath, "--microfat:prewarm=json"}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("--microfat:prewarm=json failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "--microfat:prewarm=json failed")
 
 	// 5a. Multi-variant with json modifier --microfat:prewarm=v1,v2,json
 	os.Args = []string{fatPath, "--microfat:prewarm=v1,v2,json"}
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("--microfat:prewarm=v1,v2,json failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "--microfat:prewarm=v1,v2,json failed")
 
 	// 6. --microfat:prewarm with --json flag and MICROFAT_LOG=json
 	os.Args = []string{fatPath, flagPrewarm, "--json"}
 	t.Setenv(format.EnvLog, "json")
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("--microfat:prewarm with MICROFAT_LOG=json failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "--microfat:prewarm with MICROFAT_LOG=json failed")
 	t.Setenv(format.EnvLog, "")
 
 	// 7. --microfat:prewarm with non-existent level
@@ -1404,9 +1262,7 @@ func TestStubPrewarmAndCacheDispatch(t *testing.T) {
 
 	os.Args = []string{fatPath, "arg1"}
 	t.Setenv(format.EnvExecMode, format.ExecModeCache)
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("runBinary with MICROFAT_EXEC_MODE=cache failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "runBinary with MICROFAT_EXEC_MODE=cache failed")
 	if !strings.Contains(executedPath, cacheDir) {
 		t.Errorf("expected execve from cacheDir %s, got %s", cacheDir, executedPath)
 	}
@@ -1415,9 +1271,7 @@ func TestStubPrewarmAndCacheDispatch(t *testing.T) {
 	t.Setenv(format.EnvExecMode, "")
 	t.Setenv(format.EnvDispatchMode, format.ExecModeCache)
 	executedPath = ""
-	if err := runBinary(fatPath); err != nil {
-		t.Fatalf("runBinary with MICROFAT_DISPATCH_MODE=cache failed: %v", err)
-	}
+	require.NoError(t, runBinary(fatPath), "runBinary with MICROFAT_DISPATCH_MODE=cache failed")
 	if !strings.Contains(executedPath, cacheDir) {
 		t.Errorf("expected execve from cacheDir %s, got %s", cacheDir, executedPath)
 	}
@@ -2633,19 +2487,13 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 	t.Run("RenameFailure_WhenTargetIsDirectory", func(t *testing.T) {
 		cacheHome := filepath.Join(tmpDir, "cache_rename_fail")
 		microfatCache := filepath.Join(cacheHome, "microfat")
-		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(microfatCache, 0o700), "mkdir failed")
 		t.Setenv("XDG_CACHE_HOME", cacheHome)
 
 		// Create non-empty target destination as a directory so os.Remove and os.Rename fail with ENOTEMPTY/EISDIR
 		targetPath := filepath.Join(microfatCache, entry.SHA256)
-		if err := os.MkdirAll(targetPath, 0o700); err != nil {
-			t.Fatalf("mkdir targetPath failed: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(targetPath, "blocking_child"), []byte("blocker"), 0o600); err != nil {
-			t.Fatalf("write child file failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(targetPath, 0o700), "mkdir targetPath failed")
+		require.NoError(t, os.WriteFile(filepath.Join(targetPath, "blocking_child"), []byte("blocker"), 0o600), "write child file failed")
 
 		primaryErr := errors.New("simulated primary memfd exhaustion")
 		err := executeViaCache(
@@ -2653,9 +2501,7 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 			[]string{testAppArg}, []string{testPathEnv},
 			hostInfo, policyRes, primaryErr, time.Now(),
 		)
-		if err == nil {
-			t.Fatalf("expected error when rename fails, got nil")
-		}
+		require.Error(t, err, "expected error when rename fails, got nil")
 		if !errors.Is(err, format.ErrCacheWrite) {
 			t.Fatalf("expected ErrCacheWrite, got %v", err)
 		}
@@ -2667,9 +2513,7 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 	t.Run("VerifyCache_CorruptedFileReextracted_Unconditional", func(t *testing.T) {
 		cacheHome := filepath.Join(tmpDir, "cache_verify_corrupt")
 		microfatCache := filepath.Join(cacheHome, "microfat")
-		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(microfatCache, 0o700), "mkdir failed")
 		t.Setenv("XDG_CACHE_HOME", cacheHome)
 		t.Setenv(format.EnvDebug, "1")
 		t.Setenv(format.EnvVerifyCache, "0") // Even when explicitly set to 0, verification is unconditional
@@ -2677,9 +2521,7 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 		// Create corrupted file with matching size but invalid content
 		targetPath := filepath.Join(microfatCache, entry.SHA256)
 		corruptedData := bytes.Repeat([]byte{0x42}, int(entry.UncompressedSize))
-		if err := os.WriteFile(targetPath, corruptedData, 0o700); err != nil {
-			t.Fatalf("writing corrupted file: %v", err)
-		}
+		require.NoError(t, os.WriteFile(targetPath, corruptedData, 0o700), "writing corrupted file")
 
 		execveFunc = func(argv0 string, argv []string, envv []string) error {
 			return nil
@@ -2690,25 +2532,19 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 			[]string{testAppArg}, []string{testPathEnv},
 			hostInfo, policyRes, nil, time.Now(),
 		)
-		if err != nil {
-			t.Fatalf("expected re-extraction and successful execution, got %v", err)
-		}
+		require.NoError(t, err, "expected re-extraction and successful execution, got")
 	})
 
 	t.Run("TruncatedCacheFile_DebugLogging", func(t *testing.T) {
 		cacheHome := filepath.Join(tmpDir, "cache_truncated")
 		microfatCache := filepath.Join(cacheHome, "microfat")
-		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(microfatCache, 0o700), "mkdir failed")
 		t.Setenv("XDG_CACHE_HOME", cacheHome)
 		t.Setenv(format.EnvDebug, "1")
 
 		// Write file with wrong size
 		targetPath := filepath.Join(microfatCache, entry.SHA256)
-		if err := os.WriteFile(targetPath, []byte("short"), 0o700); err != nil {
-			t.Fatalf("writing short file: %v", err)
-		}
+		require.NoError(t, os.WriteFile(targetPath, []byte("short"), 0o700), "writing short file")
 
 		execveFunc = func(argv0 string, argv []string, envv []string) error {
 			return nil
@@ -2719,9 +2555,7 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 			[]string{testAppArg}, []string{testPathEnv},
 			hostInfo, policyRes, nil, time.Now(),
 		)
-		if err != nil {
-			t.Fatalf("expected re-extraction on truncated cache file, got %v", err)
-		}
+		require.NoError(t, err, "expected re-extraction on truncated cache file, got")
 	})
 
 	t.Run("ExecveFailure_WithoutPrimaryErr", func(t *testing.T) {
@@ -2737,9 +2571,7 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 			[]string{testAppArg}, []string{testPathEnv},
 			hostInfo, policyRes, nil, time.Now(),
 		)
-		if err == nil {
-			t.Fatalf("expected execve failure, got nil")
-		}
+		require.Error(t, err, "expected execve failure, got nil")
 		if !strings.Contains(err.Error(), "cache execve failed") {
 			t.Fatalf("expected cache execve failed error without primary memfd error, got %v", err)
 		}
@@ -2748,9 +2580,7 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 	t.Run("OpenCachedBinaryFailure_CleansUpDestinationBinary", func(t *testing.T) {
 		cacheHome := filepath.Join(tmpDir, "cache_open_fail")
 		microfatCache := filepath.Join(cacheHome, "microfat")
-		if err := os.MkdirAll(microfatCache, 0o700); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(microfatCache, 0o700), "mkdir failed")
 		t.Setenv("XDG_CACHE_HOME", cacheHome)
 
 		origOpen := openCachedBinaryFunc
@@ -2785,9 +2615,7 @@ func TestExecuteViaCache_InstallationFailures(t *testing.T) {
 			[]string{testAppArg}, []string{testPathEnv},
 			hostInfo, policyRes, nil, time.Now(),
 		)
-		if err == nil {
-			t.Fatalf("expected error when openCachedBinary fails after rename, got nil")
-		}
+		require.Error(t, err, "expected error when openCachedBinary fails after rename, got nil")
 
 		// Verify that cachedBinary was removed so no defective file lingers
 		cachedBinary := filepath.Join(microfatCache, entry.SHA256)
@@ -2957,13 +2785,9 @@ func TestOpenAndValidateCacheFD_SecurityContract(t *testing.T) {
 
 	t.Run("SymlinkTarget_ReturnsErrorAndNoFollow", func(t *testing.T) {
 		validPath := filepath.Join(tmpDir, "valid_for_symlink")
-		if err := os.WriteFile(validPath, payload, 0o700); err != nil {
-			t.Fatalf("write valid file: %v", err)
-		}
+		require.NoError(t, os.WriteFile(validPath, payload, 0o700), "write valid file")
 		symlinkPath := filepath.Join(tmpDir, "symlink_test")
-		if err := os.Symlink(validPath, symlinkPath); err != nil {
-			t.Fatalf("create symlink: %v", err)
-		}
+		require.NoError(t, os.Symlink(validPath, symlinkPath), "create symlink")
 
 		fd, err := openAndValidateCacheFD(symlinkPath, entry)
 		if err == nil {
@@ -2977,9 +2801,7 @@ func TestOpenAndValidateCacheFD_SecurityContract(t *testing.T) {
 
 	t.Run("NonRegularFile_Directory_RejectedAndClosed", func(t *testing.T) {
 		dirPath := filepath.Join(tmpDir, "dir_as_cache")
-		if err := os.MkdirAll(dirPath, 0o700); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(dirPath, 0o700), "mkdir")
 
 		fd, err := openAndValidateCacheFD(dirPath, entry)
 		if err == nil {
@@ -2993,9 +2815,7 @@ func TestOpenAndValidateCacheFD_SecurityContract(t *testing.T) {
 
 	t.Run("SizeMismatch_PurgesFileAndReturnsError", func(t *testing.T) {
 		sizeMismatchPath := filepath.Join(tmpDir, "size_mismatch_test")
-		if err := os.WriteFile(sizeMismatchPath, []byte("short"), 0o700); err != nil {
-			t.Fatalf("write short file: %v", err)
-		}
+		require.NoError(t, os.WriteFile(sizeMismatchPath, []byte("short"), 0o700), "write short file")
 
 		fd, err := openAndValidateCacheFD(sizeMismatchPath, entry)
 		if err == nil {
@@ -3013,9 +2833,7 @@ func TestOpenAndValidateCacheFD_SecurityContract(t *testing.T) {
 	t.Run("ChecksumMismatch_PurgesFileAndReturnsError", func(t *testing.T) {
 		corruptPath := filepath.Join(tmpDir, "corrupt_checksum_test")
 		tampered := bytes.Repeat([]byte{0x77}, len(payload))
-		if err := os.WriteFile(corruptPath, tampered, 0o700); err != nil {
-			t.Fatalf("write corrupt file: %v", err)
-		}
+		require.NoError(t, os.WriteFile(corruptPath, tampered, 0o700), "write corrupt file")
 
 		fd, err := openAndValidateCacheFD(corruptPath, entry)
 		if err == nil {
@@ -3032,14 +2850,10 @@ func TestOpenAndValidateCacheFD_SecurityContract(t *testing.T) {
 
 	t.Run("ValidFile_ReturnsOpenPinnedDescriptor", func(t *testing.T) {
 		validPath := filepath.Join(tmpDir, "valid_cache_test")
-		if err := os.WriteFile(validPath, payload, 0o700); err != nil {
-			t.Fatalf("write valid file: %v", err)
-		}
+		require.NoError(t, os.WriteFile(validPath, payload, 0o700), "write valid file")
 
 		fd, err := openAndValidateCacheFD(validPath, entry)
-		if err != nil {
-			t.Fatalf("expected success for valid file, got: %v", err)
-		}
+		require.NoError(t, err, "expected success for valid file, got")
 		defer func() { _ = unix.Close(fd) }()
 
 		if fd < 0 {
@@ -3057,25 +2871,17 @@ func TestOpenAndValidateCacheFD_SecurityContract(t *testing.T) {
 
 	t.Run("ValidFile_DescriptorPinningSurvivesTamperingAndUnlink", func(t *testing.T) {
 		pinPath := filepath.Join(tmpDir, "stub_pinning_test")
-		if err := os.WriteFile(pinPath, payload, 0o700); err != nil {
-			t.Fatalf("write pin file: %v", err)
-		}
+		require.NoError(t, os.WriteFile(pinPath, payload, 0o700), "write pin file")
 
 		fd, err := openAndValidateCacheFD(pinPath, entry)
-		if err != nil {
-			t.Fatalf("expected success for valid file, got: %v", err)
-		}
+		require.NoError(t, err, "expected success for valid file, got")
 		defer func() { _ = unix.Close(fd) }()
 
 		// Attacker replaces pathname by renaming a tampered file over it
 		tampered := bytes.Repeat([]byte{0x55}, len(payload))
 		tamperedPath := pinPath + ".tampered"
-		if err := os.WriteFile(tamperedPath, tampered, 0o700); err != nil {
-			t.Fatalf("write tampered file: %v", err)
-		}
-		if err := os.Rename(tamperedPath, pinPath); err != nil {
-			t.Fatalf("rename over pinPath: %v", err)
-		}
+		require.NoError(t, os.WriteFile(tamperedPath, tampered, 0o700), "write tampered file")
+		require.NoError(t, os.Rename(tamperedPath, pinPath), "rename over pinPath")
 
 		// Read from pinned fd
 		buf := make([]byte, len(payload))
@@ -3085,9 +2891,7 @@ func TestOpenAndValidateCacheFD_SecurityContract(t *testing.T) {
 		}
 
 		// Unlink file completely
-		if err := os.Remove(pinPath); err != nil {
-			t.Fatalf("unlink pinPath: %v", err)
-		}
+		require.NoError(t, os.Remove(pinPath), "unlink pinPath")
 
 		// Pinned fd remains valid after unlinking
 		n, preadErr = unix.Pread(fd, buf, 0)

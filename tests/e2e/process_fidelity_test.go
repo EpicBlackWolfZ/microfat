@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -16,6 +18,7 @@ const (
 	highVolumeArgCount  = 200
 )
 
+//revive:disable-next-line:cyclomatic Keep argv, environment, stdin, exit status and executable-identity scenarios explicit.
 func TestProcessFidelityAndExecutionInvariants(t *testing.T) {
 	t.Parallel()
 
@@ -140,9 +143,7 @@ func TestProcessFidelityAndExecutionInvariants(t *testing.T) {
 		t.Parallel()
 
 		absGoldenFatBin, err := filepath.Abs(goldenFatBin)
-		if err != nil {
-			t.Fatalf("resolving abs path: %v", err)
-		}
+		require.NoError(t, err, "resolving abs path")
 
 		t.Run("MemfdExecutionMode", func(t *testing.T) {
 			t.Parallel()

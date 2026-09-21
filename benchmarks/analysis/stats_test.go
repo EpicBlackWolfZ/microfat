@@ -6,6 +6,9 @@ import (
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -29,10 +32,6 @@ const (
 	handP50_4 = 25.0
 )
 
-func almostEqual(a, b, eps float64) bool {
-	return math.Abs(a-b) <= eps
-}
-
 func TestComputeAnalysis(t *testing.T) {
 	t.Parallel()
 
@@ -40,9 +39,7 @@ func TestComputeAnalysis(t *testing.T) {
 		t.Parallel()
 		samples := []int64{42}
 		res, err := ComputeAnalysis(samples, testOpsSmall, testDurationOneSec)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 		if res.AlgorithmVersion != schema.AlgorithmVersionV1 {
 			t.Errorf("expected algorithm version %s, got %s", schema.AlgorithmVersionV1, res.AlgorithmVersion)
 		}
@@ -55,27 +52,17 @@ func TestComputeAnalysis(t *testing.T) {
 		if res.MinNs != 42 || res.MaxNs != 42 {
 			t.Errorf("expected min/max 42, got min=%d max=%d", res.MinNs, res.MaxNs)
 		}
-		if !almostEqual(res.MeanNs, 42.0, tolerance) {
-			t.Errorf("expected mean 42.0, got %f", res.MeanNs)
-		}
-		if !almostEqual(res.StdDevNs, 0.0, tolerance) {
-			t.Errorf("expected stddev 0.0, got %f", res.StdDevNs)
-		}
-		if !almostEqual(res.PercentilesNs["p50"], 42.0, tolerance) {
-			t.Errorf("expected p50 42.0, got %f", res.PercentilesNs["p50"])
-		}
-		if !almostEqual(res.ThroughputOpsPerSec, testThroughputSmall, tolerance) {
-			t.Errorf("expected throughput %f, got %f", testThroughputSmall, res.ThroughputOpsPerSec)
-		}
+		assert.InDelta(t, 42.0, res.MeanNs, tolerance)
+		assert.InDelta(t, 0.0, res.StdDevNs, tolerance)
+		assert.InDelta(t, 42.0, res.PercentilesNs["p50"], tolerance)
+		assert.InDelta(t, testThroughputSmall, res.ThroughputOpsPerSec, tolerance)
 	})
 
 	t.Run("five samples hand-verified", func(t *testing.T) {
 		t.Parallel()
 		samples := []int64{50, 10, 40, 20, 30} // unsorted intentionally
 		res, err := ComputeAnalysis(samples, testOpsSmall, testDurationOneSec)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 
 		if res.MinNs != handMin5 {
 			t.Errorf("expected min %d, got %d", handMin5, res.MinNs)
@@ -83,48 +70,26 @@ func TestComputeAnalysis(t *testing.T) {
 		if res.MaxNs != handMax5 {
 			t.Errorf("expected max %d, got %d", handMax5, res.MaxNs)
 		}
-		if !almostEqual(res.MeanNs, handMean5, tolerance) {
-			t.Errorf("expected mean %f, got %f", handMean5, res.MeanNs)
-		}
+		assert.InDelta(t, handMean5, res.MeanNs, tolerance)
 
 		expectedStdDev := math.Sqrt(200.0)
-		if !almostEqual(res.StdDevNs, expectedStdDev, tolerance) {
-			t.Errorf("expected stddev %f, got %f", expectedStdDev, res.StdDevNs)
-		}
+		assert.InDelta(t, expectedStdDev, res.StdDevNs, tolerance)
 
-		if !almostEqual(res.PercentilesNs["p50"], handP50_5, tolerance) {
-			t.Errorf("expected p50 %f, got %f", handP50_5, res.PercentilesNs["p50"])
-		}
-		if !almostEqual(res.PercentilesNs["p75"], handP75_5, tolerance) {
-			t.Errorf("expected p75 %f, got %f", handP75_5, res.PercentilesNs["p75"])
-		}
-		if !almostEqual(res.PercentilesNs["p90"], handP90_5, tolerance) {
-			t.Errorf("expected p90 %f, got %f", handP90_5, res.PercentilesNs["p90"])
-		}
-		if !almostEqual(res.PercentilesNs["p95"], handP95_5, tolerance) {
-			t.Errorf("expected p95 %f, got %f", handP95_5, res.PercentilesNs["p95"])
-		}
-		if !almostEqual(res.PercentilesNs["p99"], handP99_5, tolerance) {
-			t.Errorf("expected p99 %f, got %f", handP99_5, res.PercentilesNs["p99"])
-		}
-		if !almostEqual(res.PercentilesNs["p99.9"], handP999_5, tolerance) {
-			t.Errorf("expected p99.9 %f, got %f", handP999_5, res.PercentilesNs["p99.9"])
-		}
+		assert.InDelta(t, handP50_5, res.PercentilesNs["p50"], tolerance)
+		assert.InDelta(t, handP75_5, res.PercentilesNs["p75"], tolerance)
+		assert.InDelta(t, handP90_5, res.PercentilesNs["p90"], tolerance)
+		assert.InDelta(t, handP95_5, res.PercentilesNs["p95"], tolerance)
+		assert.InDelta(t, handP99_5, res.PercentilesNs["p99"], tolerance)
+		assert.InDelta(t, handP999_5, res.PercentilesNs["p99.9"], tolerance)
 	})
 
 	t.Run("four samples interpolation", func(t *testing.T) {
 		t.Parallel()
 		samples := []int64{10, 20, 30, 40}
 		res, err := ComputeAnalysis(samples, 0, testDurationOneSec)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !almostEqual(res.PercentilesNs["p50"], handP50_4, tolerance) {
-			t.Errorf("expected p50 %f, got %f", handP50_4, res.PercentilesNs["p50"])
-		}
-		if !almostEqual(res.ThroughputOpsPerSec, 0.0, tolerance) {
-			t.Errorf("expected zero throughput for zero operations, got %f", res.ThroughputOpsPerSec)
-		}
+		require.NoError(t, err, "unexpected error")
+		assert.InDelta(t, handP50_4, res.PercentilesNs["p50"], tolerance)
+		assert.InDelta(t, 0.0, res.ThroughputOpsPerSec, tolerance)
 	})
 
 	t.Run("validation errors", func(t *testing.T) {
