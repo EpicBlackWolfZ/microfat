@@ -5,7 +5,7 @@ IFS=$'\n\t'
 
 root="${PWD}/.work/kernel-v1"
 mkdir -p "${root}/rootfs/bin" "${root}/rootfs/proc" "${root}/rootfs/sys" "${root}/rootfs/dev" "${root}/rootfs/tmp"
-python3 scripts/benchmark-kernel-lock.py "${root}"
+"${GO:-go}" run ./internal/cmd/benchmark-kernel-lock "${root}"
 dpkg-deb -x "${root}/kernel.deb" "${root}/kernel"
 dpkg-deb -x "${root}/modules.deb" "${root}/kernel"
 cp /bin/busybox "${root}/rootfs/bin/busybox"
