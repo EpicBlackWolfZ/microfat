@@ -1,6 +1,6 @@
 # Production roadmap
 
-Updated 2026-09-21 for the v0.2.4 release. GitHub issues define remaining scope,
+Updated 2026-09-21 for the v0.2.5 implementation. GitHub issues define remaining scope,
 dependencies and acceptance criteria. Milestones group deliverable outcomes; they are not dates.
 
 ## Current baseline
@@ -13,6 +13,8 @@ See [release artifacts](release-artifacts.md) and [benchmark evidence](benchmark
 The historical release-note verification instructions were corrected in
 [#197](https://github.com/EpicBlackWolfZ/microfat/issues/197), using the published checksum signature.
 The [v0.2.4 release notes](releases/v0.2.4.md) describe the subsequent correctness fixes.
+The [v0.2.5 release notes](releases/v0.2.5.md) describe the Go/Task tooling migration, modern
+SBOMs, staged CI and benchmark corrections.
 
 Since that release, [PR #192](https://github.com/EpicBlackWolfZ/microfat/pull/192) added developer
 workflow/profiling/leak checks and [PR #194](https://github.com/EpicBlackWolfZ/microfat/pull/194)
@@ -52,7 +54,8 @@ reproduced defect outside its assertions. Task, Python removal and SBOM migratio
 
 ## v0.2.5: tooling and release trust
 
-Preserve the agreed Go/Task direction and modern SBOM goals as a separate engineering release.
+The implementation consolidates Go/Task tooling and release trust. The linked issues record
+acceptance evidence; publication still requires the signed-asset and benchmark gates below.
 
 | Scope | Issues |
 | --- | --- |
@@ -61,12 +64,14 @@ Preserve the agreed Go/Task direction and modern SBOM goals as a separate engine
 | Prove and migrate the cdxgen-based modern SBOM path | [#202](https://github.com/EpicBlackWolfZ/microfat/issues/202) |
 | Stage all PR work behind fast checks and a fail-closed final result | [#200](https://github.com/EpicBlackWolfZ/microfat/issues/200) |
 | Resolve actionable quality findings and scan the integrated candidate | [#201](https://github.com/EpicBlackWolfZ/microfat/issues/201) |
+| Correct memfd benchmark helpers, user-writable installation and ignored-file formatting | [#227](https://github.com/EpicBlackWolfZ/microfat/issues/227), [#228](https://github.com/EpicBlackWolfZ/microfat/issues/228), [#229](https://github.com/EpicBlackWolfZ/microfat/issues/229) |
+| Bound executable-fixture retries and report nested CPU limits correctly | [#245](https://github.com/EpicBlackWolfZ/microfat/issues/245), [#249](https://github.com/EpicBlackWolfZ/microfat/issues/249) |
 
-The dependency order is threat model → external verification, and Go helper contracts → Task callers.
-The SBOM experiment can proceed alongside helper design: prove CycloneDX 1.7 / SPDX 3.0.1 schema and
-archive/variant inventory fidelity without Python/BLINT before retiring the old generator. Final CI
-rollout consumes the completed commands and release contracts. Quality triage starts early; the final
-scan follows the integrated migrations and permits only narrow justified exceptions.
+Go helpers and Task callers now preserve the existing contracts without repository Python or Make.
+The cdxgen path validates CycloneDX 1.7 / SPDX 3.0.1 schemas and archive/variant inventory fidelity
+without Python/BLINT. Staged CI includes a required fail-closed completion check. Quality review
+follows the integrated migrations; exact function exceptions preserve readable validation and
+resource ownership rather than moving branches merely to improve a metric.
 
 Exit: active workflows work without repository Python/Make dependencies; exact coverage, benchmark
 replay, verified downloads, process cleanup, developer workflows and meaningful validation remain
