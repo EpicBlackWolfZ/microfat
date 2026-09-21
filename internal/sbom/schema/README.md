@@ -2,6 +2,7 @@
 
 These unmodified official schemas are embedded for offline validation. Generation
 and verification never fetch schema references from the network.
+Git preserves their original bytes, including the SPDX schema's upstream CRLF line endings.
 
 - CycloneDX specification **1.7.2**, commit `349314a9d7671d7d2ca5b711a725f49a73979da6`,
   [schema directory](https://github.com/CycloneDX/specification/tree/349314a9d7671d7d2ca5b711a725f49a73979da6/schema).

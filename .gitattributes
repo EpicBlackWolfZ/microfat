@@ -1,0 +1,5 @@
+# Preserve the exact upstream bytes of digest-pinned offline validation schemas.
+internal/sbom/schema/*.json -text
+internal/sbom/schema/*.jsonld -text
+# The official SPDX schema uses CRLF; retain it without hiding other whitespace errors.
+internal/sbom/schema/spdx-3.0.1.schema.json whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
