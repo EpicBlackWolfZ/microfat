@@ -22,6 +22,8 @@ Each archive is accompanied by:
 
 ---
 
+Maintainers can dispatch [Published Release Audit](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/release-audit.yml) with a published immutable tag. It verifies the checksum signature against the exact tag workflow and source commit before executing downloaded products on native amd64 and ARM64 runners. The audit covers both formats, full/minimal launchers, codecs/dictionaries, automatic/memfd/cache dispatch, metadata operations and corrupt-payload rejection. Its retained evidence identifies the downloaded bytes; benchmark publication qualification remains a separate gate.
+
 ## 2. Archive Contents & Binary Roles
 
 Extracting `microfat_<version>_linux_<arch>.tar.gz` provides:
