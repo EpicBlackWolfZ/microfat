@@ -33,7 +33,7 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 
 | Guide | Description |
 | :--- | :--- |
-| [**v0.2.4 Release Notes**](docs/releases/v0.2.4.md) | Runtime, input/build, cache, installer and evidence correctness fixes. |
+| [**v0.2.5 Release Notes**](docs/releases/v0.2.5.md) | Go/Task tooling, modern SBOMs, staged CI and benchmark correctness. |
 | [**Release Artifacts Guide**](docs/release-artifacts.md) | Universal fat archives, bundled launcher stubs, and Format v1 deprecation. |
 | [**Production Roadmap**](docs/roadmap.md) | Release priorities, safety gates and experimental scope. |
 | 📊 [**Demo & Benchmark Suite**](examples/demo/README.md) | Multi-workload benchmark application testing SIMD vector math, JSON/Zstd processing, and concurrent workers. |
