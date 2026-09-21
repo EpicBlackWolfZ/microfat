@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -136,10 +137,18 @@ func (o *RunOptions) resolve() error {
 		return errors.New("Fortio path required; install the pinned tool with make benchmark-tools")
 	}
 	if o.Helper == "" {
-		var err error
-		o.Helper, err = os.Executable()
-		if err != nil {
-			return err
+		if runtime.GOOS == "linux" {
+			// The parent remains alive throughout RunExperiment. A PID-qualified
+			// kernel reference names its actual image even after memfd dispatch,
+			// unlink or replacement; /proc/self/exe would name a spawning child.
+			// No inherited location hint or extra inherited descriptor is needed.
+			o.Helper = fmt.Sprintf("/proc/%d/exe", os.Getpid())
+		} else {
+			var err error
+			o.Helper, err = os.Executable()
+			if err != nil {
+				return err
+			}
 		}
 	}
 	if o.OutputDir == "" {

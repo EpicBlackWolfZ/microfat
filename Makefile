@@ -109,18 +109,13 @@ help: ## Show this help message
 
 fmt: ## Format and simplify all Go source files across the codebase
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Formatting Go source files with $(GOFMT) -s..."
-	@$(GOFMT) -s -w .
+	@bash scripts/format-go.sh write "$(GOFMT)"
 	@printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) Codebase formatted successfully"
 
 fmt-check: ## Verify all Go source files are formatted with gofmt -s
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Checking Go source code formatting..."
-	@UNFORMATTED=$$($(GOFMT) -s -l . 2>/dev/null); \
-	if [ -n "$$UNFORMATTED" ]; then \
-		printf "%b\n" "$(C_RED)$(SYM_FAIL)$(C_RESET) The following Go files need formatting (run 'make fmt' or 'make fix'):"; \
-		printf "%s\n" "$$UNFORMATTED" | sed 's/^/  • /'; \
-		exit 1; \
-	fi; \
-	printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) All Go files formatted cleanly"
+	@bash scripts/format-go.sh check "$(GOFMT)"
+	@printf "%b\n" "$(C_GREEN)$(SYM_OK)$(C_RESET) All Go files formatted cleanly"
 
 fix: ## Run Go modernizer/fixer and golangci-lint automatic fixes, then format
 	@printf "%b\n" "$(C_BLUE)$(SYM_ARROW)$(C_RESET) Applying Go modernizations via 'go fix'..."

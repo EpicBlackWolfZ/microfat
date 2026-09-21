@@ -40,6 +40,7 @@ PY
 }
 
 echo "==> Running DX regression test suite..."
+bash scripts/format-go-test.sh
 
 # -----------------------------------------------------------------------------
 # 1. TTY and ANSI Escape Behavior
