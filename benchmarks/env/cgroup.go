@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -247,7 +248,7 @@ func traverseCgroupV2CPUMax(targetDir, root string) (int64, *int64, bool, error)
 				if qErr != nil || parsedQuota <= 0 {
 					return 0, nil, false, fmt.Errorf("corrupted cpu.max quota %q: %w", qStr, qErr)
 				}
-				if !hasQuota || parsedQuota < minQuota {
+				if !hasQuota || tighterCPUQuota(parsedQuota, period, minQuota, *foundPeriod) {
 					minQuota = parsedQuota
 					hasQuota = true
 					foundPeriod = &period
@@ -391,13 +392,17 @@ func traverseCgroupV1CPU(base, target string) (int64, *int64, bool, error) {
 		var currPeriod *int64
 		periodPath := filepath.Join(curr, cgroupV1CPUPeriodFile)
 		pStr, pErr := readTrimmedLine(periodPath)
-		if pErr == nil && pStr != "" {
-			if period, parseErr := strconv.ParseInt(pStr, 10, 64); parseErr == nil && period > 0 {
-				currPeriod = &period
-				if foundPeriod == nil {
-					foundPeriod = &period
-				}
+		if pErr == nil {
+			period, parseErr := strconv.ParseInt(pStr, 10, 64)
+			if parseErr != nil || period <= 0 {
+				return 0, nil, false, fmt.Errorf("invalid cpu.cfs_period_us %q in %s", pStr, periodPath)
 			}
+			currPeriod = &period
+			if foundPeriod == nil {
+				foundPeriod = &period
+			}
+		} else if !errors.Is(pErr, os.ErrNotExist) {
+			return 0, nil, false, pErr
 		}
 
 		quotaPath := filepath.Join(curr, cgroupV1CPUQuotaFile)
@@ -408,12 +413,13 @@ func traverseCgroupV1CPU(base, target string) (int64, *int64, bool, error) {
 				if parseErr != nil || parsedQuota <= 0 {
 					return 0, nil, false, fmt.Errorf("corrupted cpu.cfs_quota_us %q: %w", qStr, parseErr)
 				}
-				if !hasQuota || parsedQuota < minQuota {
+				if currPeriod == nil {
+					return 0, nil, false, fmt.Errorf("finite cpu quota in %s has no period", curr)
+				}
+				if !hasQuota || tighterCPUQuota(parsedQuota, *currPeriod, minQuota, *foundPeriod) {
 					minQuota = parsedQuota
 					hasQuota = true
-					if currPeriod != nil {
-						foundPeriod = currPeriod
-					}
+					foundPeriod = currPeriod
 				}
 			}
 		} else if !errors.Is(qErr, os.ErrNotExist) {
@@ -431,6 +437,16 @@ func traverseCgroupV1CPU(base, target string) (int64, *int64, bool, error) {
 	}
 
 	return minQuota, foundPeriod, hasQuota, nil
+}
+
+// tighterCPUQuota compares validated positive pairs without overflow or float
+// rounding. Keep the original pair for telemetry rather than rounding CPUs.
+func tighterCPUQuota(quota, period, previousQuota, previousPeriod int64) bool {
+	// #nosec G115 -- callers pass only parsed, strictly positive quota/period pairs.
+	hi, lo := bits.Mul64(uint64(quota), uint64(previousPeriod))
+	// #nosec G115 -- callers pass only parsed, strictly positive quota/period pairs.
+	previousHi, previousLo := bits.Mul64(uint64(previousQuota), uint64(period))
+	return hi < previousHi || hi == previousHi && lo < previousLo
 }
 
 func isSafeSubpath(root, path string) bool {
