@@ -81,3 +81,25 @@ func TestCancellationAndOutputLimit(t *testing.T) {
 	require.ErrorIs(t, buffer.Err(), ErrOutputLimit)
 	assert.Equal(t, []byte("a"), buffer.Bytes())
 }
+
+func TestExplicitStdoutLimit(t *testing.T) {
+	t.Parallel()
+	for _, limit := range []int{-1, 1, 64} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+			t.Parallel()
+			spec := helper(t, "echo")
+			spec.StdoutLimit = limit
+			stdout, stderr, err := Run(context.Background(), spec)
+			switch {
+			case limit < 0:
+				require.ErrorContains(t, err, "negative child stdout limit")
+			case limit == 1:
+				require.ErrorIs(t, err, ErrOutputLimit)
+			default:
+				require.NoError(t, err)
+				require.Equal(t, "output", string(stdout))
+				require.Equal(t, "diagnostic", string(stderr))
+			}
+		})
+	}
+}

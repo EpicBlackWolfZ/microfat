@@ -265,7 +265,7 @@ jobs:
 
       - name: Verify release publication contracts
         run: |
-          python3 scripts/release_finalize_test.py
+          go test ./internal/releaseworkflow ./internal/cmd/release-finalize
           python3 scripts/audit_release_test.py
           python3 scripts/repair_v023_sboms_test.py
 

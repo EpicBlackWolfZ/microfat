@@ -23,6 +23,9 @@ type Spec struct {
 	Args []string
 	Env  []string
 	Dir  string
+	// StdoutLimit overrides the default only for callers with a larger explicit contract.
+	// Zero uses MaxOutput; stderr always retains MaxOutput.
+	StdoutLimit int
 }
 
 type Buffer struct {
@@ -81,12 +84,19 @@ type Child struct {
 }
 
 func Start(ctx context.Context, spec Spec) (*Child, error) {
+	if spec.StdoutLimit < 0 {
+		return nil, errors.New("negative child stdout limit")
+	}
+	stdoutLimit := spec.StdoutLimit
+	if stdoutLimit == 0 {
+		stdoutLimit = MaxOutput
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(ctx, spec.Path, spec.Args...) // #nosec G204 -- explicitly selected benchmark executable.
 	cmd.Dir, cmd.Env, cmd.WaitDelay = spec.Dir, spec.Env, WaitDelay
 	configureGroup(cmd)
 	cmd.Cancel = func() error { return signalGroup(cmd.Process, true) }
-	out := &Buffer{limit: MaxOutput, cancel: cancel, changed: make(chan struct{}, 1)}
+	out := &Buffer{limit: stdoutLimit, cancel: cancel, changed: make(chan struct{}, 1)}
 	errOut := &Buffer{limit: MaxOutput, cancel: cancel}
 	cmd.Stdout, cmd.Stderr = out, errOut
 	if err := cmd.Start(); err != nil {

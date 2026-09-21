@@ -117,7 +117,7 @@ jobs:
           --intensity "$INTENSITY" --controls .work/controls.json
       - name: Verify successful hosted shard
         if: success() && env.BENCHMARK_TIER == 'release'
-        run: python3 scripts/benchmark-evidence.py .work/benchmark-matrix --shard
+        run: go run ./internal/cmd/benchmark-evidence .work/benchmark-matrix --shard
       - name: Preserve sustained evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -185,7 +185,7 @@ jobs:
           pattern: calibration-*-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/calibration
       - name: Verify all independent bundles and derive policy
-        run: python3 scripts/benchmark-evidence.py .work/calibration --calibration
+        run: go run ./internal/cmd/benchmark-evidence .work/calibration --calibration
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: calibration-policy-${{ github.run_id }}-${{ github.run_attempt }}
@@ -242,7 +242,7 @@ jobs:
       - name: Verify complete matrix and prepare checksummed archive
         env:
           SOURCE_SHA: ${{ github.sha }}
-        run: python3 scripts/benchmark-evidence.py .work/release-evidence --archive
+        run: go run ./internal/cmd/benchmark-evidence .work/release-evidence --archive
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: verified-hosted-evidence-${{ github.run_id }}-${{ github.run_attempt }}
@@ -269,9 +269,14 @@ jobs:
         with:
           path: source
           persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
       - name: Attach evidence and publish complete immutable release
+        working-directory: source
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: python3 source/scripts/release-finalize.py evidence
+        run: go run ./internal/cmd/release-finalize ../evidence

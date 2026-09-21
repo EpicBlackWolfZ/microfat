@@ -5,8 +5,9 @@ on:
     branches: [main]
     paths:
       - .github/workflows/benchmark-evidence.yml
-      - scripts/benchmark-evidence.py
-      - scripts/benchmark_evidence_test.py
+      - internal/benchmarkevidence/**
+      - internal/releaseworkflow/**
+      - internal/cmd/benchmark-evidence/**
   workflow_dispatch:
     inputs:
       source_run:
@@ -36,7 +37,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: python3 scripts/benchmark_evidence_test.py
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - run: go test ./internal/benchmarkevidence ./internal/releaseworkflow ./internal/cmd/benchmark-evidence
 
   verify:
     name: Verify and archive completed measurement cohort
@@ -50,6 +55,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
       - name: Resolve immutable measurement provenance
         env:
           GH_TOKEN: ${{ github.token }}
@@ -61,12 +70,8 @@ jobs:
           mkdir -p .work
           gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN/attempts/$SOURCE_ATTEMPT" > .work/source-run.json
           gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN/attempts/$SOURCE_ATTEMPT/jobs?per_page=100" > .work/source-jobs.json
-          benchmark_source=$(python3 scripts/benchmark-evidence.py .work --source-cohort "$SOURCE_RUN" "$SOURCE_ATTEMPT")
+          benchmark_source=$(go run ./internal/cmd/benchmark-evidence .work --source-cohort "$SOURCE_RUN" "$SOURCE_ATTEMPT")
           echo "SOURCE_SHA=$benchmark_source" >> "$GITHUB_ENV"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: '1.27.1'
-          cache: false
       - run: make build
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -78,7 +83,7 @@ jobs:
         env:
           EVIDENCE_RUN_ID: ${{ inputs.source_run }}
           EVIDENCE_RUN_ATTEMPT: ${{ inputs.source_attempt }}
-        run: python3 scripts/benchmark-evidence.py .work/release-evidence --archive
+        run: go run ./internal/cmd/benchmark-evidence .work/release-evidence --archive
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: verified-hosted-evidence-${{ github.run_id }}-${{ github.run_attempt }}
