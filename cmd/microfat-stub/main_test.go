@@ -436,7 +436,7 @@ func TestLogDiagnostics(t *testing.T) {
 
 func TestEscapeJSONString(t *testing.T) {
 	input := "hello \"world\" \\ \b \f \n \r \t \x00 \x1f test"
-	escaped := escapeJSONString(input)
+	escaped := format.EscapeJSONString(input)
 	expected := `hello \"world\" \\ \b \f \n \r \t \u0000 \u001f test`
 	if escaped != expected {
 		t.Errorf("escapeJSONString mismatch: got %q, want %q", escaped, expected)

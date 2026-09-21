@@ -382,7 +382,6 @@ func measureTrial(ctx context.Context, cfg ExperimentConfig, opts RunOptions, ge
 		return
 	}
 	trial.Outcome = schema.OutcomeOK
-	return
 }
 
 type trialCleanup struct {

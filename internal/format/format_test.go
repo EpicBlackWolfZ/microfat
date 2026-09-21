@@ -1557,7 +1557,7 @@ func BenchmarkUnmarshalBinaryIndex(b *testing.B) {
 
 func TestEscapeJSONString(t *testing.T) {
 	input := "test\b\f\n\r\t\"\\hello\x01world"
-	escaped := escapeJSONString(input)
+	escaped := EscapeJSONString(input)
 	hasAll := bytes.Contains([]byte(escaped), []byte(`\b`)) &&
 		bytes.Contains([]byte(escaped), []byte(`\n`)) &&
 		bytes.Contains([]byte(escaped), []byte(`\u0001`))

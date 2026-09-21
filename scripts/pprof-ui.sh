@@ -116,19 +116,11 @@ env MICROFAT_PPROF_PORT="${PORT}" \
     "${BIN_DIR}/microfat" benchmark --trials 50 --trial-time 1s --warmup 200ms >"${LOG}" 2>&1 &
 PID=$!
 
-READY=0
-for _ in {1..30}; do
-    if curl -s "http://localhost:${PORT}/debug/pprof/" >/dev/null 2>&1; then
-        READY=1
-        break
-    fi
-    if ! kill -0 "${PID}" 2>/dev/null; then
-        break
-    fi
-    sleep 0.1
-done
-
-if [ "${READY}" -ne 1 ]; then
+set +e
+wait_for_pprof "${PID}" "${PORT}"
+readiness_status=$?
+set -e
+if [ "${readiness_status}" -ne 0 ]; then
     printf "%b\n" "${C_RED}${SYM_FAIL}${C_RESET} Failed to connect to pprof server on port ${PORT}"
     if [ -s "${LOG}" ]; then
         cat "${LOG}"

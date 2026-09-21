@@ -476,52 +476,22 @@ func newTrimCmd() *cobra.Command {
 }
 
 func newPackCmd() *cobra.Command {
+	var flags builder.BuildOptions
 	var (
-		manifestPath      string
-		stubPath          string
-		outputPath        string
-		appName           string
-		targetOS          string
-		targetArch        string
-		rawVariants       []string
-		skipELFValidation bool
-		profile           string
-		compression       string
-		compressionLevel  string
-		enableDict        bool
-		dictSize          int
-		formatVersion     int
-		concurrency       int
-		keepIntermediates bool
-		goBinary          string
+		appName, targetOS, targetArch string
+		rawVariants                   []string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "pack [--manifest <file> | [--stub <stub>] -v <level>=<path> ... -o <output>]",
 		Short: "Package multiple Go microarchitecture binaries into a single fat binary",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if manifestPath != "" {
-				m, err := builder.LoadManifest(manifestPath)
+			if flags.ManifestPath != "" {
+				m, err := builder.LoadManifest(flags.ManifestPath)
 				if err != nil {
 					return err
 				}
-				opts := builder.BuildOptions{
-					ManifestPath:      manifestPath,
-					OutputPath:        outputPath,
-					StubPath:          stubPath,
-					Concurrency:       concurrency,
-					KeepIntermediates: keepIntermediates,
-					GoBinary:          goBinary,
-					SkipELFValidation: skipELFValidation,
-					Profile:           profile,
-					Compression:       compression,
-					CompressionLevel:  compressionLevel,
-					EnableDict:        enableDict,
-					DictSize:          explicitDictionarySize(cmd, dictSize),
-					FormatVersion:     formatVersion,
-					Stdout:            cmd.OutOrStdout(),
-					Stderr:            cmd.ErrOrStderr(),
-				}
+				opts := manifestBuildOptions(cmd, flags)
 				fmt.Printf("Compiling and packaging PGO matrix for '%s' (%s/%s)...\n", m.AppName, m.TargetOS, m.TargetArch)
 				res, err := builder.BuildAndPack(cmd.Context(), m, opts)
 				if err != nil {
@@ -534,7 +504,7 @@ func newPackCmd() *cobra.Command {
 				return nil
 			}
 
-			actualStubPath := stubPath
+			actualStubPath := flags.StubPath
 			if actualStubPath == "" {
 				resolvedStub, err := builder.ResolveStubPath("", "", "")
 				if err != nil {
@@ -543,7 +513,7 @@ func newPackCmd() *cobra.Command {
 				actualStubPath = resolvedStub
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Using auto-discovered launcher stub: %s\n", actualStubPath)
 			}
-			if outputPath == "" {
+			if flags.OutputPath == "" {
 				return errors.New("required flag(s) \"output\" not set (or specify --manifest)")
 			}
 			if len(rawVariants) == 0 {
@@ -565,7 +535,7 @@ func newPackCmd() *cobra.Command {
 
 			opts := pack.DefaultOptions()
 			opts.StubPath = actualStubPath
-			opts.OutputPath = outputPath
+			opts.OutputPath = flags.OutputPath
 			opts.AppName = appName
 			if targetOS != "" {
 				opts.TargetOS = targetOS
@@ -574,24 +544,24 @@ func newPackCmd() *cobra.Command {
 				opts.TargetArch = targetArch
 			}
 			opts.Variants = variants
-			opts.SkipELFValidation = skipELFValidation
-			if profile != "" {
-				opts.Profile = profile
+			opts.SkipELFValidation = flags.SkipELFValidation
+			if flags.Profile != "" {
+				opts.Profile = flags.Profile
 			}
-			if compression != "" {
-				opts.Compression = compression
+			if flags.Compression != "" {
+				opts.Compression = flags.Compression
 			}
-			if compressionLevel != "" {
-				opts.CompressionLevel = compressionLevel
+			if flags.CompressionLevel != "" {
+				opts.CompressionLevel = flags.CompressionLevel
 			}
-			if enableDict {
-				opts.EnableDict = enableDict
+			if flags.EnableDict {
+				opts.EnableDict = flags.EnableDict
 			}
-			if dictSize > 0 {
-				opts.DictSize = dictSize
+			if flags.DictSize > 0 {
+				opts.DictSize = flags.DictSize
 			}
-			if formatVersion != 0 {
-				opts.FormatVersion = formatVersion
+			if flags.FormatVersion != 0 {
+				opts.FormatVersion = flags.FormatVersion
 			}
 			opts.WarnFunc = func(format string, args ...any) {
 				var msg string
@@ -603,13 +573,13 @@ func newPackCmd() *cobra.Command {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "[microfat:warn] %s\n", msg)
 			}
 
-			fmt.Printf("Packaging fat binary '%s'...\n", outputPath)
+			fmt.Printf("Packaging fat binary '%s'...\n", flags.OutputPath)
 			idx, err := pack.Pack(opts)
 			if err != nil {
 				return fmt.Errorf("packaging error: %w", err)
 			}
 
-			fmt.Printf("Successfully packaged %d variants into '%s':\n", len(idx.Variants), outputPath)
+			fmt.Printf("Successfully packaged %d variants into '%s':\n", len(idx.Variants), flags.OutputPath)
 			for _, v := range idx.Variants {
 				fmt.Printf("  • %-6s [%s] -> uncompressed: %d B | compressed: %d B\n", v.Level, v.Compression, v.UncompressedSize, v.CompressedSize)
 			}
@@ -617,27 +587,17 @@ func newPackCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&manifestPath, "manifest", "m", "", "Path to YAML or JSON build manifest file")
-	cmd.Flags().StringVar(&stubPath, "stub", "", "Path to microfat launcher stub binary")
-	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Destination output path for the fat binary")
+	cmd.Flags().StringVarP(&flags.ManifestPath, "manifest", "m", "", "Path to YAML or JSON build manifest file")
+	cmd.Flags().StringVar(&flags.StubPath, "stub", "", "Path to microfat launcher stub binary")
+	cmd.Flags().StringVarP(&flags.OutputPath, "output", "o", "", "Destination output path for the fat binary")
 	cmd.Flags().StringVar(&appName, "name", "", "Application name")
 	cmd.Flags().StringVar(&targetOS, "os", "linux", "Target operating system")
 	cmd.Flags().StringVar(&targetArch, "arch", "amd64", "Target architecture (amd64 or arm64)")
 	cmd.Flags().StringArrayVarP(&rawVariants, "variant", "v", nil,
 		"Variant mapping in <level>=<path> format (e.g. -v v1=bin/v1 -v v3=bin/v3 for amd64, or -v v8.0=bin/v80 -v v8.2=bin/v82 for arm64)")
-	cmd.Flags().StringVar(&profile, "profile", "", "Compression profile preset: latency, balanced, size")
-	cmd.Flags().StringVar(&compression, "compression", "", "Compression algorithm: lz4, zstd, none (e.g. lz4 or zstd:11)")
-	cmd.Flags().StringVar(&compressionLevel, "compression-level", "", "Compression level override: fastest, default, better, best, or number")
-	cmd.Flags().BoolVar(&enableDict, "dict", false, "Enable shared Zstandard dictionary compression across variants")
-	cmd.Flags().BoolVar(&enableDict, "zstd-dict", false, "Alias for --dict")
-	cmd.Flags().IntVar(&dictSize, "dict-size", codec.DefaultDictSize, "Target shared Zstandard dictionary size in bytes (default: 112 KB)")
-	cmd.Flags().IntVar(&formatVersion, "format-version", format.FormatVersionCurrent,
-		"Binary format specification version (1 for JSON, 2 for binary table)")
-	cmd.Flags().BoolVar(&skipELFValidation, "skip-elf-validation", false, "Skip ELF architecture and executable structure validation")
-	cmd.Flags().IntVarP(&concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (when using --manifest)")
-	cmd.Flags().BoolVar(&keepIntermediates, "keep-intermediates", false, "Keep intermediate compiled variant ELF binaries")
-	cmd.Flags().StringVar(&goBinary, "go-binary", "", "Path to Go toolchain binary (defaults to $GO or 'go')")
+	cmd.Flags().IntVarP(&flags.Concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (when using --manifest)")
 
+	bindManifestBuildFlags(cmd, &flags)
 	return cmd
 }
 
@@ -650,22 +610,33 @@ func explicitDictionarySize(cmd *cobra.Command, size int) int {
 	return 0
 }
 
+// Copy flag values before applying per-invocation streams and manifest defaults.
+// An omitted dictionary size must not overwrite the manifest's explicit value.
+func manifestBuildOptions(cmd *cobra.Command, flags builder.BuildOptions) builder.BuildOptions {
+	flags.DictSize = explicitDictionarySize(cmd, flags.DictSize)
+	flags.Stdout = cmd.OutOrStdout()
+	flags.Stderr = cmd.ErrOrStderr()
+	return flags
+}
+
+func bindManifestBuildFlags(cmd *cobra.Command, flags *builder.BuildOptions) {
+	cmd.Flags().StringVar(&flags.Profile, "profile", "", "Compression profile preset: latency, balanced, size")
+	cmd.Flags().StringVar(&flags.Compression, "compression", "", "Compression algorithm: lz4, zstd, none (e.g. lz4 or zstd:11)")
+	cmd.Flags().StringVar(&flags.CompressionLevel, "compression-level", "",
+		"Compression level override: fastest, default, better, best, or number")
+	cmd.Flags().BoolVar(&flags.EnableDict, "dict", false, "Enable shared Zstandard dictionary compression across variants")
+	cmd.Flags().BoolVar(&flags.EnableDict, "zstd-dict", false, "Alias for --dict")
+	cmd.Flags().IntVar(&flags.DictSize, "dict-size", codec.DefaultDictSize,
+		"Target shared Zstandard dictionary size in bytes (default: 112 KB)")
+	cmd.Flags().IntVar(&flags.FormatVersion, "format-version", format.FormatVersionCurrent,
+		"Binary format specification version (1 for JSON, 2 for binary table)")
+	cmd.Flags().BoolVar(&flags.SkipELFValidation, "skip-elf-validation", false, "Skip ELF architecture and executable structure validation")
+	cmd.Flags().BoolVar(&flags.KeepIntermediates, "keep-intermediates", false, "Keep intermediate compiled variant ELF binaries")
+	cmd.Flags().StringVar(&flags.GoBinary, "go-binary", "", "Path to Go toolchain binary (defaults to $GO or 'go')")
+}
+
 func newPgoPackCmd() *cobra.Command {
-	var (
-		manifestPath      string
-		outputPath        string
-		stubPath          string
-		profile           string
-		compression       string
-		compressionLevel  string
-		enableDict        bool
-		dictSize          int
-		formatVersion     int
-		concurrency       int
-		keepIntermediates bool
-		goBinary          string
-		skipELFValidation bool
-	)
+	var flags builder.BuildOptions
 
 	cmd := &cobra.Command{
 		Use:   "pgo-pack --manifest <manifest-file> [-o <output>]",
@@ -674,35 +645,19 @@ func newPgoPackCmd() *cobra.Command {
 (e.g., v1, v3, v4 on AMD64 or v8.0, v8.2 on ARM64) with Profile-Guided Optimization (-pgo) profiles,
 then packages them into a self-dispatching microfat binary.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if manifestPath == "" && len(args) > 0 {
-				manifestPath = args[0]
+			if flags.ManifestPath == "" && len(args) > 0 {
+				flags.ManifestPath = args[0]
 			}
-			if manifestPath == "" {
+			if flags.ManifestPath == "" {
 				return errors.New("manifest file path is required (use --manifest <file> or specify as first argument)")
 			}
 
-			m, err := builder.LoadManifest(manifestPath)
+			m, err := builder.LoadManifest(flags.ManifestPath)
 			if err != nil {
 				return err
 			}
 
-			opts := builder.BuildOptions{
-				ManifestPath:      manifestPath,
-				OutputPath:        outputPath,
-				StubPath:          stubPath,
-				Concurrency:       concurrency,
-				KeepIntermediates: keepIntermediates,
-				GoBinary:          goBinary,
-				SkipELFValidation: skipELFValidation,
-				Profile:           profile,
-				Compression:       compression,
-				CompressionLevel:  compressionLevel,
-				EnableDict:        enableDict,
-				DictSize:          explicitDictionarySize(cmd, dictSize),
-				FormatVersion:     formatVersion,
-				Stdout:            cmd.OutOrStdout(),
-				Stderr:            cmd.ErrOrStderr(),
-			}
+			opts := manifestBuildOptions(cmd, flags)
 
 			fmt.Printf("Compiling and packaging PGO matrix for '%s' (%s/%s)...\n", m.AppName, m.TargetOS, m.TargetArch)
 			res, err := builder.BuildAndPack(cmd.Context(), m, opts)
@@ -720,22 +675,12 @@ then packages them into a self-dispatching microfat binary.`,
 		},
 	}
 
-	cmd.Flags().StringVarP(&manifestPath, "manifest", "m", "", "Path to YAML or JSON build manifest file")
-	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Destination output path for the fat binary (overrides manifest)")
-	cmd.Flags().StringVar(&stubPath, "stub", "", "Path to microfat launcher stub binary (overrides manifest)")
-	cmd.Flags().StringVar(&profile, "profile", "", "Compression profile preset: latency, balanced, size")
-	cmd.Flags().StringVar(&compression, "compression", "", "Compression algorithm: lz4, zstd, none (e.g. lz4 or zstd:11)")
-	cmd.Flags().StringVar(&compressionLevel, "compression-level", "", "Compression level override: fastest, default, better, best, or number")
-	cmd.Flags().BoolVar(&enableDict, "dict", false, "Enable shared Zstandard dictionary compression across variants")
-	cmd.Flags().BoolVar(&enableDict, "zstd-dict", false, "Alias for --dict")
-	cmd.Flags().IntVar(&dictSize, "dict-size", codec.DefaultDictSize, "Target shared Zstandard dictionary size in bytes (default: 112 KB)")
-	cmd.Flags().IntVar(&formatVersion, "format-version", format.FormatVersionCurrent,
-		"Binary format specification version (1 for JSON, 2 for binary table)")
-	cmd.Flags().IntVarP(&concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (defaults to NumCPU)")
-	cmd.Flags().BoolVar(&keepIntermediates, "keep-intermediates", false, "Keep intermediate compiled variant ELF binaries")
-	cmd.Flags().StringVar(&goBinary, "go-binary", "", "Path to Go toolchain binary (defaults to $GO or 'go')")
-	cmd.Flags().BoolVar(&skipELFValidation, "skip-elf-validation", false, "Skip ELF architecture and executable structure validation")
+	cmd.Flags().StringVarP(&flags.ManifestPath, "manifest", "m", "", "Path to YAML or JSON build manifest file")
+	cmd.Flags().StringVarP(&flags.OutputPath, "output", "o", "", "Destination output path for the fat binary (overrides manifest)")
+	cmd.Flags().StringVar(&flags.StubPath, "stub", "", "Path to microfat launcher stub binary (overrides manifest)")
+	cmd.Flags().IntVarP(&flags.Concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (defaults to NumCPU)")
 
+	bindManifestBuildFlags(cmd, &flags)
 	return cmd
 }
 

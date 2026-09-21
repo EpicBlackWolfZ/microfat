@@ -50,6 +50,21 @@ is_port_in_use() {
     esac
 }
 
+wait_for_pprof() {
+    local pid="${1}"
+    local port="${2}"
+    for _ in {1..30}; do
+        if curl -s "http://localhost:${port}/debug/pprof/" >/dev/null 2>&1; then
+            return 0
+        fi
+        if ! kill -0 "${pid}" 2>/dev/null; then
+            break
+        fi
+        sleep 0.1 || return 1
+    done
+    return 1
+}
+
 terminate_pid() {
     local pid="${1:-}"
     if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
