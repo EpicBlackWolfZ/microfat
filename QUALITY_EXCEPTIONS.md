@@ -14,8 +14,8 @@ entry is not a rule in its documented Revive 1.16.0. Reasons and rule names are
 mandatory for disable directives. There are no file or test-tree exclusions.
 
 CodeFactor's separate **Complex Method** metric is a readability review signal,
-not Revive's cyclomatic score. This TOML does not suppress that metric. Accepted
-findings below remain visible in CodeFactor; no provider-side ignores are needed.
+not Revive's cyclomatic score. Review it independently of configured lint results
+and the PR delta view. No provider-side ignores are added.
 The review preserves ordered validation, explicit ownership, independent test
 oracles and test coverage. It does not remove checks to reduce a score.
 
@@ -53,8 +53,61 @@ state on the dispatch path.
 | [TestLifecycleReleaseSmoke](tests/e2e/lifecycle_test.go) | Keep the ordered release lifecycle and launcher meta-command outcomes visible together. |
 | [TestProcessFidelityAndExecutionInvariants](tests/e2e/process_fidelity_test.go) | Keep argv, environment, stdin, exit status and executable-identity scenarios explicit. |
 
-## CodeFactor review
+## Reviewed production functions
 
-The final candidate's retained Complex Method findings and specific rationales
-are recorded here after the hosted scan. Resolved duplication and maintainability
-findings do not need permanent exceptions.
+The following functions appeared in the full baseline scan after the tooling
+migrations. The scoped review retains their validation and ownership structure
+for the reasons below, even if a future hosted scan reports a complexity warning.
+These entries do not suppress any rule. Existing golangci-lint limits continue to
+apply. They are separate from the 18 explicit Revive exceptions above.
+
+| Function | Decision and reason |
+| --- | --- |
+| [Calibrate](benchmarks/ci/calibration.go) | Keep training and holdout cohorts distinct and retain report-only fallback when calibration cannot qualify. |
+| [Metric](benchmarks/compare/compare.go) | Keep pairing, provenance, scope compatibility and missing-data outcomes explicit; incomplete evidence stays inconclusive. |
+| [traverseCgroupV1CPU](benchmarks/env/cgroup.go) | Fix #249 using same-cgroup quota/period pairs; malformed or missing finite periods fail instead of borrowing an ancestor's period. |
+| [traverseCgroupV2CPUMax](benchmarks/env/cgroup.go) | Fix #249 using exact quota/period comparison; retain ancestor traversal and unavailable/error states without rounding CPUs. |
+| [detectCPUFreq](benchmarks/env/cpu_linux.go) | Keep sysfs location fallback and individually unavailable frequency observations explicit. |
+| [Render](benchmarks/report/report.go) | Keep the small explicit output-format dispatch and each format's rendering rules visible; no new templating dependency. |
+| [VerifyFiles](benchmarks/report/report.go) | Keep evidence path, symlink, size and digest checks adjacent to bounded reads; unverified bytes must not be consumed. |
+| [buildArtifacts](benchmarks/runner/artifacts.go) | Keep source build, stub selection, PGO, packaging and artifact registration in their resource-owning sequence. |
+| [RunExperiment](benchmarks/runner/experiment.go) | Keep configuration, scheduling, process outcomes and evidence publication in one ordered experiment lifecycle. |
+| [validateControls](benchmarks/runner/experiment_config.go) | Keep runtime variables, cache mode and CPU-affinity conflicts explicit before building or running a benchmark. |
+| [Run](benchmarks/runner/runner.go) | Keep each workload's preparation, execution, cleanup and evidence construction in one visible lifecycle. |
+| [runProcessTrial](benchmarks/runner/trial.go) | Keep launch, cancellation, collection, telemetry and failed-trial evidence in one bounded process lifecycle. |
+| [ValidateV2](benchmarks/schema/experiment_v2.go) | Keep schema, configuration, provenance and outcome validation ordered before downstream evidence use. |
+| [validateProcessTrials](benchmarks/schema/experiment_v2.go) | Keep schedule membership, duplicate trials, timestamps, status and telemetry constraints explicit. |
+| [ValidateExperiment](benchmarks/schema/validation.go) | Keep fail-fast schema, identity, timestamp and environment validation in explicit order before scenario traversal. |
+| [validateAnalysis](benchmarks/schema/validation.go) | Keep finite-value, sample-count and percentile boundary checks explicit; no generic reflection validator. |
+| [validateScenario](benchmarks/schema/validation.go) | Keep observation identity, temporal ordering and metric validation adjacent; invalid observations must not reach analysis. |
+| [buildAutoTunedEnviron](cmd/microfat-stub/exec_linux.go) | Keep user environment precedence, dry-run handling and dispatch metadata explicit without another launcher dependency. |
+| [executeViaCache](cmd/microfat-stub/exec_linux.go) | Keep directory and executable descriptor ownership, materialization and execution cleanup in the same scope. |
+| [newPackCmd](cmd/microfat/main.go) | Reuse existing build options and flag binding; keep manifest and direct-variant validation paths explicit. |
+| [newPrewarmCmd](cmd/microfat/main.go) | Share JSON rendering; keep verify-only nonmutation and prewarm materialization paths explicit. |
+| [newTrimCmd](cmd/microfat/main.go) | Keep input descriptor and temporary-output ownership, sync, chmod, close and atomic rename in one CLI operation. |
+| [runSIMDMathWorkload](examples/demo/main.go) | Preserve deliberate unrolled benchmark work and optimizer behavior; metric-only extraction would change the measured workload. |
+| [BuildAndPack](internal/builder/builder.go) | Keep temporary-build ownership and manifest/build/pack order visible so failures clean up only owned artifacts. |
+| [assemblePackOptions](internal/builder/builder.go) | Keep manifest versus explicit CLI override precedence, dictionary policy and per-variant settings readable. |
+| [MaterializeVariantAtFD](internal/cache/cache_other.go) | Keep temporary-file ownership, bounded write, integrity validation, atomic publication and post-publication checks adjacent on each platform. |
+| [MaterializeVariantAtFD](internal/cache/cache_unix.go) | Keep temporary-file ownership, bounded write, integrity validation, atomic publication and post-publication checks adjacent on each platform. |
+| [readCgroupV1](internal/cgroup/cgroup.go) | Keep separate memory/CPU controllers and their unavailable or malformed states explicit. |
+| [ResolveCompression](internal/codec/codec.go) | Keep profile validation and explicit algorithm/level precedence visible; invalid combinations must still fail. |
+| [OpenAndValidateCacheDirFD](internal/format/cache_unix.go) | Keep descriptor validation, ownership and permission repair in one audited sequence; no pathname reopening or new abstraction. |
+| [UnmarshalBinaryIndex](internal/format/format.go) | Keep each length and cursor bound check immediately before the corresponding slice; avoid an allocation-heavy generic decoder. |
+| [extractX86FeatureList](internal/microarch/microarch.go) | Keep the static CPU feature-to-name mapping explicit; do not introduce reflection or mutable runtime tables. |
+| [PrewarmBinary](internal/pack/pack.go) | Keep dictionary bounds and checksum verification before allocation/use, and variant selection before materialization. |
+| [PrewarmVariantWithDict](internal/pack/pack.go) | Keep dictionary integrity, cache validation, decompression limits and atomic replacement together with their owned resources. |
+| [validateOptions](internal/pack/pack.go) | Keep ISA alias collision, default selection and ELF validation ordering explicit before any output is published. |
+| [writeVariantPayload](internal/pack/pack.go) | Share raw/canonical override application while retaining raw-key precedence, codec selection and bounded payload accounting. |
+| [ExtractFileFromArchive](internal/releasecheck/archive.go) | Keep path, duplicate-entry, size and complete-archive validation before publishing the extracted destination. |
+| [applyTuningPlan](runtimeinit/runtimeinit.go) | Keep the dry-run return before all runtime setters and preserve each user environment override. |
+
+## Hosted scan acceptance
+
+Review both the PR delta and the full analyzed branch at the release candidate.
+CodeFactor [does not run duplication checks on pull requests](https://docs.codefactor.io/common-tasks/duplication-issues/),
+so the PR's fixed/new counts cannot establish that every baseline finding is gone.
+Reconcile all baseline findings and any new findings with actual source locations.
+Keep machine inventories and test evidence in `.work/` and reference the final
+scan and its commit in the issue or PR review. A retained finding needs a specific
+rationale here; a new actionable bug needs a fix or a milestone issue.
