@@ -1334,9 +1334,21 @@ func IsFatBinary(r io.ReaderAt, totalSize int64) bool {
 //     via fchmod to 0700. Foreign-owned directories, symlinks, or candidates where chmod fails are rejected,
 //     falling through to the next candidate in the cascade.
 func ResolveCacheDirFD(customDir string) (int, string, error) {
+	return resolveCacheDirFD(customDir, true)
+}
+
+// ResolveExistingCacheDirFD discovers and opens a secure existing cache directory.
+// It never creates directories or repairs permissions. Explicit paths fail directly;
+// automatic discovery tries the same candidates as ResolveCacheDirFD, without changes.
+// The caller owns the returned descriptor and must close it when it is nonnegative.
+func ResolveExistingCacheDirFD(customDir string) (int, string, error) {
+	return resolveCacheDirFD(customDir, false)
+}
+
+func resolveCacheDirFD(customDir string, materialize bool) (int, string, error) {
 	if customDir != "" {
 		cleanDir := filepath.Clean(customDir)
-		if err := os.MkdirAll(cleanDir, PrivateCacheDirMode); err != nil {
+		if err := prepareCacheDir(cleanDir, materialize); err != nil {
 			return -1, "", fmt.Errorf("creating custom cache directory %s: %w", cleanDir, err)
 		}
 		fd, err := OpenAndValidateCacheDirFD(cleanDir, false)
@@ -1348,7 +1360,7 @@ func ResolveCacheDirFD(customDir string) (int, string, error) {
 
 	if envDir := os.Getenv(EnvCacheDir); envDir != "" {
 		cleanDir := filepath.Clean(envDir)
-		if err := os.MkdirAll(cleanDir, PrivateCacheDirMode); err != nil {
+		if err := prepareCacheDir(cleanDir, materialize); err != nil {
 			return -1, "", fmt.Errorf("creating cache directory from %s (%s): %w", EnvCacheDir, cleanDir, err)
 		}
 		fd, err := OpenAndValidateCacheDirFD(cleanDir, false)
@@ -1380,24 +1392,40 @@ func ResolveCacheDirFD(customDir string) (int, string, error) {
 		attempted = append(attempted, cleanDir)
 
 		// #nosec G703 -- cache directory creation with private permissions
-		if err := os.MkdirAll(cleanDir, PrivateCacheDirMode); err != nil {
+		if err := prepareCacheDir(cleanDir, materialize); err != nil {
 			continue
 		}
 
-		fd, err := OpenAndValidateCacheDirFD(cleanDir, true)
+		fd, err := OpenAndValidateCacheDirFD(cleanDir, materialize)
 		if err == nil {
 			return fd, cleanDir, nil
 		}
 	}
 
-	return -1, "", fmt.Errorf("%w: unable to initialize microfat cache directories (tried %s)",
+	return -1, "", fmt.Errorf("%w: unable to resolve secure microfat cache directories (tried %s)",
 		ErrCacheInit, strings.Join(attempted, ", "))
+}
+
+func prepareCacheDir(dir string, materialize bool) error {
+	if !materialize {
+		return nil
+	}
+	return os.MkdirAll(dir, PrivateCacheDirMode)
+}
+
+// ResolveExistingCacheDir is the read-only counterpart of ResolveCacheDir.
+func ResolveExistingCacheDir(customDir string) (string, error) {
+	return resolveCacheDir(customDir, false)
 }
 
 // ResolveCacheDir resolves and creates the microfat cache directory with 0700 permissions.
 // On Unix systems, it validates security invariants using descriptor-based pinning to prevent TOCTOU races.
 func ResolveCacheDir(customDir string) (string, error) {
-	fd, dir, err := ResolveCacheDirFD(customDir)
+	return resolveCacheDir(customDir, true)
+}
+
+func resolveCacheDir(customDir string, materialize bool) (string, error) {
+	fd, dir, err := resolveCacheDirFD(customDir, materialize)
 	if err != nil {
 		return "", err
 	}

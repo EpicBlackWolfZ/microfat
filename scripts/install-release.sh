@@ -125,15 +125,17 @@ done
 # 9. Perform installation
 echo "==> Installing binaries to ${INSTALL_DIR}..."
 INSTALL_CMD=(install)
+INSTALL_USE_SUDO=0
 current_uid="$(id -u)"
 if [[ -n "${INSTALL_RUNNER:-}" ]]; then
     IFS=' ' read -r -a INSTALL_CMD <<< "${INSTALL_RUNNER}"
 elif [[ "${current_uid}" -ne 0 ]] && [[ ! -w "${INSTALL_DIR}" ]]; then
     INSTALL_CMD=(sudo install)
+    INSTALL_USE_SUDO=1
 fi
 
 mkdir -p "${INSTALL_DIR}" 2>/dev/null || {
-    if [[ "${INSTALL_CMD[*]}" == "sudo install" ]]; then
+    if [[ "${INSTALL_USE_SUDO}" -eq 1 ]]; then
         sudo mkdir -p "${INSTALL_DIR}"
     else
         echo "Error: Cannot create installation directory '${INSTALL_DIR}'" >&2

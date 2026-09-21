@@ -147,6 +147,9 @@ microfat prewarm --verify /usr/local/bin/myapp
 microfat prewarm --json /usr/local/bin/myapp
 ```
 
+Verification opens existing cache directories without creating them or repairing permissions, and never extracts or removes entries. Missing or insecure explicit directories fail directly. Automatic discovery tries the configured XDG/home and temporary-directory candidates without modifying any of them; if none is secure and present it fails. Missing or corrupt entries produce a failing exit status and remain untouched. This contract also applies to the full launcher's verify meta-command and library cache verification with implicit directory selection.
+
+
 ### Launcher Stub Hook
 ```bash
 # Decompress selected compatible variant and exit 0 immediately without running the app:
