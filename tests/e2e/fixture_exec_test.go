@@ -51,7 +51,7 @@ func TestFixtureExecBusyExhaustion(t *testing.T) {
 		return exec.Command(path)
 	})
 	require.ErrorIs(t, err, syscall.ETXTBSY)
-	assert.Equal(t, 10, attempts, "busy fixture must eventually fail rather than loop indefinitely")
+	assert.Equal(t, fixtureBusyAttempts, attempts, "busy fixture must eventually fail rather than loop indefinitely")
 }
 
 func TestFixtureExecPreservesFailures(t *testing.T) {

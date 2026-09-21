@@ -266,19 +266,29 @@ func executeFatBinary(t testing.TB, binPath string, env []string, args ...string
 // fork can retain a recently closed writer until exec closes its CLOEXEC copy.
 // Once Start succeeds, every exit status and I/O error is returned unchanged.
 func runFixtureCommand(newCommand func() *exec.Cmd) error {
-	const attempts = 10
+	var cmd *exec.Cmd
+	if err := retryFixtureBusy(func() error {
+		cmd = newCommand()
+		return cmd.Start()
+	}); err != nil {
+		return err
+	}
+	return cmd.Wait()
+}
+
+const fixtureBusyAttempts = 40
+
+// Retry only operations that the kernel has refused without side effects.
+// The final error is preserved; a still-busy fixture never counts as prepared.
+func retryFixtureBusy(operation func() error) error {
 	const delay = 25 * time.Millisecond
 	var err error
-	for attempt := range attempts {
-		cmd := newCommand()
-		err = cmd.Start()
+	for attempt := range fixtureBusyAttempts {
+		err = operation()
 		if !errors.Is(err, syscall.ETXTBSY) {
-			if err != nil {
-				return err
-			}
-			return cmd.Wait()
+			return err
 		}
-		if attempt+1 < attempts {
+		if attempt+1 < fixtureBusyAttempts {
 			time.Sleep(delay)
 		}
 	}
@@ -354,22 +364,11 @@ func copyFile(t testing.TB, src, dst string) int64 {
 func mutateFileBytes(t testing.TB, path string, offset int64, patch []byte) {
 	t.Helper()
 	var f *os.File
-	var err error
-
-	// If the file was recently executed by a preceding test step, Linux kernel VM_DENYWRITE
-	// cleanup may briefly defer clearing write denial. Retry open(O_WRONLY) if busy.
-	const maxOpenAttempts = 5
-	const openRetryDelay = 10 * time.Millisecond
-
-	for range maxOpenAttempts {
+	if err := retryFixtureBusy(func() error {
+		var err error
 		f, err = os.OpenFile(path, os.O_WRONLY, 0)
-		if err != nil && errors.Is(err, syscall.ETXTBSY) {
-			time.Sleep(openRetryDelay)
-			continue
-		}
-		break
-	}
-	if err != nil {
+		return err
+	}); err != nil {
 		t.Fatalf("opening %s for mutation: %v", path, err)
 	}
 
@@ -386,24 +385,12 @@ func mutateFileBytes(t testing.TB, path string, offset int64, patch []byte) {
 		t.Fatalf("closing %s: %v", path, err)
 	}
 
-	// Yield briefly during fixture construction to let kernel delayed_fput drain writecount
-	time.Sleep(10 * time.Millisecond)
 }
 
 func truncateFile(t testing.TB, path string, size int64) {
 	t.Helper()
-	const maxAttempts = 5
-	const retryDelay = 10 * time.Millisecond
-	for range maxAttempts {
-		err := os.Truncate(path, size)
-		if err != nil && errors.Is(err, syscall.ETXTBSY) {
-			time.Sleep(retryDelay)
-			continue
-		}
-		if err != nil {
-			t.Fatalf("truncating %s: %v", path, err)
-		}
-		return
+	if err := retryFixtureBusy(func() error { return os.Truncate(path, size) }); err != nil {
+		t.Fatalf("truncating %s: %v", path, err)
 	}
 }
 

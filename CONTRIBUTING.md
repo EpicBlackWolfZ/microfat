@@ -62,6 +62,7 @@ task all        # Run tidy, lint, vuln, test, coverage gate (>=95%), and build
 task build      # Compile microfat and microfat-stub into bin/
 task test       # Run unit tests with race detection (-race)
 task coverage   # Generate coverage profile and enforce >= 95.0% threshold gate
+task coverage-unit # Enforce the same statement gate before black-box integration tests
 task lint       # Run all linters (Go via golangci-lint and Bash via shellcheck)
 task lint-go    # Run golangci-lint across all packages
 task lint-shell # Run ShellCheck (v0.11.0) across all tracked Bash scripts
@@ -103,6 +104,11 @@ and the >=95% overall gate counts statements rather than averaging package perce
 artifacts use separate profile names. Temporary planning documents and verification evidence belong
 under ignored `.work/`, not published documentation directories.
 
+CI uses `task coverage-unit` for its middle stage. It runs the unit tests in `cmd`, `internal`,
+`runtimeinit` and `benchmarks` with both profiles and the same production statement universe.
+The dedicated black-box suite runs afterwards through `task e2e`, also with both profiles.
+The full local and release commands retain their existing complete test and coverage scope.
+
 Workflow actions are pinned to upstream commit SHAs with version comments; Dependabot maintains
 these pins. Publishing/OIDC permissions belong only to the release publisher. Fork PRs retain read-only
 tokens, skip checks-write reporting, and still enforce test failures through the test job. The release
@@ -138,18 +144,37 @@ We strictly follow the [Conventional Commits](https://www.conventionalcommits.or
 
 ## 6. Automated Quality & Security Gates
 
-The `main` ruleset requires these **six CI checks**, including legitimate documentation-only skips
-as described below:
+The `main` ruleset requires **`CI Complete`** together with the existing six checks below.
+`CI Complete` validates every expected stage result; missing jobs, failure, cancellation and
+unexpected skips fail the gate. A matrix must succeed as a whole. The only accepted skips are
+the code stages of a positively classified documentation-only PR, as described below.
 
 1. **`Validate Conventional PR Title`**: Verifies PR title follows Conventional Commits.
 2. **`Lint (golangci-lint)`**: Zero tolerance for Go linter errors (`errcheck`, `goconst`, `lll`, `mnd`, `govet`, etc.) and ShellCheck (v0.11.0) static analysis violations across all tracked Bash scripts.
-3. **`Unit Tests & Coverage Gate (>= 95%)`**: Full test execution with `-race` detection enforcing the strict **>= 95.0%** threshold across all packages (`cmd/...`, `internal/...`, and `runtimeinit/...`).
+3. **`Unit Tests & Coverage Gate (>= 95%)`**: Default/minimal unit tests with `-race`, enforcing the exact **>= 95%** production statement union across `cmd`, `internal`, `runtimeinit` and `benchmarks`.
 4. **`Vulnerability Scan (govulncheck)`**: Automated scanning against the official Go Vulnerability Database.
 5. **`Secrets Detection (gitleaks)`**: Audits commits for accidental credential leaks.
 6. **`Build, GoReleaser Snapshot & Self-Bundling Verification`**: Verifies multi-architecture builds and self-dispatching stubs.
 
-CodeQL (Go and Actions), developer workflow regressions, benchmarks and CodeFactor provide additional
-validation; they are not currently named as required checks in the branch ruleset.
+All PR work shares one dependency graph. Formatting, module/configuration/workflow checks,
+Go/ShellCheck lint, title validation, secrets and vulnerability checks run first. Only after they
+succeed can unit/race/coverage run. Integration/chaos/fuzz, developer regressions and leak checks,
+serialized release snapshots, benchmark smoke, archive contracts, all three kernel modes and
+CodeQL wait for the unit gate. `CI Complete` explicitly requires every stage, including the
+reusable workflow results. CodeFactor remains a separate quality signal and release acceptance
+check; it is not a named ruleset requirement.
+
+Main pushes use the same staged validation. Scheduled/manual deep benchmarks, calibration,
+release evidence and publication retain their own workflows. Reusable jobs have distinct
+concurrency groups so they cannot cancel their parent CI run. Snapshots sharing `dist/` remain
+serialized within one job.
+
+Maintainers can use the CI workflow's manual `failure_probe` input to verify propagation of a
+fast, unit, final-stage or matrix failure, or an unexpected skip. The `cancel` probe holds a
+bounded cancellation window before unit tests; cancelling that run must not produce a green
+aggregate. These probes deliberately fail validation. Use `none` for ordinary qualification.
+When changing required checks, first prove the new context on the candidate PR, then add it to
+the ruleset while retaining existing protections before merging the workflow change.
 
 ---
 
@@ -185,10 +210,12 @@ validation; they are not currently named as required checks in the branch rulese
 The required CI workflow runs on every pull request to `main`. PR title validation, secret scanning
 and change-classification regression checks also run for documentation changes. A nonempty diff
 limited to root Markdown files, Markdown under `docs/`, and `LICENSE` skips Go lint, tests, developer
-runtime checks, vulnerability analysis and snapshots at the step/job level, so required statuses
+runtime checks, vulnerability analysis, benchmarks, CodeQL and snapshots at the step/job level, so required statuses
 finish instead of remaining pending. Other paths, mixed changes and empty diffs run code checks.
 
 Classification uses the complete Git diff of the PR merge result against its first parent, with
 rename detection disabled. A Git or classifier failure fails the required lint job; it cannot approve
-a documentation-only skip. Push and manual runs retain the full CI checks. No required check names
-or branch protection rules are changed. Run `bash scripts/ci-code-changes-test.sh` to verify the policy.
+a documentation-only skip. The final aggregate checks the explicit skip set while title, lint
+classification and secrets must succeed. Push and ordinary manual runs retain the full CI checks.
+Run `bash scripts/ci-code-changes-test.sh` to verify the policy and `go test ./internal/cigate`
+to check the workflow dependency and completion contracts.
