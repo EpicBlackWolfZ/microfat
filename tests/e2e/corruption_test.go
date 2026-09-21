@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -22,6 +24,7 @@ const (
 	tamperedInvalidSize          = 10
 )
 
+//revive:disable-next-line:cyclomatic Keep independent malformed-byte fixtures and no-payload-execution assertions explicit.
 func TestCorruptionAndSecurityBoundary(t *testing.T) {
 	t.Parallel()
 
@@ -155,9 +158,7 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 
 		// Truncate file back to index offset and re-write index and valid trailer checksum
 		f, err := os.OpenFile(corruptPath, os.O_RDWR, 0)
-		if err != nil {
-			t.Fatalf("open %s: %v", corruptPath, err)
-		}
+		require.NoErrorf(t, err, "open %s: %v", corruptPath, err)
 
 		if err := f.Truncate(trailer.IndexOffset); err != nil {
 			_ = f.Close()
@@ -234,9 +235,7 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 		}
 
 		f, err := os.OpenFile(corruptPath, os.O_RDWR, 0)
-		if err != nil {
-			t.Fatalf("open %s: %v", corruptPath, err)
-		}
+		require.NoErrorf(t, err, "open %s: %v", corruptPath, err)
 
 		if err := f.Truncate(trailer.IndexOffset); err != nil {
 			_ = f.Close()

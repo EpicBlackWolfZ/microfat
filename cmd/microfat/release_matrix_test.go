@@ -16,9 +16,10 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"github.com/EpicBlackWolfZ/microfat/internal/releasecheck"
+	"gopkg.in/yaml.v3"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -117,13 +118,9 @@ func TestMinimalStubAndMatrixDistribution(t *testing.T) {
 		minStub := compile("stub-amd64-min", "../microfat-stub", "minimal", "GOOS=linux", "GOARCH=amd64", "GOAMD64=v1")
 
 		fullStat, err := os.Stat(fullStub)
-		if err != nil {
-			t.Fatalf("stat full stub: %v", err)
-		}
+		require.NoError(t, err, "stat full stub")
 		minStat, err := os.Stat(minStub)
-		if err != nil {
-			t.Fatalf("stat min stub: %v", err)
-		}
+		require.NoError(t, err, "stat min stub")
 
 		if minStat.Size() >= fullStat.Size() {
 			t.Errorf("minimal stub size (%d) should be smaller than full stub size (%d)", minStat.Size(), fullStat.Size())
@@ -133,9 +130,7 @@ func TestMinimalStubAndMatrixDistribution(t *testing.T) {
 		}
 
 		f, err := elf.Open(minStub)
-		if err != nil {
-			t.Fatalf("open ELF minStub: %v", err)
-		}
+		require.NoError(t, err, "open ELF minStub")
 		defer f.Close()
 		if f.Machine != elf.EM_X86_64 {
 			t.Errorf("expected machine EM_X86_64, got %v", f.Machine)
@@ -147,22 +142,16 @@ func TestMinimalStubAndMatrixDistribution(t *testing.T) {
 		armMinStub := compile("stub-arm64-min", "../microfat-stub", "minimal", "GOOS=linux", "GOARCH=arm64", "GOARM64=v8.0")
 
 		armStat, err := os.Stat(armStub)
-		if err != nil {
-			t.Fatalf("stat arm full stub: %v", err)
-		}
+		require.NoError(t, err, "stat arm full stub")
 		armMinStat, err := os.Stat(armMinStub)
-		if err != nil {
-			t.Fatalf("stat arm min stub: %v", err)
-		}
+		require.NoError(t, err, "stat arm min stub")
 
 		if armMinStat.Size() >= armStat.Size() {
 			t.Errorf("minimal arm stub (%d) should be smaller than full arm stub (%d)", armMinStat.Size(), armStat.Size())
 		}
 
 		f, err := elf.Open(armMinStub)
-		if err != nil {
-			t.Fatalf("open arm ELF minStub: %v", err)
-		}
+		require.NoError(t, err, "open arm ELF minStub")
 		defer f.Close()
 		if f.Machine != elf.EM_AARCH64 {
 			t.Errorf("expected machine EM_AARCH64, got %v", f.Machine)
@@ -174,9 +163,7 @@ func TestMinimalStubAndMatrixDistribution(t *testing.T) {
 
 		srcPath := filepath.Join(tempDir, "main.go")
 		code := "package main\nfunc main() {}\n"
-		if err := os.WriteFile(srcPath, []byte(code), 0o644); err != nil {
-			t.Fatalf("writing dummy main.go: %v", err)
-		}
+		require.NoError(t, os.WriteFile(srcPath, []byte(code), 0o644), "writing dummy main.go")
 
 		v80Bin := compile("app_v80", srcPath, "", "GOOS=linux", "GOARCH=arm64", "GOARM64=v8.0")
 		v88Bin := compile("app_v88", srcPath, "", "GOOS=linux", "GOARCH=arm64", "GOARM64=v8.8")
@@ -186,9 +173,7 @@ func TestMinimalStubAndMatrixDistribution(t *testing.T) {
 		checkARM64Setting := func(binPath, expectedLevel string) {
 			t.Helper()
 			bi, err := buildinfo.ReadFile(binPath)
-			if err != nil {
-				t.Fatalf("reading buildinfo for %s: %v", binPath, err)
-			}
+			require.NoErrorf(t, err, "reading buildinfo for %s: %v", binPath, err)
 			found := false
 			for _, s := range bi.Settings {
 				if s.Key == "GOARM64" {
@@ -222,29 +207,21 @@ func TestMinimalStubAndMatrixDistribution(t *testing.T) {
 		}
 
 		res, err := pack.Pack(opts)
-		if err != nil {
-			t.Fatalf("pack failed: %v", err)
-		}
+		require.NoError(t, err, "pack failed")
 		if len(res.Variants) != expectedCount {
 			t.Errorf("expected %d variants, got %d", expectedCount, len(res.Variants))
 		}
 
 		fatFile, err := os.Open(outFat)
-		if err != nil {
-			t.Fatalf("open outFat: %v", err)
-		}
+		require.NoError(t, err, "open outFat")
 		defer fatFile.Close()
 
 		fatStat, err := fatFile.Stat()
-		if err != nil {
-			t.Fatalf("stat outFat: %v", err)
-		}
+		require.NoError(t, err, "stat outFat")
 
 		// Verify binary integrity
 		verIdx, results, err := pack.VerifyBinary(fatFile, fatStat.Size())
-		if err != nil {
-			t.Fatalf("verify binary failed: %v", err)
-		}
+		require.NoError(t, err, "verify binary failed")
 		if len(results) != expectedCount {
 			t.Errorf("expected %d verification results, got %d", expectedCount, len(results))
 		}

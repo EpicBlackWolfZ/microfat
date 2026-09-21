@@ -412,17 +412,11 @@ func writeVariantPayload(
 	compLevel := opts.CompressionLevel
 
 	normLvl := format.NormalizeVariant(lvl)
-	if varComp, ok := opts.VariantCompression[lvl]; ok {
-		if varComp.Profile != "" {
-			profile = varComp.Profile
-		}
-		if varComp.Compression != "" {
-			compAlgo = varComp.Compression
-		}
-		if varComp.Level != "" {
-			compLevel = varComp.Level
-		}
-	} else if varComp, ok := opts.VariantCompression[normLvl]; ok {
+	varComp, hasOverride := opts.VariantCompression[lvl]
+	if !hasOverride {
+		varComp, hasOverride = opts.VariantCompression[normLvl]
+	}
+	if hasOverride {
 		if varComp.Profile != "" {
 			profile = varComp.Profile
 		}

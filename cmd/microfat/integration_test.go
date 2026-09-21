@@ -9,8 +9,11 @@ import (
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
+
+	"github.com/stretchr/testify/require"
 )
 
+//revive:disable-next-line:cyclomatic Keep build, pack, trim, prewarm and optimize steps tied to the same executable and environment.
 func TestEndToEndFatBinaryWorkflow(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -19,9 +22,7 @@ func TestEndToEndFatBinaryWorkflow(t *testing.T) {
 	buildStubCmd := exec.Command("go", "build", "-buildvcs=false", "-o", stubPath, "../microfat-stub")
 	buildStubCmd.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOAMD64=v1")
 	out, err := buildStubCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("failed to build microfat-stub: %v (output: %s)", err, out)
-	}
+	require.NoErrorf(t, err, "failed to build microfat-stub: %v (output: %s)", err, out)
 
 	// 2. Create and compile 3 distinct Go variant binaries
 	createAndBuildVariant := func(level, greeting string) string {
@@ -71,9 +72,7 @@ func main() {
 	detectCmd := exec.Command(cliPath, "detect", "--json")
 	var detectBuf bytes.Buffer
 	detectCmd.Stdout = &detectBuf
-	if err := detectCmd.Run(); err != nil {
-		t.Fatalf("microfat detect failed: %v", err)
-	}
+	require.NoError(t, detectCmd.Run(), "microfat detect failed")
 	if !strings.Contains(detectBuf.String(), `"arch": "amd64"`) {
 		t.Errorf("detect output missing amd64: %s", detectBuf.String())
 	}
@@ -96,9 +95,7 @@ func main() {
 	inspectCmd := exec.Command(cliPath, "inspect", fatBinPath)
 	var inspectBuf bytes.Buffer
 	inspectCmd.Stdout = &inspectBuf
-	if err := inspectCmd.Run(); err != nil {
-		t.Fatalf("microfat inspect failed: %v", err)
-	}
+	require.NoError(t, inspectCmd.Run(), "microfat inspect failed")
 	inspectOut := inspectBuf.String()
 	if !strings.Contains(inspectOut, "App Name:          demo-app") ||
 		!strings.Contains(inspectOut, "v1") ||
@@ -116,9 +113,7 @@ func main() {
 	// 8. Execute fat binary in standard transient mode (memfd_create)
 	execCmd := exec.Command(fatBinPath)
 	out, err = execCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("executing fat binary failed: %v (output: %s)", err, out)
-	}
+	require.NoErrorf(t, err, "executing fat binary failed: %v (output: %s)", err, out)
 
 	hostLevel := microarch.CurrentLevel()
 	expectedOutput := "HELLO FROM V1 BASELINE"
@@ -136,9 +131,7 @@ func main() {
 	explicitCmd := exec.Command(fatBinPath)
 	explicitCmd.Env = append(os.Environ(), "GOMEMLIMIT=512MiB", "GOMAXPROCS=4")
 	out, err = explicitCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("executing with explicit env failed: %v (output: %s)", err, out)
-	}
+	require.NoErrorf(t, err, "executing with explicit env failed: %v (output: %s)", err, out)
 	if !strings.Contains(string(out), "ENV_GOMEMLIMIT=512MiB") || !strings.Contains(string(out), "ENV_GOMAXPROCS=4") {
 		t.Errorf("explicit user env vars not preserved: %s", string(out))
 	}
@@ -146,9 +139,7 @@ func main() {
 	// 10. Run `--microfat:info`
 	infoCmd := exec.Command(fatBinPath, "--microfat:info")
 	out, err = infoCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("running --microfat:info failed: %v (output: %s)", err, out)
-	}
+	require.NoErrorf(t, err, "running --microfat:info failed: %v (output: %s)", err, out)
 	if !strings.Contains(string(out), "Selected Variant:") || !strings.Contains(string(out), "memfd_create") {
 		t.Errorf("unexpected info output: %s", string(out))
 	}
@@ -167,9 +158,7 @@ func main() {
 	// Verify executing trimmed binary still uses memfd and produces correct output
 	trimExecCmd := exec.Command(trimmedPath)
 	trimOut, err := trimExecCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("running trimmed binary failed: %v (output: %s)", err, trimOut)
-	}
+	require.NoErrorf(t, err, "running trimmed binary failed: %v (output: %s)", err, trimOut)
 	if !strings.Contains(string(trimOut), expectedOutput) {
 		t.Errorf("trimmed binary produced unexpected output: %s", string(trimOut))
 	}
@@ -182,9 +171,7 @@ func main() {
 	}
 	cliTrimExecCmd := exec.Command(cliTrimPath)
 	cliTrimOut, err := cliTrimExecCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("running cli trimmed binary failed: %v (output: %s)", err, cliTrimOut)
-	}
+	require.NoErrorf(t, err, "running cli trimmed binary failed: %v (output: %s)", err, cliTrimOut)
 	if !strings.Contains(string(cliTrimOut), expectedOutput) {
 		t.Errorf("cli trimmed binary produced unexpected output: %s", string(cliTrimOut))
 	}
@@ -193,9 +180,7 @@ func main() {
 	prewarmCacheDir := filepath.Join(tempDir, "integ_cache")
 	prewarmCliCmd := exec.Command(cliPath, "prewarm", "--cache-dir", prewarmCacheDir, "--json", fatBinPath)
 	prewarmOut, err := prewarmCliCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("running microfat prewarm CLI failed: %v (output: %s)", err, prewarmOut)
-	}
+	require.NoErrorf(t, err, "running microfat prewarm CLI failed: %v (output: %s)", err, prewarmOut)
 	if !strings.Contains(string(prewarmOut), `"event": "prewarm"`) {
 		t.Errorf("prewarm JSON output missing event: %s", string(prewarmOut))
 	}
@@ -215,9 +200,7 @@ func main() {
 		"MICROFAT_DEBUG=1",
 	)
 	cacheExecOut, err := cacheExecCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("running with MICROFAT_EXEC_MODE=cache failed: %v (output: %s)", err, cacheExecOut)
-	}
+	require.NoErrorf(t, err, "running with MICROFAT_EXEC_MODE=cache failed: %v (output: %s)", err, cacheExecOut)
 	if !strings.Contains(string(cacheExecOut), expectedOutput) {
 		t.Errorf("cache exec output missing expected payload output: %s", string(cacheExecOut))
 	}
@@ -233,18 +216,14 @@ func main() {
 	}
 	matExecCmd := exec.Command(matPath)
 	matOut, err := matExecCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("running materialized binary failed: %v (output: %s)", err, matOut)
-	}
+	require.NoErrorf(t, err, "running materialized binary failed: %v (output: %s)", err, matOut)
 	if !strings.Contains(string(matOut), expectedOutput) {
 		t.Errorf("materialized binary produced unexpected output: %s", string(matOut))
 	}
 
 	// 17. Run `--microfat:optimize` (in-place)
 	statBefore, err := os.Stat(fatBinPath)
-	if err != nil {
-		t.Fatalf("stat fat binary: %v", err)
-	}
+	require.NoError(t, err, "stat fat binary")
 
 	optCmd := exec.Command(fatBinPath, "--microfat:optimize")
 	if out, err := optCmd.CombinedOutput(); err != nil {
@@ -252,9 +231,7 @@ func main() {
 	}
 
 	statAfter, err := os.Stat(fatBinPath)
-	if err != nil {
-		t.Fatalf("stat optimized binary: %v", err)
-	}
+	require.NoError(t, err, "stat optimized binary")
 
 	if statAfter.Size() >= statBefore.Size() {
 		t.Errorf("expected optimized size (%d) to be smaller than fat binary (%d)", statAfter.Size(), statBefore.Size())
@@ -263,9 +240,7 @@ func main() {
 	// Verify the shrunk binary continues to execute perfectly
 	optExecCmd := exec.Command(fatBinPath)
 	optOut, err := optExecCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("executing optimized binary failed: %v (output: %s)", err, optOut)
-	}
+	require.NoErrorf(t, err, "executing optimized binary failed: %v (output: %s)", err, optOut)
 	if !strings.Contains(string(optOut), expectedOutput) {
 		t.Errorf("optimized binary produced unexpected output: %s", string(optOut))
 	}

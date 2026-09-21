@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -16,6 +18,7 @@ const (
 	concurrentProcsCount = 10
 )
 
+//revive:disable-next-line:cyclomatic Keep filesystem attack scenarios and concurrent cache recovery assertions explicit.
 func TestCacheSecurityAndFilesystemInvariants(t *testing.T) {
 	t.Parallel()
 
@@ -35,9 +38,7 @@ func TestCacheSecurityAndFilesystemInvariants(t *testing.T) {
 		assertSelectedMatchesExecuted(t, stdout, stderr, currentHostLevel)
 
 		fi, err := os.Stat(deepMissingCacheDir)
-		if err != nil {
-			t.Fatalf("stat created cache dir: %v", err)
-		}
+		require.NoError(t, err, "stat created cache dir")
 		if !fi.IsDir() {
 			t.Fatalf("expected created cache path to be directory")
 		}
@@ -67,9 +68,7 @@ func TestCacheSecurityAndFilesystemInvariants(t *testing.T) {
 		}
 		cachedPath := filepath.Join(cacheDir, entries[0].Name())
 		stat1, err := os.Stat(cachedPath)
-		if err != nil {
-			t.Fatalf("stat cached file: %v", err)
-		}
+		require.NoError(t, err, "stat cached file")
 
 		// Second execution: must reuse existing verified cache file
 		stdout2, stderr2, exitCode2, err2 := executeFatBinary(t, goldenFatBin, env)
@@ -79,9 +78,7 @@ func TestCacheSecurityAndFilesystemInvariants(t *testing.T) {
 		assertSelectedMatchesExecuted(t, stdout2, stderr2, currentHostLevel)
 
 		stat2, err := os.Stat(cachedPath)
-		if err != nil {
-			t.Fatalf("stat cached file second time: %v", err)
-		}
+		require.NoError(t, err, "stat cached file second time")
 		if stat1.ModTime() != stat2.ModTime() {
 			t.Fatalf("expected cached file to be reused without modification on second execution")
 		}
@@ -119,9 +116,7 @@ func TestCacheSecurityAndFilesystemInvariants(t *testing.T) {
 		assertSelectedMatchesExecuted(t, stdout, stderr, currentHostLevel)
 
 		reStat, err := os.Stat(cachedPath)
-		if err != nil {
-			t.Fatalf("stat re-extracted file: %v", err)
-		}
+		require.NoError(t, err, "stat re-extracted file")
 		if reStat.Size() <= truncatedSizeBytes {
 			t.Fatalf("expected full re-extracted size, got truncated %d bytes", reStat.Size())
 		}
@@ -195,9 +190,7 @@ func TestCacheSecurityAndFilesystemInvariants(t *testing.T) {
 	t.Run("Scenario25_StrictSymlinkAttackRejection", func(t *testing.T) {
 		t.Parallel()
 		cacheDir := filepath.Join(t.TempDir(), "symlink_attack_cache")
-		if err := os.MkdirAll(cacheDir, defaultFilePerm); err != nil {
-			t.Fatalf("mkdir cache: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(cacheDir, defaultFilePerm), "mkdir cache")
 
 		_, idx := readTrailerAndIndex(t, goldenFatBin)
 		entry, found := idx.FindVariant(currentHostLevel)
@@ -208,9 +201,7 @@ func TestCacheSecurityAndFilesystemInvariants(t *testing.T) {
 		// Create a symlink at the expected cached path pointing to /bin/sh
 		symlinkTarget := "/bin/sh"
 		cachedSymlink := filepath.Join(cacheDir, entry.SHA256)
-		if err := os.Symlink(symlinkTarget, cachedSymlink); err != nil {
-			t.Fatalf("creating test symlink: %v", err)
-		}
+		require.NoError(t, os.Symlink(symlinkTarget, cachedSymlink), "creating test symlink")
 
 		env := []string{
 			envExecCache,
@@ -258,34 +249,26 @@ func TestCacheSecurityAndFilesystemInvariants(t *testing.T) {
 		close(errChan)
 
 		for err := range errChan {
-			if err != nil {
-				t.Fatalf("concurrent process failed under cache contention: %v", err)
-			}
+			require.NoError(t, err, "concurrent process failed under cache contention")
 		}
 
 		// Assert that exactly one canonical cache artifact exists and is verified
 		entries, err := os.ReadDir(cacheDir)
-		if err != nil {
-			t.Fatalf("reading cache directory: %v", err)
-		}
+		require.NoError(t, err, "reading cache directory")
 		if len(entries) != 1 {
 			t.Fatalf("expected exactly 1 canonical cached payload in %s, found %d", cacheDir, len(entries))
 		}
 
 		cachedPath := filepath.Join(cacheDir, entries[0].Name())
 		cachedStat, err := os.Stat(cachedPath)
-		if err != nil {
-			t.Fatalf("stat cached artifact: %v", err)
-		}
+		require.NoError(t, err, "stat cached artifact")
 		if cachedStat.Size() == 0 {
 			t.Fatalf("cached artifact is empty")
 		}
 
 		// Verify cached file SHA-256 matches its filename (launcher naming contract)
 		f, err := os.Open(cachedPath)
-		if err != nil {
-			t.Fatalf("open cached artifact: %v", err)
-		}
+		require.NoError(t, err, "open cached artifact")
 		defer func() { _ = f.Close() }()
 
 		hasher := sha256.New()

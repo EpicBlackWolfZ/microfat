@@ -178,6 +178,21 @@ the ruleset while retaining existing protections before merging the workflow cha
 
 ---
 
+### CodeFactor and complexity
+
+CodeFactor reads the root `revive.toml` alongside `.shellcheckrc`. The Revive
+cyclomatic limit is 25, matching the numeric golangci-lint ceiling; its treatment
+of default switch arms differs. CodeFactor's separate Complex Method metric still
+requires review. Keep bounds checks, descriptor ownership and independent test
+oracles explicit. Prefer existing helpers and standard assertions over abstractions
+that hide validation or expand runtime dependencies.
+
+[Reviewed complexity exceptions](QUALITY_EXCEPTIONS.md) identify exact functions
+and their reasons. A narrow `revive:disable-next-line:cyclomatic` directive is
+allowed only with a reason and a corresponding entry there. Do not exclude whole
+test trees or handwritten runtime files. A green grade alone does not resolve an
+actionable finding; review the candidate scan after tooling migrations.
+
 ## 7. Branch Protection & Contribution Flow
 
 > [!NOTE]

@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -622,6 +624,7 @@ func (m mockFileInfo) ModTime() time.Time { return m.modTime }
 func (m mockFileInfo) IsDir() bool        { return m.isDir }
 func (m mockFileInfo) Sys() any           { return m.sys }
 
+//revive:disable-next-line:cyclomatic Keep explicit ownership, symlink and permission attack fixtures together with their restoration hooks.
 func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 	origOpen := openDirFunc
 	origClose := closeDirFunc
@@ -641,17 +644,11 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 	t.Run("explicit customDir with permissive permissions fails fast without chmod", func(t *testing.T) {
 		tempDir := t.TempDir()
 		insecureDir := filepath.Join(tempDir, "insecure_custom")
-		if err := os.MkdirAll(insecureDir, testPerm0777); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
-		if err := os.Chmod(insecureDir, testPerm0777); err != nil {
-			t.Fatalf("chmod failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(insecureDir, testPerm0777), "mkdir failed")
+		require.NoError(t, os.Chmod(insecureDir, testPerm0777), "chmod failed")
 
 		_, err := ResolveCacheDir(insecureDir)
-		if err == nil {
-			t.Fatalf("expected error for insecure customDir, got nil")
-		}
+		require.Error(t, err, "expected error for insecure customDir, got nil")
 		if !errors.Is(err, ErrInsecureCacheDir) {
 			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
 		}
@@ -669,18 +666,12 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 	t.Run("explicit customDir as symlink fails fast", func(t *testing.T) {
 		tempDir := t.TempDir()
 		targetDir := filepath.Join(tempDir, "symlink_target")
-		if err := os.MkdirAll(targetDir, testPerm0700); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(targetDir, testPerm0700), "mkdir failed")
 		symlinkDir := filepath.Join(tempDir, "symlink_custom")
-		if err := os.Symlink(targetDir, symlinkDir); err != nil {
-			t.Fatalf("symlink failed: %v", err)
-		}
+		require.NoError(t, os.Symlink(targetDir, symlinkDir), "symlink failed")
 
 		_, err := ResolveCacheDir(symlinkDir)
-		if err == nil {
-			t.Fatalf("expected error for symlink customDir, got nil")
-		}
+		require.Error(t, err, "expected error for symlink customDir, got nil")
 		if !errors.Is(err, ErrInsecureCacheDir) {
 			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
 		}
@@ -689,17 +680,13 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 	t.Run("explicit customDir with foreign UID fails fast", func(t *testing.T) {
 		tempDir := t.TempDir()
 		validDir := filepath.Join(tempDir, "foreign_custom")
-		if err := os.MkdirAll(validDir, testPerm0700); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(validDir, testPerm0700), "mkdir failed")
 
 		geteuidFunc = func() int { return testForeignUID }
 		defer func() { geteuidFunc = origGeteuid }()
 
 		_, err := ResolveCacheDir(validDir)
-		if err == nil {
-			t.Fatalf("expected error for foreign UID, got nil")
-		}
+		require.Error(t, err, "expected error for foreign UID, got nil")
 		if !errors.Is(err, ErrInsecureCacheDir) {
 			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
 		}
@@ -709,21 +696,15 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 		tempDir := t.TempDir()
 
 		dir700 := filepath.Join(tempDir, "cache_700")
-		if err := os.MkdirAll(dir700, testPerm0700); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(dir700, testPerm0700), "mkdir failed")
 		res, err := ResolveCacheDir(dir700)
 		if err != nil || res != dir700 {
 			t.Fatalf("expected %s, got %s (err: %v)", dir700, res, err)
 		}
 
 		dir750 := filepath.Join(tempDir, "cache_750")
-		if err := os.MkdirAll(dir750, testPerm0750); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
-		if err := os.Chmod(dir750, testPerm0750); err != nil {
-			t.Fatalf("chmod failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(dir750, testPerm0750), "mkdir failed")
+		require.NoError(t, os.Chmod(dir750, testPerm0750), "chmod failed")
 		res, err = ResolveCacheDir(dir750)
 		if err != nil || res != dir750 {
 			t.Fatalf("expected %s, got %s (err: %v)", dir750, res, err)
@@ -733,18 +714,12 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 	t.Run("explicit MICROFAT_CACHE_DIR fails fast on insecure dir and symlink", func(t *testing.T) {
 		tempDir := t.TempDir()
 		insecureDir := filepath.Join(tempDir, "insecure_env")
-		if err := os.MkdirAll(insecureDir, testPerm0777); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
-		if err := os.Chmod(insecureDir, testPerm0777); err != nil {
-			t.Fatalf("chmod failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(insecureDir, testPerm0777), "mkdir failed")
+		require.NoError(t, os.Chmod(insecureDir, testPerm0777), "chmod failed")
 
 		t.Setenv(EnvCacheDir, insecureDir)
 		_, err := ResolveCacheDir("")
-		if err == nil {
-			t.Fatalf("expected error for insecure MICROFAT_CACHE_DIR, got nil")
-		}
+		require.Error(t, err, "expected error for insecure MICROFAT_CACHE_DIR, got nil")
 		if !errors.Is(err, ErrInsecureCacheDir) {
 			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
 		}
@@ -752,18 +727,12 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 		// Check symlink rejection via env
 		symlinkDir := filepath.Join(tempDir, "symlink_env")
 		targetDir := filepath.Join(tempDir, "target_env")
-		if err := os.MkdirAll(targetDir, testPerm0700); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
-		if err := os.Symlink(targetDir, symlinkDir); err != nil {
-			t.Fatalf("symlink failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(targetDir, testPerm0700), "mkdir failed")
+		require.NoError(t, os.Symlink(targetDir, symlinkDir), "symlink failed")
 
 		t.Setenv(EnvCacheDir, symlinkDir)
 		_, err = ResolveCacheDir("")
-		if err == nil {
-			t.Fatalf("expected error for symlink MICROFAT_CACHE_DIR, got nil")
-		}
+		require.Error(t, err, "expected error for symlink MICROFAT_CACHE_DIR, got nil")
 		if !errors.Is(err, ErrInsecureCacheDir) {
 			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
 		}
@@ -773,12 +742,8 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 		tempDir := t.TempDir()
 		xdgDir := filepath.Join(tempDir, "xdg_tighten")
 		cacheDir := filepath.Join(xdgDir, "microfat")
-		if err := os.MkdirAll(cacheDir, testPerm0777); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
-		if err := os.Chmod(cacheDir, testPerm0777); err != nil {
-			t.Fatalf("chmod failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(cacheDir, testPerm0777), "mkdir failed")
+		require.NoError(t, os.Chmod(cacheDir, testPerm0777), "chmod failed")
 
 		t.Setenv(EnvCacheDir, "")
 		t.Setenv("XDG_CACHE_HOME", xdgDir)
@@ -801,12 +766,8 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 		tempDir := t.TempDir()
 		xdgDir := filepath.Join(tempDir, "xdg_750")
 		cacheDir := filepath.Join(xdgDir, "microfat")
-		if err := os.MkdirAll(cacheDir, testPerm0750); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
-		if err := os.Chmod(cacheDir, testPerm0750); err != nil {
-			t.Fatalf("chmod failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(cacheDir, testPerm0750), "mkdir failed")
+		require.NoError(t, os.Chmod(cacheDir, testPerm0750), "chmod failed")
 
 		t.Setenv(EnvCacheDir, "")
 		t.Setenv("XDG_CACHE_HOME", xdgDir)
@@ -828,25 +789,17 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 	t.Run("discovery cascade falls through if candidate is a symlink", func(t *testing.T) {
 		tempDir := t.TempDir()
 		xdgDir := filepath.Join(tempDir, "xdg_symlink")
-		if err := os.MkdirAll(xdgDir, testPerm0700); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(xdgDir, testPerm0700), "mkdir failed")
 		fakeTarget := filepath.Join(tempDir, "fake_target")
-		if err := os.MkdirAll(fakeTarget, testPerm0700); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
-		if err := os.Symlink(fakeTarget, filepath.Join(xdgDir, "microfat")); err != nil {
-			t.Fatalf("symlink failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(fakeTarget, testPerm0700), "mkdir failed")
+		require.NoError(t, os.Symlink(fakeTarget, filepath.Join(xdgDir, "microfat")), "symlink failed")
 
 		t.Setenv(EnvCacheDir, "")
 		t.Setenv("XDG_CACHE_HOME", xdgDir)
 		t.Setenv("TMPDIR", tempDir)
 
 		res, err := ResolveCacheDir("")
-		if err != nil {
-			t.Fatalf("expected fallback to succeed, got: %v", err)
-		}
+		require.NoError(t, err, "expected fallback to succeed, got")
 		expectedFallback := filepath.Join(tempDir, fmt.Sprintf(".microfat-%d", os.Geteuid()))
 		if res != expectedFallback {
 			t.Fatalf("expected fallback to %s, got %s", expectedFallback, res)
@@ -857,9 +810,7 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 		tempDir := t.TempDir()
 		xdgDir := filepath.Join(tempDir, "xdg_foreign")
 		xdgMicrofat := filepath.Join(xdgDir, "microfat")
-		if err := os.MkdirAll(xdgMicrofat, testPerm0700); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(xdgMicrofat, testPerm0700), "mkdir failed")
 
 		t.Setenv(EnvCacheDir, "")
 		t.Setenv("XDG_CACHE_HOME", xdgDir)
@@ -902,9 +853,7 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 		}()
 
 		res, err := ResolveCacheDir("")
-		if err != nil {
-			t.Fatalf("expected fallback to succeed, got: %v", err)
-		}
+		require.NoError(t, err, "expected fallback to succeed, got")
 		expectedFallback := filepath.Join(tempDir, fmt.Sprintf(".microfat-%d", os.Geteuid()))
 		if res != expectedFallback {
 			t.Fatalf("expected fallback to %s, got %s", expectedFallback, res)
@@ -915,12 +864,8 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 		tempDir := t.TempDir()
 		xdgDir := filepath.Join(tempDir, "xdg_chmod_fail")
 		xdgMicrofat := filepath.Join(xdgDir, "microfat")
-		if err := os.MkdirAll(xdgMicrofat, testPerm0777); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
-		if err := os.Chmod(xdgMicrofat, testPerm0777); err != nil {
-			t.Fatalf("chmod failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(xdgMicrofat, testPerm0777), "mkdir failed")
+		require.NoError(t, os.Chmod(xdgMicrofat, testPerm0777), "chmod failed")
 
 		t.Setenv(EnvCacheDir, "")
 		t.Setenv("XDG_CACHE_HOME", xdgDir)
@@ -959,9 +904,7 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 		}()
 
 		res, err := ResolveCacheDir("")
-		if err != nil {
-			t.Fatalf("expected fallback to succeed, got: %v", err)
-		}
+		require.NoError(t, err, "expected fallback to succeed, got")
 		expectedFallback := filepath.Join(tempDir, fmt.Sprintf(".microfat-%d", os.Geteuid()))
 		if res != expectedFallback {
 			t.Fatalf("expected fallback to %s, got %s", expectedFallback, res)
@@ -979,9 +922,7 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 		geteuidFunc = func() int { return testForeignUID }
 
 		_, err := ResolveCacheDir("")
-		if err == nil {
-			t.Fatalf("expected error when all candidates fail, got nil")
-		}
+		require.Error(t, err, "expected error when all candidates fail, got nil")
 		if !errors.Is(err, ErrCacheInit) {
 			t.Fatalf("expected ErrCacheInit, got: %v", err)
 		}
@@ -1004,9 +945,7 @@ func TestValidateCacheDirSecurity(t *testing.T) {
 
 	t.Run("non-existent directory", func(t *testing.T) {
 		err := validateCacheDirSecurity(filepath.Join(tempDir, "does_not_exist"))
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
+		require.Error(t, err, "expected error, got nil")
 		if !errors.Is(err, ErrInsecureCacheDir) {
 			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
 		}
@@ -1014,13 +953,9 @@ func TestValidateCacheDirSecurity(t *testing.T) {
 
 	t.Run("regular file instead of directory", func(t *testing.T) {
 		filePath := filepath.Join(tempDir, "regular_file")
-		if err := os.WriteFile(filePath, []byte("data"), testPerm0600); err != nil {
-			t.Fatalf("write file failed: %v", err)
-		}
+		require.NoError(t, os.WriteFile(filePath, []byte("data"), testPerm0600), "write file failed")
 		err := validateCacheDirSecurity(filePath)
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
+		require.Error(t, err, "expected error, got nil")
 		if !errors.Is(err, ErrInsecureCacheDir) {
 			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
 		}
@@ -1031,17 +966,11 @@ func TestValidateCacheDirSecurity(t *testing.T) {
 
 	t.Run("symlink to directory", func(t *testing.T) {
 		target := filepath.Join(tempDir, "sym_target")
-		if err := os.MkdirAll(target, testPerm0700); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(target, testPerm0700), "mkdir failed")
 		link := filepath.Join(tempDir, "sym_link")
-		if err := os.Symlink(target, link); err != nil {
-			t.Fatalf("symlink failed: %v", err)
-		}
+		require.NoError(t, os.Symlink(target, link), "symlink failed")
 		err := validateCacheDirSecurity(link)
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
+		require.Error(t, err, "expected error, got nil")
 		if !errors.Is(err, ErrInsecureCacheDir) {
 			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
 		}
@@ -1052,17 +981,11 @@ func TestValidateCacheDirSecurity(t *testing.T) {
 
 	t.Run("symlink to directory with trailing slash", func(t *testing.T) {
 		target := filepath.Join(tempDir, "sym_target_slash")
-		if err := os.MkdirAll(target, testPerm0700); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(target, testPerm0700), "mkdir failed")
 		link := filepath.Join(tempDir, "sym_link_slash")
-		if err := os.Symlink(target, link); err != nil {
-			t.Fatalf("symlink failed: %v", err)
-		}
+		require.NoError(t, os.Symlink(target, link), "symlink failed")
 		err := validateCacheDirSecurity(link + "/")
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
+		require.Error(t, err, "expected error, got nil")
 		if !errors.Is(err, ErrInsecureCacheDir) {
 			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
 		}
@@ -1077,9 +1000,7 @@ func TestValidateCacheDirSecurity(t *testing.T) {
 		}
 		defer func() { fstatDirFunc = origFstat }()
 		err := validateCacheDirSecurity(tempDir)
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
+		require.Error(t, err, "expected error, got nil")
 		if !errors.Is(err, ErrInsecureCacheDir) {
 			t.Fatalf("expected ErrInsecureCacheDir, got: %v", err)
 		}
@@ -1090,23 +1011,13 @@ func TestValidateCacheDirSecurity(t *testing.T) {
 
 	t.Run("valid 0700 and 0750 directories", func(t *testing.T) {
 		dir700 := filepath.Join(tempDir, "valid_700")
-		if err := os.MkdirAll(dir700, testPerm0700); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
-		if err := validateCacheDirSecurity(dir700); err != nil {
-			t.Fatalf("expected valid 0700 directory, got err: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(dir700, testPerm0700), "mkdir failed")
+		require.NoError(t, validateCacheDirSecurity(dir700), "expected valid 0700 directory, got err")
 
 		dir750 := filepath.Join(tempDir, "valid_750")
-		if err := os.MkdirAll(dir750, testPerm0750); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
-		if err := os.Chmod(dir750, testPerm0750); err != nil {
-			t.Fatalf("chmod failed: %v", err)
-		}
-		if err := validateCacheDirSecurity(dir750); err != nil {
-			t.Fatalf("expected valid 0750 directory, got err: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(dir750, testPerm0750), "mkdir failed")
+		require.NoError(t, os.Chmod(dir750, testPerm0750), "chmod failed")
+		require.NoError(t, validateCacheDirSecurity(dir750), "expected valid 0750 directory, got err")
 	})
 
 	t.Run("open generic failure", func(t *testing.T) {
@@ -1131,9 +1042,7 @@ func TestValidateCacheDirSecurity(t *testing.T) {
 
 	t.Run("remediate fstat failure after chmod", func(t *testing.T) {
 		insecureDir := filepath.Join(tempDir, "remed_fstat_fail")
-		if err := os.MkdirAll(insecureDir, testPerm0777); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(insecureDir, testPerm0777), "mkdir failed")
 		_ = os.Chmod(insecureDir, testPerm0777)
 
 		callCount := 0
@@ -1154,9 +1063,7 @@ func TestValidateCacheDirSecurity(t *testing.T) {
 
 	t.Run("remediate chmod leaves write bits", func(t *testing.T) {
 		insecureDir := filepath.Join(tempDir, "remed_still_insecure")
-		if err := os.MkdirAll(insecureDir, testPerm0777); err != nil {
-			t.Fatalf("mkdir failed: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(insecureDir, testPerm0777), "mkdir failed")
 		_ = os.Chmod(insecureDir, testPerm0777)
 
 		fchmodDirFunc = func(int, uint32) error {
@@ -1557,7 +1464,7 @@ func BenchmarkUnmarshalBinaryIndex(b *testing.B) {
 
 func TestEscapeJSONString(t *testing.T) {
 	input := "test\b\f\n\r\t\"\\hello\x01world"
-	escaped := escapeJSONString(input)
+	escaped := EscapeJSONString(input)
 	hasAll := bytes.Contains([]byte(escaped), []byte(`\b`)) &&
 		bytes.Contains([]byte(escaped), []byte(`\n`)) &&
 		bytes.Contains([]byte(escaped), []byte(`\u0001`))
@@ -2403,9 +2310,7 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 				{Level: "v9.5", Offset: 500, CompressedSize: 100, UncompressedSize: 200, SHA256: testSHA256Sample},
 			},
 		}
-		if err := idx.ValidateBounds(1000); err != nil {
-			t.Fatalf("expected valid bounds for arm64 variants, got %v", err)
-		}
+		require.NoError(t, idx.ValidateBounds(1000), "expected valid bounds for arm64 variants, got")
 	})
 
 	t.Run("Format v2 rejects empty variant SHA256 in ValidateBounds", func(t *testing.T) {
@@ -2933,9 +2838,7 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 			DictionarySHA256: testSHA256Sample,
 			Variants:         []VariantEntry{validVariant},
 		}
-		if err := idx.ValidateBounds(boundaryMax); err != nil {
-			t.Fatalf("expected valid bounds, got %v", err)
-		}
+		require.NoError(t, idx.ValidateBounds(boundaryMax), "expected valid bounds, got")
 	})
 
 	t.Run("Format v2 allows empty dictionary SHA256 when DictionarySize is zero", func(t *testing.T) {
@@ -2948,9 +2851,7 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 			DictionarySHA256: "",
 			Variants:         []VariantEntry{validVariant},
 		}
-		if err := idx.ValidateBounds(boundaryMax); err != nil {
-			t.Fatalf("expected valid bounds with zero-size dictionary, got %v", err)
-		}
+		require.NoError(t, idx.ValidateBounds(boundaryMax), "expected valid bounds with zero-size dictionary, got")
 	})
 
 	t.Run("Format v1 rejects empty dictionary SHA256 when DictionarySize is non-zero", func(t *testing.T) {
@@ -3040,9 +2941,7 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 			Variants:         []VariantEntry{validVariant},
 		}
 		goodBytes, err := MarshalBinaryIndex(goodIdx)
-		if err != nil {
-			t.Fatalf("MarshalBinaryIndex failed: %v", err)
-		}
+		require.NoError(t, err, "MarshalBinaryIndex failed")
 
 		// In goodBytes: offset 34 is dictSHALen (64).
 		// Splice out the 64 SHA bytes and set length prefix to 0.
@@ -3071,9 +2970,7 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 			Variants:         []VariantEntry{validVariant},
 		}
 		goodBytes, err := MarshalBinaryIndex(goodIdx)
-		if err != nil {
-			t.Fatalf("MarshalBinaryIndex failed: %v", err)
-		}
+		require.NoError(t, err, "MarshalBinaryIndex failed")
 
 		// Mutate SHA256 bytes to non-hex
 		const dictSHAStart = 35
@@ -3100,9 +2997,7 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 			Variants:         []VariantEntry{validVariant},
 		}
 		goodBytes, err := MarshalBinaryIndex(goodIdx)
-		if err != nil {
-			t.Fatalf("MarshalBinaryIndex failed: %v", err)
-		}
+		require.NoError(t, err, "MarshalBinaryIndex failed")
 
 		const dictSHALenOffset = 34
 		craftedIndex := make([]byte, 0, len(goodBytes)-maxSHA256HexLen)
@@ -3146,9 +3041,7 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 
 		buf := bytes.NewBuffer(make([]byte, boundaryMax))
 		written, err := WriteIndexAndTrailerWithVersion(buf, idxV1, boundaryMax, FormatVersion1)
-		if err != nil {
-			t.Fatalf("WriteIndexAndTrailerWithVersion failed: %v", err)
-		}
+		require.NoError(t, err, "WriteIndexAndTrailerWithVersion failed")
 
 		totalSize := boundaryMax + written
 		_, err = ReadTrailerAndIndex(bytes.NewReader(buf.Bytes()), totalSize)
@@ -3173,15 +3066,11 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 
 		buf := bytes.NewBuffer(make([]byte, boundaryMax))
 		written, err := WriteIndexAndTrailerWithVersion(buf, idxV1, boundaryMax, FormatVersion1)
-		if err != nil {
-			t.Fatalf("WriteIndexAndTrailerWithVersion failed: %v", err)
-		}
+		require.NoError(t, err, "WriteIndexAndTrailerWithVersion failed")
 
 		totalSize := boundaryMax + written
 		parsed, err := ReadTrailerAndIndex(bytes.NewReader(buf.Bytes()), totalSize)
-		if err != nil {
-			t.Fatalf("expected clean parse for Format v1 with valid dict SHA256, got %v", err)
-		}
+		require.NoError(t, err, "expected clean parse for Format v1 with valid dict SHA256, got")
 		if parsed.DictionarySize != dictSize {
 			t.Fatalf("expected DictionarySize %d, got %d", dictSize, parsed.DictionarySize)
 		}

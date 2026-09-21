@@ -1160,13 +1160,13 @@ func marshalJSONIndex(idx *Index) ([]byte, error) {
 	sb.WriteString(strconv.Itoa(idx.Version))
 	if idx.AppName != "" {
 		sb.WriteString(`,"app_name":"`)
-		sb.WriteString(escapeJSONString(idx.AppName))
+		sb.WriteString(EscapeJSONString(idx.AppName))
 		sb.WriteString(`"`)
 	}
 	sb.WriteString(`,"os":"`)
-	sb.WriteString(escapeJSONString(idx.TargetOS))
+	sb.WriteString(EscapeJSONString(idx.TargetOS))
 	sb.WriteString(`","arch":"`)
-	sb.WriteString(escapeJSONString(idx.TargetArch))
+	sb.WriteString(EscapeJSONString(idx.TargetArch))
 	sb.WriteString(`","created_unix":`)
 	sb.WriteString(strconv.FormatInt(idx.CreatedUnix, 10))
 	if idx.DictionarySize > 0 {
@@ -1176,7 +1176,7 @@ func marshalJSONIndex(idx *Index) ([]byte, error) {
 		sb.WriteString(strconv.FormatInt(idx.DictionarySize, 10))
 		if idx.DictionarySHA256 != "" {
 			sb.WriteString(`,"dictionary_sha256":"`)
-			sb.WriteString(escapeJSONString(idx.DictionarySHA256))
+			sb.WriteString(EscapeJSONString(idx.DictionarySHA256))
 			sb.WriteString(`"`)
 		}
 		if idx.DictionaryID > 0 {
@@ -1190,7 +1190,7 @@ func marshalJSONIndex(idx *Index) ([]byte, error) {
 			sb.WriteString(`,`)
 		}
 		sb.WriteString(`{"level":"`)
-		sb.WriteString(escapeJSONString(v.Level))
+		sb.WriteString(EscapeJSONString(v.Level))
 		sb.WriteString(`","offset":`)
 		sb.WriteString(strconv.FormatInt(v.Offset, 10))
 		sb.WriteString(`,"compressed_size":`)
@@ -1199,7 +1199,7 @@ func marshalJSONIndex(idx *Index) ([]byte, error) {
 		sb.WriteString(strconv.FormatInt(v.UncompressedSize, 10))
 		if v.SHA256 != "" {
 			sb.WriteString(`,"sha256":"`)
-			sb.WriteString(escapeJSONString(v.SHA256))
+			sb.WriteString(EscapeJSONString(v.SHA256))
 			sb.WriteString(`"`)
 		}
 		comp := v.Compression
@@ -1207,14 +1207,16 @@ func marshalJSONIndex(idx *Index) ([]byte, error) {
 			comp = defaultCompressionAlgorithm
 		}
 		sb.WriteString(`,"compression":"`)
-		sb.WriteString(escapeJSONString(comp))
+		sb.WriteString(EscapeJSONString(comp))
 		sb.WriteString(`"}`)
 	}
 	sb.WriteString(`]}`)
 	return []byte(sb.String()), nil
 }
 
-func escapeJSONString(s string) string {
+// EscapeJSONString escapes JSON string content without adding quotes or using reflection.
+// The format writer and launcher telemetry share this byte-preserving encoder.
+func EscapeJSONString(s string) string {
 	var sb strings.Builder
 	for i := 0; i < len(s); i++ {
 		c := s[i]

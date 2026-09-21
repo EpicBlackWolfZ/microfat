@@ -1,0 +1,29 @@
+# CodeFactor's Revive rules, with the same production complexity ceiling as
+# .golangci.yml: both rules report scores above 25. Revive also counts default
+# switch/select arms, so those differences need specific review.
+# CodeFactor's separate "Complex Method" metric is reviewed independently.
+ignoreGeneratedHeader = false
+severity = "warning"
+confidence = 0.8
+errorCode = 1
+warningCode = 1
+
+[directive.specify-disable-reason]
+severity = "error"
+
+[directive.specify-disable-rule]
+severity = "error"
+
+[rule.atomic]
+[rule.context-keys-type]
+[rule.identical-branches]
+[rule.unexported-return]
+[rule.indent-error-flow]
+[rule.superfluous-else]
+[rule.unreachable-code]
+[rule.redefines-builtin-id]
+[rule.unnecessary-stmt]
+[rule.useless-break]
+
+[rule.cyclomatic]
+arguments = [25]

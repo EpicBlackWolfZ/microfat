@@ -38,6 +38,7 @@ func TestGoldenVariantSelection_HostDependent(t *testing.T) {
 	})
 }
 
+//revive:disable-next-line:cyclomatic Keep compatibility and forbidden-execution expectations independent of the production selector.
 func TestGoldenVariantSelection_Deterministic(t *testing.T) {
 	t.Parallel()
 

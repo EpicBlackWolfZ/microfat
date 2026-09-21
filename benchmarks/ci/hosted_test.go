@@ -176,10 +176,10 @@ func TestCalibration(t *testing.T) {
 	}
 	for _, mutate := range []func(*Calibration){func(c *Calibration) { c.Version = "bad" }, func(c *Calibration) { c.Classes = nil },
 		func(c *Calibration) { c.Classes[0].FloorNS = math.NaN() }} {
-		copy, err := Calibrate(exps)
+		calibration, err := Calibrate(exps)
 		require.NoError(t, err)
-		mutate(&copy)
-		p, _ := copy.Policy(exps[0])
+		mutate(&calibration)
+		p, _ := calibration.Policy(exps[0])
 		assert.False(t, p.Calibrated)
 	}
 	exps[TrainingRuns].Trials[1].Metrics["startup_ns"] = schema.Measured(1000, "ns", "startup", schema.StartupProtocol)

@@ -15,6 +15,9 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -782,18 +785,10 @@ func TestAutoTune_WithCgroupRoot_MemoryHighFilesystem(t *testing.T) {
 		expectedCPUs     = 2
 	)
 
-	if err := os.WriteFile(v2MemMax, []byte("max\n"), testFilePerm); err != nil {
-		t.Fatalf("writing memory.max: %v", err)
-	}
-	if err := os.WriteFile(v2MemHigh, []byte(testMemHighStr+"\n"), testFilePerm); err != nil {
-		t.Fatalf("writing memory.high: %v", err)
-	}
-	if err := os.WriteFile(v2CPUMax, []byte(testCPUQuota+"\n"), testFilePerm); err != nil {
-		t.Fatalf("writing cpu.max: %v", err)
-	}
-	if err := os.WriteFile(procFile, []byte("0::/\n"), testFilePerm); err != nil {
-		t.Fatalf("writing proc_cgroup: %v", err)
-	}
+	require.NoError(t, os.WriteFile(v2MemMax, []byte("max\n"), testFilePerm), "writing memory.max")
+	require.NoError(t, os.WriteFile(v2MemHigh, []byte(testMemHighStr+"\n"), testFilePerm), "writing memory.high")
+	require.NoError(t, os.WriteFile(v2CPUMax, []byte(testCPUQuota+"\n"), testFilePerm), "writing cpu.max")
+	require.NoError(t, os.WriteFile(procFile, []byte("0::/\n"), testFilePerm), "writing proc_cgroup")
 
 	origReadFrom := readLimitsFromFunc
 	readLimitsFromFunc = func(root string) (cgroup.Limits, error) {
@@ -859,9 +854,7 @@ func TestAutoTune_DiagnosticsLogging(t *testing.T) {
 			cleanJSON := strings.TrimPrefix(strings.TrimSpace(output), "[microfat] ")
 
 			var telem Telemetry
-			if err := json.Unmarshal([]byte(cleanJSON), &telem); err != nil {
-				t.Fatalf("unmarshaling json telemetry: %v", err)
-			}
+			require.NoError(t, json.Unmarshal([]byte(cleanJSON), &telem), "unmarshaling json telemetry")
 			if telem.Event != eventRuntimeInit {
 				t.Errorf("expected event %s, got %s", eventRuntimeInit, telem.Event)
 			}
@@ -937,9 +930,7 @@ func TestAutoTune_DiagnosticsLogging(t *testing.T) {
 			output := stderrBuf.String()
 			cleanJSON := strings.TrimPrefix(strings.TrimSpace(output), "[microfat] ")
 			var telem Telemetry
-			if err := json.Unmarshal([]byte(cleanJSON), &telem); err != nil {
-				t.Fatalf("unmarshaling json telemetry: %v", err)
-			}
+			require.NoError(t, json.Unmarshal([]byte(cleanJSON), &telem), "unmarshaling json telemetry")
 			if telem.ConstrainingLimit != cgroup.LimitConstraintHigh {
 				t.Errorf("expected telem.ConstrainingLimit 'high', got %q", telem.ConstrainingLimit)
 			}
@@ -978,31 +969,16 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 		withIsolatedEnv(t, nil, &mockLimitsV2, nil, func(memLimit *int64, maxProcs *int, gogc *int, _ *bytes.Buffer) {
 			res := AutoTune(WithDryRun(true))
 
-			if !res.DryRun {
-				t.Errorf("expected res.DryRun to be true")
-			}
-			if res.MemLimitApplied || res.MaxProcsApplied || res.GOGCApplied {
-				t.Errorf("expected all applied flags to be false: mem=%t cpu=%t gogc=%t",
-					res.MemLimitApplied, res.MaxProcsApplied, res.GOGCApplied)
-			}
-			if *memLimit != -1 {
-				t.Errorf("expected setMemoryLimitFunc not called (-1), got %d", *memLimit)
-			}
-			if *maxProcs != -1 {
-				t.Errorf("expected setMaxProcsFunc not called (-1), got %d", *maxProcs)
-			}
-			if *gogc != -999 {
-				t.Errorf("expected setGCPercentFunc not called (-999), got %d", *gogc)
-			}
-			if res.GOMEMLIMIT <= 0 {
-				t.Errorf("expected GOMEMLIMIT > 0, got %d", res.GOMEMLIMIT)
-			}
-			if res.GOMAXPROCS != 4 {
-				t.Errorf("expected GOMAXPROCS 4, got %d", res.GOMAXPROCS)
-			}
-			if res.SkippedReason != testReasonDryRun {
-				t.Errorf("expected SkippedReason %q, got %q", testReasonDryRun, res.SkippedReason)
-			}
+			assert.True(t, res.DryRun)
+			assert.False(t, res.MemLimitApplied)
+			assert.False(t, res.MaxProcsApplied)
+			assert.False(t, res.GOGCApplied)
+			assert.Equal(t, int64(-1), *memLimit)
+			assert.Equal(t, -1, *maxProcs)
+			assert.Equal(t, -999, *gogc)
+			assert.Positive(t, res.GOMEMLIMIT)
+			assert.Equal(t, 4, res.GOMAXPROCS)
+			assert.Equal(t, testReasonDryRun, res.SkippedReason)
 		})
 	})
 
@@ -1016,22 +992,16 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 		withIsolatedEnv(t, nil, &mockLimitsV1, nil, func(memLimit *int64, maxProcs *int, gogc *int, _ *bytes.Buffer) {
 			res := AutoTune(WithDryRun(true))
 
-			if !res.DryRun {
-				t.Errorf("expected res.DryRun to be true")
-			}
-			if res.MemLimitApplied || res.MaxProcsApplied || res.GOGCApplied {
-				t.Errorf("expected all applied flags to be false: mem=%t cpu=%t gogc=%t",
-					res.MemLimitApplied, res.MaxProcsApplied, res.GOGCApplied)
-			}
-			if *memLimit != -1 || *maxProcs != -1 || *gogc != -999 {
-				t.Errorf("expected no runtime mutations: mem=%d maxProcs=%d gogc=%d", *memLimit, *maxProcs, *gogc)
-			}
-			if res.GOMEMLIMIT <= 0 || res.GOMAXPROCS != 2 {
-				t.Errorf("expected planned values populated: mem=%d procs=%d", res.GOMEMLIMIT, res.GOMAXPROCS)
-			}
-			if res.SkippedReason != testReasonDryRun {
-				t.Errorf("expected SkippedReason %q, got %q", testReasonDryRun, res.SkippedReason)
-			}
+			assert.True(t, res.DryRun)
+			assert.False(t, res.MemLimitApplied)
+			assert.False(t, res.MaxProcsApplied)
+			assert.False(t, res.GOGCApplied)
+			assert.Equal(t, int64(-1), *memLimit)
+			assert.Equal(t, -1, *maxProcs)
+			assert.Equal(t, -999, *gogc)
+			assert.Positive(t, res.GOMEMLIMIT)
+			assert.Equal(t, 2, res.GOMAXPROCS)
+			assert.Equal(t, testReasonDryRun, res.SkippedReason)
 		})
 	})
 
@@ -1097,28 +1067,18 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 				withIsolatedEnv(t, nil, &mockLimitsV2, nil, func(_ *int64, _ *int, gogc *int, _ *bytes.Buffer) {
 					res := AutoTune(opts...)
 
-					if !res.DryRun {
-						t.Errorf("expected res.DryRun to be true")
-					}
-					if res.MemLimitApplied || res.MaxProcsApplied || res.GOGCApplied {
-						t.Errorf("expected all applied flags to be false")
-					}
-					if *gogc != -999 {
-						t.Errorf("expected setGCPercentFunc not called, got %d", *gogc)
-					}
+					assert.True(t, res.DryRun)
+					assert.False(t, res.MemLimitApplied)
+					assert.False(t, res.MaxProcsApplied)
+					assert.False(t, res.GOGCApplied)
+					assert.Equal(t, -999, *gogc)
 					if tt.name == "AdaptiveWithLiveHeap" {
-						if res.GOGC <= 0 {
-							t.Errorf("expected adaptive GOGC > 0, got %d", res.GOGC)
-						}
-					} else if res.GOGC != tt.wantGOGC {
-						t.Errorf("expected GOGC %d, got %d", tt.wantGOGC, res.GOGC)
+						assert.Positive(t, res.GOGC)
+					} else {
+						assert.Equal(t, tt.wantGOGC, res.GOGC)
 					}
-					if res.ProfileApplied != tt.wantProfile {
-						t.Errorf("expected ProfileApplied %q, got %q", tt.wantProfile, res.ProfileApplied)
-					}
-					if res.SkippedReason != tt.wantReason {
-						t.Errorf("expected SkippedReason %q, got %q", tt.wantReason, res.SkippedReason)
-					}
+					assert.Equal(t, tt.wantProfile, res.ProfileApplied)
+					assert.Equal(t, tt.wantReason, res.SkippedReason)
 				})
 			})
 		}
@@ -1129,18 +1089,10 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 			withIsolatedEnv(t, nil, &mockLimitsV2, nil, func(_ *int64, _ *int, gogc *int, _ *bytes.Buffer) {
 				const targetGOGC = 60
 				res := AutoTune(WithDryRun(true), WithGOGC(targetGOGC))
-				if !res.DryRun {
-					t.Errorf("expected DryRun true")
-				}
-				if res.GOGC != targetGOGC {
-					t.Errorf("expected res.GOGC %d, got %d", targetGOGC, res.GOGC)
-				}
-				if res.GOGCApplied {
-					t.Errorf("expected GOGCApplied false")
-				}
-				if *gogc != -999 {
-					t.Errorf("expected setGCPercentFunc not called, got %d", *gogc)
-				}
+				assert.True(t, res.DryRun)
+				assert.Equal(t, targetGOGC, res.GOGC)
+				assert.False(t, res.GOGCApplied)
+				assert.Equal(t, -999, *gogc)
 			})
 		})
 
@@ -1155,33 +1107,19 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 				}
 
 				res := AutoTune(WithDryRun(true), WithGOGC(0), WithLogger(customLogger))
-				if !res.DryRun {
-					t.Errorf("expected DryRun true")
-				}
-				if res.GOGC != 0 {
-					t.Errorf("expected res.GOGC 0, got %d", res.GOGC)
-				}
-				if res.GOGCApplied {
-					t.Errorf("expected GOGCApplied false")
-				}
-				if *gogc != -999 {
-					t.Errorf("expected setGCPercentFunc not called, got %d", *gogc)
-				}
-				if !strings.Contains(customLogged, "gogc=0") {
-					t.Errorf("expected custom logger to contain 'gogc=0', got %q", customLogged)
-				}
+				assert.True(t, res.DryRun)
+				assert.Equal(t, 0, res.GOGC)
+				assert.False(t, res.GOGCApplied)
+				assert.Equal(t, -999, *gogc)
+				assert.Contains(t, customLogged, "gogc=0")
 
 				// Also verify JSON telemetry formatting for GOGC=0
 				withIsolatedEnv(t, mockEnv, &mockLimitsV2, nil, func(_ *int64, _ *int, _ *int, stderrBufJSON *bytes.Buffer) {
 					_ = AutoTune(WithDryRun(true), WithGOGC(0))
 					cleanJSON := strings.TrimPrefix(strings.TrimSpace(stderrBufJSON.String()), "[microfat] ")
 					var telem Telemetry
-					if err := json.Unmarshal([]byte(cleanJSON), &telem); err != nil {
-						t.Fatalf("unmarshaling json telemetry: %v", err)
-					}
-					if telem.GOGC != "0" {
-						t.Errorf("expected telemetry GOGC '0', got %q", telem.GOGC)
-					}
+					require.NoError(t, json.Unmarshal([]byte(cleanJSON), &telem))
+					assert.Equal(t, "0", telem.GOGC)
 				})
 			})
 		})
@@ -1192,20 +1130,12 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 			}
 			withIsolatedEnv(t, mockEnv, &mockLimitsV2, nil, func(_ *int64, _ *int, gogc *int, stderrBuf *bytes.Buffer) {
 				res := AutoTune(WithDryRun(true), WithGOGC(-1))
-				if res.GOGC != -1 {
-					t.Errorf("expected res.GOGC -1, got %d", res.GOGC)
-				}
-				if *gogc != -999 {
-					t.Errorf("expected setGCPercentFunc not called, got %d", *gogc)
-				}
+				assert.Equal(t, -1, res.GOGC)
+				assert.Equal(t, -999, *gogc)
 				cleanJSON := strings.TrimPrefix(strings.TrimSpace(stderrBuf.String()), "[microfat] ")
 				var telem Telemetry
-				if err := json.Unmarshal([]byte(cleanJSON), &telem); err != nil {
-					t.Fatalf("unmarshaling json telemetry: %v", err)
-				}
-				if telem.GOGC != "off" {
-					t.Errorf("expected telemetry GOGC 'off', got %q", telem.GOGC)
-				}
+				require.NoError(t, json.Unmarshal([]byte(cleanJSON), &telem))
+				assert.Equal(t, "off", telem.GOGC)
 			})
 		})
 	})
@@ -1230,18 +1160,14 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 				}
 				withIsolatedEnv(t, mockEnv, &mockLimitsV2, nil, func(memLimit *int64, maxProcs *int, gogc *int, _ *bytes.Buffer) {
 					res := AutoTune()
-					if !res.DryRun {
-						t.Errorf("expected DryRun true for env %q", tc.envVal)
-					}
-					if *memLimit != -1 || *maxProcs != -1 || *gogc != -999 {
-						t.Errorf("expected no runtime mutation under dry run env")
-					}
-					if res.MemLimitApplied || res.MaxProcsApplied || res.GOGCApplied {
-						t.Errorf("expected applied flags to be false")
-					}
-					if res.SkippedReason != testReasonDryRun {
-						t.Errorf("expected SkippedReason %q, got %q", testReasonDryRun, res.SkippedReason)
-					}
+					assert.True(t, res.DryRun)
+					assert.Equal(t, int64(-1), *memLimit)
+					assert.Equal(t, -1, *maxProcs)
+					assert.Equal(t, -999, *gogc)
+					assert.False(t, res.MemLimitApplied)
+					assert.False(t, res.MaxProcsApplied)
+					assert.False(t, res.GOGCApplied)
+					assert.Equal(t, testReasonDryRun, res.SkippedReason)
 				})
 			})
 		}
@@ -1254,15 +1180,11 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 			}
 			withIsolatedEnv(t, mockEnv, &mockLimitsV2, nil, func(memLimit *int64, maxProcs *int, _ *int, _ *bytes.Buffer) {
 				res := AutoTune(WithDryRun(false))
-				if res.DryRun {
-					t.Errorf("expected DryRun false when WithDryRun(false) is passed")
-				}
-				if !res.MemLimitApplied || !res.MaxProcsApplied {
-					t.Errorf("expected limits to be applied when DryRun is overridden to false")
-				}
-				if *memLimit == -1 || *maxProcs == -1 {
-					t.Errorf("expected runtime mutations when DryRun is false")
-				}
+				assert.False(t, res.DryRun)
+				assert.True(t, res.MemLimitApplied)
+				assert.True(t, res.MaxProcsApplied)
+				assert.NotEqual(t, int64(-1), *memLimit)
+				assert.NotEqual(t, -1, *maxProcs)
 			})
 		})
 
@@ -1272,15 +1194,11 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 			}
 			withIsolatedEnv(t, mockEnv, &mockLimitsV2, nil, func(memLimit *int64, maxProcs *int, _ *int, _ *bytes.Buffer) {
 				res := AutoTune(WithDryRun(true))
-				if !res.DryRun {
-					t.Errorf("expected DryRun true when WithDryRun(true) is passed")
-				}
-				if res.MemLimitApplied || res.MaxProcsApplied {
-					t.Errorf("expected applied flags false when WithDryRun(true) overrides env 0")
-				}
-				if *memLimit != -1 || *maxProcs != -1 {
-					t.Errorf("expected no mutations")
-				}
+				assert.True(t, res.DryRun)
+				assert.False(t, res.MemLimitApplied)
+				assert.False(t, res.MaxProcsApplied)
+				assert.Equal(t, int64(-1), *memLimit)
+				assert.Equal(t, -1, *maxProcs)
 			})
 		})
 	})
@@ -1298,12 +1216,8 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 			_ = AutoTune(WithDryRun(true), WithLogger(customLogger))
 			mu.Lock()
 			defer mu.Unlock()
-			if !strings.Contains(loggedMsg, "dry_run=true") {
-				t.Errorf("expected logged message to contain 'dry_run=true', got %q", loggedMsg)
-			}
-			if !strings.Contains(loggedMsg, `skipped="`+testReasonDryRun+`"`) {
-				t.Errorf("expected logged message to contain skipped dry-run mode, got %q", loggedMsg)
-			}
+			assert.Contains(t, loggedMsg, "dry_run=true")
+			assert.Contains(t, loggedMsg, `skipped="`+testReasonDryRun+`"`)
 		})
 	})
 
@@ -1314,33 +1228,21 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 		}
 		withIsolatedEnv(t, mockEnv, &mockLimitsV2, nil, func(_ *int64, _ *int, _ *int, stderrBuf *bytes.Buffer) {
 			res := AutoTune(WithDryRun(true))
-			if !res.DryRun {
-				t.Fatalf("expected res.DryRun to be true")
-			}
+			require.True(t, res.DryRun)
 
 			output := stderrBuf.String()
 			cleanJSON := strings.TrimPrefix(strings.TrimSpace(output), "[microfat] ")
 
-			if !strings.Contains(cleanJSON, `"dry_run":true`) {
-				t.Errorf("expected JSON to contain '\"dry_run\":true', got %s", cleanJSON)
-			}
+			assert.Contains(t, cleanJSON, `"dry_run":true`)
 
 			var telem Telemetry
-			if err := json.Unmarshal([]byte(cleanJSON), &telem); err != nil {
-				t.Fatalf("unmarshaling json telemetry: %v", err)
-			}
-			if !telem.DryRun {
-				t.Errorf("expected telem.DryRun to be true")
-			}
-			if telem.MemLimitApplied || telem.MaxProcsApplied || telem.GOGCApplied {
-				t.Errorf("expected telemetry applied flags to be false")
-			}
-			if telem.GOGC != "75" {
-				t.Errorf("expected telem.GOGC '75', got %q", telem.GOGC)
-			}
-			if telem.SkippedReason != testReasonDryRun {
-				t.Errorf("expected telem.SkippedReason %q, got %q", testReasonDryRun, telem.SkippedReason)
-			}
+			require.NoError(t, json.Unmarshal([]byte(cleanJSON), &telem))
+			assert.True(t, telem.DryRun)
+			assert.False(t, telem.MemLimitApplied)
+			assert.False(t, telem.MaxProcsApplied)
+			assert.False(t, telem.GOGCApplied)
+			assert.Equal(t, "75", telem.GOGC)
+			assert.Equal(t, testReasonDryRun, telem.SkippedReason)
 		})
 	})
 
@@ -1353,12 +1255,8 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 			_ = AutoTune(WithDryRun(true))
 			cleanJSON := strings.TrimPrefix(strings.TrimSpace(stderrBuf.String()), "[microfat] ")
 			var telem Telemetry
-			if err := json.Unmarshal([]byte(cleanJSON), &telem); err != nil {
-				t.Fatalf("unmarshaling json telemetry: %v", err)
-			}
-			if telem.GOGC != "off" {
-				t.Errorf("expected GOGC 'off' in telemetry for batch_etl, got %q", telem.GOGC)
-			}
+			require.NoError(t, json.Unmarshal([]byte(cleanJSON), &telem))
+			assert.Equal(t, "off", telem.GOGC)
 		})
 	})
 
@@ -1369,12 +1267,8 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 		withIsolatedEnv(t, mockEnv, &mockLimitsV2, nil, func(_ *int64, _ *int, _ *int, stderrBuf *bytes.Buffer) {
 			_ = AutoTune(WithDryRun(true))
 			output := stderrBuf.String()
-			if !strings.Contains(output, "dry_run=true") {
-				t.Errorf("expected stderr to contain 'dry_run=true', got %s", output)
-			}
-			if !strings.Contains(output, `reason="`+testReasonDryRun+`"`) {
-				t.Errorf("expected stderr to contain reason dry-run mode, got %s", output)
-			}
+			assert.Contains(t, output, "dry_run=true")
+			assert.Contains(t, output, `reason="`+testReasonDryRun+`"`)
 		})
 	})
 
@@ -1385,15 +1279,11 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 		}
 		withIsolatedEnv(t, mockEnv, &mockLimitsV2, nil, func(memLimit *int64, maxProcs *int, gogc *int, _ *bytes.Buffer) {
 			res := AutoTune()
-			if !res.DryRun {
-				t.Errorf("expected DryRun true")
-			}
-			if !strings.Contains(res.SkippedReason, "auto-tuning disabled") {
-				t.Errorf("expected SkippedReason to reflect disabled, got %q", res.SkippedReason)
-			}
-			if *memLimit != -1 || *maxProcs != -1 || *gogc != -999 {
-				t.Errorf("expected no runtime calls")
-			}
+			assert.True(t, res.DryRun)
+			assert.Contains(t, res.SkippedReason, "auto-tuning disabled")
+			assert.Equal(t, int64(-1), *memLimit)
+			assert.Equal(t, -1, *maxProcs)
+			assert.Equal(t, -999, *gogc)
 		})
 	})
 
@@ -1401,15 +1291,11 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 		mockLimitsUnknown := cgroup.Limits{CgroupVersion: cgroup.VersionUnknown}
 		withIsolatedEnv(t, nil, &mockLimitsUnknown, nil, func(memLimit *int64, maxProcs *int, gogc *int, _ *bytes.Buffer) {
 			res := AutoTune(WithDryRun(true))
-			if !res.DryRun {
-				t.Errorf("expected DryRun true")
-			}
-			if !strings.Contains(res.SkippedReason, "cgroup resource limits not detected") {
-				t.Errorf("expected SkippedReason 'cgroup resource limits not detected', got %q", res.SkippedReason)
-			}
-			if *memLimit != -1 || *maxProcs != -1 || *gogc != -999 {
-				t.Errorf("expected no runtime calls")
-			}
+			assert.True(t, res.DryRun)
+			assert.Contains(t, res.SkippedReason, "cgroup resource limits not detected")
+			assert.Equal(t, int64(-1), *memLimit)
+			assert.Equal(t, -1, *maxProcs)
+			assert.Equal(t, -999, *gogc)
 		})
 	})
 
@@ -1417,15 +1303,11 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 		inspectErr := errors.New("simulated error")
 		withIsolatedEnv(t, nil, nil, inspectErr, func(memLimit *int64, maxProcs *int, gogc *int, _ *bytes.Buffer) {
 			res := AutoTune(WithDryRun(true))
-			if !res.DryRun {
-				t.Errorf("expected DryRun true")
-			}
-			if !strings.Contains(res.SkippedReason, "cgroup inspection failed: simulated error") {
-				t.Errorf("expected SkippedReason to contain simulated error, got %q", res.SkippedReason)
-			}
-			if *memLimit != -1 || *maxProcs != -1 || *gogc != -999 {
-				t.Errorf("expected no runtime calls")
-			}
+			assert.True(t, res.DryRun)
+			assert.Contains(t, res.SkippedReason, "cgroup inspection failed: simulated error")
+			assert.Equal(t, int64(-1), *memLimit)
+			assert.Equal(t, -1, *maxProcs)
+			assert.Equal(t, -999, *gogc)
 		})
 	})
 
@@ -1438,18 +1320,16 @@ func TestAutoTune_WithDryRun(t *testing.T) {
 				go func() {
 					defer wg.Done()
 					res := AutoTune(WithDryRun(true), WithProfile(ProfileLatencyCritical))
-					if !res.DryRun {
-						t.Errorf("expected DryRun true")
-					}
-					if res.MemLimitApplied || res.MaxProcsApplied || res.GOGCApplied {
-						t.Errorf("expected no applied flags in concurrent dry run")
-					}
+					assert.True(t, res.DryRun)
+					assert.False(t, res.MemLimitApplied)
+					assert.False(t, res.MaxProcsApplied)
+					assert.False(t, res.GOGCApplied)
 				}()
 			}
 			wg.Wait()
-			if *memLimit != -1 || *maxProcs != -1 || *gogc != -999 {
-				t.Errorf("expected no runtime mutations in concurrent dry run")
-			}
+			assert.Equal(t, int64(-1), *memLimit)
+			assert.Equal(t, -1, *maxProcs)
+			assert.Equal(t, -999, *gogc)
 		})
 	})
 }

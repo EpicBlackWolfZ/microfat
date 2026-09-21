@@ -10,6 +10,8 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/testutil"
+
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -86,94 +88,47 @@ func TestParseCompressionSpec(t *testing.T) {
 
 func TestResolveCompression(t *testing.T) {
 	t.Parallel()
-
-	t.Run("Default balanced", func(t *testing.T) {
-		t.Parallel()
-		c, level, err := codec.ResolveCompression("", "", "", 1024)
-		if err != nil || c.Name() != codec.AlgorithmZstd || level != "better" {
-			t.Fatalf("unexpected resolve: c=%v, level=%s, err=%v", c, level, err)
-		}
-	})
-
-	t.Run("Profile size", func(t *testing.T) {
-		t.Parallel()
-		c, level, err := codec.ResolveCompression(codec.ProfileSize, "", "", 1024)
-		if err != nil || c.Name() != codec.AlgorithmZstd || level != "best" {
-			t.Fatalf("unexpected resolve: c=%v, level=%s, err=%v", c, level, err)
-		}
-	})
-
-	t.Run("Profile latency tiny payload auto-promotes to none", func(t *testing.T) {
-		t.Parallel()
-		c, level, err := codec.ResolveCompression(codec.ProfileLatency, "", "", testPayloadSizeTiny)
-		if err != nil || c.Name() != codec.AlgorithmNone {
-			t.Fatalf("unexpected resolve: c=%v, level=%s, err=%v", c, level, err)
-		}
-	})
-
-	t.Run("Profile latency large payload defaults to lz4", func(t *testing.T) {
-		t.Parallel()
-		c, _, err := codec.ResolveCompression(codec.ProfileLatency, "", "", testPayloadSizeLarge)
-		if err != nil || c.Name() != codec.AlgorithmLZ4 {
-			t.Fatalf("unexpected resolve: c=%v, err=%v", c, err)
-		}
-	})
-
-	t.Run("Profile latency with explicit lz4 does not auto-promote", func(t *testing.T) {
-		t.Parallel()
-		c, _, err := codec.ResolveCompression(codec.ProfileLatency, "lz4", "", testPayloadSizeTiny)
-		if err != nil || c.Name() != codec.AlgorithmLZ4 {
-			t.Fatalf("unexpected resolve: c=%v, err=%v", c, err)
-		}
-	})
-
-	t.Run("Explicit algorithm and spec level override", func(t *testing.T) {
-		t.Parallel()
-		c, level, err := codec.ResolveCompression(codec.ProfileLatency, "zstd:9", "", 1024)
-		if err != nil || c.Name() != codec.AlgorithmZstd || level != "9" {
-			t.Fatalf("unexpected resolve: c=%v, level=%s, err=%v", c, level, err)
-		}
-	})
-
-	t.Run("Profile size with custom algo and level", func(t *testing.T) {
-		t.Parallel()
-		c, level, err := codec.ResolveCompression(codec.ProfileSize, testCodecZstd, "19", 1024)
-		if err != nil || c.Name() != codec.AlgorithmZstd || level != "19" {
-			t.Fatalf("unexpected resolve: c=%v, level=%s, err=%v", c, level, err)
-		}
-	})
-
-	t.Run("Profile balanced with explicit level", func(t *testing.T) {
-		t.Parallel()
-		c, level, err := codec.ResolveCompression(codec.ProfileBalanced, testCodecZstd, testLevelFastest, 1024)
-		if err != nil || c.Name() != codec.AlgorithmZstd || level != testLevelFastest {
-			t.Fatalf("unexpected resolve: c=%v, level=%s, err=%v", c, level, err)
-		}
-	})
-
-	t.Run("Default with explicit level", func(t *testing.T) {
-		t.Parallel()
-		c, level, err := codec.ResolveCompression("", testCodecZstd, testLevelFastest, 1024)
-		if err != nil || c.Name() != codec.AlgorithmZstd || level != testLevelFastest {
-			t.Fatalf("unexpected resolve: c=%v, level=%s, err=%v", c, level, err)
-		}
-	})
-
-	t.Run("Invalid profile error", func(t *testing.T) {
-		t.Parallel()
-		_, _, err := codec.ResolveCompression("unknown_profile", "", "", 1024)
-		if !errors.Is(err, codec.ErrUnsupportedProfile) {
-			t.Fatalf("expected ErrUnsupportedProfile, got %v", err)
-		}
-	})
-
-	t.Run("Invalid algorithm error", func(t *testing.T) {
-		t.Parallel()
-		_, _, err := codec.ResolveCompression("", "unknown_algo", "", 1024)
-		if !errors.Is(err, codec.ErrUnsupportedCodec) {
-			t.Fatalf("expected ErrUnsupportedCodec, got %v", err)
-		}
-	})
+	tests := []struct {
+		name, profile, algorithm, level string
+		size                            int64
+		wantCodec, wantLevel            string
+		checkLevel                      bool
+		wantErr                         error
+	}{
+		{"Default balanced", "", "", "", 1024, codec.AlgorithmZstd, "better", true, nil},
+		{"Profile size", codec.ProfileSize, "", "", 1024, codec.AlgorithmZstd, "best", true, nil},
+		{"Profile latency tiny payload auto-promotes to none", codec.ProfileLatency, "", "",
+			testPayloadSizeTiny, codec.AlgorithmNone, "", false, nil},
+		{"Profile latency large payload defaults to lz4", codec.ProfileLatency, "", "",
+			testPayloadSizeLarge, codec.AlgorithmLZ4, "", false, nil},
+		{"Profile latency with explicit lz4 does not auto-promote", codec.ProfileLatency, "lz4", "",
+			testPayloadSizeTiny, codec.AlgorithmLZ4, "", false, nil},
+		{"Explicit algorithm and spec level override", codec.ProfileLatency, "zstd:9", "", 1024,
+			codec.AlgorithmZstd, "9", true, nil},
+		{"Profile size with custom algo and level", codec.ProfileSize, testCodecZstd, "19", 1024,
+			codec.AlgorithmZstd, "19", true, nil},
+		{"Profile balanced with explicit level", codec.ProfileBalanced, testCodecZstd, testLevelFastest, 1024,
+			codec.AlgorithmZstd, testLevelFastest, true, nil},
+		{"Default with explicit level", "", testCodecZstd, testLevelFastest, 1024, codec.AlgorithmZstd, testLevelFastest, true, nil},
+		{"Invalid profile error", "unknown_profile", "", "", 1024, "", "", false, codec.ErrUnsupportedProfile},
+		{"Invalid algorithm error", "", "unknown_algo", "", 1024, "", "", false, codec.ErrUnsupportedCodec},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c, level, err := codec.ResolveCompression(tt.profile, tt.algorithm, tt.level, tt.size)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, c)
+			require.Equal(t, tt.wantCodec, c.Name())
+			if tt.checkLevel {
+				require.Equal(t, tt.wantLevel, level)
+			}
+		})
+	}
 }
 
 func TestCodecsRoundtrip(t *testing.T) {
@@ -348,17 +303,13 @@ func TestZstdDictionaryCompression(t *testing.T) {
 	samples := generateDictionarySamples()
 
 	dict, err := codec.TrainDictionary(samples, 32*1024, "better")
-	if err != nil {
-		t.Fatalf("TrainDictionary failed: %v", err)
-	}
+	require.NoError(t, err, "TrainDictionary failed")
 	if len(dict) == 0 {
 		t.Fatalf("expected non-empty dictionary")
 	}
 
 	zCodecRaw, err := codec.Get(codec.AlgorithmZstd)
-	if err != nil {
-		t.Fatalf("Get zstd: %v", err)
-	}
+	require.NoError(t, err, "Get zstd")
 	zCodec, ok := zCodecRaw.(codec.DictCodec)
 	if !ok {
 		t.Fatalf("expected zstd codec to implement DictCodec")
@@ -369,14 +320,10 @@ func TestZstdDictionaryCompression(t *testing.T) {
 	t.Run("Compress and Decompress with Dict", func(t *testing.T) {
 		t.Parallel()
 		var compressed bytes.Buffer
-		if err := zCodec.CompressWithDict(&compressed, testData, "fastest", dict); err != nil {
-			t.Fatalf("CompressWithDict failed: %v", err)
-		}
+		require.NoError(t, zCodec.CompressWithDict(&compressed, testData, "fastest", dict), "CompressWithDict failed")
 
 		var decompressed bytes.Buffer
-		if err := zCodec.DecompressWithDict(&decompressed, &compressed, int64(len(testData)), dict); err != nil {
-			t.Fatalf("DecompressWithDict failed: %v", err)
-		}
+		require.NoError(t, zCodec.DecompressWithDict(&decompressed, &compressed, int64(len(testData)), dict), "DecompressWithDict failed")
 
 		if !bytes.Equal(decompressed.Bytes(), testData) {
 			t.Fatalf("decompressed payload with dict mismatch")
@@ -386,14 +333,11 @@ func TestZstdDictionaryCompression(t *testing.T) {
 	t.Run("DecompressWithOptionalDict helper", func(t *testing.T) {
 		t.Parallel()
 		var compressed bytes.Buffer
-		if err := zCodec.CompressWithDict(&compressed, testData, "fastest", dict); err != nil {
-			t.Fatalf("CompressWithDict failed: %v", err)
-		}
+		require.NoError(t, zCodec.CompressWithDict(&compressed, testData, "fastest", dict), "CompressWithDict failed")
 
 		var decompressed bytes.Buffer
-		if err := codec.DecompressWithOptionalDict(zCodec, &decompressed, &compressed, int64(len(testData)), dict); err != nil {
-			t.Fatalf("DecompressWithOptionalDict failed: %v", err)
-		}
+		require.NoError(t, codec.DecompressWithOptionalDict(zCodec, &decompressed, &compressed, int64(len(testData)), dict),
+			"DecompressWithOptionalDict failed")
 
 		if !bytes.Equal(decompressed.Bytes(), testData) {
 			t.Fatalf("DecompressWithOptionalDict payload mismatch")
@@ -403,17 +347,13 @@ func TestZstdDictionaryCompression(t *testing.T) {
 		noneCodec, _ := codec.Get(codec.AlgorithmNone)
 		var noneOut bytes.Buffer
 		err := codec.DecompressWithOptionalDict(noneCodec, &noneOut, bytes.NewReader(testData), int64(len(testData)), dict)
-		if err != nil {
-			t.Fatalf("DecompressWithOptionalDict with noneCodec: %v", err)
-		}
+		require.NoError(t, err, "DecompressWithOptionalDict with noneCodec")
 	})
 
 	t.Run("Decompress without matching dict fails or errs on corrupted data", func(t *testing.T) {
 		t.Parallel()
 		var compressed bytes.Buffer
-		if err := zCodec.CompressWithDict(&compressed, testData, "fastest", dict); err != nil {
-			t.Fatalf("CompressWithDict failed: %v", err)
-		}
+		require.NoError(t, zCodec.CompressWithDict(&compressed, testData, "fastest", dict), "CompressWithDict failed")
 
 		wrongDict := []byte("invalid_or_wrong_dictionary_content_bytes_sequence_1234567890")
 		var decompressed bytes.Buffer
@@ -440,9 +380,7 @@ func TestZstdDictionaryCompression(t *testing.T) {
 		t.Parallel()
 		ew := &errWriter{}
 		err := zCodec.CompressWithDict(ew, testData, "fastest", dict)
-		if err == nil {
-			t.Fatalf("expected error writing with errWriter")
-		}
+		require.Error(t, err, "expected error writing with errWriter")
 	})
 }
 
@@ -496,14 +434,10 @@ func TestDecompressionBombRejection(t *testing.T) {
 	t.Run("Zstd decompression bomb rejected early", func(t *testing.T) {
 		t.Parallel()
 		zCodec, err := codec.Get(codec.AlgorithmZstd)
-		if err != nil {
-			t.Fatalf("Get zstd: %v", err)
-		}
+		require.NoError(t, err, "Get zstd")
 
 		var compressed bytes.Buffer
-		if err := zCodec.Compress(&compressed, largeData, "best"); err != nil {
-			t.Fatalf("Compress failed: %v", err)
-		}
+		require.NoError(t, zCodec.Compress(&compressed, largeData, "best"), "Compress failed")
 
 		var dest bytes.Buffer
 		err = zCodec.Decompress(&dest, bytes.NewReader(compressed.Bytes()), declaredLimitSize)
@@ -521,14 +455,10 @@ func TestDecompressionBombRejection(t *testing.T) {
 	t.Run("LZ4 decompression bomb rejected early", func(t *testing.T) {
 		t.Parallel()
 		lzCodec, err := codec.Get(codec.AlgorithmLZ4)
-		if err != nil {
-			t.Fatalf("Get lz4: %v", err)
-		}
+		require.NoError(t, err, "Get lz4")
 
 		var compressed bytes.Buffer
-		if err := lzCodec.Compress(&compressed, largeData, "best"); err != nil {
-			t.Fatalf("Compress failed: %v", err)
-		}
+		require.NoError(t, lzCodec.Compress(&compressed, largeData, "best"), "Compress failed")
 
 		var dest bytes.Buffer
 		err = lzCodec.Decompress(&dest, bytes.NewReader(compressed.Bytes()), declaredLimitSize)
@@ -546,9 +476,7 @@ func TestDecompressionBombRejection(t *testing.T) {
 	t.Run("None decompression bomb rejected early", func(t *testing.T) {
 		t.Parallel()
 		nCodec, err := codec.Get(codec.AlgorithmNone)
-		if err != nil {
-			t.Fatalf("Get none: %v", err)
-		}
+		require.NoError(t, err, "Get none")
 
 		var dest bytes.Buffer
 		err = nCodec.Decompress(&dest, bytes.NewReader(largeData), declaredLimitSize)
@@ -567,23 +495,17 @@ func TestDecompressionBombRejection(t *testing.T) {
 		t.Parallel()
 		samples := generateDictionarySamples()
 		dict, err := codec.TrainDictionary(samples, 32*1024, "default")
-		if err != nil {
-			t.Fatalf("TrainDictionary failed: %v", err)
-		}
+		require.NoError(t, err, "TrainDictionary failed")
 
 		zCodecRaw, err := codec.Get(codec.AlgorithmZstd)
-		if err != nil {
-			t.Fatalf("Get zstd: %v", err)
-		}
+		require.NoError(t, err, "Get zstd")
 		zCodec, ok := zCodecRaw.(codec.DictCodec)
 		if !ok {
 			t.Fatalf("expected DictCodec")
 		}
 
 		var compressed bytes.Buffer
-		if err := zCodec.CompressWithDict(&compressed, largeData, "fastest", dict); err != nil {
-			t.Fatalf("CompressWithDict failed: %v", err)
-		}
+		require.NoError(t, zCodec.CompressWithDict(&compressed, largeData, "fastest", dict), "CompressWithDict failed")
 
 		var dest bytes.Buffer
 		err = zCodec.DecompressWithDict(&dest, bytes.NewReader(compressed.Bytes()), declaredLimitSize, dict)

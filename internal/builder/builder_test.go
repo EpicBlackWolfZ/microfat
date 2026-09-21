@@ -14,6 +14,8 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/builder"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -94,14 +96,10 @@ variants:
     pgo: profiles/v3.pgo
     flags: ["-v"]
 `
-	if err := os.WriteFile(manifestFile, []byte(content), 0o644); err != nil {
-		t.Fatalf("failed to write manifest: %v", err)
-	}
+	require.NoError(t, os.WriteFile(manifestFile, []byte(content), 0o644), "failed to write manifest")
 
 	m, err := builder.LoadManifest(manifestFile)
-	if err != nil {
-		t.Fatalf("LoadManifest failed: %v", err)
-	}
+	require.NoError(t, err, "LoadManifest failed")
 	if m.AppName != "testapp" {
 		t.Errorf("expected AppName testapp, got %s", m.AppName)
 	}
@@ -391,9 +389,7 @@ func TestBuildAndPack_RealCompilation(t *testing.T) {
 
 	// Create a minimal compilable Go package
 	pkgDir := filepath.Join(tmpDir, "pkg")
-	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
-		t.Fatalf("failed to create pkg dir: %v", err)
-	}
+	require.NoError(t, os.MkdirAll(pkgDir, 0o755), "failed to create pkg dir")
 
 	goSource := `package main
 
@@ -403,22 +399,14 @@ func main() {
 	fmt.Println("PGO compiled")
 }
 `
-	if err := os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(goSource), 0o644); err != nil {
-		t.Fatalf("failed to write main.go: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module testpkg\ngo 1.27.1\n"), 0o644); err != nil {
-		t.Fatalf("failed to write go.mod: %v", err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(goSource), 0o644), "failed to write main.go")
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module testpkg\ngo 1.27.1\n"), 0o644), "failed to write go.mod")
 
 	// Create a dummy pgo file
 	profilesDir := filepath.Join(tmpDir, "profiles")
-	if err := os.MkdirAll(profilesDir, 0o755); err != nil {
-		t.Fatalf("failed to create profiles dir: %v", err)
-	}
+	require.NoError(t, os.MkdirAll(profilesDir, 0o755), "failed to create profiles dir")
 	dummyPGO := filepath.Join(profilesDir, "v3.pgo")
-	if err := os.WriteFile(dummyPGO, []byte(""), 0o644); err != nil {
-		t.Fatalf("failed to write dummy pgo: %v", err)
-	}
+	require.NoError(t, os.WriteFile(dummyPGO, []byte(""), 0o644), "failed to write dummy pgo")
 
 	outFile := filepath.Join(tmpDir, "bin", "myfatbin")
 
@@ -443,9 +431,7 @@ func main() {
 		SkipELFValidation: false,
 		Stdout:            &stdoutBuf,
 	})
-	if err != nil {
-		t.Fatalf("BuildAndPack failed: %v", err)
-	}
+	require.NoError(t, err, "BuildAndPack failed")
 	if res == nil {
 		t.Fatalf("expected non-nil BuildResult")
 	}
@@ -458,23 +444,17 @@ func main() {
 
 	// Verify the produced fat binary
 	f, err := os.Open(outFile)
-	if err != nil {
-		t.Fatalf("failed to open output binary: %v", err)
-	}
+	require.NoError(t, err, "failed to open output binary")
 	defer f.Close()
 
 	stat, err := f.Stat()
-	if err != nil {
-		t.Fatalf("stat failed: %v", err)
-	}
+	require.NoError(t, err, "stat failed")
 	if !format.IsFatBinary(f, stat.Size()) {
 		t.Errorf("expected valid fat binary magic trailer")
 	}
 
 	idx, results, err := pack.VerifyBinary(f, stat.Size())
-	if err != nil {
-		t.Fatalf("VerifyBinary failed: %v", err)
-	}
+	require.NoError(t, err, "VerifyBinary failed")
 	if idx.AppName != "pgo-demo" {
 		t.Errorf("expected AppName pgo-demo, got %s", idx.AppName)
 	}

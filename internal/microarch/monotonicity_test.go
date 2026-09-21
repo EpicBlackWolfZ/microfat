@@ -14,6 +14,7 @@ const (
 	arm64FeatureCount  = 30
 )
 
+//revive:disable-next-line:cyclomatic Keep the explicit independent ISA prerequisite oracle; do not reuse the selector being tested.
 func TestMicroarch_AMD64MonotonicityInvariants(t *testing.T) {
 	t.Parallel()
 

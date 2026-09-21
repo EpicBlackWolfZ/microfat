@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/workloads"
+
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -49,9 +51,7 @@ func TestBaselineWorkload_Lifecycle(t *testing.T) {
 			"seed": "987654321",
 		},
 	}
-	if err := w.Setup(ctx, cfg); err != nil {
-		t.Fatalf("Setup failed: %v", err)
-	}
+	require.NoError(t, w.Setup(ctx, cfg), "Setup failed")
 
 	// Warmup
 	warmupPlan := workloads.ExecutionPlan{
@@ -59,15 +59,11 @@ func TestBaselineWorkload_Lifecycle(t *testing.T) {
 		TargetDuration: testDurationWarm,
 		BatchSize:      testBatchSize,
 	}
-	if err := w.Warmup(ctx, warmupPlan); err != nil {
-		t.Fatalf("Warmup failed: %v", err)
-	}
+	require.NoError(t, w.Warmup(ctx, warmupPlan), "Warmup failed")
 
 	// RunTrial (iterations mode)
 	obs, err := w.RunTrial(ctx, plan, 1)
-	if err != nil {
-		t.Fatalf("RunTrial failed: %v", err)
-	}
+	require.NoError(t, err, "RunTrial failed")
 
 	if obs.TrialIndex != 1 {
 		t.Errorf("expected trial index 1, got %d", obs.TrialIndex)
@@ -89,9 +85,7 @@ func TestBaselineWorkload_Lifecycle(t *testing.T) {
 	}
 
 	// Teardown
-	if err := w.Teardown(ctx); err != nil {
-		t.Fatalf("Teardown failed: %v", err)
-	}
+	require.NoError(t, w.Teardown(ctx), "Teardown failed")
 
 	// After Teardown, workload should no longer be configured
 	if err := w.Warmup(ctx, plan); err != ErrNotSetup {

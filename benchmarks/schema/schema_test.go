@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
+
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -224,9 +226,7 @@ func TestExperimentValidation(t *testing.T) {
 	t.Run("valid experiment passes", func(t *testing.T) {
 		t.Parallel()
 		exp := validMockExperiment()
-		if err := schema.ValidateExperiment(exp); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, schema.ValidateExperiment(exp), "unexpected error")
 	})
 
 	t.Run("valid experiment with RFC3339 seconds timestamp", func(t *testing.T) {
@@ -235,43 +235,33 @@ func TestExperimentValidation(t *testing.T) {
 		exp.CreatedAt = "2026-09-07T20:00:00Z"
 		exp.Scenarios[0].Observations[0].StartTime = "2026-09-07T20:00:01Z"
 		exp.Scenarios[0].Observations[0].EndTime = "2026-09-07T20:00:02Z"
-		if err := schema.ValidateExperiment(exp); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, schema.ValidateExperiment(exp), "unexpected error")
 	})
 
 	t.Run("nil experiment fails", func(t *testing.T) {
 		t.Parallel()
-		if err := schema.ValidateExperiment(nil); !errors.Is(err, schema.ErrNilExperiment) {
-			t.Fatalf("expected ErrNilExperiment, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(nil), schema.ErrNilExperiment, "expected ErrNilExperiment")
 	})
 
 	t.Run("invalid schema version fails", func(t *testing.T) {
 		t.Parallel()
 		exp := validMockExperiment()
 		exp.SchemaVersion = "v2"
-		if err := schema.ValidateExperiment(exp); !errors.Is(err, schema.ErrInvalidSchemaVersion) {
-			t.Fatalf("expected ErrInvalidSchemaVersion, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp), schema.ErrInvalidSchemaVersion, "expected ErrInvalidSchemaVersion")
 	})
 
 	t.Run("empty id fails", func(t *testing.T) {
 		t.Parallel()
 		exp := validMockExperiment()
 		exp.ID = "   "
-		if err := schema.ValidateExperiment(exp); !errors.Is(err, schema.ErrEmptyExperimentID) {
-			t.Fatalf("expected ErrEmptyExperimentID, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp), schema.ErrEmptyExperimentID, "expected ErrEmptyExperimentID")
 	})
 
 	t.Run("invalid timestamp fails", func(t *testing.T) {
 		t.Parallel()
 		exp := validMockExperiment()
 		exp.CreatedAt = "not-a-timestamp"
-		if err := schema.ValidateExperiment(exp); !errors.Is(err, schema.ErrInvalidTimestamp) {
-			t.Fatalf("expected ErrInvalidTimestamp, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp), schema.ErrInvalidTimestamp, "expected ErrInvalidTimestamp")
 	})
 
 	t.Run("invalid cgroup limits fail", func(t *testing.T) {
@@ -281,215 +271,156 @@ func TestExperimentValidation(t *testing.T) {
 			State: schema.LimitStateFinite,
 			Value: nil,
 		}
-		if err := schema.ValidateExperiment(exp); err == nil {
-			t.Fatal("expected error for invalid memory limit")
-		}
+		require.Error(t, schema.ValidateExperiment(exp), "expected error for invalid memory limit")
 
 		exp2 := validMockExperiment()
 		exp2.Environment.Host.Cgroup.CPUQuotaUs = schema.ResourceLimit[int64]{
 			State: schema.LimitStateUnlimited,
 			Value: &exp2.Scenarios[0].Observations[0].DurationNs,
 		}
-		if err := schema.ValidateExperiment(exp2); err == nil {
-			t.Fatal("expected error for invalid cpu quota limit")
-		}
+		require.Error(t, schema.ValidateExperiment(exp2), "expected error for invalid cpu quota limit")
 	})
 
 	t.Run("empty scenarios fails", func(t *testing.T) {
 		t.Parallel()
 		exp := validMockExperiment()
 		exp.Scenarios = nil
-		if err := schema.ValidateExperiment(exp); !errors.Is(err, schema.ErrEmptyScenarios) {
-			t.Fatalf("expected ErrEmptyScenarios, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp), schema.ErrEmptyScenarios, "expected ErrEmptyScenarios")
 	})
 
 	t.Run("empty scenario name fails", func(t *testing.T) {
 		t.Parallel()
 		exp := validMockExperiment()
 		exp.Scenarios[0].Name = ""
-		if err := schema.ValidateExperiment(exp); !errors.Is(err, schema.ErrInvalidScenarioName) {
-			t.Fatalf("expected ErrInvalidScenarioName, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp), schema.ErrInvalidScenarioName, "expected ErrInvalidScenarioName")
 	})
 
 	t.Run("empty scenario workload fails", func(t *testing.T) {
 		t.Parallel()
 		exp := validMockExperiment()
 		exp.Scenarios[0].Workload = ""
-		if err := schema.ValidateExperiment(exp); !errors.Is(err, schema.ErrInvalidScenarioName) {
-			t.Fatalf("expected ErrInvalidScenarioName, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp), schema.ErrInvalidScenarioName, "expected ErrInvalidScenarioName")
 	})
 
 	t.Run("empty observations fails", func(t *testing.T) {
 		t.Parallel()
 		exp := validMockExperiment()
 		exp.Scenarios[0].Observations = nil
-		if err := schema.ValidateExperiment(exp); !errors.Is(err, schema.ErrEmptyObservations) {
-			t.Fatalf("expected ErrEmptyObservations, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp), schema.ErrEmptyObservations, "expected ErrEmptyObservations")
 	})
 
 	t.Run("invalid observation metrics fail", func(t *testing.T) {
 		t.Parallel()
 		exp := validMockExperiment()
 		exp.Scenarios[0].Observations[0].DurationNs = 0
-		if err := schema.ValidateExperiment(exp); !errors.Is(err, schema.ErrInvalidDuration) {
-			t.Fatalf("expected ErrInvalidDuration, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp), schema.ErrInvalidDuration, "expected ErrInvalidDuration")
 
 		exp2 := validMockExperiment()
 		exp2.Scenarios[0].Observations[0].Operations = -1
-		if err := schema.ValidateExperiment(exp2); !errors.Is(err, schema.ErrNegativeOperations) {
-			t.Fatalf("expected ErrNegativeOperations, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp2), schema.ErrNegativeOperations, "expected ErrNegativeOperations")
 
 		exp3 := validMockExperiment()
 		exp3.Scenarios[0].Observations[0].RawSamplesNs = []int64{100, -50}
-		if err := schema.ValidateExperiment(exp3); !errors.Is(err, schema.ErrNegativeSample) {
-			t.Fatalf("expected ErrNegativeSample, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp3), schema.ErrNegativeSample, "expected ErrNegativeSample")
 
 		exp4 := validMockExperiment()
 		exp4.Scenarios[0].Observations[0].StartTime = "invalid"
-		if err := schema.ValidateExperiment(exp4); !errors.Is(err, schema.ErrInvalidTimestamp) {
-			t.Fatalf("expected ErrInvalidTimestamp, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp4), schema.ErrInvalidTimestamp, "expected ErrInvalidTimestamp")
 
 		exp5 := validMockExperiment()
 		exp5.Scenarios[0].Observations[0].EndTime = "invalid"
-		if err := schema.ValidateExperiment(exp5); !errors.Is(err, schema.ErrInvalidTimestamp) {
-			t.Fatalf("expected ErrInvalidTimestamp, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp5), schema.ErrInvalidTimestamp, "expected ErrInvalidTimestamp")
 
 		exp6 := validMockExperiment()
 		exp6.Scenarios[0].Observations[0].TrialIndex = -1
-		if err := schema.ValidateExperiment(exp6); err == nil {
-			t.Fatal("expected error on negative trial index")
-		}
+		require.Error(t, schema.ValidateExperiment(exp6), "expected error on negative trial index")
 
 		exp7 := validMockExperiment()
 		exp7.Scenarios[0].Observations = append(exp7.Scenarios[0].Observations, exp7.Scenarios[0].Observations[0])
-		if err := schema.ValidateExperiment(exp7); err == nil {
-			t.Fatal("expected error on duplicate trial index")
-		}
+		require.Error(t, schema.ValidateExperiment(exp7), "expected error on duplicate trial index")
 
 		exp8 := validMockExperiment()
 		exp8.Scenarios[0].Observations[0].StartTime = "2026-09-07T20:00:05Z"
 		exp8.Scenarios[0].Observations[0].EndTime = "2026-09-07T20:00:01Z"
-		if err := schema.ValidateExperiment(exp8); err == nil {
-			t.Fatal("expected error when end_time is before start_time")
-		}
+		require.Error(t, schema.ValidateExperiment(exp8), "expected error when end_time is before start_time")
 
 		exp9 := validMockExperiment()
 		nonPosLimit := int64(0)
 		exp9.Environment.Host.Cgroup.MemoryMaxBytes = schema.NewFiniteLimit(nonPosLimit)
-		if err := schema.ValidateExperiment(exp9); err == nil {
-			t.Fatal("expected error for non-positive finite memory limit")
-		}
+		require.Error(t, schema.ValidateExperiment(exp9), "expected error for non-positive finite memory limit")
 
 		exp10 := validMockExperiment()
 		exp10.Environment.Host.Cgroup.CPUQuotaUs = schema.NewFiniteLimit(nonPosLimit)
-		if err := schema.ValidateExperiment(exp10); err == nil {
-			t.Fatal("expected error for non-positive finite cpu quota")
-		}
+		require.Error(t, schema.ValidateExperiment(exp10), "expected error for non-positive finite cpu quota")
 
 		exp11 := validMockExperiment()
 		nonPosPeriod := int64(0)
 		exp11.Environment.Host.Cgroup.CPUPeriodUs = &nonPosPeriod
-		if err := schema.ValidateExperiment(exp11); err == nil {
-			t.Fatal("expected error for non-positive cpu period")
-		}
+		require.Error(t, schema.ValidateExperiment(exp11), "expected error for non-positive cpu period")
 	})
 
 	t.Run("invalid scenario analysis fails", func(t *testing.T) {
 		t.Parallel()
 		exp := validMockExperiment()
 		exp.Scenarios[0].Analysis.AlgorithmVersion = "v2"
-		if err := schema.ValidateExperiment(exp); !errors.Is(err, schema.ErrInvalidAnalysis) {
-			t.Fatalf("expected ErrInvalidAnalysis, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp), schema.ErrInvalidAnalysis, "expected ErrInvalidAnalysis")
 
 		exp2 := validMockExperiment()
 		exp2.Scenarios[0].Analysis.PercentileMethod = "nearest_rank"
-		if err := schema.ValidateExperiment(exp2); !errors.Is(err, schema.ErrInvalidAnalysis) {
-			t.Fatalf("expected ErrInvalidAnalysis, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp2), schema.ErrInvalidAnalysis, "expected ErrInvalidAnalysis")
 
 		exp3 := validMockExperiment()
 		exp3.Scenarios[0].Analysis.SampleCount = 0
-		if err := schema.ValidateExperiment(exp3); !errors.Is(err, schema.ErrInvalidAnalysis) {
-			t.Fatalf("expected ErrInvalidAnalysis, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp3), schema.ErrInvalidAnalysis, "expected ErrInvalidAnalysis")
 
 		exp4 := validMockExperiment()
 		exp4.Scenarios[0].Analysis.SampleCount = 999
-		if err := schema.ValidateExperiment(exp4); !errors.Is(err, schema.ErrInvalidAnalysis) {
-			t.Fatalf("expected ErrInvalidAnalysis, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp4), schema.ErrInvalidAnalysis, "expected ErrInvalidAnalysis")
 
 		exp5 := validMockExperiment()
 		exp5.Scenarios[0].Analysis.MinNs = -1
-		if err := schema.ValidateExperiment(exp5); !errors.Is(err, schema.ErrInvalidAnalysis) {
-			t.Fatalf("expected ErrInvalidAnalysis, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp5), schema.ErrInvalidAnalysis, "expected ErrInvalidAnalysis")
 
 		exp6 := validMockExperiment()
 		exp6.Scenarios[0].Analysis.MaxNs = exp6.Scenarios[0].Analysis.MinNs - 1
-		if err := schema.ValidateExperiment(exp6); !errors.Is(err, schema.ErrInvalidAnalysis) {
-			t.Fatalf("expected ErrInvalidAnalysis, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp6), schema.ErrInvalidAnalysis, "expected ErrInvalidAnalysis")
 
 		exp7 := validMockExperiment()
 		exp7.Scenarios[0].Analysis.MeanNs = -1.0
-		if err := schema.ValidateExperiment(exp7); !errors.Is(err, schema.ErrInvalidAnalysis) {
-			t.Fatalf("expected ErrInvalidAnalysis, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp7), schema.ErrInvalidAnalysis, "expected ErrInvalidAnalysis")
 
 		exp8 := validMockExperiment()
 		exp8.Scenarios[0].Analysis.PercentilesNs = nil
-		if err := schema.ValidateExperiment(exp8); !errors.Is(err, schema.ErrInvalidAnalysis) {
-			t.Fatalf("expected ErrInvalidAnalysis for nil percentiles, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp8), schema.ErrInvalidAnalysis, "expected ErrInvalidAnalysis for nil percentiles")
 
 		exp9 := validMockExperiment()
 		exp9.Scenarios[0].Analysis.PercentilesNs = map[string]float64{
 			"p50": float64(exp9.Scenarios[0].Analysis.MaxNs + 5000),
 		}
-		if err := schema.ValidateExperiment(exp9); !errors.Is(err, schema.ErrInvalidAnalysis) {
-			t.Fatalf("expected ErrInvalidAnalysis for out of bounds percentile, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(exp9), schema.ErrInvalidAnalysis, "expected ErrInvalidAnalysis for out of bounds percentile")
 
 		// NaN and Inf checks
 		expNaNMean := validMockExperiment()
 		expNaNMean.Scenarios[0].Analysis.MeanNs = math.NaN()
-		if err := schema.ValidateExperiment(expNaNMean); !errors.Is(err, schema.ErrInvalidAnalysis) {
-			t.Fatalf("expected ErrInvalidAnalysis for NaN mean, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(expNaNMean), schema.ErrInvalidAnalysis, "expected ErrInvalidAnalysis for NaN mean")
 
 		expInfStdDev := validMockExperiment()
 		expInfStdDev.Scenarios[0].Analysis.StdDevNs = math.Inf(1)
-		if err := schema.ValidateExperiment(expInfStdDev); !errors.Is(err, schema.ErrInvalidAnalysis) {
-			t.Fatalf("expected ErrInvalidAnalysis for Inf stddev, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(expInfStdDev), schema.ErrInvalidAnalysis, "expected ErrInvalidAnalysis for Inf stddev")
 
 		expNaNTP := validMockExperiment()
 		expNaNTP.Scenarios[0].Analysis.ThroughputOpsPerSec = math.NaN()
-		if err := schema.ValidateExperiment(expNaNTP); !errors.Is(err, schema.ErrInvalidAnalysis) {
-			t.Fatalf("expected ErrInvalidAnalysis for NaN throughput, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(expNaNTP), schema.ErrInvalidAnalysis, "expected ErrInvalidAnalysis for NaN throughput")
 
 		expNaNP := validMockExperiment()
 		expNaNP.Scenarios[0].Analysis.PercentilesNs = map[string]float64{
 			"p50": math.NaN(),
 		}
-		if err := schema.ValidateExperiment(expNaNP); !errors.Is(err, schema.ErrInvalidAnalysis) {
-			t.Fatalf("expected ErrInvalidAnalysis for NaN percentile, got %v", err)
-		}
+		require.ErrorIs(t, schema.ValidateExperiment(expNaNP), schema.ErrInvalidAnalysis, "expected ErrInvalidAnalysis for NaN percentile")
 	})
 }
 
+//revive:disable-next-line:cyclomatic Keep canonical bytes, digest, tampering and round-trip evidence checks in one fixture lifecycle.
 func TestCanonicalSerializationAndEvidence(t *testing.T) {
 	t.Parallel()
 
@@ -529,9 +460,7 @@ func TestCanonicalSerializationAndEvidence(t *testing.T) {
 	t.Run("build evidence success and verification", func(t *testing.T) {
 		t.Parallel()
 		ev, err := schema.BuildEvidence(exp1)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 		if ev == nil {
 			t.Fatal("evidence must not be nil")
 		}
@@ -548,15 +477,11 @@ func TestCanonicalSerializationAndEvidence(t *testing.T) {
 			t.Fatalf("invalid generated_at timestamp: %v", parseErr)
 		}
 
-		if err := schema.VerifyEvidence(ev); err != nil {
-			t.Fatalf("unexpected verification error: %v", err)
-		}
+		require.NoError(t, schema.VerifyEvidence(ev), "unexpected verification error")
 
 		// Test Experiment() extraction from PayloadBytes
 		gotExp, err := ev.Experiment()
-		if err != nil {
-			t.Fatalf("unexpected Experiment() error: %v", err)
-		}
+		require.NoError(t, err, "unexpected Experiment() error")
 		if gotExp.ID != exp1.ID {
 			t.Errorf("expected ID %s, got %s", exp1.ID, gotExp.ID)
 		}
@@ -596,9 +521,7 @@ func TestCanonicalSerializationAndEvidence(t *testing.T) {
 		}
 
 		ev, err := schema.BuildEvidence(exp1)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 
 		badVersion := *ev
 		badVersion.SchemaVersion = "v99"
@@ -633,25 +556,17 @@ func TestCanonicalSerializationAndEvidence(t *testing.T) {
 	t.Run("evidence serialization roundtrip", func(t *testing.T) {
 		t.Parallel()
 		ev, err := schema.BuildEvidence(exp1)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 
 		rawJSON, err := schema.SerializeEvidence(ev)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 		if len(rawJSON) == 0 {
 			t.Fatal("serialized evidence JSON cannot be empty")
 		}
 
 		deserialized, err := schema.DeserializeEvidence(rawJSON)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if err := schema.VerifyEvidence(deserialized); err != nil {
-			t.Fatalf("deserialized evidence verification failed: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
+		require.NoError(t, schema.VerifyEvidence(deserialized), "deserialized evidence verification failed")
 		if ev.DigestSHA256 != deserialized.DigestSHA256 {
 			t.Errorf("digest mismatch: %s vs %s", ev.DigestSHA256, deserialized.DigestSHA256)
 		}

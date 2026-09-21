@@ -6,96 +6,80 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDemoWorkloads(t *testing.T) {
 	// Test Phase A (Standard and SIMD modes)
 	mA := runSIMDMathWorkload(LevelStandard, false)
-	if mA.Operations == 0 || mA.ComputeMs <= 0 || mA.Detail == "" {
-		t.Errorf("Phase A standard returned invalid metrics: %+v", mA)
-	}
+	assert.NotZero(t, mA.Operations)
+	assert.Positive(t, mA.ComputeMs)
+	assert.NotEmpty(t, mA.Detail)
 
 	mASIMD := runSIMDMathWorkload(LevelStandard, true)
-	if mASIMD.Operations == 0 || mASIMD.ComputeMs <= 0 || !bytes.Contains([]byte(mASIMD.Detail), []byte("SIMD 8-Way Unrolled")) {
-		t.Errorf("Phase A SIMD returned invalid metrics: %+v", mASIMD)
-	}
+	assert.NotZero(t, mASIMD.Operations)
+	assert.Positive(t, mASIMD.ComputeMs)
+	assert.Contains(t, mASIMD.Detail, "SIMD 8-Way Unrolled")
 
 	// Test Phase A with Heavy and Ultra levels in SIMD mode
 	mAHeavy := runSIMDMathWorkload(LevelHeavy, true)
-	if mAHeavy.Operations == 0 || mAHeavy.ComputeMs <= 0 {
-		t.Errorf("Phase A heavy SIMD returned invalid metrics: %+v", mAHeavy)
-	}
+	assert.NotZero(t, mAHeavy.Operations)
+	assert.Positive(t, mAHeavy.ComputeMs)
 
 	// Test Phase B across levels
 	mB := runJSONMemoryWorkload(LevelStandard)
-	if mB.Operations == 0 || mB.ComputeMs <= 0 {
-		t.Errorf("Phase B returned invalid metrics: %+v", mB)
-	}
+	assert.NotZero(t, mB.Operations)
+	assert.Positive(t, mB.ComputeMs)
 
 	mBHeavy := runJSONMemoryWorkload(LevelHeavy)
-	if mBHeavy.Operations == 0 || mBHeavy.ComputeMs <= 0 {
-		t.Errorf("Phase B heavy returned invalid metrics: %+v", mBHeavy)
-	}
+	assert.NotZero(t, mBHeavy.Operations)
+	assert.Positive(t, mBHeavy.ComputeMs)
 
 	// Test Phase C across levels
 	mC := runConcurrentWorkload(LevelStandard)
-	if mC.Operations == 0 || mC.ComputeMs <= 0 {
-		t.Errorf("Phase C returned invalid metrics: %+v", mC)
-	}
+	assert.NotZero(t, mC.Operations)
+	assert.Positive(t, mC.ComputeMs)
 
 	mCHeavy := runConcurrentWorkload(LevelHeavy)
-	if mCHeavy.Operations == 0 || mCHeavy.ComputeMs <= 0 {
-		t.Errorf("Phase C heavy returned invalid metrics: %+v", mCHeavy)
-	}
+	assert.NotZero(t, mCHeavy.Operations)
+	assert.Positive(t, mCHeavy.ComputeMs)
 
 	// Test CLI commands
 	root := newRootCmd()
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetArgs([]string{"--help"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("root help failed: %v", err)
-	}
+	require.NoError(t, root.Execute(), "root help failed")
 
 	// Test all subcommands via root
 	r1 := newRootCmd()
 	r1.SetArgs([]string{"math", "--json", "--simd"})
-	if err := r1.Execute(); err != nil {
-		t.Fatalf("math command with simd failed: %v", err)
-	}
+	require.NoError(t, r1.Execute(), "math command with simd failed")
 
 	r2 := newRootCmd()
 	r2.SetArgs([]string{"json-mem"})
-	if err := r2.Execute(); err != nil {
-		t.Fatalf("json command failed: %v", err)
-	}
+	require.NoError(t, r2.Execute(), "json command failed")
 
 	r3 := newRootCmd()
 	r3.SetArgs([]string{"concurrent", "--json"})
-	if err := r3.Execute(); err != nil {
-		t.Fatalf("concurrent command failed: %v", err)
-	}
+	require.NoError(t, r3.Execute(), "concurrent command failed")
 
 	r4 := newRootCmd()
 	r4.SetArgs([]string{"all", "--heavy", "--simd"})
-	if err := r4.Execute(); err != nil {
-		t.Fatalf("all command with heavy and simd failed: %v", err)
-	}
+	require.NoError(t, r4.Execute(), "all command with heavy and simd failed")
 
 	r5 := newRootCmd()
 	r5.SetArgs([]string{"all", "--json", "--simd"})
-	if err := r5.Execute(); err != nil {
-		t.Fatalf("all command with json failed: %v", err)
-	}
+	require.NoError(t, r5.Execute(), "all command with json failed")
 
 	// Test --cpu-profile
 	tempDir := t.TempDir()
 	profPath := filepath.Join(tempDir, "test_cpu.pprof")
 	rProf := newRootCmd()
 	rProf.SetArgs([]string{"all", "--cpu-profile", profPath})
-	if err := rProf.Execute(); err != nil {
-		t.Fatalf("all command with cpu-profile failed: %v", err)
-	}
+	require.NoError(t, rProf.Execute(), "all command with cpu-profile failed")
 
 	if st, err := os.Stat(profPath); err != nil || st.Size() == 0 {
 		t.Errorf("expected non-empty cpu profile file at %s: %v", profPath, err)
@@ -113,9 +97,7 @@ func TestDemoWorkloads(t *testing.T) {
 	var startupBuf bytes.Buffer
 	rStartup.SetOut(&startupBuf)
 	rStartup.SetArgs([]string{"--startup-only"})
-	if err := rStartup.Execute(); err != nil {
-		t.Fatalf("startup-only failed: %v", err)
-	}
+	require.NoError(t, rStartup.Execute(), "startup-only failed")
 	if startupBuf.String() != "READY\n" {
 		t.Errorf("expected 'READY\\n', got %q", startupBuf.String())
 	}
@@ -125,9 +107,7 @@ func TestDemoWorkloads(t *testing.T) {
 	var startupJSONBuf bytes.Buffer
 	rStartupJSON.SetOut(&startupJSONBuf)
 	rStartupJSON.SetArgs([]string{"--startup-only", "--json"})
-	if err := rStartupJSON.Execute(); err != nil {
-		t.Fatalf("startup-only json failed: %v", err)
-	}
+	require.NoError(t, rStartupJSON.Execute(), "startup-only json failed")
 	if !bytes.Contains(startupJSONBuf.Bytes(), []byte(`"status": "ready"`)) {
 		t.Errorf("expected ready json, got %q", startupJSONBuf.String())
 	}

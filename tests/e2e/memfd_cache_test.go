@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestMemfdAndCacheFallback(t *testing.T) {
@@ -13,9 +15,7 @@ func TestMemfdAndCacheFallback(t *testing.T) {
 	t.Run("Scenario18_CleanInMemoryMemfdExecution", func(t *testing.T) {
 		t.Parallel()
 		cacheDir := filepath.Join(t.TempDir(), "memfd_cache_empty")
-		if err := os.MkdirAll(cacheDir, defaultFilePerm); err != nil {
-			t.Fatalf("mkdir cache: %v", err)
-		}
+		require.NoError(t, os.MkdirAll(cacheDir, defaultFilePerm), "mkdir cache")
 
 		env := []string{
 			"MICROFAT_CACHE_DIR=" + cacheDir,
@@ -33,9 +33,7 @@ func TestMemfdAndCacheFallback(t *testing.T) {
 
 		// Assert cache directory remained completely untouched
 		entries, err := os.ReadDir(cacheDir)
-		if err != nil {
-			t.Fatalf("read cache dir: %v", err)
-		}
+		require.NoError(t, err, "read cache dir")
 		if len(entries) != 0 {
 			t.Fatalf("expected cache directory to remain empty during memfd execution, found %d entries", len(entries))
 		}
@@ -61,9 +59,7 @@ func TestMemfdAndCacheFallback(t *testing.T) {
 
 		// Assert cache binary was written
 		entries, err := os.ReadDir(cacheDir)
-		if err != nil {
-			t.Fatalf("read cache dir: %v", err)
-		}
+		require.NoError(t, err, "read cache dir")
 		if len(entries) != 1 {
 			t.Fatalf("expected exactly 1 cached binary in %s, found %d", cacheDir, len(entries))
 		}
@@ -96,9 +92,7 @@ func TestMemfdAndCacheFallback(t *testing.T) {
 
 		// Verify cached binary was populated
 		entries, err := os.ReadDir(cacheDir)
-		if err != nil {
-			t.Fatalf("read cache dir: %v", err)
-		}
+		require.NoError(t, err, "read cache dir")
 		if len(entries) != 1 {
 			t.Fatalf("expected exactly 1 cached file after seccomp fallback, found %d", len(entries))
 		}
