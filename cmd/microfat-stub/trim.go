@@ -13,6 +13,9 @@ import (
 
 // trimInPlace trims the fat binary in-place to contain only the selected variant + stub.
 func trimInPlace(selfPath string, selfFile *os.File, totalSize int64, targetLevel string) error {
+	if err := validateDeploymentPath(selfPath, selfFile); err != nil {
+		return err
+	}
 	realPath, err := filepath.EvalSymlinks(selfPath)
 	if err != nil {
 		realPath = selfPath
@@ -53,6 +56,9 @@ func trimInPlace(selfPath string, selfFile *os.File, totalSize int64, targetLeve
 	}
 
 	// #nosec G703 -- atomic replace of binary
+	if err := validateDeploymentPath(realPath, selfFile); err != nil {
+		return err
+	}
 	if err := os.Rename(tmpPath, realPath); err != nil {
 		return fmt.Errorf("replacing binary %s: %w", realPath, err)
 	}

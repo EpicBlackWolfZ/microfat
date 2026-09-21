@@ -100,6 +100,10 @@ When executing in-place mutations (`--microfat:trim` or `--microfat:optimize`):
   ./app --microfat:optimize-to /path/to/extracted-elf
   ```
 
+Before any `trim`, `specialize`, `optimize`, or corresponding `-to` command, the launcher checks that the original deployment path still identifies its open running image. If the deployment was unlinked or replaced, the command fails without transforming the newer file. Restart from the intended deployment before transforming it. Read-only `--microfat:info` continues to describe the original image.
+
+In-place operations recheck the destination before rename. This check and rename are separate operations: serialize deployment updates and transformations with the same external lock or maintenance window. Atomic replacement prevents a partially written executable; it does not provide a compare-and-swap transaction against a concurrent deployment. See [executable paths and re-exec](troubleshooting.md#9-executable-paths-assets-and-deliberate-re-exec).
+
 ---
 
 ## 5. Node Cache Prewarming (`--microfat:prewarm` / `microfat prewarm`)

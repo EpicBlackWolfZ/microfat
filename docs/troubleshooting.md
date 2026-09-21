@@ -38,7 +38,7 @@ microfat doctor --json
 ### Symptom A: `memfd_create failed: operation not permitted` or `permission denied`
 
 #### Root Cause:
-Linux `memfd_create` (syscall 319 on x86_64, syscall 279 on arm64) is restricted by a custom Docker/Kubernetes seccomp profile or an older Linux kernel (< 3.17).
+A seccomp policy or `vm.memfd_noexec=2` can deny executable memfd creation; kernels before Linux 3.17 lack the syscall. Microfat explicitly requests `MFD_EXEC` so policy scope 1 can permit executable memfds. It retries without that flag only on `EINVAL` for older-kernel compatibility, never on `EPERM` or `EACCES`. Scope 2 remains enforced. See the [kernel policy documentation](https://cdn.kernel.org/doc/html/latest/userspace-api/mfd_noexec.html). No sysctl changes are required or made by Microfat.
 
 ---
 
@@ -243,7 +243,7 @@ export MICROFAT_LIVE_HEAP_ESTIMATE=150MB
 
 | Error | Root Cause | Remediation |
 | :--- | :--- | :--- |
-| `invalid microfat magic bytes at EOF` | File is a standard ELF or truncated binary without the fixed 56-byte trailer (`\x00\xFA\x7FMICRO`). | Ensure file was packed with `microfat pack`. |
+| `invalid microfat magic bytes at EOF` / `missing magic trailer` | Ordinary ELF, truncation, or post-pack ELF rewriting may have removed the packed payload/index/trailer. | Obtain or rebuild a complete artifact; strip inputs before packing. See [packaging guidance](release-artifacts.md#preserve-packed-bytes-during-packaging-and-installation). |
 | `index SHA-256 checksum mismatch` | The binary index manifest was modified or corrupted in transit. | Re-download or rebuild fat executable. Run `microfat verify <bin>`. |
 | `shared dictionary SHA-256 checksum mismatch` | Embedded Zstandard dictionary was corrupted or truncated. | Verify dictionary size and SHA-256 hash with `microfat inspect <bin>`. |
 | `variant payload extends beyond binary boundary` | Binary was truncated during copy or download. | Check complete file size against `stat` and rebuild. |
@@ -264,6 +264,20 @@ Use Raw Native ELF mode:
 ./my-cli --microfat:optimize
 ```
 This permanently replaces the file on disk with the raw uncompressed selected compatible ELF, removing the microfat launcher stage; native process startup still has a cost.
+
+## 9. Executable Paths, Assets and Deliberate Re-exec
+
+Use the [tested asset-location example](runtime-tuning.md#locating-original-executable--sibling-assets-runtimeinitexecutable) for native, memfd, cache and symlink invocation. A cache executable is a content-addressed payload, not the deployment directory: switching to cache does not make sibling assets or self-update logic based on `os.Executable()` safe.
+
+After unlink/replacement, startup still reads the original kernel-held fat image. The deployment hint may be missing or name a different file. Do not use `MICROFAT_ORIGINAL_EXE` as identity or permission to overwrite it. Launcher transforms reject a detected stale deployment; [serialize transforms and deployment updates](lifecycle-modes.md#4-symlinks--atomic-in-place-operations).
+
+Choose re-exec behavior deliberately:
+
+- To start the **currently deployed release** and repeat CPU selection/tuning, execute an absolute deployment path supplied by trusted application/operator configuration, such as `/opt/myapp/current/app`. Replacement between selection and exec selects whichever complete deployment the kernel opens. Use a versioned immutable path if an exact release is required.
+- To restart the **currently running payload** on Linux, `syscall.Exec("/proc/self/exe", os.Args, os.Environ())` executes the kernel-held payload image even if its disk name has gone away. Handle the returned error. This requires accessible procfs and bypasses the fat launcher, so it does not redispatch or recompute launcher tuning. Audit inherited environment and open descriptors for the application's re-exec contract.
+- To update software, let a deployment manager verify and atomically install a complete artifact at its configured target. The cache path and original-path hint are not update targets. A native executable has ordinary OS path semantics but still needs an explicit concurrency/update contract.
+
+These choices do not guarantee third-party libraries support memfd paths, deleted files, changed mount views or dynamic assets. Mount-specific lifecycle coverage remains tracked in [#157](https://github.com/EpicBlackWolfZ/microfat/issues/157).
 
 ---
 

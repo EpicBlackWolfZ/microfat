@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 )
 
@@ -17,6 +18,9 @@ var (
 	exitFunc                  = os.Exit
 	getSelfExecutablePathFunc = os.Executable
 )
+
+const incompleteArtifactHint = "post-pack ELF rewriting (strip/objcopy) or truncation may have removed or damaged packed data; " +
+	"obtain or rebuild a complete artifact and strip inputs before packing"
 
 func main() {
 	if err := run(); err != nil {
@@ -52,17 +56,23 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("resolving executable path: %w", err)
 	}
-	return runBinary(selfPath)
+	// The pathname is informational metadata. Linux keeps this image alive even
+	// after unlink or atomic replacement of the deployment pathname.
+	return runImage(selfPath, "/proc/self/exe")
 }
 
 func runBinary(selfPath string) error {
+	return runImage(selfPath, selfPath)
+}
+
+func runImage(selfPath, imagePath string) error {
 	if err := checkLauncherPrivilegeFunc(); err != nil {
 		return err
 	}
 	launcherStart := time.Now()
 
 	// #nosec G304 -- launcher opens its own binary image to read payload index
-	selfFile, err := os.Open(filepath.Clean(selfPath))
+	selfFile, err := inputfile.Open(filepath.Clean(imagePath))
 	if err != nil {
 		return fmt.Errorf("opening executable %s: %w", selfPath, err)
 	}
@@ -74,12 +84,12 @@ func runBinary(selfPath string) error {
 	}
 
 	if !format.IsFatBinary(selfFile, stat.Size()) {
-		return fmt.Errorf("file %s is not a valid microfat fat binary (missing magic trailer)", selfPath)
+		return fmt.Errorf("file %s is not a valid microfat fat binary (missing magic trailer); %s", selfPath, incompleteArtifactHint)
 	}
 
 	idx, err := format.ReadTrailerAndIndex(selfFile, stat.Size())
 	if err != nil {
-		return fmt.Errorf("reading binary manifest: %w", err)
+		return fmt.Errorf("reading binary manifest: %w; %s", err, incompleteArtifactHint)
 	}
 
 	hostInfo := microarch.Detect()
