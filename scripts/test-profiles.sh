@@ -20,13 +20,13 @@ run_tests() {
     fi
 }
 if [[ "${1:-test}" == "coverage" ]]; then
-    python3 scripts/coverage_test.py
-    # Source blocks shared between profiles are counted once by coverage.py.
+    "${GO}" test ./internal/coveragegate ./internal/cmd/coverage
+    # Source blocks shared between profiles are counted once by the Go merger.
     run_tests default -race -covermode=atomic -coverprofile="${TEST_ARTIFACT_DIR}/default.out" \
         -coverpkg=./cmd/...,./internal/...,./runtimeinit/...,./benchmarks/... ./...
     run_tests minimal -race -tags minimal -covermode=atomic -coverprofile="${TEST_ARTIFACT_DIR}/minimal.out" \
         -coverpkg=./cmd/...,./internal/...,./runtimeinit/...,./benchmarks/... ./...
-    python3 scripts/coverage.py "${COVERAGE_FILE}" "${TEST_ARTIFACT_DIR}/default.out" "${TEST_ARTIFACT_DIR}/minimal.out"
+    "${GO}" run ./internal/cmd/coverage "${COVERAGE_FILE}" "${TEST_ARTIFACT_DIR}/default.out" "${TEST_ARTIFACT_DIR}/minimal.out"
 else
     run_tests default -race ./...
     run_tests minimal -race -tags minimal ./...
