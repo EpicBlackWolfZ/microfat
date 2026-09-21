@@ -53,7 +53,13 @@ jobs:
           RELEASE_SOURCE: ${{ steps.release.outputs.source }}
           RELEASE_ARCH: ${{ matrix.arch }}
         run: |
-          go run ./internal/cmd/release-audit run --dist .work/audit/dist --output .work/audit/results \
+          go build -o .work/audit/release-audit ./internal/cmd/release-audit
+          mkdir -p .work/audit/path
+          for audit_tool in go gofmt cosign; do
+            audit_tool_path=$(command -v "$audit_tool")
+            ln -s "$audit_tool_path" ".work/audit/path/$audit_tool"
+          done
+          PATH="$PWD/.work/audit/path" .work/audit/release-audit run --dist .work/audit/dist --output .work/audit/results \
             --version "$RELEASE_VERSION" --source "$RELEASE_SOURCE" --arch "$RELEASE_ARCH"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
