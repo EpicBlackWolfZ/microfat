@@ -61,6 +61,11 @@ Extracting `microfat_<version>_linux_<arch>.tar.gz` provides:
 ### Scenario A: Installing the `microfat` CLI
 Always download the versioned archive into an unprivileged temporary directory, verify the cryptographic signature and checksum, and install solely the three binaries:
 
+First establish a trusted Cosign verifier. The [verification contract](release-verification.md)
+defines the exact issuer/version/identity checks, independent verifier pins, historical releases,
+offline trust material and what a successful signature proves. The commands below assume that
+bootstrap has already been completed; no downloaded microfat executable is used to authenticate itself.
+
 ```bash
 set -euo pipefail
 

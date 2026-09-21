@@ -1,0 +1,6 @@
+0d6f5c08d09bc0b1939de128febb9f4f472d7eb5a2af508f7acc6626c4e15865  microfat_0.2.4_linux_amd64.tar.gz
+fec1e3a9799bb0319955cc1d1b8b607752b87747771dc4e674c74b8f9cc43caa  microfat_0.2.4_linux_amd64.tar.gz.cyclonedx.json
+0a2a0cf9a2e8d966549cb42e33955ec2464458342318b46368cb19c6faf28065  microfat_0.2.4_linux_amd64.tar.gz.spdx.json
+63649d79668d3f975923bb36da5822a5877af1d3cc789cc164a5853372e49878  microfat_0.2.4_linux_arm64.tar.gz
+a9af3b6b0c548295366ef1839b10fb6e74b05eb6b7bd2c415b9be11ab52c0a9c  microfat_0.2.4_linux_arm64.tar.gz.cyclonedx.json
+d4bee0bb50fac61de93c19c7a70bb8395fa94a6512c11d9e7943f86cd3724c34  microfat_0.2.4_linux_arm64.tar.gz.spdx.json

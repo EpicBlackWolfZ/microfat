@@ -129,6 +129,8 @@ boundary on fallback. A hostile same-UID isolation design requires separate revi
 The kernel and privileged administrators are trusted. The ambient environment is configuration,
 not authenticated provenance. Embedded hashes do not authenticate a hostile whole artifact: verify
 publisher identity and exact artifact bytes externally **before first execution**.
+The [release verification contract](docs/release-verification.md) specifies exact publisher/version
+matching, verifier bootstrap, historical identities and offline/transparency behavior.
 
 ## 8. Threat model and enforcement map
 
