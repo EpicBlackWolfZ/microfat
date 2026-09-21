@@ -9,7 +9,7 @@ import (
 	"runtime"
 )
 
-// Injected via -ldflags at build time by GoReleaser or Makefile.
+// Injected via -ldflags at build time by GoReleaser or Taskfile.yml.
 var (
 	Role    = "standalone"
 	Version = "dev"

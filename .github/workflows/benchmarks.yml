@@ -48,15 +48,22 @@ jobs:
         with:
           go-version: '1.27.1'
           cache: false
-      - run: make benchmark-tools
+      - name: Install pinned Task
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
+      - run: task benchmark-tools
       - name: Run paired smoke with trusted baseline policy
         env:
           BENCHMARK_BASE: ${{ github.workspace }}/.work/benchmark-base
         run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
           if [ -f "$BENCHMARK_BASE/benchmarks/config/calibration.json" ]; then
             export BENCHMARK_CALIBRATION="$BENCHMARK_BASE/benchmarks/config/calibration.json"
           fi
-          make benchmark-smoke
+          task benchmark-smoke
       - name: Preserve smoke evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -104,17 +111,24 @@ jobs:
           git worktree add --detach .work/benchmark-base "$base"
           echo "BENCHMARK_BASE=$GITHUB_WORKSPACE/.work/benchmark-base" >> "$GITHUB_ENV"
           echo "BENCHMARK_TIER=$tier" >> "$GITHUB_ENV"
-      - run: make benchmark-tools build
+      - name: Install pinned Task
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
+      - run: task benchmark-tools build
       - name: Prepare hosted resource controls
         run: bash scripts/benchmark-controls.sh .work/controls.json
       - name: Measure paired revisions
         env:
           WORKLOAD: ${{ matrix.workload }}
           INTENSITY: ${{ matrix.intensity }}
-        run: >-
-          bash scripts/benchmark-enter.sh "$MICROFAT_BENCH_CGROUP_ROOT"
-          go run ./internal/cmd/benchmark-matrix "$BENCHMARK_TIER" --workload "$WORKLOAD"
-          --intensity "$INTENSITY" --controls .work/controls.json
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          bash scripts/benchmark-enter.sh "$MICROFAT_BENCH_CGROUP_ROOT" \
+            go run ./internal/cmd/benchmark-matrix "$BENCHMARK_TIER" --workload "$WORKLOAD" \
+            --intensity "$INTENSITY" --controls .work/controls.json
       - name: Verify successful hosted shard
         if: success() && env.BENCHMARK_TIER == 'release'
         run: go run ./internal/cmd/benchmark-evidence .work/benchmark-matrix --shard
@@ -152,12 +166,20 @@ jobs:
           go-version: '1.27.1'
           cache: false
       - run: git worktree add --detach .work/benchmark-base HEAD
-      - run: make benchmark-tools
+      - name: Install pinned Task
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
+      - run: task benchmark-tools
       - name: Measure unchanged revision
         env:
           BENCHMARK_BASE: ${{ github.workspace }}/.work/benchmark-base
           BENCHMARK_REPETITION: ${{ matrix.repetition }}
-        run: make benchmark-smoke
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task benchmark-smoke
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -179,7 +201,12 @@ jobs:
         with:
           go-version: '1.27.1'
           cache: false
-      - run: make build
+      - name: Install pinned Task
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
+      - run: task build
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: calibration-*-${{ github.run_id }}-${{ github.run_attempt }}
@@ -211,7 +238,12 @@ jobs:
         with:
           go-version: '1.27.1'
           cache: false
-      - run: make benchmark-tools benchmark-matrix
+      - name: Install pinned Task
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
+      - run: task benchmark-tools benchmark-matrix
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -234,7 +266,12 @@ jobs:
         with:
           go-version: '1.27.1'
           cache: false
-      - run: make build
+      - name: Install pinned Task
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
+      - run: task build
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: benchmark-release-*-${{ github.run_id }}-${{ github.run_attempt }}

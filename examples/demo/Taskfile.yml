@@ -1,0 +1,165 @@
+# Command-line variables override inherited environment; shellQuote keeps values as data.
+version: '3'
+silent: true
+set:
+- errexit
+- nounset
+- pipefail
+vars:
+  GO_DEFAULT:
+    sh: |
+      if [ -x ../../.go/bin/go ]; then
+        cd ../../.go/bin && printf '%s/go' "$PWD"
+      else
+        command -v go
+      fi
+  GO: '{{.GO | default .GO_DEFAULT}}'
+  BINARY_NAME: '{{.BINARY_NAME | default "demo"}}'
+  BIN_DIR: '{{.BIN_DIR | default "bin"}}'
+  INSTALL_DIR: '{{.INSTALL_DIR | default (printf "%s/.local/bin" .HOME)}}'
+  REPO_ROOT_BIN_DEFAULT:
+    sh: cd ../.. && printf '%s/bin' "$PWD"
+  REPO_ROOT_BIN: '{{.REPO_ROOT_BIN | default .REPO_ROOT_BIN_DEFAULT}}'
+  MICROFAT_DEFAULT:
+    sh: |
+      if [ -x {{printf "%s/microfat" .REPO_ROOT_BIN | shellQuote}} ]; then
+        printf '%s/microfat' {{.REPO_ROOT_BIN | shellQuote}}
+      else
+        command -v microfat || printf '%s/microfat' {{.INSTALL_DIR | shellQuote}}
+      fi
+  MICROFAT_STUB_DEFAULT:
+    sh: |
+      if [ -x {{printf "%s/microfat-stub" .REPO_ROOT_BIN | shellQuote}} ]; then
+        printf '%s/microfat-stub' {{.REPO_ROOT_BIN | shellQuote}}
+      else
+        command -v microfat-stub || printf '%s/microfat-stub' {{.INSTALL_DIR | shellQuote}}
+      fi
+  MICROFAT: '{{.MICROFAT | default .MICROFAT_DEFAULT}}'
+  MICROFAT_STUB: '{{.MICROFAT_STUB | default .MICROFAT_STUB_DEFAULT}}'
+  TASK_ENV: |
+    export GO={{.GO | shellQuote}}
+    export BINARY_NAME={{.BINARY_NAME | shellQuote}}
+    export BIN_DIR={{.BIN_DIR | shellQuote}}
+    export MICROFAT={{.MICROFAT | shellQuote}}
+    export MICROFAT_STUB={{.MICROFAT_STUB | shellQuote}}
+tasks:
+  default:
+    cmds:
+    - task: all
+  all:
+    desc: Build the native demo and AMD64 fat binary
+    cmds:
+    - task: build
+    - task: fat
+  help:
+    desc: List demonstration and exploratory benchmark commands
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      task --list
+  build:
+    desc: Build a standalone native Go demo
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      mkdir -p "$BIN_DIR"
+    - |-
+      {{.TASK_ENV}}
+      "$GO" build -ldflags="-s -w" -o "$BIN_DIR/$BINARY_NAME" main.go
+  fat:
+    desc: Package AMD64 v1/v2/v3/v4 into a self-dispatching demo
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash ../../scripts/demo-build.sh amd64
+  fat-arm64:
+    desc: Package ARM64 v8.0/v8.2/v9.0 into a self-dispatching demo
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash ../../scripts/demo-build.sh arm64
+  trim:
+    desc: Trim the fat demo to a single compatible variant
+    cmds:
+    - task: fat
+    - |-
+      {{.TASK_ENV}}
+      "$MICROFAT" trim "$BIN_DIR/$BINARY_NAME-fat" -o "$BIN_DIR/$BINARY_NAME-trimmed"
+  optimize:
+    desc: Materialize the selected native ELF from the fat demo
+    cmds:
+    - task: fat
+    - |-
+      {{.TASK_ENV}}
+      "$BIN_DIR/$BINARY_NAME-fat" "--microfat:optimize-to=$BIN_DIR/$BINARY_NAME-optimized"
+  check:
+    desc: Verify info, prewarm, optimize and trim with cleanup
+    cmds:
+    - task: fat
+    - |-
+      {{.TASK_ENV}}
+      bash ../../scripts/demo-check.sh
+  run:
+    desc: Run standard demo workloads
+    cmds:
+    - task: fat
+    - |-
+      {{.TASK_ENV}}
+      "$BIN_DIR/$BINARY_NAME-fat" all
+  run-heavy:
+    desc: Run sustained demo workloads
+    cmds:
+    - task: fat
+    - |-
+      {{.TASK_ENV}}
+      "$BIN_DIR/$BINARY_NAME-fat" all --heavy
+  run-ultra:
+    desc: Run ultra-heavy sustained demo workloads
+    cmds:
+    - task: fat
+    - |-
+      {{.TASK_ENV}}
+      "$BIN_DIR/$BINARY_NAME-fat" all --ultra
+  run-simd:
+    desc: Run exploratory SIMD demo workloads
+    cmds:
+    - task: fat
+    - |-
+      {{.TASK_ENV}}
+      "$BIN_DIR/$BINARY_NAME-fat" all --simd
+  bench:
+    desc: Run the standard exploratory benchmark suite
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      cd runner && "$GO" run main.go
+  bench-heavy:
+    desc: Run exploratory heavy benchmarks
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      cd runner && "$GO" run main.go -heavy
+  bench-ultra:
+    desc: Run exploratory ultra-heavy benchmarks
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      cd runner && "$GO" run main.go -ultra
+  bench-simd:
+    desc: Run exploratory SIMD benchmarks
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      cd runner && "$GO" run main.go -simd
+  bench-startup:
+    desc: Run the exploratory startup and telemetry matrix
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      cd runner && "$GO" run main.go -startup
+  clean:
+    desc: Remove demo build outputs
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash ../../scripts/clean.sh

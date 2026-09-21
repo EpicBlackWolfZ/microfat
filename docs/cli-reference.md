@@ -492,8 +492,8 @@ identical native and packaged server payloads, drives them with pinned external 
 and records a counterbalanced trial schedule and resource evidence.
 
 ```bash
-make benchmark-tools
-make benchmark-smoke
+task benchmark-tools
+task benchmark-smoke
 bin/microfat benchmark run --config benchmarks/config/smoke.json \
   --fortio .work/benchmark-tools/fortio --output-dir .work/server-evidence
 bin/microfat benchmark verify <bundle>

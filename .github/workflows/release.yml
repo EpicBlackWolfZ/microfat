@@ -47,14 +47,25 @@ jobs:
           go-version-input: '1.27.1'
           go-package: ./...
 
+      - name: Install pinned Task
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
+      - name: Install pinned ShellCheck for the full release gate
+        run: |
+          mkdir -p "$RUNNER_TEMP/microfat-tools"
+          bash scripts/install-shellcheck.sh "$RUNNER_TEMP/microfat-tools"
+          echo "$RUNNER_TEMP/microfat-tools" >> "$GITHUB_PATH"
+
       - name: Run Full Pipeline (tidy, lint, vuln, test, coverage gate, build)
-        run: make all
+        run: task all
 
       - name: Run End-to-End Test Suite
-        run: make e2e
+        run: task e2e
 
       - name: Run Chaos and Fault Injection Suite
-        run: make chaos
+        run: task chaos
 
   goreleaser:
     name: Build, Smoke Test & Stage Release Draft

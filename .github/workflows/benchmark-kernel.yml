@@ -32,17 +32,28 @@ jobs:
       - name: Prepare native delegation
         if: matrix.mode != 'v1-tcg'
         run: bash scripts/benchmark-controls.sh .work/kernel-controls.json
+      - name: Install pinned Task
+        if: matrix.mode != 'v1-tcg'
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
       - name: Test native enforcement
         if: matrix.mode != 'v1-tcg'
         run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
           set -o pipefail
-          bash scripts/benchmark-enter.sh "$MICROFAT_BENCH_CGROUP_ROOT" make benchmark-kernel | tee .work/kernel-native.log
+          bash scripts/benchmark-enter.sh "$MICROFAT_BENCH_CGROUP_ROOT" task benchmark-kernel | tee .work/kernel-native.log
       - name: Install guest tools
         if: matrix.mode == 'v1-tcg'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-x86 busybox-static cpio
       - name: Test guest enforcement
         if: matrix.mode == 'v1-tcg'
-        run: bash scripts/benchmark-kernel.sh
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          bash scripts/benchmark-kernel.sh
       - name: Retain kernel evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

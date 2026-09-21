@@ -9,8 +9,8 @@ The existing `microfat benchmark` baseline and v1 evidence remain supported.
 Use Go 1.27.1 and install the pinned external tool explicitly:
 
 ```bash
-make benchmark-tools
-make benchmark BENCHMARK_CONFIG=benchmarks/config/smoke.json
+task benchmark-tools
+task benchmark BENCHMARK_CONFIG=benchmarks/config/smoke.json
 ```
 
 The setup command checks the Fortio module checksum and source commit in `benchmarks/tools.lock.json`.
@@ -20,7 +20,7 @@ the experiment records the executable hash and build information.
 For full CLI control:
 
 ```bash
-make build
+task build
 bin/microfat benchmark run --config benchmarks/config/smoke.json \
   --fortio .work/benchmark-tools/fortio --output-dir results/benchmarks
 bin/microfat benchmark verify <bundle-directory>
@@ -93,8 +93,8 @@ Process separation alone cannot eliminate shared cache, memory-bandwidth, or ker
 ## Validation and revision comparisons
 
 ```bash
-make benchmark-integration
-make benchmark-matrix
+task benchmark-integration
+task benchmark-matrix
 go run ./internal/cmd/benchmark-matrix compatibility --list
 go run ./internal/cmd/benchmark-matrix nightly --workload cpu
 ```
@@ -106,7 +106,7 @@ cross-compilation does not count as measured native execution.
 To compare two revisions, keep this checkout as the target source/harness and provide a separate base checkout:
 
 ```bash
-BENCHMARK_BASE=/absolute/path/to/base-checkout make benchmark-smoke
+BENCHMARK_BASE=/absolute/path/to/base-checkout task benchmark-smoke
 ```
 
 The same payload bytes are packaged by base and current packers/stubs. Both revisions are interleaved within each
@@ -122,7 +122,7 @@ workflow execution uses `benchmark gate --calibration <trusted-policy.json>` ins
 
 ## Real kernel controls
 
-`make benchmark-kernel` requires `MICROFAT_BENCH_CGROUP_ROOT`, `MICROFAT_BENCH_CGROUP_VERSION`, and for v1,
+`task benchmark-kernel` requires `MICROFAT_BENCH_CGROUP_ROOT`, `MICROFAT_BENCH_CGROUP_VERSION`, and for v1,
 `MICROFAT_BENCH_MEMORY_ROOT`. It fails if required controls are unavailable. Ordinary unit tests still skip
 privileged integration when no root is configured; normal benchmark runs retain explicit uncontrolled fallbacks.
 
@@ -132,7 +132,7 @@ moves only the new command into that leaf and immediately drops back to the runn
 migrations inside a writable common ancestor without changing the workflow runner's own cgroup or its ownership.
 Cleanup removes only the empty benchmark-created groups.
 
-`make benchmark-kernel-v1` boots a networkless QEMU TCG guest. The kernel and matching modules package are locked
+`task benchmark-kernel-v1` boots a networkless QEMU TCG guest. The kernel and matching modules package are locked
 in `benchmarks/kernel.lock.json`, checked against Ubuntu-signed metadata, and checked again after download.
 The guest records kernel configuration, binary/initramfs hashes, controls, counters, and serial test results.
 Missing completion, test skips, or timeout fail validation. Emulation proves kernel behavior and is never used

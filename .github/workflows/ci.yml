@@ -83,14 +83,9 @@ jobs:
       - name: Install ShellCheck (v0.11.0)
         if: steps.changes.outputs.run-code-checks != 'false'
         run: |
-          SHELLCHECK_VERSION="0.11.0"
-          SHELLCHECK_SHA256="8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
-          curl -sSL "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" -o /tmp/shellcheck.tar.xz
-          echo "${SHELLCHECK_SHA256}  /tmp/shellcheck.tar.xz" | sha256sum -c -
-          tar -xJf /tmp/shellcheck.tar.xz -C /tmp
-          sudo install -m 0755 "/tmp/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
-          rm -rf /tmp/shellcheck.tar.xz "/tmp/shellcheck-v${SHELLCHECK_VERSION}"
-          shellcheck --version
+          mkdir -p "$RUNNER_TEMP/microfat-tools"
+          bash scripts/install-shellcheck.sh "$RUNNER_TEMP/microfat-tools"
+          echo "$RUNNER_TEMP/microfat-tools" >> "$GITHUB_PATH"
 
       - name: Run golangci-lint
         if: steps.changes.outputs.run-code-checks != 'false'
@@ -100,9 +95,15 @@ jobs:
           install-mode: binary
           args: --timeout=5m
 
+      - name: Install pinned Task
+        if: steps.changes.outputs.run-code-checks != 'false'
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
       - name: Run ShellCheck
         if: steps.changes.outputs.run-code-checks != 'false'
-        run: make lint-shell
+        run: task lint-shell
 
   test:
     name: Unit Tests & Coverage Gate (>= 95%)
@@ -134,21 +135,34 @@ jobs:
           sudo apt-get install -y --no-install-recommends qemu-user
           command -v qemu-x86_64
 
+      - name: Install pinned Task
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
       - name: Run Unit Tests with Race Detection & Coverage
         run: |
-          make coverage
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task coverage
 
       - name: Run Chaos and Fault Injection Test Suite
         run: |
-          make chaos
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task chaos
 
       - name: Run End-to-End (E2E) Test Suite
         run: |
-          make e2e
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task e2e
 
       - name: Run Fuzz Sanity Checks (2s per target)
         run: |
-          make fuzz FUZZTIME=2s
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task fuzz FUZZTIME=2s
 
       - name: Publish Test Results to GitHub View
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3
@@ -196,17 +210,34 @@ jobs:
           go-version: '1.27.1'
           cache: true
 
+      - name: Install pinned Task
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
       - name: Run Developer Workflow Regression Tests
-        run: make test-dx
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task test-dx
 
       - name: Run Tests with Goroutine Leak Detection
-        run: make test-leaks
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task test-leaks
 
       - name: Run Benchmark Leak Probe
-        run: make check-leaks
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task check-leaks
 
       - name: Verify Demo Fat Binary
-        run: make demo-check
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task demo-check
 
   vulncheck:
     name: Vulnerability Scan (govulncheck)
@@ -278,8 +309,16 @@ jobs:
           MICROFAT_SIGNATURE_TESTS: required
         run: go test ./tests/e2e -run '^TestPublishedReleaseSignatureContract$' -count=1
 
+      - name: Install pinned Task
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
       - name: Compile Standard Binaries
-        run: make build
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task build
 
       - name: Smoke Test Standalone microfat CLI
         run: |
@@ -295,6 +334,8 @@ jobs:
 
       - name: Mandatory Product-Oriented Release Validation (Serialized)
         run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
           MICROFAT_RELEASE_TESTS=required MICROFAT_RELEASE_DIST=$(pwd)/dist go test -v ./cmd/microfat -run '^TestGoReleaserSnapshotArtifacts$' -count=1
 
       - name: Release Artifact Quality & Concurrent Snapshot Verification
@@ -306,4 +347,6 @@ jobs:
 
       - name: Mandatory Product-Oriented Release Validation (Concurrent)
         run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
           MICROFAT_RELEASE_TESTS=required MICROFAT_RELEASE_DIST=$(pwd)/dist go test -v ./cmd/microfat -run '^TestGoReleaserSnapshotArtifacts$' -count=1

@@ -140,7 +140,7 @@ Allocator selection and `GOMEMLIMIT` tuning can change memory pressure, but neit
 | Reduce transfer/storage | `size` / `zstd:best` | More packing effort; evaluate extraction memory and startup |
 | Similar variants | `size` + `--dict` | Measure dictionary benefit and its memory cost |
 
-These are configuration choices, not measured latency or compression guarantees. Use `make bench-matrix`
+These are configuration choices, not measured latency or compression guarantees. Use `task bench-matrix`
 for the supported format/profile/codec/mode combinations and preserve raw results with host and commit
 metadata before publishing numbers.
 

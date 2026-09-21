@@ -64,7 +64,7 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 			t.Fatalf("expected child application to not execute with invalid index offset, got:\n%s", stdout)
 		}
 		if !strings.Contains(stderr, "beyond trailer") && !strings.Contains(stderr, "reading binary manifest") {
-			t.Fatalf("expected index offset error diagnostics, got:\n%s", stderr)
+			t.Fatalf("expected index offset diagnostics (exit %d, err: %v), got:\n%s", exitCode, err, stderr)
 		}
 	})
 
@@ -86,7 +86,7 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 			t.Fatalf("expected child application to not execute with invalid index size, got:\n%s", stdout)
 		}
 		if !strings.Contains(stderr, "does not match trailer boundary") && !strings.Contains(stderr, "reading binary manifest") {
-			t.Fatalf("expected index size boundary error diagnostics, got:\n%s", stderr)
+			t.Fatalf("expected index size boundary diagnostics (exit %d, err: %v), got:\n%s", exitCode, err, stderr)
 		}
 	})
 

@@ -53,25 +53,25 @@ flowchart LR
 ### Build & Run the Universal Fat Binary
 ```bash
 # Build v1, v2, v3, v4 variants and package the universal fat binary:
-make fat
+task fat
 
 # Run standard workload (~110ms):
-make run
+task run
 
 # Run with SIMD vectorization enabled:
-make run-simd
+task run-simd
 
 # Run heavy workload (~500ms):
-make run-heavy
+task run-heavy
 
 # Run ultra-heavy sustained compute workload (5-15s):
-make run-ultra
+task run-ultra
 ```
 
 ### Try the Trimmed Fat Binary Mode
 ```bash
 # Trim the binary in-place to your host architecture (-50.9% disk size):
-make trim
+task trim
 
 # Inspect the single-variant fat binary:
 bin/demo-trimmed --microfat:info
@@ -83,7 +83,7 @@ bin/demo-trimmed all --ultra
 ### Materialize Raw Native ELF
 ```bash
 # Permanently extract raw uncompressed native v3 ELF:
-make optimize
+task optimize
 
 # Run the native binary directly with zero launch overhead:
 bin/demo-optimized all --ultra
@@ -95,19 +95,19 @@ bin/demo-optimized all --ultra
 
 ```bash
 # 1. Standard benchmark (50 iterations):
-make bench
+task bench
 
 # 2. SIMD vectorization benchmark (50 iterations with 8-way unrolling):
-make bench-simd
+task bench-simd
 
 # 3. Heavy sustained compute benchmark (20 iterations):
-make bench-heavy
+task bench-heavy
 
 # 4. Ultra sustained compute benchmark (5-15s per run, reporting seconds):
-make bench-ultra
+task bench-ultra
 
 # 5. Startup latency benchmark:
-make bench-startup
+task bench-startup
 ```
 
 ### Benchmark Metrics Measured:
