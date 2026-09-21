@@ -142,18 +142,26 @@ jobs:
 
       - name: Run Unit Tests with Race Detection & Coverage
         run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
           task coverage
 
       - name: Run Chaos and Fault Injection Test Suite
         run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
           task chaos
 
       - name: Run End-to-End (E2E) Test Suite
         run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
           task e2e
 
       - name: Run Fuzz Sanity Checks (2s per target)
         run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
           task fuzz FUZZTIME=2s
 
       - name: Publish Test Results to GitHub View
@@ -208,16 +216,28 @@ jobs:
           version: '3.53.1'
 
       - name: Run Developer Workflow Regression Tests
-        run: task test-dx
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task test-dx
 
       - name: Run Tests with Goroutine Leak Detection
-        run: task test-leaks
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task test-leaks
 
       - name: Run Benchmark Leak Probe
-        run: task check-leaks
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task check-leaks
 
       - name: Verify Demo Fat Binary
-        run: task demo-check
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task demo-check
 
   vulncheck:
     name: Vulnerability Scan (govulncheck)
@@ -295,7 +315,10 @@ jobs:
           version: '3.53.1'
 
       - name: Compile Standard Binaries
-        run: task build
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task build
 
       - name: Smoke Test Standalone microfat CLI
         run: |
@@ -311,6 +334,8 @@ jobs:
 
       - name: Mandatory Product-Oriented Release Validation (Serialized)
         run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
           MICROFAT_RELEASE_TESTS=required MICROFAT_RELEASE_DIST=$(pwd)/dist go test -v ./cmd/microfat -run '^TestGoReleaserSnapshotArtifacts$' -count=1
 
       - name: Release Artifact Quality & Concurrent Snapshot Verification
@@ -322,4 +347,6 @@ jobs:
 
       - name: Mandatory Product-Oriented Release Validation (Concurrent)
         run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
           MICROFAT_RELEASE_TESTS=required MICROFAT_RELEASE_DIST=$(pwd)/dist go test -v ./cmd/microfat -run '^TestGoReleaserSnapshotArtifacts$' -count=1

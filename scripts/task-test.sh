@@ -28,6 +28,17 @@ for task_check in lint-go lint-shell vuln fix snapshot; do
     fi
 done
 
+# The CI path filter removes Make and Python without hiding the Go/Task tools.
+CI_TOOL_PATH="$(bash "${ROOT}/scripts/tooling-path.sh")"
+PATH="${CI_TOOL_PATH}" bash -c '
+    for retired in python python3 python3.14 pypy pypy3 make gmake; do
+        if command -v "${retired}"; then exit 1; fi
+    done
+    command -v go >/dev/null
+    command -v task >/dev/null
+'
+rm -rf "${CI_TOOL_PATH}"
+
 # A formatter path with spaces is data; a command-line override must beat a
 # conflicting inherited environment value, including the nested Task case.
 cat > "${TASK_TEST_DIR}/formatter with spaces" <<'FORMATTER'

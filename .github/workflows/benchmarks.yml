@@ -58,6 +58,8 @@ jobs:
         env:
           BENCHMARK_BASE: ${{ github.workspace }}/.work/benchmark-base
         run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
           if [ -f "$BENCHMARK_BASE/benchmarks/config/calibration.json" ]; then
             export BENCHMARK_CALIBRATION="$BENCHMARK_BASE/benchmarks/config/calibration.json"
           fi
@@ -121,10 +123,12 @@ jobs:
         env:
           WORKLOAD: ${{ matrix.workload }}
           INTENSITY: ${{ matrix.intensity }}
-        run: >-
-          bash scripts/benchmark-enter.sh "$MICROFAT_BENCH_CGROUP_ROOT"
-          go run ./internal/cmd/benchmark-matrix "$BENCHMARK_TIER" --workload "$WORKLOAD"
-          --intensity "$INTENSITY" --controls .work/controls.json
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          bash scripts/benchmark-enter.sh "$MICROFAT_BENCH_CGROUP_ROOT" \
+            go run ./internal/cmd/benchmark-matrix "$BENCHMARK_TIER" --workload "$WORKLOAD" \
+            --intensity "$INTENSITY" --controls .work/controls.json
       - name: Verify successful hosted shard
         if: success() && env.BENCHMARK_TIER == 'release'
         run: go run ./internal/cmd/benchmark-evidence .work/benchmark-matrix --shard
@@ -172,7 +176,10 @@ jobs:
         env:
           BENCHMARK_BASE: ${{ github.workspace }}/.work/benchmark-base
           BENCHMARK_REPETITION: ${{ matrix.repetition }}
-        run: task benchmark-smoke
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task benchmark-smoke
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
