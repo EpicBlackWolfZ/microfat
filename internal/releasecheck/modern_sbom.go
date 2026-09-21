@@ -47,19 +47,8 @@ func validateModernCatalog(c *sbom.Catalog, facts *ArchiveFacts, inv *ArchiveInv
 	if facts == nil || inv == nil {
 		return fmt.Errorf("missing independent archive inventory")
 	}
-	identity, err := ParseReleaseArchiveName(facts.ArchiveName)
+	version, err := checkModernArchive(c.Components[c.Root], facts)
 	if err != nil {
-		return err
-	}
-	root := c.Components[c.Root]
-	if root.Type != cdx.ComponentTypeFile || root.Name != facts.ArchiveName || root.Version != identity.Version {
-		return fmt.Errorf("modern SBOM archive identity mismatch")
-	}
-	if err := checkModernProperties(root, map[string]string{"microfat:target_arch": facts.TargetArch,
-		"microfat:release_version": identity.Version, "microfat:component_type": "file"}); err != nil {
-		return err
-	}
-	if err := checkModernHash(root, facts.ArchiveSHA256); err != nil {
 		return err
 	}
 	binaries, modules, err := indexModernComponents(c)
@@ -75,7 +64,7 @@ func validateModernCatalog(c *sbom.Catalog, facts *ArchiveFacts, inv *ArchiveInv
 		if !ok || bin == nil {
 			return fmt.Errorf("modern SBOM binary %s is missing", id)
 		}
-		if err := checkModernBinary(component, bin, facts, identity.Version); err != nil {
+		if err := checkModernBinary(component, bin, facts, version); err != nil {
 			return err
 		}
 		if err := checkModernDependencies(c, component, bin, modules, usedModules); err != nil {
@@ -92,6 +81,24 @@ func validateModernCatalog(c *sbom.Catalog, facts *ArchiveFacts, inv *ArchiveInv
 		return err
 	}
 	return checkModernMetadata(c.BOM.Metadata)
+}
+
+func checkModernArchive(root cdx.Component, facts *ArchiveFacts) (string, error) {
+	identity, err := ParseReleaseArchiveName(facts.ArchiveName)
+	if err != nil {
+		return "", err
+	}
+	if root.Type != cdx.ComponentTypeFile || root.Name != facts.ArchiveName || root.Version != identity.Version {
+		return "", fmt.Errorf("modern SBOM archive identity mismatch")
+	}
+	if err := checkModernProperties(root, map[string]string{"microfat:target_arch": facts.TargetArch,
+		"microfat:release_version": identity.Version, "microfat:component_type": "file"}); err != nil {
+		return "", err
+	}
+	if err := checkModernHash(root, facts.ArchiveSHA256); err != nil {
+		return "", err
+	}
+	return identity.Version, nil
 }
 
 func checkModernLicenses(c *sbom.Catalog, facts *ArchiveFacts) error {

@@ -139,18 +139,18 @@ func TestIndependentValidationRejectsChangedMetadata(t *testing.T) {
 			b.Components = &[]cdx.Component{(*children)[0]}
 		},
 		"duplicate_binary": func(b *cdx.BOM) {
-			copy := (*b.Metadata.Component.Components)[1]
-			copy.BOMRef = "urn:duplicate:binary"
-			*b.Components = append(*b.Components, copy)
+			duplicate := (*b.Metadata.Component.Components)[1]
+			duplicate.BOMRef = "urn:duplicate:binary"
+			*b.Components = append(*b.Components, duplicate)
 		},
 		"duplicate_module_coordinate": func(b *cdx.BOM) {
-			copy := (*b.Components)[0]
-			copy.BOMRef = "urn:duplicate:module"
-			*b.Components = append(*b.Components, copy)
+			duplicate := (*b.Components)[0]
+			duplicate.BOMRef = "urn:duplicate:module"
+			*b.Components = append(*b.Components, duplicate)
 		},
 		"unused_module": func(b *cdx.BOM) {
-			copy := moduleComponent(releasecheck.ModuleDep{Path: "example.com/unused", Version: fixtureModuleVersion})
-			*b.Components = append(*b.Components, copy)
+			duplicate := moduleComponent(releasecheck.ModuleDep{Path: "example.com/unused", Version: fixtureModuleVersion})
+			*b.Components = append(*b.Components, duplicate)
 		},
 		"missing_license": func(b *cdx.BOM) { b.Metadata.Component.Licenses = nil },
 		"invalid_binary_settings": func(b *cdx.BOM) {
