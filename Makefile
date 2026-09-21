@@ -291,10 +291,10 @@ benchmark-smoke: build ## Run a paired server benchmark with the installed refer
 	@bash scripts/benchmark-ci.sh
 
 benchmark-matrix: build ## Validate all supported format/profile/codec/mode combinations
-	@python3 scripts/benchmark-matrix.py compatibility
+	@$(GO) run ./internal/cmd/benchmark-matrix compatibility
 
 benchmark-integration: ## Run benchmark integrations with the pinned external tool
-	@python3 scripts/benchmark_matrix_test.py
+	@$(GO) test ./internal/benchmarkmatrix ./internal/cmd/benchmark-matrix
 	@python3 scripts/benchmark_evidence_test.py
 	@MICROFAT_BENCH_FORTIO="$(CURDIR)/.work/benchmark-tools/fortio" $(GO) test -race ./benchmarks/...
 
