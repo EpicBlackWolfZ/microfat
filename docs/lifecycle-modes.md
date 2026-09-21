@@ -89,8 +89,8 @@ Microfat supports three distinct binary operational modes to accommodate differe
 ## 4. Symlinks & Atomic In-Place Operations
 
 When executing in-place mutations (`--microfat:trim` or `--microfat:optimize`):
-- If the binary is invoked via a symbolic link (e.g. `/usr/local/bin/app -> /opt/app/bin/app_fat`), Microfat evaluates the symlink (`filepath.EvalSymlinks`) to atomically replace the physical destination binary while preserving permissions.
-- Microfat explicitly prints a notification indicating the canonical target path being replaced:
+- On Linux, invocation through a symbolic link (e.g. `/usr/local/bin/app -> /opt/app/bin/app_fat`) resolves to the physical executable. In-place transformations replace that physical deployment file while preserving permissions; the symlink remains in place.
+- If the transformation still receives a symlink path that needs resolution, it prints the canonical target path:
   ```
   [microfat] Notice: resolved symlink '/usr/local/bin/app' -> target '/opt/app/bin/app_fat'
   ```

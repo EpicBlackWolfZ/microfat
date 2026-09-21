@@ -62,7 +62,7 @@ Always download the versioned archive into an unprivileged temporary directory, 
 ```bash
 set -euo pipefail
 
-VERSION="0.2.3"
+VERSION="0.2.4"
 ARCH="amd64" # or "arm64"
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT

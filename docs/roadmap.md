@@ -1,6 +1,6 @@
 # Production roadmap
 
-Updated 2026-09-21 against `main` at `de191f0`. GitHub issues define remaining scope,
+Updated 2026-09-21 for the v0.2.4 release. GitHub issues define remaining scope,
 dependencies and acceptance criteria. Milestones group deliverable outcomes; they are not dates.
 
 ## Current baseline
@@ -10,8 +10,9 @@ dependencies and acceptance criteria. Milestones group deliverable outcomes; the
 archives with companion full/minimal stubs, and release integrity/SBOM validation. Format v1
 is deprecated; support must follow the documented policy rather than disappear incidentally.
 See [release artifacts](release-artifacts.md) and [benchmark evidence](benchmarks/README.md).
-The historical release-note verification instructions need correction in
-[#197](https://github.com/EpicBlackWolfZ/microfat/issues/197); publication is already complete.
+The historical release-note verification instructions were corrected in
+[#197](https://github.com/EpicBlackWolfZ/microfat/issues/197), using the published checksum signature.
+The [v0.2.4 release notes](releases/v0.2.4.md) describe the subsequent correctness fixes.
 
 Since that release, [PR #192](https://github.com/EpicBlackWolfZ/microfat/pull/192) added developer
 workflow/profiling/leak checks and [PR #194](https://github.com/EpicBlackWolfZ/microfat/pull/194)
@@ -32,7 +33,8 @@ allow, but overlapping refactors follow correctness fixes and retain their regre
 
 ## v0.2.4: correctness and compatibility
 
-The next patch fixes existing behavior using the current working build/release tools.
+The v0.2.4 patch fixes existing behavior using the current build/release tools. The linked issues
+record the acceptance criteria and regression evidence; later milestones retain the broader work.
 
 | Scope | Issues |
 | --- | --- |
