@@ -16,7 +16,7 @@ func TestInstallDirectoryElevation(t *testing.T) {
 	const version, arch = "0.2.3", "amd64"
 	archiveName := "microfat_" + version + "_linux_" + arch + ".tar.gz"
 	archive := createValidReleaseTarGz(t, map[string]string{
-		"microfat": "cli", "microfat-stub": "stub", "microfat-stub-minimal": "minimal",
+		installCLIName: "cli", installStubName: "stub", installMinimalName: "minimal",
 	})
 	server := setupInstallTestServer(t, archiveName, archive, fmt.Sprintf("%x  %s\n", sha256.Sum256(archive), archiveName), "mock-signature")
 	defer server.Close()
@@ -76,7 +76,7 @@ exec /bin/mkdir "$@"
 				}
 			}
 			if !strings.HasPrefix(scenario, "custom") {
-				for name, want := range map[string]string{"microfat": "cli", "microfat-stub": "stub", "microfat-stub-minimal": "minimal"} {
+				for name, want := range map[string]string{installCLIName: "cli", installStubName: "stub", installMinimalName: "minimal"} {
 					data, err := os.ReadFile(filepath.Join(dest, name))
 					require.NoError(t, err)
 					require.Equal(t, want, string(data))

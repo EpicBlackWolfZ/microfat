@@ -18,6 +18,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	installCLIName     = "microfat"
+	installStubName    = "microfat-stub"
+	installMinimalName = "microfat-stub-minimal"
+)
+
 func createValidReleaseTarGz(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf strings.Builder
@@ -151,9 +157,9 @@ func TestInstallScript_Regressions(t *testing.T) {
 	)
 	archiveName := fmt.Sprintf("microfat_%s_linux_%s.tar.gz", testVersion, testArch)
 	validArchive := createValidReleaseTarGz(t, map[string]string{
-		"microfat":              "dummy-microfat",
-		"microfat-stub":         "dummy-stub",
-		"microfat-stub-minimal": "dummy-minimal",
+		installCLIName:     "dummy-microfat",
+		installStubName:    "dummy-stub",
+		installMinimalName: "dummy-minimal",
 	})
 	hashBytes := sha256.Sum256(validArchive)
 	validHash := hex.EncodeToString(hashBytes[:])
@@ -309,8 +315,8 @@ func TestInstallScript_Regressions(t *testing.T) {
 	t.Run("MissingRequiredBinary_ZeroInstallCalls", func(t *testing.T) {
 		binDir, logPath := setupInstallMocks(t, true)
 		incompleteArchive := createValidReleaseTarGz(t, map[string]string{
-			"microfat":      "dummy-microfat",
-			"microfat-stub": "dummy-stub",
+			installCLIName:  "dummy-microfat",
+			installStubName: "dummy-stub",
 			// missing microfat-stub-minimal
 		})
 		iHash := sha256.Sum256(incompleteArchive)
@@ -341,9 +347,9 @@ func TestInstallScript_Regressions(t *testing.T) {
 
 		calls := readInstallCalls(logPath)
 		require.Len(t, calls, 3, "must make exactly 3 install calls for the 3 binaries")
-		assert.Contains(t, calls[0], "microfat")
-		assert.Contains(t, calls[1], "microfat-stub")
-		assert.Contains(t, calls[2], "microfat-stub-minimal")
+		assert.Contains(t, calls[0], installCLIName)
+		assert.Contains(t, calls[1], installStubName)
+		assert.Contains(t, calls[2], installMinimalName)
 	})
 
 	t.Run("SuccessfulInstallation_BinaryChecksumMarker", func(t *testing.T) {

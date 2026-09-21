@@ -15,7 +15,7 @@ func TestInstallerVerifierPin(t *testing.T) {
 	const version, arch = "0.2.4", "amd64"
 	archiveName := "microfat_" + version + "_linux_" + arch + ".tar.gz"
 	archive := createValidReleaseTarGz(t, map[string]string{
-		"microfat": "cli", "microfat-stub": "stub", "microfat-stub-minimal": "minimal",
+		installCLIName: "cli", installStubName: "stub", installMinimalName: "minimal",
 	})
 	checksums := fmt.Sprintf("%x  %s\n", sha256.Sum256(archive), archiveName)
 	server := setupInstallTestServer(t, archiveName, archive, checksums, "signature-fixture")
