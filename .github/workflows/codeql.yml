@@ -62,9 +62,15 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
 
+      - name: Install pinned Task
+        if: matrix.build-mode == 'manual' && matrix.language == 'go'
+        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+
       - name: Run Build for CodeQL
         if: matrix.build-mode == 'manual' && matrix.language == 'go'
-        run: make build
+        run: task build
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4

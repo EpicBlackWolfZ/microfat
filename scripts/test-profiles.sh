@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One package/profile contract for local tests and CI. GO is supplied by Makefile.
+# One package/profile contract for local tests and CI. GO is supplied by Taskfile.yml.
 set -euo pipefail
 IFS=$'\n\t'
 

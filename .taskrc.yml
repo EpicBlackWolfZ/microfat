@@ -1,0 +1,4 @@
+# Keep Task's local execution metadata out of the source tree.
+temp-dir: .work/task
+# Script-level optional colors still honor COLOR and NO_COLOR.
+color: false

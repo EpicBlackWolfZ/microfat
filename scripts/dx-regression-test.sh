@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regression tests for Makefile developer workflows, port safety, formatting, and TTY behavior.
+# Regression tests for Taskfile.yml developer workflows, port safety, formatting, and TTY behavior.
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -52,27 +52,28 @@ wait_for_port() {
 
 echo "==> Running DX regression test suite..."
 bash scripts/format-go-test.sh
+bash scripts/task-test.sh
 
 # -----------------------------------------------------------------------------
 # 1. TTY and ANSI Escape Behavior
 # -----------------------------------------------------------------------------
 echo "--> Test 1: Piped output disables ANSI escape codes"
-PIPED_HELP="$(make help | cat)"
+PIPED_HELP="$(task help | cat)"
 if printf "%s\n" "${PIPED_HELP}" | grep -F $'\033' >/dev/null; then
-    echo "FAIL: make help | cat contained ANSI escape codes"
+    echo "FAIL: task help | cat contained ANSI escape codes"
     exit 1
 fi
-echo "    PASS: Piped make help output contains no ANSI escape codes"
+echo "    PASS: Piped task help output contains no ANSI escape codes"
 
 echo "--> Test 2: NO_COLOR and COLOR=0 disable ANSI escape codes"
-NO_COLOR_HELP="$(NO_COLOR=1 make help)"
+NO_COLOR_HELP="$(NO_COLOR=1 task help)"
 if printf "%s\n" "${NO_COLOR_HELP}" | grep -F $'\033' >/dev/null; then
-    echo "FAIL: NO_COLOR=1 make help contained ANSI escape codes"
+    echo "FAIL: NO_COLOR=1 task help contained ANSI escape codes"
     exit 1
 fi
-COLOR_ZERO_HELP="$(COLOR=0 make help)"
+COLOR_ZERO_HELP="$(COLOR=0 task help)"
 if printf "%s\n" "${COLOR_ZERO_HELP}" | grep -F $'\033' >/dev/null; then
-    echo "FAIL: COLOR=0 make help contained ANSI escape codes"
+    echo "FAIL: COLOR=0 task help contained ANSI escape codes"
     exit 1
 fi
 echo "    PASS: NO_COLOR=1 and COLOR=0 strip all ANSI escape codes"
@@ -92,35 +93,35 @@ EOF
 
 # Ensure fmt-check fails
 FMT_FAIL=0
-make fmt-check COLOR=0 >/dev/null 2>&1 || FMT_FAIL=1
+task fmt-check COLOR=0 >/dev/null 2>&1 || FMT_FAIL=1
 if [ "${FMT_FAIL}" -ne 1 ]; then
-    echo "FAIL: make fmt-check did not fail on misformatted code"
+    echo "FAIL: task fmt-check did not fail on misformatted code"
     rm -f "${FIXTURE_FILE}"
     FIXTURE_FILE=""
     exit 1
 fi
 
-# Ensure make all fails and does not silently mutate
+# Ensure task all fails and does not silently mutate
 ALL_FAIL=0
-make all COLOR=0 >/dev/null 2>&1 || ALL_FAIL=1
+task all COLOR=0 >/dev/null 2>&1 || ALL_FAIL=1
 if [ "${ALL_FAIL}" -ne 1 ]; then
-    echo "FAIL: make all did not fail on misformatted code"
+    echo "FAIL: task all did not fail on misformatted code"
     rm -f "${FIXTURE_FILE}"
     FIXTURE_FILE=""
     exit 1
 fi
 
 if ! grep -q "func badFormatFixture()   {" "${FIXTURE_FILE}"; then
-    echo "FAIL: make all silently mutated the misformatted file!"
+    echo "FAIL: task all silently mutated the misformatted file!"
     rm -f "${FIXTURE_FILE}"
     FIXTURE_FILE=""
     exit 1
 fi
 
-# Ensure make fmt fixes it
-make fmt COLOR=0 >/dev/null 2>&1
+# Ensure task fmt fixes it
+task fmt COLOR=0 >/dev/null 2>&1
 if grep -q "func badFormatFixture()   {" "${FIXTURE_FILE}"; then
-    echo "FAIL: make fmt failed to format the fixture file"
+    echo "FAIL: task fmt failed to format the fixture file"
     rm -f "${FIXTURE_FILE}"
     FIXTURE_FILE=""
     exit 1
@@ -128,7 +129,7 @@ fi
 
 rm -f "${FIXTURE_FILE}"
 FIXTURE_FILE=""
-make fmt-check COLOR=0 >/dev/null 2>&1
+task fmt-check COLOR=0 >/dev/null 2>&1
 echo "    PASS: Formatting verification pipeline is strictly non-mutating"
 
 # -----------------------------------------------------------------------------
@@ -145,15 +146,15 @@ if ! kill -0 "${DUMMY_PID}" 2>/dev/null; then
 fi
 
 CHECK_FAIL=0
-make check-leaks PORT="${DUMMY_PORT}" COLOR=0 >/dev/null 2>&1 || CHECK_FAIL=1
+task check-leaks PORT="${DUMMY_PORT}" COLOR=0 >/dev/null 2>&1 || CHECK_FAIL=1
 
 if [ "${CHECK_FAIL}" -ne 1 ]; then
-    echo "FAIL: make check-leaks succeeded despite occupied port ${DUMMY_PORT}"
+    echo "FAIL: task check-leaks succeeded despite occupied port ${DUMMY_PORT}"
     exit 1
 fi
 
 if ! kill -0 "${DUMMY_PID}" 2>/dev/null; then
-    echo "FAIL: make check-leaks killed unrelated dummy process on port ${DUMMY_PORT}!"
+    echo "FAIL: task check-leaks killed unrelated dummy process on port ${DUMMY_PORT}!"
     exit 1
 fi
 
@@ -173,15 +174,15 @@ if ! kill -0 "${DUMMY_PID_2}" 2>/dev/null; then
 fi
 
 PPROF_FAIL=0
-make pprof HTTP_PORT="${DUMMY_HTTP_PORT}" COLOR=0 >/dev/null 2>&1 || PPROF_FAIL=1
+task pprof HTTP_PORT="${DUMMY_HTTP_PORT}" COLOR=0 >/dev/null 2>&1 || PPROF_FAIL=1
 
 if [ "${PPROF_FAIL}" -ne 1 ]; then
-    echo "FAIL: make pprof succeeded despite occupied HTTP_PORT ${DUMMY_HTTP_PORT}"
+    echo "FAIL: task pprof succeeded despite occupied HTTP_PORT ${DUMMY_HTTP_PORT}"
     exit 1
 fi
 
 if ! kill -0 "${DUMMY_PID_2}" 2>/dev/null; then
-    echo "FAIL: make pprof killed unrelated dummy process on port ${DUMMY_HTTP_PORT}!"
+    echo "FAIL: task pprof killed unrelated dummy process on port ${DUMMY_HTTP_PORT}!"
     exit 1
 fi
 
@@ -195,9 +196,9 @@ echo "    PASS: Port collision on pprof preserved occupant process"
 # -----------------------------------------------------------------------------
 echo "--> Test 6: Unsupported PROFILE name fails immediately with non-zero exit code"
 INVALID_PROFILE_FAIL=0
-make pprof PROFILE="nonexistent_profile_xyz" COLOR=0 >/dev/null 2>&1 || INVALID_PROFILE_FAIL=1
+task pprof PROFILE="nonexistent_profile_xyz" COLOR=0 >/dev/null 2>&1 || INVALID_PROFILE_FAIL=1
 if [ "${INVALID_PROFILE_FAIL}" -ne 1 ]; then
-    echo "FAIL: make pprof succeeded with invalid profile name"
+    echo "FAIL: task pprof succeeded with invalid profile name"
     exit 1
 fi
 echo "    PASS: Unsupported profile name rejected cleanly"
@@ -210,9 +211,9 @@ BEFORE_MOD="$(sha256sum go.mod)"
 BEFORE_SUM="$(sha256sum go.sum)"
 
 TIDY_FAIL=0
-make tidy-check COLOR=0 >/dev/null 2>&1 || TIDY_FAIL=1
+task tidy-check COLOR=0 >/dev/null 2>&1 || TIDY_FAIL=1
 if [ "${TIDY_FAIL}" -ne 0 ]; then
-    echo "FAIL: make tidy-check failed on clean repository"
+    echo "FAIL: task tidy-check failed on clean repository"
     exit 1
 fi
 
@@ -220,15 +221,15 @@ AFTER_MOD="$(sha256sum go.mod)"
 AFTER_SUM="$(sha256sum go.sum)"
 
 if [ "${BEFORE_MOD}" != "${AFTER_MOD}" ]; then
-    echo "FAIL: make tidy-check modified go.mod!"
+    echo "FAIL: task tidy-check modified go.mod!"
     exit 1
 fi
 
 if [ "${BEFORE_SUM}" != "${AFTER_SUM}" ]; then
-    echo "FAIL: make tidy-check modified go.sum!"
+    echo "FAIL: task tidy-check modified go.sum!"
     exit 1
 fi
-echo "    PASS: make tidy-check is non-mutating and verified dependencies"
+echo "    PASS: task tidy-check is non-mutating and verified dependencies"
 
 echo "--> Test 8: Missing mandatory port helper fails closed"
 if GO=/nonexistent/microfat-go BIN_DIR=/nonexistent bash scripts/check-leaks.sh > "${DX_TEMP}/missing-go.log" 2>&1; then

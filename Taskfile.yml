@@ -1,0 +1,410 @@
+# Command-line variables override inherited environment; shellQuote keeps values as data.
+version: '3'
+silent: true
+set:
+- errexit
+- nounset
+- pipefail
+vars:
+  GO_DEFAULT:
+    sh: |
+      if [ -x .go/bin/go ]; then
+        cd .go/bin && printf '%s/go' "$PWD"
+      else
+        command -v go
+      fi
+  GO: '{{.GO | default .GO_DEFAULT}}'
+  GO_ROOT:
+    sh: '{{.GO | shellQuote}} env GOROOT'
+  GOFMT: '{{.GOFMT | default (printf "%s/bin/gofmt" .GO_ROOT)}}'
+  BIN_DIR: '{{.BIN_DIR | default "bin"}}'
+  COVERAGE_FILE: '{{.COVERAGE_FILE | default "coverage.out"}}'
+  COVERAGE_THRESHOLD: '{{.COVERAGE_THRESHOLD | default "95"}}'
+  FUZZTIME: '{{.FUZZTIME | default "5s"}}'
+  PORT: '{{.PORT | default "6060"}}'
+  HTTP_PORT: '{{.HTTP_PORT | default "8080"}}'
+  PROFILE: '{{.PROFILE | default "heap"}}'
+  DURATION: '{{.DURATION | default "2s"}}'
+  TRIALS: '{{.TRIALS | default "3"}}'
+  COLOR: '{{.COLOR | default "1"}}'
+  NO_COLOR: '{{.NO_COLOR | default ""}}'
+  VERSION_DEFAULT:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  COMMIT_DEFAULT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo none
+  DATE_DEFAULT:
+    sh: date -u +'%Y-%m-%dT%H:%M:%SZ'
+  HOST_ARCH_DEFAULT:
+    sh: '{{.GO | shellQuote}} env GOARCH'
+  VERSION: '{{.VERSION | default .VERSION_DEFAULT}}'
+  COMMIT: '{{.COMMIT | default .COMMIT_DEFAULT}}'
+  DATE: '{{.DATE | default .DATE_DEFAULT}}'
+  HOST_ARCH: '{{.HOST_ARCH | default .HOST_ARCH_DEFAULT}}'
+  LDFLAGS: '{{.LDFLAGS | default ""}}'
+  BENCHMARK_CONFIG: '{{.BENCHMARK_CONFIG | default ""}}'
+  BENCHMARK_OUTPUT: '{{.BENCHMARK_OUTPUT | default ""}}'
+  BENCHMARK_BASE: '{{.BENCHMARK_BASE | default ""}}'
+  BENCHMARK_CALIBRATION: '{{.BENCHMARK_CALIBRATION | default ""}}'
+  MICROFAT_BENCH_FORTIO: '{{.MICROFAT_BENCH_FORTIO | default ""}}'
+  TEST_ARTIFACT_DIR: '{{.TEST_ARTIFACT_DIR | default ""}}'
+  BENCHMARK_BINARY: '{{.BENCHMARK_BINARY | default (printf "%s/microfat" .BIN_DIR)}}'
+  TASK_ENV: |
+    export GO={{.GO | shellQuote}}
+    export GOFMT={{.GOFMT | shellQuote}}
+    export BIN_DIR={{.BIN_DIR | shellQuote}}
+    export COVERAGE_FILE={{.COVERAGE_FILE | shellQuote}}
+    export COVERAGE_THRESHOLD={{.COVERAGE_THRESHOLD | shellQuote}}
+    export FUZZTIME={{.FUZZTIME | shellQuote}}
+    export PORT={{.PORT | shellQuote}}
+    export HTTP_PORT={{.HTTP_PORT | shellQuote}}
+    export PROFILE={{.PROFILE | shellQuote}}
+    export DURATION={{.DURATION | shellQuote}}
+    export TRIALS={{.TRIALS | shellQuote}}
+    export COLOR={{.COLOR | shellQuote}}
+    export NO_COLOR={{.NO_COLOR | shellQuote}}
+    export VERSION={{.VERSION | shellQuote}}
+    export COMMIT={{.COMMIT | shellQuote}}
+    export DATE={{.DATE | shellQuote}}
+    export HOST_ARCH={{.HOST_ARCH | shellQuote}}
+    export LDFLAGS={{.LDFLAGS | shellQuote}}
+    export BENCHMARK_CONFIG={{.BENCHMARK_CONFIG | shellQuote}}
+    export BENCHMARK_OUTPUT={{.BENCHMARK_OUTPUT | shellQuote}}
+    export BENCHMARK_BASE={{.BENCHMARK_BASE | shellQuote}}
+    export BENCHMARK_CALIBRATION={{.BENCHMARK_CALIBRATION | shellQuote}}
+    export MICROFAT_BENCH_FORTIO={{.MICROFAT_BENCH_FORTIO | shellQuote}}
+    export TEST_ARTIFACT_DIR={{.TEST_ARTIFACT_DIR | shellQuote}}
+    export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
+
+tasks:
+  default:
+    cmds:
+    - task: all
+  help:
+    desc: List development and benchmark tasks
+    cmds:
+    - |
+      {{.TASK_ENV}}
+      if [ -n "$NO_COLOR" ] || [ "$COLOR" = 0 ] || [ "$COLOR" = false ] || [ ! -t 1 ]; then
+        NO_COLOR=1 task --list
+      else
+        task --list
+      fi
+  all:
+    desc: Run tidy, formatting, lint, vulnerability, race, coverage and build checks in order
+    cmds:
+    - task: tidy-check
+    - task: fmt-check
+    - task: lint
+    - task: vuln
+    - task: test
+    - task: coverage
+    - task: build
+  fmt:
+    desc: Format nonignored Go sources with gofmt -s
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/format-go.sh write "$GOFMT"
+  fmt-check:
+    desc: Check nonignored Go formatting without changing sources
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/format-go.sh check "$GOFMT"
+  fix:
+    desc: Apply Go and linter fixes, then format
+    preconditions:
+    - sh: command -v golangci-lint >/dev/null
+      msg: Install golangci-lint v2.13.2 before running fix
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      "$GO" fix ./...
+    - |-
+      {{.TASK_ENV}}
+      golangci-lint run --fix ./...
+    - task: fmt
+  build:
+    desc: Build host CLI and full/minimal baseline launchers
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/build.sh host
+  build-amd64:
+    desc: Cross-compile Linux AMD64 CLI and full/minimal launchers
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/build.sh amd64
+  build-arm64:
+    desc: Cross-compile Linux ARM64 CLI and full/minimal launchers
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/build.sh arm64
+  build-all:
+    desc: Build host, Linux AMD64 and Linux ARM64 in order
+    cmds:
+    - task: build
+    - task: build-amd64
+    - task: build-arm64
+  test:
+    desc: Run default/minimal package tests with the race detector
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/test-profiles.sh test
+  e2e:
+    desc: Build and run black-box end-to-end tests with race detection
+    cmds:
+    - task: build
+    - |-
+      {{.TASK_ENV}}
+      "$GO" test -race -v ./tests/e2e/...
+  fuzz:
+    desc: Run all format, codec, cgroup, microarch and pack fuzz targets (FUZZTIME=5s)
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/fuzz.sh
+  chaos:
+    desc: Run concurrent, corruption, fault and resource rejection tests
+    cmds:
+    - |
+      {{.TASK_ENV}}
+      for pattern in TestConcurrent TestCorrupted TestReadOnly TestSimulated TestMalicious; do
+        "$GO" test -race -run="$pattern" ./cmd/microfat-stub/...
+      done
+      for pattern in TestTruncated TestBitFlipped TestDictionaryTampering; do
+        "$GO" test -race -run="$pattern" ./internal/pack/...
+      done
+  test-all:
+    desc: Run the full verification pipeline plus e2e and chaos tests
+    cmds:
+    - task: all
+    - task: e2e
+    - task: chaos
+  coverage:
+    desc: Merge exact default/minimal coverage and enforce at least 95 percent
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/test-profiles.sh coverage
+    - |-
+      {{.TASK_ENV}}
+      "$GO" tool cover -func="$COVERAGE_FILE"
+  lint:
+    desc: Run mandatory Go and shell linters
+    cmds:
+    - task: lint-go
+    - task: lint-shell
+  lint-go:
+    desc: Run golangci-lint without weaker fallback checks
+    preconditions:
+    - sh: command -v golangci-lint >/dev/null
+      msg: Install golangci-lint v2.13.2; Go lint cannot be skipped
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      golangci-lint run ./...
+  lint-shell:
+    desc: Run ShellCheck v0.11.0 on all tracked shell scripts
+    preconditions:
+    - sh: |
+        shellcheck --version | grep -Fx 'version: 0.11.0' >/dev/null
+      msg: Install ShellCheck v0.11.0; shell lint cannot be skipped
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      git ls-files -z '*.sh' | xargs -0r shellcheck
+  vuln:
+    desc: Run mandatory govulncheck vulnerability analysis
+    preconditions:
+    - sh: command -v govulncheck >/dev/null
+      msg: Install govulncheck; vulnerability analysis cannot be skipped
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      govulncheck ./...
+  tidy:
+    desc: Update module metadata and verify dependencies
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      "$GO" mod tidy
+    - |-
+      {{.TASK_ENV}}
+      "$GO" mod verify
+  tidy-check:
+    desc: Verify module tidiness without modifying go.mod or go.sum
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      "$GO" mod tidy -diff
+    - |-
+      {{.TASK_ENV}}
+      "$GO" mod verify
+  snapshot:
+    desc: Build a local GoReleaser snapshot without publication or signing
+    preconditions:
+    - sh: command -v goreleaser >/dev/null
+      msg: Install GoReleaser before snapshot packaging
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      goreleaser release --snapshot --clean --skip=publish,sign,announce,validate,sbom
+  demo:
+    desc: Build and package the AMD64 example
+    cmds:
+    - task: build
+    - |-
+      {{.TASK_ENV}}
+      MICROFAT="$(cd "$BIN_DIR" && pwd)/microfat" MICROFAT_STUB="$(cd "$BIN_DIR" && pwd)/microfat-stub" task --dir examples/demo fat
+  demo-arm64:
+    desc: Build and package the ARM64 example
+    cmds:
+    - task: build-all
+    - |-
+      {{.TASK_ENV}}
+      MICROFAT="$(cd "$BIN_DIR" && pwd)/microfat" MICROFAT_STUB="$(cd "$BIN_DIR" && pwd)/microfat-stub" task --dir examples/demo fat-arm64
+  demo-check:
+    desc: Verify packaged demo info, prewarm, optimize and trim operations
+    cmds:
+    - task: build
+    - |-
+      {{.TASK_ENV}}
+      MICROFAT="$(cd "$BIN_DIR" && pwd)/microfat" MICROFAT_STUB="$(cd "$BIN_DIR" && pwd)/microfat-stub" task --dir examples/demo check
+  benchmark:
+    desc: Run the canonical benchmark or BENCHMARK_CONFIG
+    cmds:
+    - task: build
+    - |
+      {{.TASK_ENV}}
+      if [ -n "${BENCHMARK_CONFIG:-}" ]; then
+        bash scripts/benchmark-ci.sh
+      else
+        "$BIN_DIR/microfat" benchmark --trials 3 --trial-time 500ms --warmup 200ms
+      fi
+  benchmark-tools:
+    desc: Install and verify the pinned Fortio reference tool
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/benchmark-tools.sh
+  benchmark-smoke:
+    desc: Run a paired server benchmark with pinned Fortio
+    cmds:
+    - task: build
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/benchmark-ci.sh
+  benchmark-matrix:
+    desc: Validate supported format/profile/codec/dispatch combinations
+    cmds:
+    - task: build
+    - |-
+      {{.TASK_ENV}}
+      "$GO" run ./internal/cmd/benchmark-matrix compatibility
+  benchmark-integration:
+    desc: Run benchmark integrations with the installed pinned Fortio
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      "$GO" test ./internal/benchmarkmatrix ./internal/cmd/benchmark-matrix
+    - |-
+      {{.TASK_ENV}}
+      "$GO" test ./internal/benchmarkevidence ./internal/releaseworkflow ./internal/cmd/benchmark-evidence
+    - |-
+      {{.TASK_ENV}}
+      MICROFAT_BENCH_FORTIO="$PWD/.work/benchmark-tools/fortio" "$GO" test -race ./benchmarks/...
+  benchmark-kernel:
+    desc: Prove native kernel enforcement in a delegated cgroup
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      MICROFAT_BENCH_REQUIRE_CONTROLS=1 "$GO" test -v ./benchmarks/system -run '^Test(KernelControls|RealCgroupIntegration)$' -count=1
+  benchmark-kernel-v1:
+    desc: Prove cgroup v1 enforcement in a networkless QEMU TCG guest
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/benchmark-kernel.sh
+  bench:
+    desc: Run the exploratory demo benchmark suite
+    cmds:
+    - task: build
+    - |-
+      {{.TASK_ENV}}
+      task --dir examples/demo bench
+  bench-heavy:
+    desc: Run exploratory sustained demo benchmarks
+    cmds:
+    - task: build
+    - |-
+      {{.TASK_ENV}}
+      task --dir examples/demo bench-heavy
+  bench-ultra:
+    desc: Run exploratory ultra-heavy demo benchmarks
+    cmds:
+    - task: build
+    - |-
+      {{.TASK_ENV}}
+      task --dir examples/demo bench-ultra
+  bench-simd:
+    desc: Run exploratory SIMD demo benchmarks
+    cmds:
+    - task: build
+    - |-
+      {{.TASK_ENV}}
+      task --dir examples/demo bench-simd
+  bench-startup:
+    desc: Run exploratory startup and telemetry matrix benchmarks
+    cmds:
+    - task: build
+    - |-
+      {{.TASK_ENV}}
+      task --dir examples/demo bench-startup
+  bench-matrix:
+    desc: Alias for the exploratory startup matrix
+    cmds:
+    - task: bench-startup
+  check-leaks:
+    desc: Probe the Go 1.27 goroutine leak endpoint during a workload
+    cmds:
+    - task: build
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/check-leaks.sh
+  test-leaks:
+    desc: Run default/minimal tests with in-process Go 1.27 leak detection
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      MICROFAT_TEST_LEAKS=1 bash scripts/test-profiles.sh test
+  test-dx:
+    desc: Verify formatting, terminal behavior, port ownership and cleanup
+    cmds:
+    - task: build
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/dx-regression-test.sh
+  pprof:
+    desc: Open pprof (PROFILE=heap|cpu|goroutine|allocs|mutex|block|goroutineleak)
+    cmds:
+    - task: profile-ui
+  profile-ui:
+    desc: Run a profiling workload and interactive pprof UI
+    cmds:
+    - task: build
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/pprof-ui.sh
+  clean:
+    desc: Remove generated build and coverage outputs
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      bash scripts/clean.sh
+    - |-
+      {{.TASK_ENV}}
+      task --dir examples/demo clean

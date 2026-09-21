@@ -10,7 +10,7 @@
 ## Verification & Testing
 
 <!-- Detail the automated or manual tests performed. -->
-- [ ] `make all` executed cleanly (tidy, lint, vuln, test, coverage >= 95%, build)
+- [ ] `task all` executed cleanly (tidy, lint, vuln, test, coverage >= 95%, build)
 - [ ] Added unit tests covering new code paths
 - [ ] Race detection passed (`go test -race ./...`)
 

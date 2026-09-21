@@ -205,19 +205,19 @@ microfat pgo-pack --manifest pgo.yaml
 
 ```bash
 # Build and run the AMD64 demo workloads:
-make demo
+task demo
 
 # Build the ARM64 demo fat binary:
-make demo-arm64
+task demo-arm64
 
 # Run the standard benchmark suite (~110ms):
-make bench
+task bench
 
 # Run the heavy sustained compute benchmark suite (~500ms):
-make bench-heavy
+task bench-heavy
 
 # Run the ultra sustained compute benchmark suite (5-15s per run):
-make bench-ultra
+task bench-ultra
 ```
 
 ---
@@ -412,43 +412,46 @@ builds:
 
 ## Development & Developer Workflow
 
-All daily development operations are automated through the root `Makefile`:
+All daily development operations use [Task v3.53.1](https://taskfile.dev/) through the root `Taskfile.yml`.
+Install the pinned version with `go install github.com/go-task/task/v3/cmd/task@v3.53.1` and put
+`$(go env GOPATH)/bin` on PATH. See [contributor setup](CONTRIBUTING.md#3-development-prerequisites--setup)
+for required validation tools.
 
 ```bash
 # View all targets and descriptions (respects NO_COLOR=1 and COLOR=0)
-make help
+task help
 
 # Run complete verification pipeline: tidy-check, fmt-check, lint, vuln, test, coverage gate, build
-make all
+task all
 
 # Format code across the repository with $(GOFMT) -s
-make fmt
+task fmt
 
 # Verify all Go source files are formatted cleanly (non-mutating)
-make fmt-check
+task fmt-check
 
 # Run Go API modernizations ('go fix'), linter auto-fixes, and format code
-make fix
+task fix
 
 # Verify Go module dependencies are tidy (non-mutating 'go mod tidy -diff')
-make tidy-check
+task tidy-check
 
 # Run tests with Go 1.27 goroutine leak detection enabled (MICROFAT_TEST_LEAKS=1)
-make test-leaks
+task test-leaks
 
 # Check for Go 1.27 goroutine leaks on the running benchmark workload
-make check-leaks
+task check-leaks
 
 # Run regression tests for developer workflows (port safety, formatting, TTY detection)
-make test-dx
+task test-dx
 
 # Open interactive browser UI for pprof profiles (heap, cpu, goroutine, allocs, mutex, block, goroutineleak)
 # (block and mutex sampling rates are enabled only when PROFILE=block or PROFILE=mutex)
-make pprof PROFILE=heap
-make pprof PROFILE=block PORT=6061 HTTP_PORT=8081
+task pprof PROFILE=heap
+task pprof PROFILE=block PORT=6061 HTTP_PORT=8081
 
 # Verify finished fat binary stub commands (info, optimize-to, trim-to, prewarm)
-make demo-check
+task demo-check
 ```
 
 > **Terminal Detection & Port Safety**:

@@ -75,35 +75,37 @@ A `microfat` fat binary consists of contiguous segments:
 
 ## 4. Development Commands & Workflows
 
-All development operations are automated through the root `Makefile`:
+All development operations use pinned Task v3.53.1 through the root `Taskfile.yml`. Bootstrap with
+`go install github.com/go-task/task/v3/cmd/task@v3.53.1`; CI pins the installer action and version.
+Mandatory linters and scanners must fail when missing. Do not restore Make wrappers or Python helpers.
 
 ```bash
-make help          # View all available targets and descriptions (respects NO_COLOR=1 and COLOR=0)
-make all           # Run complete non-mutating pipeline: tidy-check, fmt-check, lint, vuln, test, coverage gate, build
-make fmt           # Format and simplify all Go source files with gofmt -s
-make fmt-check     # Check formatting and fail if any Go files need formatting (non-mutating)
-make fix           # Apply Go API modernizations ('go fix'), linter auto-fixes, and gofmt -s
-make build         # Compile microfat and microfat-stub into bin/
-make test          # Run unit tests with race detection
-make test-leaks    # Run tests with Go 1.27 goroutine leak detection enabled (MICROFAT_TEST_LEAKS=1)
-make check-leaks   # Probe Go 1.27 goroutine leak endpoint during running benchmark workload
-make test-dx       # Run regression tests for developer workflows (port safety, formatting, TTY detection)
-make pprof         # Open interactive pprof web UI (PROFILE=heap|cpu|goroutine|allocs|mutex|block|goroutineleak)
-make coverage      # Generate coverage profile and enforce 95% threshold gate
-make lint          # Run all linters (Go via golangci-lint and Bash via shellcheck)
-make lint-go       # Run golangci-lint across all packages
-make lint-shell    # Run ShellCheck across all tracked Bash scripts
-make vuln          # Run govulncheck vulnerability scan
-make tidy          # Run go mod tidy and go mod verify
-make tidy-check    # Verify module dependencies are tidy using non-mutating verification ('go mod tidy -diff')
-make snapshot      # Test local GoReleaser release packaging without publishing
-make demo          # Build the demo fat binary in examples/demo
-make demo-check    # Verify finished fat binary stub commands (info, optimize, trim, prewarm) with trap cleanup
-make bench         # Run benchmark suite in examples/demo
-make clean         # Remove build artifacts and coverage files
+task help          # View all available targets and descriptions (respects NO_COLOR=1 and COLOR=0)
+task all           # Run complete non-mutating pipeline: tidy-check, fmt-check, lint, vuln, test, coverage gate, build
+task fmt           # Format and simplify all Go source files with gofmt -s
+task fmt-check     # Check formatting and fail if any Go files need formatting (non-mutating)
+task fix           # Apply Go API modernizations ('go fix'), linter auto-fixes, and gofmt -s
+task build         # Compile microfat and microfat-stub into bin/
+task test          # Run unit tests with race detection
+task test-leaks    # Run tests with Go 1.27 goroutine leak detection enabled (MICROFAT_TEST_LEAKS=1)
+task check-leaks   # Probe Go 1.27 goroutine leak endpoint during running benchmark workload
+task test-dx       # Run regression tests for developer workflows (port safety, formatting, TTY detection)
+task pprof         # Open interactive pprof web UI (PROFILE=heap|cpu|goroutine|allocs|mutex|block|goroutineleak)
+task coverage      # Generate coverage profile and enforce 95% threshold gate
+task lint          # Run all linters (Go via golangci-lint and Bash via shellcheck)
+task lint-go       # Run golangci-lint across all packages
+task lint-shell    # Run ShellCheck across all tracked Bash scripts
+task vuln          # Run govulncheck vulnerability scan
+task tidy          # Run go mod tidy and go mod verify
+task tidy-check    # Verify module dependencies are tidy using non-mutating verification ('go mod tidy -diff')
+task snapshot      # Test local GoReleaser release packaging without publishing
+task demo          # Build the demo fat binary in examples/demo
+task demo-check    # Verify finished fat binary stub commands (info, optimize, trim, prewarm) with trap cleanup
+task bench         # Run benchmark suite in examples/demo
+task clean         # Remove build artifacts and coverage files
 ```
 
-> **Terminal Output & Colors**: All make targets support the standard [`NO_COLOR`](https://no-color.org) environment variable (`NO_COLOR=1`) and `COLOR=0` make variable to strip ANSI escape codes and switch Unicode symbols (`✔`/`✖`) to clean ASCII markers (`[OK]`/`[FAIL]`). Terminal detection checks standard output (`[ -t 1 ]`) to automatically disable colors when redirected or non-interactive.
+> **Terminal Output & Colors**: All Task commands support the standard [`NO_COLOR`](https://no-color.org) environment variable (`NO_COLOR=1`) and `COLOR=0` Task variable to strip ANSI escape codes and switch Unicode symbols (`✔`/`✖`) to clean ASCII markers (`[OK]`/`[FAIL]`). Terminal detection checks standard output (`[ -t 1 ]`) to automatically disable colors when redirected or non-interactive.
 > **Port Safety & Profiling**: Profiling targets (`check-leaks`, `pprof`) detect occupied ports cleanly and fail with an actionable message (`PORT=<port>`, `HTTP_PORT=<port>`) rather than terminating external processes. Profiling cleanup sends graceful SIGTERM before SIGKILL strictly to spawned child processes. Mutex and block profile sampling rates (`MICROFAT_PPROF_BLOCK_RATE`, `MICROFAT_PPROF_MUTEX_FRACTION`) are enabled only when `PROFILE=block` or `PROFILE=mutex` is requested.
 > **CI Regression Gates**: Developer workflow regression tests (`test-dx`, `test-leaks`, `check-leaks`, `demo-check`) are CI-enforced on code-changing pull requests. Documentation-only pull requests still run required CI classification, title validation and secret scanning; see the documentation-only policy in `CONTRIBUTING.md`. Push and manual CI runs retain the full checks.
 

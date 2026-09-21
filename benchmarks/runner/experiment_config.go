@@ -134,7 +134,7 @@ func (o *RunOptions) resolve() error {
 		o.LogWriter = os.Stderr
 	}
 	if o.Fortio == "" {
-		return errors.New("Fortio path required; install the pinned tool with make benchmark-tools")
+		return errors.New("Fortio path required; install the pinned tool with task benchmark-tools")
 	}
 	if o.Helper == "" {
 		if runtime.GOOS == "linux" {
