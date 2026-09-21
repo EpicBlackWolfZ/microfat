@@ -1,0 +1,96 @@
+name: Published Release Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published immutable release tag to audit
+        required: true
+        default: v0.2.4
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Published archive (${{ matrix.arch }})
+    runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Require published immutable release and download its products
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", os.environ["RELEASE_TAG"]):
+              raise SystemExit("invalid release tag")
+          PY
+          mkdir -p .work/audit
+          gh release view "$RELEASE_TAG" --repo EpicBlackWolfZ/microfat \
+            --json tagName,isDraft,isImmutable,publishedAt,assets > .work/audit/release.json
+          gh api "repos/EpicBlackWolfZ/microfat/commits/$RELEASE_TAG" --jq .sha > .work/audit/source.txt
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          release = json.loads(Path(".work/audit/release.json").read_text())
+          source = Path(".work/audit/source.txt").read_text().strip()
+          if release["tagName"] != os.environ["RELEASE_TAG"] or release["isDraft"] or not release["isImmutable"]:
+              raise SystemExit("audit requires the requested published immutable release")
+          if not release["publishedAt"] or not re.fullmatch("[0-9a-f]{40}", source):
+              raise SystemExit("missing publication or source identity")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("source=" + source + "\n")
+              output.write("version=" + os.environ["RELEASE_TAG"].removeprefix("v") + "\n")
+          PY
+          gh release download "$RELEASE_TAG" --repo EpicBlackWolfZ/microfat \
+            --dir .work/audit/dist --pattern 'microfat_*' --pattern 'checksums.txt*'
+      - name: Authenticate and exercise downloaded CLI and launchers
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_SOURCE: ${{ steps.release.outputs.source }}
+          RELEASE_ARCH: ${{ matrix.arch }}
+        run: |
+          python3 scripts/audit-release.py --dist .work/audit/dist --output .work/audit/results \
+            --version "$RELEASE_VERSION" --source "$RELEASE_SOURCE" --arch "$RELEASE_ARCH"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.release.outputs.source }}
+          path: .work/release-source
+          persist-credentials: false
+      - name: Apply the tagged source's complete artifact contract
+        env:
+          MICROFAT_RELEASE_TESTS: required
+        run: |
+          export MICROFAT_RELEASE_DIST="$GITHUB_WORKSPACE/.work/audit/dist"
+          cd .work/release-source
+          go test -v ./cmd/microfat -run '^TestGoReleaserSnapshotArtifacts$' -count=1
+      - name: Preserve audit evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-release-audit-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          retention-days: 14
+          path: |
+            .work/audit/release.json
+            .work/audit/source.txt
+            .work/audit/dist/checksums.txt*
+            .work/audit/results/*.json
+            .work/audit/results/*.jsonl
+            .work/audit/results/payload.go
