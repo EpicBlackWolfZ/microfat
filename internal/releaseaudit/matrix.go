@@ -162,25 +162,7 @@ func exerciseCase(
 		return result, err
 	}
 	packed, cli := filepath.Join(output, "packed"), filepath.Join(products, cliName)
-	stub := filepath.Join(products, fullStub)
-	if item.Profile == "minimal" {
-		stub = filepath.Join(products, minimalStub)
-	}
-	arguments := []string{cli, "pack", "--arch", options.Arch, "--format-version", strconv.Itoa(item.Version),
-		"--compression", item.Codec, "-o", packed}
-	if item.Version != 2 || item.Profile != "full" || item.Codec != "none" {
-		arguments = append(arguments, "--stub", stub)
-	}
-	if item.Dictionary {
-		arguments = append(arguments, "--dict")
-	}
-	for _, variant := range variants {
-		arguments = append(arguments, "-v", variant.Level+"="+variant.Path)
-	}
-	if _, err := runner.Run(arguments, nil, true); err != nil {
-		return result, err
-	}
-	if err := checkStub(packed, stub); err != nil {
+	if err := packImage(options, runner, products, variants, item, packed); err != nil {
 		return result, err
 	}
 	var index packedIndex
@@ -245,4 +227,29 @@ func writeJSON(filename string, value any) error {
 		return err
 	}
 	return os.WriteFile(filename, append(data, '\n'), fileMode)
+}
+
+func packImage(options Options, runner Runner, products string, variants []variant, item matrixCase, packed string) error {
+	stub := filepath.Join(products, fullStub)
+	if item.Profile == "minimal" {
+		stub = filepath.Join(products, minimalStub)
+	}
+	arguments := []string{filepath.Join(products, cliName), "pack", "--arch", options.Arch, "--format-version", strconv.Itoa(item.Version),
+		"--compression", item.Codec, "-o", packed}
+	if item.Version != 2 || item.Profile != "full" || item.Codec != "none" {
+		arguments = append(arguments, "--stub", stub)
+	}
+	if item.Dictionary {
+		arguments = append(arguments, "--dict")
+	}
+	for _, variant := range variants {
+		arguments = append(arguments, "-v", variant.Level+"="+variant.Path)
+	}
+	if _, err := runner.Run(arguments, nil, true); err != nil {
+		return err
+	}
+	if err := checkStub(packed, stub); err != nil {
+		return err
+	}
+	return nil
 }
