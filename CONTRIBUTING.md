@@ -219,3 +219,8 @@ a documentation-only skip. The final aggregate checks the explicit skip set whil
 classification and secrets must succeed. Push and ordinary manual runs retain the full CI checks.
 Run `bash scripts/ci-code-changes-test.sh` to verify the policy and `go test ./internal/cigate`
 to check the workflow dependency and completion contracts.
+
+To inspect a staged run, open the PR's **CI Complete** check and follow its prerequisites in
+GitHub Actions. A later job marked **skipped** after an earlier failure has not passed validation;
+fix the first failing prerequisite and run CI again. For a docs-only PR, code-stage skips are
+expected only when classification, title validation, secret scanning and **CI Complete** all pass.
