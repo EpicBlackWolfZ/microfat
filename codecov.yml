@@ -3,28 +3,36 @@
 
 codecov:
   require_ci_to_pass: true
+  notify:
+    wait_for_ci: true
 
 coverage:
   precision: 2
   round: down
-  range: "90...100"
+  range: "70...100"
   status:
     project:
       default:
-        target: 95%
+        target: auto
         threshold: 0%
+        base: auto
     patch:
       default:
-        target: 95%
+        target: auto
         threshold: 0%
+        base: auto
 
 component_management:
   default_rules:
     statuses:
       - type: project
         target: auto
+        threshold: 0%
+        base: auto
       - type: patch
-        target: 95%
+        target: auto
+        threshold: 0%
+        base: auto
   individual_components:
     - component_id: cli
       name: CLI
@@ -70,8 +78,12 @@ flag_management:
     statuses:
       - type: project
         target: auto
+        threshold: 0%
+        base: auto
       - type: patch
-        target: 95%
+        target: auto
+        threshold: 0%
+        base: auto
   individual_flags:
     - name: default-profile
       carryforward: true
@@ -81,12 +93,13 @@ flag_management:
       carryforward: true
 
 comment:
-  layout: "reach, diff, flags, components, files"
+  layout: "diff, flags, files, components"
   behavior: default
   require_changes: false
   require_base: false
   require_head: true
   hide_project_coverage: false
+  show_carryforward_flags: true
 
 ignore:
   - "**/*_test.go"

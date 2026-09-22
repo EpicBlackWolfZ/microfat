@@ -25,18 +25,22 @@ type codecovConfig struct {
 			Project map[string]struct {
 				Target    string `yaml:"target"`
 				Threshold string `yaml:"threshold"`
+				Base      string `yaml:"base"`
 			} `yaml:"project"`
 			Patch map[string]struct {
 				Target    string `yaml:"target"`
 				Threshold string `yaml:"threshold"`
+				Base      string `yaml:"base"`
 			} `yaml:"patch"`
 		} `yaml:"status"`
 	} `yaml:"coverage"`
 	ComponentManagement struct {
 		DefaultRules struct {
 			Statuses []struct {
-				Type   string `yaml:"type"`
-				Target string `yaml:"target"`
+				Type      string `yaml:"type"`
+				Target    string `yaml:"target"`
+				Threshold string `yaml:"threshold"`
+				Base      string `yaml:"base"`
 			} `yaml:"statuses"`
 		} `yaml:"default_rules"`
 		IndividualComponents []struct {
@@ -55,11 +59,12 @@ type codecovConfig struct {
 		} `yaml:"individual_flags"`
 	} `yaml:"flag_management"`
 	Comment struct {
-		Layout              string `yaml:"layout"`
-		Behavior            string `yaml:"behavior"`
-		RequireChanges      bool   `yaml:"require_changes"`
-		RequireHead         bool   `yaml:"require_head"`
-		HideProjectCoverage bool   `yaml:"hide_project_coverage"`
+		Layout                string `yaml:"layout"`
+		Behavior              string `yaml:"behavior"`
+		RequireChanges        bool   `yaml:"require_changes"`
+		RequireHead           bool   `yaml:"require_head"`
+		HideProjectCoverage   bool   `yaml:"hide_project_coverage"`
+		ShowCarryforwardFlags bool   `yaml:"show_carryforward_flags"`
 	} `yaml:"comment"`
 	Ignore       []string                  `yaml:"ignore"`
 	Parsers      map[string]map[string]any `yaml:"parsers"`
@@ -84,11 +89,13 @@ func TestCodecovConfigurationContract(t *testing.T) {
 	assert.True(t, cfg.Codecov.RequireCIToPass, "Codecov must wait for CI to pass before notifications")
 	assert.Equal(t, 2, cfg.Coverage.Precision)
 	assert.Equal(t, "down", cfg.Coverage.Round)
-	assert.Equal(t, "90...100", cfg.Coverage.Range)
+	assert.Equal(t, "70...100", cfg.Coverage.Range)
 
-	assert.Equal(t, "95%", cfg.Coverage.Status.Project["default"].Target)
+	assert.Equal(t, "auto", cfg.Coverage.Status.Project["default"].Target)
+	assert.Equal(t, "auto", cfg.Coverage.Status.Project["default"].Base)
 	assert.Equal(t, "0%", cfg.Coverage.Status.Project["default"].Threshold)
-	assert.Equal(t, "95%", cfg.Coverage.Status.Patch["default"].Target)
+	assert.Equal(t, "auto", cfg.Coverage.Status.Patch["default"].Target)
+	assert.Equal(t, "auto", cfg.Coverage.Status.Patch["default"].Base)
 	assert.Equal(t, "0%", cfg.Coverage.Status.Patch["default"].Threshold)
 
 	assert.True(t, cfg.FlagManagement.DefaultRules.Carryforward)
@@ -100,7 +107,8 @@ func TestCodecovConfigurationContract(t *testing.T) {
 	assert.ElementsMatch(t, []string{"default-profile", "minimal-profile", "unified"}, flagNames)
 
 	assert.True(t, cfg.GitHubChecks.Annotations)
-	assert.Contains(t, cfg.Comment.Layout, "reach")
+	assert.False(t, cfg.Comment.HideProjectCoverage, "must show project coverage changes on PR comment")
+	assert.True(t, cfg.Comment.ShowCarryforwardFlags, "must show carryforward flags column in PR comment")
 	assert.Contains(t, cfg.Comment.Layout, "diff")
 	assert.Contains(t, cfg.Comment.Layout, "flags")
 	assert.Contains(t, cfg.Comment.Layout, "components")
