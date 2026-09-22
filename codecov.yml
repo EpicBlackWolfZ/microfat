@@ -93,7 +93,7 @@ flag_management:
       carryforward: true
 
 comment:
-  layout: "diff, flags, files, components"
+  layout: "header, diff, flags, components, files, footer"
   behavior: default
   require_changes: false
   require_base: false
