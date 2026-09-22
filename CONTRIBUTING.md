@@ -109,6 +109,16 @@ CI uses `task coverage-unit` for its middle stage. It runs the unit tests in `cm
 The dedicated black-box suite runs afterwards through `task e2e`, also with both profiles.
 The full local and release commands retain their existing complete test and coverage scope.
 
+### Code Coverage Architecture & Codecov Integration
+
+The local statement coverage gate (`task coverage-unit COVERAGE_THRESHOLD=95` in CI, `task coverage` locally) is **authoritative**. A combined statement coverage below 95% fails CI immediately with an exact rational calculation (no display rounding passes). Codecov integration serves as an auxiliary telemetry and diagnostic system; it does not replace or weaken the local gate.
+
+- **Isolated Report Uploads**: In CI, coverage reports and test results are uploaded via five distinct, isolated steps (`unified`, `default-profile`, `minimal-profile`, and per-profile JUnit test results for Test Analytics). All uploads explicitly set `disable_search: true` to prevent unintended file inclusion and ensure exclusive file selection.
+- **Codecov CLI Pinning**: The Codecov CLI executable is pinned to official release `v11.3.1` (via job-level `CODECOV_CLI_VERSION`) rather than floating at `latest`, maintaining cryptographic signature verification.
+- **Telemetry Error Bounding**: Upload actions specify `continue-on-error: true`, `fail_ci_if_error: false`, and tight `timeout-minutes: 3` so that external network outages do not fail an otherwise passing test suite. Conversely, a below-95% local gate failure always fails the job.
+- **Dynamic Status Checks & Disabled Carryforward**: Codecov project status uses `target: auto` with zero threshold filtered to `unified` to detect regressions against the base commit. Patch status targets `95%` filtered to `unified`. `carryforward` is disabled across all normal coverage flags so missing uploads remain visibly missing rather than substituting stale measurements. Codecov statuses remain non-required during rollout without setting `informational: true`.
+- **Validation**: Developers can validate `codecov.yml` online using `task codecov-validate`.
+
 Workflow actions are pinned to upstream commit SHAs with version comments; Dependabot maintains
 these pins. Publishing/OIDC permissions belong only to the release publisher. Fork PRs retain read-only
 tokens, skip checks-write reporting, and still enforce test failures through the test job. The release

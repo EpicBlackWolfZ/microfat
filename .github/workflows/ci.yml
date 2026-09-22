@@ -136,6 +136,8 @@ jobs:
       checks: write
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      CODECOV_CLI_VERSION: v11.3.1
     steps:
       - name: Controlled unit-stage failure
         if: github.event_name == 'workflow_dispatch' && inputs.failure_probe == 'unit'
@@ -173,7 +175,16 @@ jobs:
         run: |
           tooling_path=$(bash scripts/tooling-path.sh)
           export PATH="$tooling_path"
-          task coverage-unit
+          task coverage-unit COVERAGE_THRESHOLD=95
+
+      - name: Verify Coverage & Test Artifacts
+        run: |
+          for f in coverage.out .work/tests/default.out .work/tests/minimal.out .work/tests/junit-default.xml .work/tests/junit-minimal.xml; do
+            if [ ! -s "$f" ]; then
+              echo "Expected artifact $f is missing or empty" >&2
+              exit 1
+            fi
+          done
 
       - name: Publish Test Results to GitHub View
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3
@@ -203,6 +214,93 @@ jobs:
                 echo "| \`$pkg\` | $pct |"
               fi
             done
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload Unified Coverage to Codecov
+        id: codecov_unified
+        if: ${{ !cancelled() && hashFiles('coverage.out') != '' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.out
+          flags: unified
+          disable_search: true
+          version: ${{ env.CODECOV_CLI_VERSION }}
+          fail_ci_if_error: false
+
+      - name: Upload Default Profile Coverage to Codecov
+        id: codecov_default
+        if: ${{ !cancelled() && hashFiles('.work/tests/default.out') != '' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: .work/tests/default.out
+          flags: default-profile
+          disable_search: true
+          version: ${{ env.CODECOV_CLI_VERSION }}
+          fail_ci_if_error: false
+
+      - name: Upload Minimal Profile Coverage to Codecov
+        id: codecov_minimal
+        if: ${{ !cancelled() && hashFiles('.work/tests/minimal.out') != '' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: .work/tests/minimal.out
+          flags: minimal-profile
+          disable_search: true
+          version: ${{ env.CODECOV_CLI_VERSION }}
+          fail_ci_if_error: false
+
+      - name: Upload Default Test Analytics to Codecov
+        id: codecov_tests_default
+        if: ${{ !cancelled() && hashFiles('.work/tests/junit-default.xml') != '' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: .work/tests/junit-default.xml
+          flags: default-profile
+          disable_search: true
+          version: ${{ env.CODECOV_CLI_VERSION }}
+          fail_ci_if_error: false
+
+      - name: Upload Minimal Test Analytics to Codecov
+        id: codecov_tests_minimal
+        if: ${{ !cancelled() && hashFiles('.work/tests/junit-minimal.xml') != '' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: .work/tests/junit-minimal.xml
+          flags: minimal-profile
+          disable_search: true
+          version: ${{ env.CODECOV_CLI_VERSION }}
+          fail_ci_if_error: false
+
+      - name: Report Codecov Upload Status
+        if: always()
+        run: |
+          {
+            echo "### ☂️ Codecov Telemetry Uploads"
+            echo ""
+            echo "| Upload Step | Result | Outcome |"
+            echo "| :--- | :--- | :--- |"
+            echo "| Unified Coverage (\`coverage.out\`) | ${{ steps.codecov_unified.conclusion || 'skipped' }} | ${{ steps.codecov_unified.outcome || 'skipped' }} |"
+            echo "| Default Profile (\`default.out\`) | ${{ steps.codecov_default.conclusion || 'skipped' }} | ${{ steps.codecov_default.outcome || 'skipped' }} |"
+            echo "| Minimal Profile (\`minimal.out\`) | ${{ steps.codecov_minimal.conclusion || 'skipped' }} | ${{ steps.codecov_minimal.outcome || 'skipped' }} |"
+            echo "| Default Tests (\`junit-default.xml\`) | ${{ steps.codecov_tests_default.conclusion || 'skipped' }} | ${{ steps.codecov_tests_default.outcome || 'skipped' }} |"
+            echo "| Minimal Tests (\`junit-minimal.xml\`) | ${{ steps.codecov_tests_minimal.conclusion || 'skipped' }} | ${{ steps.codecov_tests_minimal.outcome || 'skipped' }} |"
           } >> "${GITHUB_STEP_SUMMARY}"
 
 
