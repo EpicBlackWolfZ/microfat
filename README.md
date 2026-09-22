@@ -4,6 +4,7 @@
 [![GitHub Release](https://img.shields.io/github/v/release/EpicBlackWolfZ/microfat?logo=github)](https://github.com/EpicBlackWolfZ/microfat/releases)
 [![CI Status](https://img.shields.io/github/actions/workflow/status/EpicBlackWolfZ/microfat/ci.yml?branch=main&logo=github&label=CI)](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/ci.yml)
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/EpicBlackWolfZ/microfat/codeql.yml?branch=main&logo=github&label=CodeQL)](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/codeql.yml)
+[![CodeFactor](https://www.codefactor.io/repository/github/epicblackwolfz/microfat/badge)](https://www.codefactor.io/repository/github/epicblackwolfz/microfat)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 **Microfat** combines multiple CPU microarchitecture-specific ELF binaries (`v1`, `v2`, `v3`, `v4` or `v8.0`..`v9.5`) into a single, self-dispatching Linux executable with no persistent launcher process, automatic container resource tuning (`GOMEMLIMIT` & `GOMAXPROCS`), and payload integrity verification.
