@@ -205,6 +205,42 @@ jobs:
             done
           } >> "${GITHUB_STEP_SUMMARY}"
 
+      - name: Upload coverage reports to Codecov
+        if: always()
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.out
+          flags: unified
+          fail_ci_if_error: false
+
+      - name: Upload Default Profile Coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: .work/tests/default.out
+          flags: default-profile
+          fail_ci_if_error: false
+
+      - name: Upload Minimal Profile Coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: .work/tests/minimal.out
+          flags: minimal-profile
+          fail_ci_if_error: false
+
+      - name: Upload test results to Codecov Test Analytics
+        if: always()
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: .work/tests/junit-default.xml,.work/tests/junit-minimal.xml
+          fail_ci_if_error: false
+
 
   dx:
     name: Developer Workflow Regression Tests

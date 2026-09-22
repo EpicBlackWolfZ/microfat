@@ -203,6 +203,16 @@ tasks:
     - |-
       {{.TASK_ENV}}
       "$GO" tool cover -func="$COVERAGE_FILE"
+  codecov-validate:
+    desc: Validate codecov.yml against the Codecov API schema validator
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      curl -s -f -X POST --data-binary @codecov.yml https://api.codecov.io/validate | grep -q "Valid!" || {
+        echo "codecov.yml validation failed" >&2
+        exit 1
+      }
+      echo "codecov.yml is valid"
   ci-complete:
     desc: Verify the complete GitHub Actions prerequisite result contract
     cmds:
