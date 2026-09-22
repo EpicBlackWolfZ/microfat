@@ -22,12 +22,13 @@ type workflow struct {
 }
 
 type workflowJob struct {
-	Name     string         `yaml:"name"`
-	Needs    yaml.Node      `yaml:"needs"`
-	If       string         `yaml:"if"`
-	Uses     string         `yaml:"uses"`
-	Timeout  int            `yaml:"timeout-minutes"`
-	Steps    []workflowStep `yaml:"steps"`
+	Name     string            `yaml:"name"`
+	Needs    yaml.Node         `yaml:"needs"`
+	If       string            `yaml:"if"`
+	Uses     string            `yaml:"uses"`
+	Timeout  int               `yaml:"timeout-minutes"`
+	Env      map[string]string `yaml:"env"`
+	Steps    []workflowStep    `yaml:"steps"`
 	Strategy struct {
 		FailFast *bool `yaml:"fail-fast"`
 		Matrix   struct {
@@ -37,9 +38,15 @@ type workflowJob struct {
 }
 
 type workflowStep struct {
-	Uses string         `yaml:"uses"`
-	Run  string         `yaml:"run"`
-	With map[string]any `yaml:"with"`
+	ID              string            `yaml:"id"`
+	Name            string            `yaml:"name"`
+	If              string            `yaml:"if"`
+	Uses            string            `yaml:"uses"`
+	Run             string            `yaml:"run"`
+	With            map[string]any    `yaml:"with"`
+	TimeoutMinutes  int               `yaml:"timeout-minutes"`
+	ContinueOnError *bool             `yaml:"continue-on-error"`
+	Env             map[string]string `yaml:"env"`
 }
 
 func readWorkflow(t *testing.T, name string) workflow {
