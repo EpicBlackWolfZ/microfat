@@ -51,3 +51,59 @@ func TestMainCommand(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, string(output), "usage: coverage")
 }
+
+func TestMainBelowThresholdSubprocess(t *testing.T) {
+	if os.Getenv("MICROFAT_COVERAGE_HELPER") == "below_threshold" {
+		outPath := os.Getenv("MICROFAT_COVERAGE_OUT")
+		inPath := os.Getenv("MICROFAT_COVERAGE_IN")
+		os.Args = []string{"coverage", outPath, inPath, inPath}
+		main()
+		return
+	}
+	root := t.TempDir()
+	input := filepath.Join(root, "input")
+	output := filepath.Join(root, "output.out")
+	const content = "mode: atomic\np/a.go:1.1,2.1 50 1\np/a.go:3.1,4.1 50 0\n"
+	require.NoError(t, os.WriteFile(input, []byte(content), 0o600))
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestMainBelowThresholdSubprocess$")
+	cmd.Env = append(os.Environ(),
+		"MICROFAT_COVERAGE_HELPER=below_threshold",
+		"MICROFAT_COVERAGE_OUT="+output,
+		"MICROFAT_COVERAGE_IN="+input,
+		"COVERAGE_THRESHOLD=95",
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	require.Error(t, err, "subcommand must fail with nonzero exit status when coverage is below threshold")
+
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	require.Equal(t, 1, exitErr.ExitCode())
+
+	require.Contains(t, stdout.String(), "Exact coverage: 50/100 statements (50.000000%)")
+	require.Contains(t, stderr.String(), "coverage below 95% (without rounding)")
+
+	written, readErr := os.ReadFile(output)
+	require.NoError(t, readErr, "coverage output artifact must be written even when threshold gate fails")
+	require.Contains(t, string(written), "mode: atomic")
+	require.Contains(t, string(written), "p/a.go:1.1,2.1 50 1")
+	require.Contains(t, string(written), "p/a.go:3.1,4.1 50 0")
+}
+
+func TestExplicitThresholdCannotBeOverriddenByEnv(t *testing.T) {
+	t.Setenv("COVERAGE_THRESHOLD", "50")
+	root := t.TempDir()
+	input := filepath.Join(root, "input")
+	output := filepath.Join(root, "output")
+	const content = "mode: atomic\np/a.go:1.1,2.1 80 1\np/a.go:3.1,4.1 20 0\n"
+	require.NoError(t, os.WriteFile(input, []byte(content), 0o600))
+	args := []string{output, input, input}
+
+	var out bytes.Buffer
+	err := run(args, "95", &out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "coverage below 95% (without rounding)")
+}

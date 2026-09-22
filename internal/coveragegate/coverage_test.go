@@ -42,6 +42,33 @@ func TestMergeProfileUnion(t *testing.T) {
 	require.Equal(t, "mode: atomic\np/a.go:1.1,2.1 3 5\n", got.Text)
 }
 
+func TestComplementaryProfilesUnion(t *testing.T) {
+	t.Parallel()
+	paths := profiles(t,
+		"mode: atomic\np/a.go:1.1,2.1 50 1\np/b.go:1.1,2.1 50 0\n",
+		"mode: atomic\np/a.go:1.1,2.1 50 0\np/b.go:1.1,2.1 50 1\n",
+	)
+	p1, err := Merge([]string{paths[0]})
+	require.NoError(t, err)
+	pass1, err := MeetsThreshold(p1.Covered, p1.Total, "95")
+	require.NoError(t, err)
+	require.False(t, pass1, "profile 1 alone (50%) must fail 95% gate")
+
+	p2, err := Merge([]string{paths[1]})
+	require.NoError(t, err)
+	pass2, err := MeetsThreshold(p2.Covered, p2.Total, "95")
+	require.NoError(t, err)
+	require.False(t, pass2, "profile 2 alone (50%) must fail 95% gate")
+
+	union, err := Merge(paths)
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), union.Covered)
+	require.Equal(t, uint64(100), union.Total)
+	passUnion, err := MeetsThreshold(union.Covered, union.Total, "95")
+	require.NoError(t, err)
+	require.True(t, passUnion, "complementary union (100%) must pass 95% gate")
+}
+
 func TestRejectMalformedProfiles(t *testing.T) {
 	t.Parallel()
 	const good = "mode: atomic\np/a.go:1.1,2.1 3 1\n"
@@ -94,6 +121,9 @@ func TestExactThreshold(t *testing.T) {
 		covered, total  uint64
 		pass, invalid   bool
 	}{
+		{"exact 95 of 100", "95", 95, 100, true, false},
+		{"949999 of 1000000 fails at 95", "95", 949999, 1000000, false, false},
+		{"950001 of 1000000 passes at 95", "95", 950001, 1000000, true, false},
 		{"below despite display rounding", "95", 94973, 100000, false, false},
 		{"equal", "95", 95000, 100000, true, false},
 		{"scientific decimal", "9.5e1", 95000, 100000, true, false},
