@@ -208,11 +208,15 @@ tasks:
     cmds:
     - |-
       {{.TASK_ENV}}
-      curl -s -f -X POST --data-binary @codecov.yml https://api.codecov.io/validate | grep -q "Valid!" || {
-        echo "codecov.yml validation failed" >&2
+      res=$(curl -sS --connect-timeout 10 --max-time 30 -w "\n%{http_code}" -X POST --data-binary @codecov.yml https://api.codecov.io/validate)
+      code=$(tail -n1 <<< "$res")
+      body=$(sed '$d' <<< "$res")
+      if [ "$code" != "200" ]; then
+        echo "codecov.yml validation failed with HTTP $code:" >&2
+        echo "$body" >&2
         exit 1
-      }
-      echo "codecov.yml is valid"
+      fi
+      echo "codecov.yml is valid (HTTP 200)"
   ci-complete:
     desc: Verify the complete GitHub Actions prerequisite result contract
     cmds:
