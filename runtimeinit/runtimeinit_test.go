@@ -1526,17 +1526,41 @@ func TestExecutable(t *testing.T) {
 			wantPath: "bar",
 		},
 		{
-			name:     "OriginalExeWhitespaceTrimmed",
-			envVal:   "   /usr/local/bin/myapp   ",
-			wantPath: "/usr/local/bin/myapp",
+			name:     "OriginalExeAbsError_PreservesWhitespace",
+			envVal:   "foo/../  bar  ",
+			mockAbs:  func(string) (string, error) { return "", errors.New("simulated abs error") },
+			wantPath: "  bar  ",
 		},
 		{
-			name:   "OriginalExeWhitespaceOnly_FallsBackToOsExecutable",
-			envVal: "   \t\n ",
-			mockExec: func() (string, error) {
-				return "/fallback/binary", nil
-			},
-			wantPath: "/fallback/binary",
+			name:     "OriginalExeTrailingSpacePreserved",
+			envVal:   "/usr/local/bin/myapp ",
+			wantPath: "/usr/local/bin/myapp ",
+		},
+		{
+			name:     "OriginalExeLeadingSpacePreserved",
+			envVal:   "/usr/local/bin/ myapp",
+			wantPath: "/usr/local/bin/ myapp",
+		},
+		{
+			name:     "OriginalExeSpacesInParentDirPreserved",
+			envVal:   "/usr/local/my app/bin/myapp",
+			wantPath: "/usr/local/my app/bin/myapp",
+		},
+		{
+			name:     "OriginalExeTabInPathPreserved",
+			envVal:   "/usr/local/bin/my\tapp",
+			wantPath: "/usr/local/bin/my\tapp",
+		},
+		{
+			name:     "OriginalExeNewlineInPathPreserved",
+			envVal:   "/usr/local/bin/my\napp",
+			wantPath: "/usr/local/bin/my\napp",
+		},
+		{
+			name:     "OriginalExeWhitespaceOnly_TreatedAsPathnameData",
+			envVal:   "   ",
+			mockAbs:  func(p string) (string, error) { return "/abs/" + p, nil },
+			wantPath: "/abs/   ",
 		},
 		{
 			name:   "FallbackToOsExecutableSuccess",
@@ -1643,9 +1667,19 @@ func TestRuntimeInit_ExecutableSubprocess(t *testing.T) {
 			wantPrefix: "/",
 		},
 		{
-			name:       "FallbackWhenWhitespaceOnly",
-			env:        []string{format.EnvOriginalExe + "=   \t  "},
-			wantPrefix: "/",
+			name:      "PreserveTrailingWhitespace",
+			env:       []string{format.EnvOriginalExe + "=/opt/custom/bin/app "},
+			wantExact: "/opt/custom/bin/app ",
+		},
+		{
+			name:      "PreserveLeadingWhitespace",
+			env:       []string{format.EnvOriginalExe + "=/opt/custom/bin/ app"},
+			wantExact: "/opt/custom/bin/ app",
+		},
+		{
+			name:      "PreserveWhitespaceOnlyPath",
+			env:       []string{format.EnvOriginalExe + "=   "},
+			wantExact: filepath.Join(repoRoot, "   "),
 		},
 	}
 
@@ -1657,13 +1691,163 @@ func TestRuntimeInit_ExecutableSubprocess(t *testing.T) {
 			if err != nil {
 				t.Fatalf("runFixture failed: %v, stderr: %s", err, stderr)
 			}
-			trimmed := strings.TrimSpace(stdout)
-			if tt.wantExact != "" && trimmed != tt.wantExact {
-				t.Errorf("got stdout %q, want %q", trimmed, tt.wantExact)
+			if tt.wantExact != "" && stdout != tt.wantExact {
+				t.Errorf("got stdout %q, want %q", stdout, tt.wantExact)
 			}
-			if tt.wantPrefix != "" && !strings.HasPrefix(trimmed, tt.wantPrefix) {
-				t.Errorf("got stdout %q, expected prefix %q", trimmed, tt.wantPrefix)
+			if tt.wantPrefix != "" && !strings.HasPrefix(stdout, tt.wantPrefix) {
+				t.Errorf("got stdout %q, expected prefix %q", stdout, tt.wantPrefix)
 			}
 		})
 	}
+}
+
+func TestExecutablePreservesPathWhitespace(t *testing.T) {
+	wd, err := os.Getwd()
+	require.NoError(t, err, "failed to get current working directory")
+
+	tests := []struct {
+		name     string
+		hint     string
+		mockAbs  func(string) (string, error)
+		wantPath string
+		wantErr  bool
+	}{
+		{
+			name:     "OrdinaryFilename",
+			hint:     "/usr/local/bin/myapp",
+			wantPath: "/usr/local/bin/myapp",
+		},
+		{
+			name:     "LeadingSpaceInBasename",
+			hint:     "/usr/local/bin/ myapp",
+			wantPath: "/usr/local/bin/ myapp",
+		},
+		{
+			name:     "LeadingSpaceInRelativePath",
+			hint:     " bin/myapp",
+			wantPath: filepath.Join(wd, " bin", "myapp"),
+		},
+		{
+			name:     "TrailingSpaceInBasename",
+			hint:     "/usr/local/bin/myapp ",
+			wantPath: "/usr/local/bin/myapp ",
+		},
+		{
+			name:     "SpacesInParentDirectories",
+			hint:     "/usr/local/my directory/bin/myapp",
+			wantPath: "/usr/local/my directory/bin/myapp",
+		},
+		{
+			name:     "TabInFilename",
+			hint:     "/usr/local/bin/my\tapp",
+			wantPath: "/usr/local/bin/my\tapp",
+		},
+		{
+			name:     "NewlineInFilename",
+			hint:     "/usr/local/bin/my\napp",
+			wantPath: "/usr/local/bin/my\napp",
+		},
+		{
+			name:     "NonemptyAllSpaceRelativePath",
+			hint:     "   ",
+			wantPath: filepath.Join(wd, "   "),
+		},
+		{
+			name:     "EmptyHint_FallsBackToExecutable",
+			hint:     "",
+			wantPath: "", // will match fallback
+		},
+		{
+			name: "AbsoluteResolutionFailure_RetainsPathnameBytes",
+			hint: "foo/../  bar  ",
+			mockAbs: func(string) (string, error) {
+				return "", errors.New("simulated abs failure")
+			},
+			wantPath: "  bar  ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origAbs := absFunc
+			origExec := executableFunc
+			defer func() {
+				absFunc = origAbs
+				executableFunc = origExec
+			}()
+
+			if tt.mockAbs != nil {
+				absFunc = tt.mockAbs
+			}
+
+			mockEnv := make(map[string]string)
+			if tt.hint != "" {
+				mockEnv[format.EnvOriginalExe] = tt.hint
+			} else {
+				executableFunc = func() (string, error) {
+					return "/fallback/binary", nil
+				}
+			}
+
+			withIsolatedEnv(t, mockEnv, nil, nil, func(_ *int64, _ *int, _ *int, _ *bytes.Buffer) {
+				got, err := Executable()
+				if tt.wantErr {
+					require.Error(t, err)
+					return
+				}
+				require.NoError(t, err)
+
+				expected := tt.wantPath
+				if tt.hint == "" {
+					expected = "/fallback/binary"
+				}
+				assert.Equal(t, expected, got)
+				if strings.HasSuffix(tt.hint, " ") {
+					assert.True(t, strings.HasSuffix(got, " "), "trailing whitespace must not be stripped")
+				}
+			})
+		})
+	}
+
+	t.Run("DecoyDistinguishableContent", func(t *testing.T) {
+		tempDir := t.TempDir()
+		decoyPath := filepath.Join(tempDir, "app")
+		targetPath := filepath.Join(tempDir, "app ")
+
+		const decoyContent = "DECOY_BINARY_IDENTITY_ALPHA"
+		const targetContent = "TARGET_BINARY_IDENTITY_BETA"
+
+		require.NoError(t, os.WriteFile(decoyPath, []byte(decoyContent), 0o755))
+		require.NoError(t, os.WriteFile(targetPath, []byte(targetContent), 0o755))
+
+		// 1. Point hint at target with trailing space
+		mockEnvTarget := map[string]string{
+			format.EnvOriginalExe: targetPath,
+		}
+		withIsolatedEnv(t, mockEnvTarget, nil, nil, func(_ *int64, _ *int, _ *int, _ *bytes.Buffer) {
+			got, err := Executable()
+			require.NoError(t, err)
+			assert.Equal(t, targetPath, got)
+			assert.NotEqual(t, decoyPath, got)
+
+			content, readErr := os.ReadFile(got)
+			require.NoError(t, readErr)
+			assert.Equal(t, targetContent, string(content))
+		})
+
+		// 2. Point hint at decoy without trailing space
+		mockEnvDecoy := map[string]string{
+			format.EnvOriginalExe: decoyPath,
+		}
+		withIsolatedEnv(t, mockEnvDecoy, nil, nil, func(_ *int64, _ *int, _ *int, _ *bytes.Buffer) {
+			got, err := Executable()
+			require.NoError(t, err)
+			assert.Equal(t, decoyPath, got)
+			assert.NotEqual(t, targetPath, got)
+
+			content, readErr := os.ReadFile(got)
+			require.NoError(t, readErr)
+			assert.Equal(t, decoyContent, string(content))
+		})
+	})
 }

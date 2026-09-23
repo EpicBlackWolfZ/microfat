@@ -3297,16 +3297,38 @@ func TestBuildAutoTunedEnviron_OriginalExeReflection(t *testing.T) {
 			wantPresent: false,
 		},
 		{
-			name:        "WhitespaceSelfPath_StripsBaseEnvOriginalExe",
+			name:        "WhitespaceOnlySelfPath_PreservedAsPathnameData",
 			selfPath:    "   ",
 			baseEnv:     []string{testPathEnv, format.EnvOriginalExe + "=/spoofed/path"},
-			wantPresent: false,
+			wantOrigExe: filepath.Join(wd, "   "),
+			wantPresent: true,
 		},
 		{
-			name:        "WhitespaceSurroundedSelfPath_TrimmedAndNormalized",
-			selfPath:    "  /usr/bin/trimmed_binary  ",
+			name:        "TrailingSpaceInBasename_Preserved",
+			selfPath:    "/usr/bin/app ",
 			baseEnv:     []string{testPathEnv},
-			wantOrigExe: "/usr/bin/trimmed_binary",
+			wantOrigExe: "/usr/bin/app ",
+			wantPresent: true,
+		},
+		{
+			name:        "LeadingSpaceInBasename_Preserved",
+			selfPath:    "/usr/bin/ app",
+			baseEnv:     []string{testPathEnv},
+			wantOrigExe: "/usr/bin/ app",
+			wantPresent: true,
+		},
+		{
+			name:        "SpacesInParentDirectories_Preserved",
+			selfPath:    "/opt/my app/bin/app",
+			baseEnv:     []string{testPathEnv},
+			wantOrigExe: "/opt/my app/bin/app",
+			wantPresent: true,
+		},
+		{
+			name:        "TabInFilename_Preserved",
+			selfPath:    "/usr/bin/app\ttest",
+			baseEnv:     []string{testPathEnv},
+			wantOrigExe: "/usr/bin/app\ttest",
 			wantPresent: true,
 		},
 	}
@@ -3428,7 +3450,7 @@ func TestExecution_OriginalExePropagation(t *testing.T) {
 				return nil
 			}
 
-			baseEnv := []string{"PATH=/bin", format.EnvOriginalExe + "=/stale/fake/path"}
+			baseEnv := []string{testPathEnv, format.EnvOriginalExe + "=/stale/fake/path"}
 			if err := tt.invoke(rawFile.Name(), baseEnv); err != nil {
 				t.Fatalf("execution failed: %v", err)
 			}

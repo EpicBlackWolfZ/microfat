@@ -230,6 +230,17 @@ func TestResolveStubPath_SiblingAndRepoRelative(t *testing.T) {
 		}
 	})
 
+	t.Run("SiblingStubInDirectoryWithWhitespace", func(t *testing.T) {
+		wsSiblingDir := filepath.Join(f.tmpDir, "sibling path with spaces")
+		require.NoError(t, os.MkdirAll(wsSiblingDir, 0o755))
+		wsSiblingStub := createDummyELF(t, wsSiblingDir, "microfat-stub", testArchAMD64)
+		f.mockNativeDir(wsSiblingDir)
+
+		res, err := ResolveStubPath("", "", "")
+		require.NoError(t, err)
+		assert.Equal(t, wsSiblingStub, res)
+	})
+
 	t.Run("Case5_RepoRelativeBinAndParentBinExist_TrustedPATHWins", func(t *testing.T) {
 		cwd, err := os.Getwd()
 		if err != nil {
