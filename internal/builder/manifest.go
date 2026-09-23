@@ -25,6 +25,7 @@ var (
 	ErrInvalidVariantLevel = errors.New("invalid variant level for target architecture")
 	ErrProfileNotFound     = errors.New("specified PGO profile file not found")
 	ErrStubNotFound        = errors.New("microfat launcher stub binary not found")
+	ErrInvalidTargetEnv    = errors.New("invalid target environment")
 )
 
 // CompressionConfig defines declarative compression parameters.
@@ -168,7 +169,7 @@ func ValidateManifest(m *Manifest) error {
 		m.Variants[i].Level = normLevel
 	}
 
-	return nil
+	return validateTargetEnvironment(m)
 }
 
 func validateCompressionConfig(c *CompressionConfig, contextStr string) error {
@@ -190,4 +191,184 @@ func validateCompressionConfig(c *CompressionConfig, contextStr string) error {
 		}
 	}
 	return nil
+}
+
+func validateTargetEnvironment(m *Manifest) error {
+	var tierKey, inappKey string
+	switch m.TargetArch {
+	case microarch.ArchAMD64:
+		tierKey = EnvGOAMD64
+		inappKey = EnvGOARM64
+	case microarch.ArchARM64:
+		tierKey = EnvGOARM64
+		inappKey = EnvGOAMD64
+	}
+
+	if err := validateRootTargetEnvironment(m, tierKey, inappKey); err != nil {
+		return err
+	}
+	return validateVariantTargetEnvironment(m, tierKey, inappKey)
+}
+
+func validateRootTargetEnvironment(m *Manifest, tierKey, inappKey string) error {
+	if err := validateEnvMap(m.Env, "manifest root"); err != nil {
+		return err
+	}
+	if _, exists := m.Env[inappKey]; exists {
+		return fmt.Errorf("%w: %w: architecture-inapplicable key %q in manifest root for %s",
+			ErrInvalidManifest, ErrInvalidTargetEnv, inappKey, m.TargetArch)
+	}
+	if val, exists := m.Env[EnvGOOS]; exists {
+		if val == "" {
+			return fmt.Errorf("%w: %w: empty reserved target variable %q in manifest root",
+				ErrInvalidManifest, ErrInvalidTargetEnv, EnvGOOS)
+		}
+		if val != m.TargetOS {
+			return fmt.Errorf("%w: %w: root GOOS=%q contradicts manifest target_os=%q",
+				ErrInvalidManifest, ErrInvalidTargetEnv, val, m.TargetOS)
+		}
+	}
+	if val, exists := m.Env[EnvGOARCH]; exists {
+		if val == "" {
+			return fmt.Errorf("%w: %w: empty reserved target variable %q in manifest root",
+				ErrInvalidManifest, ErrInvalidTargetEnv, EnvGOARCH)
+		}
+		if val != m.TargetArch {
+			return fmt.Errorf("%w: %w: root GOARCH=%q contradicts manifest target_arch=%q",
+				ErrInvalidManifest, ErrInvalidTargetEnv, val, m.TargetArch)
+		}
+	}
+	if rootTier, exists := m.Env[tierKey]; exists {
+		if rootTier == "" {
+			return fmt.Errorf("%w: %w: empty reserved target variable %q in manifest root",
+				ErrInvalidManifest, ErrInvalidTargetEnv, tierKey)
+		}
+		for _, v := range m.Variants {
+			if err := matchDeclaredTier(m.TargetArch, rootTier, v.Level); err != nil {
+				return fmt.Errorf("%w: %w: root %s=%q contradicts variant %s: %w",
+					ErrInvalidManifest, ErrInvalidTargetEnv, tierKey, rootTier, v.Level, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateVariantTargetEnvironment(m *Manifest, tierKey, inappKey string) error {
+	for _, v := range m.Variants {
+		contextStr := fmt.Sprintf("variant %s", v.Level)
+		if err := validateEnvMap(v.Env, contextStr); err != nil {
+			return err
+		}
+		if _, exists := v.Env[inappKey]; exists {
+			return fmt.Errorf("%w: %w: architecture-inapplicable key %q in %s for %s",
+				ErrInvalidManifest, ErrInvalidTargetEnv, inappKey, contextStr, m.TargetArch)
+		}
+		if val, exists := v.Env[EnvGOOS]; exists {
+			if val == "" {
+				return fmt.Errorf("%w: %w: empty reserved target variable %q in %s",
+					ErrInvalidManifest, ErrInvalidTargetEnv, EnvGOOS, contextStr)
+			}
+			if val != m.TargetOS {
+				return fmt.Errorf("%w: %w: %s GOOS=%q contradicts manifest target_os=%q",
+					ErrInvalidManifest, ErrInvalidTargetEnv, contextStr, val, m.TargetOS)
+			}
+		}
+		if val, exists := v.Env[EnvGOARCH]; exists {
+			if val == "" {
+				return fmt.Errorf("%w: %w: empty reserved target variable %q in %s",
+					ErrInvalidManifest, ErrInvalidTargetEnv, EnvGOARCH, contextStr)
+			}
+			if val != m.TargetArch {
+				return fmt.Errorf("%w: %w: %s GOARCH=%q contradicts manifest target_arch=%q",
+					ErrInvalidManifest, ErrInvalidTargetEnv, contextStr, val, m.TargetArch)
+			}
+		}
+		if varTier, exists := v.Env[tierKey]; exists {
+			if varTier == "" {
+				return fmt.Errorf("%w: %w: empty reserved target variable %q in %s",
+					ErrInvalidManifest, ErrInvalidTargetEnv, tierKey, contextStr)
+			}
+			if err := matchDeclaredTier(m.TargetArch, varTier, v.Level); err != nil {
+				return fmt.Errorf("%w: %w: %s %s=%q contradicts declared level: %w",
+					ErrInvalidManifest, ErrInvalidTargetEnv, contextStr, tierKey, varTier, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateEnvMap(env map[string]string, contextStr string) error {
+	for k, v := range env {
+		if k == "" {
+			return fmt.Errorf("%w: %w: empty environment variable name in %s",
+				ErrInvalidManifest, ErrInvalidTargetEnv, contextStr)
+		}
+		if strings.ContainsAny(k, "=\x00") {
+			return fmt.Errorf("%w: %w: environment variable name %q contains invalid characters in %s",
+				ErrInvalidManifest, ErrInvalidTargetEnv, k, contextStr)
+		}
+		if strings.Contains(v, "\x00") {
+			return fmt.Errorf("%w: %w: environment variable value for %q contains NUL in %s",
+				ErrInvalidManifest, ErrInvalidTargetEnv, k, contextStr)
+		}
+	}
+	return nil
+}
+
+func matchDeclaredTier(arch, envVal, declaredLevel string) error {
+	switch arch {
+	case microarch.ArchAMD64:
+		if envVal != declaredLevel {
+			return fmt.Errorf("expected %q, got %q", declaredLevel, envVal)
+		}
+	case microarch.ArchARM64:
+		if err := matchARM64Setting(envVal, declaredLevel); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func cloneManifest(m *Manifest) *Manifest {
+	if m == nil {
+		return nil
+	}
+	clone := *m
+	if m.BuildFlags != nil {
+		clone.BuildFlags = append([]string(nil), m.BuildFlags...)
+	}
+	if m.Tags != nil {
+		clone.Tags = append([]string(nil), m.Tags...)
+	}
+	if m.Env != nil {
+		clone.Env = make(map[string]string, len(m.Env))
+		for k, v := range m.Env {
+			clone.Env[k] = v
+		}
+	}
+	if m.Compression != nil {
+		comp := *m.Compression
+		clone.Compression = &comp
+	}
+	if m.Variants != nil {
+		clone.Variants = make([]VariantConfig, len(m.Variants))
+		for i, v := range m.Variants {
+			varClone := v
+			if v.Flags != nil {
+				varClone.Flags = append([]string(nil), v.Flags...)
+			}
+			if v.Env != nil {
+				varClone.Env = make(map[string]string, len(v.Env))
+				for k, val := range v.Env {
+					varClone.Env[k] = val
+				}
+			}
+			if v.Compression != nil {
+				comp := *v.Compression
+				varClone.Compression = &comp
+			}
+			clone.Variants[i] = varClone
+		}
+	}
+	return &clone
 }

@@ -20,6 +20,7 @@ import (
 )
 
 const (
+	testOSLinux        = "linux"
 	testArchAMD64      = "amd64"
 	testArchARM64      = "arm64"
 	dummyELFExtraBytes = 100
@@ -1038,7 +1039,7 @@ func testDispatchedIndexMismatchErrors(t *testing.T, tmpDir string) {
 	wrongArch := "arm64"
 	wrongLevel := "v8.0"
 	if runtime.GOARCH == "arm64" {
-		wrongArch = "amd64"
+		wrongArch = testArchAMD64
 		wrongLevel = "v1"
 	}
 

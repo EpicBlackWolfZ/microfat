@@ -79,6 +79,14 @@ Alternatively, use the `pack` shorthand:
 microfat pack --manifest pgo.yaml -o bin/myapp
 ```
 
+### Authoritative Target Contract & Artifact Validation
+
+When compiling via manifest (`pgo-pack` or `pack --manifest`), the manifest's `target_os`, `target_arch`, and each variant's declared `level` are authoritative:
+
+- **Reserved Target Keys**: `GOOS`, `GOARCH`, `GOAMD64`, and `GOARM64` are strictly controlled. Ambient host values for these keys are stripped to prevent host environment pollution.
+- **Manifest Overrides**: Contradictory target variables in manifest `env` (root or per-variant) are rejected before compilation begins. Redundant values that match declared targets are accepted after semantic validation. Inapplicable architecture keys (e.g. `GOARM64` for AMD64 targets) are rejected.
+- **Post-Compilation Buildinfo Inspection**: Upon successful compiler exit, each compiled Go binary is inspected via `debug/buildinfo` before packaging. The builder verifies that `GOOS`, `GOARCH`, and the CPU microarchitecture tier match the declared variant (including semantic ARM64 feature evaluation such as implied LSE). If any artifact does not match, the build is aborted, temporary files are removed, and any existing output executable is left untouched.
+
 ### Manual Compilation Workflow (Alternative)
 If building outside of `microfat pgo-pack`:
 ```bash
