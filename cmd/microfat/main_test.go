@@ -216,6 +216,12 @@ func TestRootCmdAndSubcommands(t *testing.T) {
 		t.Errorf("expected trim with directory dest to fail")
 	}
 
+	trimEmptyOut := newTrimCmd()
+	trimEmptyOut.SetArgs([]string{"-o", "", fatPath})
+	if err := trimEmptyOut.Execute(); err == nil {
+		t.Errorf("expected trim with empty output flag to fail")
+	}
+
 	trimNonFat := newTrimCmd()
 	trimNonFat.SetArgs([]string{stubPath})
 	if err := trimNonFat.Execute(); err == nil {

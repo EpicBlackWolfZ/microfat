@@ -4,9 +4,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
@@ -29,6 +31,7 @@ func trimInPlace(selfPath string, selfFile *os.File, totalSize int64, targetLeve
 		SrcPath:  realPath,
 		SrcFile:  selfFile,
 		DestPath: realPath,
+		Intent:   lifecycle.IntentReplaceSource,
 		Opts:     opts,
 		Transform: func(staged *os.File) error {
 			_, trimErr := pack.TrimBinary(selfFile, totalSize, targetLevel, staged)
@@ -39,10 +42,14 @@ func trimInPlace(selfPath string, selfFile *os.File, totalSize int64, targetLeve
 
 // trimTo creates a new trimmed fat binary at the specified target destination path.
 func trimTo(destPath string, selfFile *os.File, totalSize int64, targetLevel string, opts lifecycle.Options) error {
+	if strings.TrimSpace(destPath) == "" {
+		return errors.New("destination path must not be empty")
+	}
 	return lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  selfFile.Name(),
 		SrcFile:  selfFile,
 		DestPath: destPath,
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     opts,
 		Transform: func(staged *os.File) error {
 			_, trimErr := pack.TrimBinary(selfFile, totalSize, targetLevel, staged)

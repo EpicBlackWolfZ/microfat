@@ -4,9 +4,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
@@ -31,6 +33,7 @@ func optimizeInPlace(
 		SrcPath:  realPath,
 		SrcFile:  selfFile,
 		DestPath: realPath,
+		Intent:   lifecycle.IntentReplaceSource,
 		Opts:     opts,
 		Transform: func(staged *os.File) error {
 			return extractVariantToWriter(selfFile, entry, idx, staged)
@@ -42,10 +45,14 @@ func optimizeInPlace(
 func optimizeTo(
 	destPath string, selfFile *os.File, entry *format.VariantEntry, idx *format.Index, opts lifecycle.Options,
 ) error {
+	if strings.TrimSpace(destPath) == "" {
+		return errors.New("destination path must not be empty")
+	}
 	return lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  selfFile.Name(),
 		SrcFile:  selfFile,
 		DestPath: destPath,
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     opts,
 		Transform: func(staged *os.File) error {
 			return extractVariantToWriter(selfFile, entry, idx, staged)

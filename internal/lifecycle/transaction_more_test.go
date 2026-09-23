@@ -42,6 +42,7 @@ func TestExecute_DirAndStagingErrors(t *testing.T) {
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: destUnderFile,
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(_ *os.File) error {
 			return nil
@@ -58,6 +59,7 @@ func TestExecute_DirAndStagingErrors(t *testing.T) {
 	err = lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: destInReadOnly,
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(_ *os.File) error {
 			return nil
@@ -81,6 +83,7 @@ func TestExecute_DirAndStagingErrors(t *testing.T) {
 	err = lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: destNormal,
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(_ *os.File) error {
 			return nil
@@ -105,6 +108,7 @@ func TestExecute_ApplyMetadataAndReadbackErrors(t *testing.T) {
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: filepath.Join(tmpDir, "dest_strict_chown.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, err := staged.Write([]byte("transformed"))
@@ -130,6 +134,7 @@ func TestExecute_ApplyMetadataAndReadbackErrors(t *testing.T) {
 	err = lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: filepath.Join(tmpDir, "dest_strict_xattr.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, err := staged.Write([]byte("transformed"))
@@ -156,6 +161,7 @@ func TestExecute_ApplyMetadataAndReadbackErrors(t *testing.T) {
 	err = lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: filepath.Join(tmpDir, "dest_target_chmod.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, err := staged.Write([]byte("transformed"))
@@ -176,6 +182,7 @@ func TestExecute_ApplyMetadataAndReadbackErrors(t *testing.T) {
 	err = lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: filepath.Join(tmpDir, "dest_readback_mode.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, err := staged.Write([]byte("transformed"))
@@ -196,6 +203,7 @@ func TestExecute_ApplyMetadataAndReadbackErrors(t *testing.T) {
 	err = lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: filepath.Join(tmpDir, "dest_sync_fail.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, err := staged.Write([]byte("transformed"))
@@ -217,6 +225,7 @@ func TestExecute_StripModeUpgradesNonExecutable(t *testing.T) {
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: dest,
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts: lifecycle.Options{
 			Policy: lifecycle.PolicyStrip,
 		},
@@ -244,6 +253,7 @@ func TestExecute_InPlace_SameDevIno_DifferentPath(t *testing.T) {
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: destLink,
+		Intent:   lifecycle.IntentReplaceSource,
 		Opts: lifecycle.Options{
 			Policy:         lifecycle.PolicyStrict,
 			BreakHardlinks: true,
@@ -266,6 +276,7 @@ func TestExecute_InPlace_TargetRemovedBeforePublish(t *testing.T) {
 
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: src,
+		Intent:  lifecycle.IntentReplaceSource,
 		Opts:    lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, err := staged.Write([]byte("data"))
@@ -299,6 +310,7 @@ func TestExecute_NonExistentSourceAndUnsafeValidation(t *testing.T) {
 	// 1. Non-existent source path fails in resolveTargetAndSnapshot
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: "/non/existent/microfat/path",
+		Intent:  lifecycle.IntentReplaceSource,
 		Opts:    lifecycle.DefaultOptions(),
 		Transform: func(_ *os.File) error {
 			return nil
@@ -314,6 +326,7 @@ func TestExecute_NonExistentSourceAndUnsafeValidation(t *testing.T) {
 
 	err = lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: src,
+		Intent:  lifecycle.IntentReplaceSource,
 		Opts:    lifecycle.DefaultOptions(),
 		Transform: func(_ *os.File) error {
 			return nil
@@ -334,20 +347,169 @@ func TestExecute_InPlace_Symlink_EvaluatedTargetDifference(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
+	// Descriptor points to otherFile while path points to realSrc.
+	// Must fail with ErrSourceModified and NEVER overwrite realSrc.
 	err = lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: symlinkPath,
 		SrcFile: f,
+		Intent:  lifecycle.IntentReplaceSource,
 		Opts:    lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, err := staged.Write([]byte("updated_real"))
 			return err
 		},
 	})
-	require.NoError(t, err)
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrSourceModified)
 
 	updatedReal, err := os.ReadFile(realSrc)
 	require.NoError(t, err)
-	assert.Equal(t, []byte("updated_real"), updatedReal)
+	assert.Equal(t, []byte("real_payload"), updatedReal)
+}
+
+func TestExecute_InPlace_Symlink_RedirectedTargetRejection(t *testing.T) {
+	tmpDir := t.TempDir()
+	appA := createTestBinary(t, tmpDir, "app_a", []byte("content_a"))
+	appB := createTestBinary(t, tmpDir, "app_b", []byte("content_b"))
+	symlinkPath := filepath.Join(tmpDir, "current_app")
+	require.NoError(t, os.Symlink(appA, symlinkPath))
+
+	fA, err := os.Open(symlinkPath)
+	require.NoError(t, err)
+	defer func() { _ = fA.Close() }()
+
+	// Redirect symlink to B after descriptor A is opened
+	require.NoError(t, os.Remove(symlinkPath))
+	require.NoError(t, os.Symlink(appB, symlinkPath))
+
+	err = lifecycle.Execute(lifecycle.Transaction{
+		SrcPath: symlinkPath,
+		SrcFile: fA,
+		Intent:  lifecycle.IntentReplaceSource,
+		Opts:    lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			_, err := staged.Write([]byte("updated_content"))
+			return err
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrSourceModified)
+
+	// B must remain completely untouched
+	bContent, err := os.ReadFile(appB)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("content_b"), bContent)
+}
+
+func TestExecute_InheritedDirectoryACLs_StrictAndStrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := createTestBinary(t, tmpDir, "app_0750", []byte("payload_0750"))
+	require.NoError(t, os.Chmod(src, 0o750))
+
+	var removedACLs []string
+	restoreRemove := lifecycle.SetRemoveFdXattrFuncForTest(func(fd int, attr string) error {
+		removedACLs = append(removedACLs, attr)
+		return nil
+	})
+	defer restoreRemove()
+
+	restoreRead := lifecycle.SetReadFdXattrsFuncForTest(func(fd int) (map[string][]byte, error) {
+		if len(removedACLs) == 0 {
+			return map[string][]byte{
+				"system.posix_acl_access": []byte("user:1001:r-x"),
+			}, nil
+		}
+		return map[string][]byte{}, nil
+	})
+	defer restoreRead()
+
+	// 1. Strict mode
+	destStrict := filepath.Join(tmpDir, "out_strict")
+	err := lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: destStrict,
+		Intent:   lifecycle.IntentCreateOnly,
+		Opts:     lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			_, err := staged.Write([]byte("out_strict_data"))
+			return err
+		},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, removedACLs, "system.posix_acl_access")
+
+	// 2. Strip mode
+	removedACLs = nil
+	destStrip := filepath.Join(tmpDir, "out_strip")
+	err = lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: destStrip,
+		Intent:   lifecycle.IntentCreateOnly,
+		Opts: lifecycle.Options{
+			Policy: lifecycle.PolicyStrip,
+		},
+		Transform: func(staged *os.File) error {
+			_, err := staged.Write([]byte("out_strip_data"))
+			return err
+		},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, removedACLs, "system.posix_acl_access")
+}
+
+func TestExecute_InheritedDirectoryACL_UnremovedReadbackRejection(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := createTestBinary(t, tmpDir, "app", []byte("payload"))
+
+	restoreRead := lifecycle.SetReadFdXattrsFuncForTest(func(fd int) (map[string][]byte, error) {
+		return map[string][]byte{
+			"system.posix_acl_access": []byte("user:1001:r-x"),
+		}, nil
+	})
+	defer restoreRead()
+
+	dest := filepath.Join(tmpDir, "out")
+	err := lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: dest,
+		Intent:   lifecycle.IntentCreateOnly,
+		Opts:     lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			_, err := staged.Write([]byte("data"))
+			return err
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrReadbackVerification)
+	assert.Contains(t, err.Error(), "system.posix_acl_access")
+}
+
+func TestExecute_VerifyReadback_UnexpectedCapabilityOrClaim(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := createTestBinary(t, tmpDir, "app", []byte("payload"))
+
+	// Capability leak
+	restoreRead := lifecycle.SetReadFdXattrsFuncForTest(func(fd int) (map[string][]byte, error) {
+		return map[string][]byte{
+			"security.capability": []byte("cap_data"),
+		}, nil
+	})
+	defer restoreRead()
+
+	dest := filepath.Join(tmpDir, "out_cap")
+	err := lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: dest,
+		Intent:   lifecycle.IntentCreateOnly,
+		Opts:     lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			_, err := staged.Write([]byte("data"))
+			return err
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrReadbackVerification)
+	assert.Contains(t, err.Error(), "unexpected capability")
 }
 
 func TestExecute_ApplyMetadata_OwnershipError_NonRoot(t *testing.T) {
@@ -367,6 +529,7 @@ func TestExecute_ApplyMetadata_OwnershipError_NonRoot(t *testing.T) {
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: filepath.Join(tmpDir, "dest_strict_chown.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, err := staged.Write([]byte("transformed"))
@@ -405,6 +568,7 @@ func TestExecute_VerifyReadback_RootOwnershipMismatch(t *testing.T) {
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: filepath.Join(tmpDir, "dest_root_mismatch.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, err := staged.Write([]byte("transformed"))
@@ -427,6 +591,7 @@ func TestExecute_PublishInPlace_RenameFails(t *testing.T) {
 
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: src,
+		Intent:  lifecycle.IntentReplaceSource,
 		Opts:    lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, err := staged.Write([]byte("transformed"))
@@ -444,6 +609,7 @@ func TestExecute_StagedSyncError(t *testing.T) {
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: filepath.Join(tmpDir, "dest_closed.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts: lifecycle.Options{
 			Policy: lifecycle.PolicyStrip,
 		},
@@ -453,4 +619,265 @@ func TestExecute_StagedSyncError(t *testing.T) {
 		},
 	})
 	require.Error(t, err)
+}
+
+func TestTakeSourceSnapshot_FdErrors(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := createTestBinary(t, tmpDir, "app", []byte("bin"))
+
+	f, err := os.Open(src)
+	require.NoError(t, err)
+	_ = f.Close() // close immediately so f.Stat() fails
+
+	_, err = lifecycle.TakeSourceSnapshot(f, src)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stating source executable")
+
+	// Open valid file but fail readFdXattrsFunc
+	f2, err := os.Open(src)
+	require.NoError(t, err)
+	defer func() { _ = f2.Close() }()
+
+	restore := lifecycle.SetReadFdXattrsFuncForTest(func(int) (map[string][]byte, error) {
+		return nil, errors.New("simulated fd xattr error")
+	})
+	defer restore()
+
+	_, err = lifecycle.TakeSourceSnapshot(f2, src)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading extended attributes from fd")
+}
+
+func TestExecute_StripInheritedStagingACLs_Error(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := createTestBinary(t, tmpDir, "app", []byte("bin"))
+
+	restore := lifecycle.SetRemoveFdXattrFuncForTest(func(int, string) error {
+		return errors.New("simulated remove acl error")
+	})
+	defer restore()
+
+	err := lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: filepath.Join(tmpDir, "dest.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
+		Opts:     lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			return nil
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrStagingFailed)
+}
+
+func TestExecute_IntentReplaceSource_DestErrors(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := createTestBinary(t, tmpDir, "app", []byte("bin"))
+
+	// 1. DestPath does not exist
+	err := lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: filepath.Join(tmpDir, "non_existent.bin"),
+		Intent:   lifecycle.IntentReplaceSource,
+		Opts:     lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			return nil
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not match source for replace-source intent")
+
+	// 2. DestPath exists but has different inode
+	destDiff := createTestBinary(t, tmpDir, "different.bin", []byte("other"))
+	err = lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: destDiff,
+		Intent:   lifecycle.IntentReplaceSource,
+		Opts:     lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			return nil
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not match source inode for replace-source intent")
+}
+
+func TestExecute_SrcFileDescriptorMismatch_StatError(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := createTestBinary(t, tmpDir, "app", []byte("bin"))
+
+	f, err := os.Open(src)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	// Provide non-existent src path with open f
+	err = lifecycle.Execute(lifecycle.Transaction{
+		SrcPath: filepath.Join(tmpDir, "non_existent.bin"),
+		SrcFile: f,
+		Intent:  lifecycle.IntentReplaceSource,
+		Opts:    lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			return nil
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrSourceModified)
+}
+
+func TestExecute_VerifyReadback_ReadFdXattrsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := createTestBinary(t, tmpDir, "app", []byte("bin"))
+
+	restore := lifecycle.SetReadFdXattrsFuncForTest(func(int) (map[string][]byte, error) {
+		return nil, errors.New("simulated readback xattrs error")
+	})
+	defer restore()
+
+	err := lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: filepath.Join(tmpDir, "dest.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
+		Opts:     lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			_, err := staged.Write([]byte("transformed"))
+			return err
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrReadbackVerification)
+}
+
+func TestExecute_VerifyReadback_IntegrityAttr(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := createTestBinary(t, tmpDir, "app", []byte("bin"))
+
+	restore := lifecycle.SetReadFdXattrsFuncForTest(func(int) (map[string][]byte, error) {
+		return map[string][]byte{"security.ima": []byte("digest")}, nil
+	})
+	defer restore()
+
+	err := lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: filepath.Join(tmpDir, "dest.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
+		Opts:     lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			_, err := staged.Write([]byte("transformed"))
+			return err
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrReadbackVerification)
+	assert.Contains(t, err.Error(), "unexpected integrity attribute")
+}
+
+func TestExecute_StripInheritedStagingACLs_DefaultAclError(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := createTestBinary(t, tmpDir, "app", []byte("bin"))
+
+	restore := lifecycle.SetRemoveFdXattrFuncForTest(func(fd int, attr string) error {
+		if attr == "system.posix_acl_default" {
+			return errors.New("simulated default acl error")
+		}
+		return nil
+	})
+	defer restore()
+
+	err := lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: filepath.Join(tmpDir, "dest.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
+		Opts:     lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			return nil
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrStagingFailed)
+}
+
+func TestExecute_SymlinkTargetMismatchAndStatError(t *testing.T) {
+	tmpDir := t.TempDir()
+	target := createTestBinary(t, tmpDir, "target.bin", []byte("bin"))
+	link := filepath.Join(tmpDir, "link.bin")
+	require.NoError(t, os.Symlink(target, link))
+
+	// Open descriptor to original target
+	f, err := os.Open(target)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	// 1. Remove target file so EvalSymlinks returns target, but os.Stat(realSrc) fails
+	require.NoError(t, os.Remove(target))
+	err = lifecycle.Execute(lifecycle.Transaction{
+		SrcPath: link,
+		SrcFile: f,
+		Intent:  lifecycle.IntentReplaceSource,
+		Opts:    lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			return nil
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrSourceModified)
+	assert.Contains(t, err.Error(), "stating source path")
+
+	// 2. Re-create target with different inode
+	require.NoError(t, os.WriteFile(target, []byte("new target"), 0o755))
+	err = lifecycle.Execute(lifecycle.Transaction{
+		SrcPath: link,
+		SrcFile: f,
+		Intent:  lifecycle.IntentReplaceSource,
+		Opts:    lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			return nil
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrSourceModified)
+	assert.Contains(t, err.Error(), "source descriptor does not match path")
+}
+
+func TestExecute_VerifyReadback_UnexpectedAttributes(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := createTestBinary(t, tmpDir, "app", []byte("bin"))
+
+	// 1. PolicyStrip with unexpected user attribute
+	restore := lifecycle.SetReadFdXattrsFuncForTest(func(int) (map[string][]byte, error) {
+		return map[string][]byte{"user.unexpected": []byte("val")}, nil
+	})
+	defer restore()
+
+	err := lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: filepath.Join(tmpDir, "dest1.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
+		Opts: lifecycle.Options{
+			Policy: lifecycle.PolicyStrip,
+		},
+		Transform: func(staged *os.File) error {
+			_, err := staged.Write([]byte("transformed"))
+			return err
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrReadbackVerification)
+	assert.Contains(t, err.Error(), "unexpected attribute \"user.unexpected\" under strip policy")
+
+	// 2. PolicyStrict with attribute not on source
+	err = lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: filepath.Join(tmpDir, "dest2.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
+		Opts: lifecycle.Options{
+			Policy: lifecycle.PolicyStrict,
+		},
+		Transform: func(staged *os.File) error {
+			_, err := staged.Write([]byte("transformed"))
+			return err
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrReadbackVerification)
+	assert.Contains(t, err.Error(), "unexpected attribute \"user.unexpected\" not present on source")
 }

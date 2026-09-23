@@ -35,13 +35,25 @@ type SourceSnapshot struct {
 func TakeSourceSnapshot(f *os.File, path string) (*SourceSnapshot, error) {
 	var fi os.FileInfo
 	var err error
+	var xattrs map[string][]byte
 	if f != nil {
 		fi, err = f.Stat()
+		if err != nil {
+			return nil, fmt.Errorf("stating source executable: %w", err)
+		}
+		xattrs, err = readFdXattrsFunc(int(f.Fd()))
+		if err != nil {
+			return nil, fmt.Errorf("reading extended attributes from fd: %w", err)
+		}
 	} else {
 		fi, err = os.Stat(path)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("stating source executable %s: %w", path, err)
+		if err != nil {
+			return nil, fmt.Errorf("stating source executable %s: %w", path, err)
+		}
+		xattrs, err = readXattrsFunc(path)
+		if err != nil {
+			return nil, fmt.Errorf("reading extended attributes from %s: %w", path, err)
+		}
 	}
 
 	dev, ino, nlink, uid, gid, ok := fileStatMetadataFunc(fi)
@@ -49,11 +61,6 @@ func TakeSourceSnapshot(f *os.File, path string) (*SourceSnapshot, error) {
 		// Fallback for non-UNIX platforms where raw stat is unavailable
 		dev, ino, nlink = 0, 0, 1
 		uid, gid = os.Geteuid(), os.Getegid()
-	}
-
-	xattrs, err := readXattrsFunc(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading extended attributes from %s: %w", path, err)
 	}
 
 	return &SourceSnapshot{

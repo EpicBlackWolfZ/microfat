@@ -24,9 +24,21 @@ const (
 	DefaultPolicy = PolicyStrict
 )
 
+// PublicationIntent declares the caller's intended publication mode.
+type PublicationIntent string
+
+const (
+	// IntentReplaceSource replaces the source executable atomically in-place.
+	IntentReplaceSource PublicationIntent = "replace-source"
+
+	// IntentCreateOnly publishes the derivative to a new destination, failing if destination exists.
+	IntentCreateOnly PublicationIntent = "create-only"
+)
+
 // Common lifecycle transaction errors.
 var (
 	ErrInvalidMetadataPolicy    = errors.New("invalid metadata policy: must be 'strict' or 'strip'")
+	ErrInvalidPublicationIntent = errors.New("invalid publication intent: must be 'replace-source' or 'create-only'")
 	ErrHardLinkDetected         = errors.New("multi-link file detected: in-place replacement severs hard links")
 	ErrSourceModified           = errors.New("source file modified or replaced during transformation")
 	ErrConcurrentTransformation = errors.New("concurrent transformation in progress on target")

@@ -133,20 +133,41 @@ func TestExecute_ValidationErrors(t *testing.T) {
 	// Nil transform
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: src,
+		Intent:  lifecycle.IntentReplaceSource,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "transformation callback must not be nil")
 
 	// Empty source
 	err = lifecycle.Execute(lifecycle.Transaction{
+		Intent:    lifecycle.IntentReplaceSource,
 		Transform: func(_ *os.File) error { return nil },
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "source path must not be empty")
 
+	// Invalid / empty intent
+	err = lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:   src,
+		Transform: func(_ *os.File) error { return nil },
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrInvalidPublicationIntent)
+
+	// Create-only with empty destination
+	err = lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:   src,
+		DestPath:  "",
+		Intent:    lifecycle.IntentCreateOnly,
+		Transform: func(_ *os.File) error { return nil },
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "destination path must not be empty")
+
 	// Invalid policy
 	err = lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: src,
+		Intent:  lifecycle.IntentReplaceSource,
 		Opts: lifecycle.Options{
 			Policy: "invalid",
 		},
@@ -170,6 +191,7 @@ func TestExecute_FreshDestination_SuccessAndCollision(t *testing.T) {
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: dest,
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, writeErr := staged.Write(transformedContent)
@@ -192,6 +214,7 @@ func TestExecute_FreshDestination_SuccessAndCollision(t *testing.T) {
 	err = lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: dest,
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, writeErr := staged.Write([]byte("clobber"))
@@ -218,6 +241,7 @@ func TestExecute_InPlace_SuccessAndHardlinkProtection(t *testing.T) {
 	// Normal in-place (1 link) succeeds
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: src,
+		Intent:  lifecycle.IntentReplaceSource,
 		Opts:    lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, writeErr := staged.Write(transformedContent)
@@ -237,6 +261,7 @@ func TestExecute_InPlace_SuccessAndHardlinkProtection(t *testing.T) {
 	// In-place without BreakHardlinks must fail
 	err = lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: src,
+		Intent:  lifecycle.IntentReplaceSource,
 		Opts:    lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, writeErr := staged.Write([]byte("should fail"))
@@ -255,6 +280,7 @@ func TestExecute_InPlace_SuccessAndHardlinkProtection(t *testing.T) {
 	brokenContent := []byte("severed link content")
 	err = lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: src,
+		Intent:  lifecycle.IntentReplaceSource,
 		Opts: lifecycle.Options{
 			Policy:         lifecycle.PolicyStrict,
 			BreakHardlinks: true,
@@ -290,6 +316,7 @@ func TestExecute_InPlace_SymlinkResolution(t *testing.T) {
 	// Running in-place on symlink path must resolve and transform the target file
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: symlinkPath,
+		Intent:  lifecycle.IntentReplaceSource,
 		Opts:    lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, writeErr := staged.Write(transformedContent)
@@ -320,6 +347,7 @@ func TestExecute_TransformError_CleansUpStaging(t *testing.T) {
 
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: src,
+		Intent:  lifecycle.IntentReplaceSource,
 		Opts:    lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, _ = staged.Write([]byte("partial garbage"))
@@ -350,6 +378,7 @@ func TestExecute_EmptyStaging_FailsReadback(t *testing.T) {
 
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: src,
+		Intent:  lifecycle.IntentReplaceSource,
 		Opts:    lifecycle.DefaultOptions(),
 		Transform: func(_ *os.File) error {
 			// Write nothing (0 bytes)
@@ -369,6 +398,7 @@ func TestExecute_SourceModifiedDuringTransformation_Aborts(t *testing.T) {
 
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: src,
+		Intent:  lifecycle.IntentReplaceSource,
 		Opts:    lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, _ = staged.Write([]byte("new content"))
@@ -399,6 +429,7 @@ func TestExecute_ConcurrentInPlace_SerializedByAdvisoryLock(t *testing.T) {
 		defer wg.Done()
 		err1 = lifecycle.Execute(lifecycle.Transaction{
 			SrcPath: src,
+			Intent:  lifecycle.IntentReplaceSource,
 			Opts:    lifecycle.DefaultOptions(),
 			Transform: func(staged *os.File) error {
 				_, _ = staged.Write([]byte("tx1"))
@@ -414,6 +445,7 @@ func TestExecute_ConcurrentInPlace_SerializedByAdvisoryLock(t *testing.T) {
 	// Second concurrent in-place transaction must fail immediately with ErrConcurrentTransformation
 	err2 = lifecycle.Execute(lifecycle.Transaction{
 		SrcPath: src,
+		Intent:  lifecycle.IntentReplaceSource,
 		Opts:    lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, _ = staged.Write([]byte("tx2"))
@@ -451,6 +483,7 @@ func TestExecute_ExtendedAttributes_PreservedInStrict_StrippedInStrip(t *testing
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: destStrict,
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, wErr := staged.Write([]byte("strict"))
@@ -469,6 +502,7 @@ func TestExecute_ExtendedAttributes_PreservedInStrict_StrippedInStrip(t *testing
 	err = lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: destStrip,
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts: lifecycle.Options{
 			Policy: lifecycle.PolicyStrip,
 		},
@@ -499,6 +533,7 @@ func TestExecute_WithSourceFile(t *testing.T) {
 		SrcPath:  src,
 		SrcFile:  f,
 		DestPath: dest,
+		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
 			_, err := io.Copy(staged, f)

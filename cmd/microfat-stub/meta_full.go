@@ -153,11 +153,12 @@ func handleOptimizeTo(arg1 string, selfFile *os.File, selectedEntry *format.Vari
 	if err != nil {
 		return err
 	}
-	fmt.Printf("[microfat] Extracting variant '%s' to '%s'...\n", selectedEntry.Level, targetPath)
-	if err := optimizeTo(targetPath, selfFile, selectedEntry, idx, opts); err != nil {
+	cleanTarget := filepath.Clean(targetPath)
+	fmt.Printf("[microfat] Extracting variant '%s' to '%s'...\n", selectedEntry.Level, cleanTarget)
+	if err := optimizeTo(cleanTarget, selfFile, selectedEntry, idx, opts); err != nil {
 		return err
 	}
-	fmt.Printf("[microfat] Successfully materialized '%s' (%d bytes)\n", targetPath, selectedEntry.UncompressedSize)
+	fmt.Printf("[microfat] Successfully materialized '%s' (%d bytes)\n", cleanTarget, selectedEntry.UncompressedSize)
 	return nil
 }
 
@@ -372,14 +373,26 @@ func isPrefixOrExact(arg, flag string) bool {
 
 func extractTargetPath(arg, primaryFlag, aliasFlag string) (string, error) {
 	if after, ok := strings.CutPrefix(arg, primaryFlag+"="); ok {
-		return after, nil
+		trimmed := strings.TrimSpace(after)
+		if trimmed == "" {
+			return "", fmt.Errorf("%s requires a destination path", primaryFlag)
+		}
+		return trimmed, nil
 	}
 	if aliasFlag != "" && strings.HasPrefix(arg, aliasFlag+"=") {
-		return strings.TrimPrefix(arg, aliasFlag+"="), nil
+		trimmed := strings.TrimSpace(strings.TrimPrefix(arg, aliasFlag+"="))
+		if trimmed == "" {
+			return "", fmt.Errorf("%s requires a destination path", aliasFlag)
+		}
+		return trimmed, nil
 	}
 	for _, a := range os.Args[2:] {
 		if !strings.HasPrefix(a, "--microfat:") {
-			return a, nil
+			trimmed := strings.TrimSpace(a)
+			if trimmed == "" {
+				return "", fmt.Errorf("%s requires a destination path", primaryFlag)
+			}
+			return trimmed, nil
 		}
 	}
 	return "", fmt.Errorf("%s requires a destination path", primaryFlag)

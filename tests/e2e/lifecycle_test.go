@@ -199,4 +199,100 @@ func TestLifecycleReleaseSmoke(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("Scenario43_TransformationSafety_EmptyDestinationRejection", func(t *testing.T) {
+		t.Parallel()
+
+		goldenData, err := os.ReadFile(goldenFatBin)
+		require.NoError(t, err)
+
+		flagsToTest := [][]string{
+			{"--microfat:optimize-to="},
+			{"--microfat:optimize-to", ""},
+			{"--microfat:trim-to="},
+			{"--microfat:trim-to", ""},
+		}
+
+		for _, flagArgs := range flagsToTest {
+			flagDesc := strings.Join(flagArgs, " ")
+			t.Run(flagDesc, func(t *testing.T) {
+				t.Parallel()
+				subDir := t.TempDir()
+				copyFat := filepath.Join(subDir, "copy.fat")
+				require.NoError(t, os.WriteFile(copyFat, goldenData, 0o755))
+
+				fiBefore, err := os.Stat(copyFat)
+				require.NoError(t, err)
+				statBefore, okBefore := fiBefore.Sys().(*syscall.Stat_t)
+
+				_, stderr, exitCode, err := executeFatBinary(t, copyFat, nil, flagArgs...)
+				if err == nil && exitCode == defaultExitCode {
+					t.Fatalf("expected empty destination to fail for args %v, but succeeded", flagArgs)
+				}
+				if !strings.Contains(stderr, "requires a destination path") {
+					t.Fatalf("expected 'requires a destination path' in stderr for args %v, got: %s", flagArgs, stderr)
+				}
+
+				fiAfter, err := os.Stat(copyFat)
+				require.NoError(t, err)
+				statAfter, okAfter := fiAfter.Sys().(*syscall.Stat_t)
+
+				if fiBefore.Size() != fiAfter.Size() {
+					t.Fatalf("file size changed from %d to %d for args %v", fiBefore.Size(), fiAfter.Size(), flagArgs)
+				}
+				if okBefore && okAfter {
+					if statBefore.Ino != statAfter.Ino {
+						t.Fatalf("inode changed from %d to %d for args %v", statBefore.Ino, statAfter.Ino, flagArgs)
+					}
+				}
+
+				afterData, err := os.ReadFile(copyFat)
+				require.NoError(t, err)
+				if !bytes.Equal(goldenData, afterData) {
+					t.Fatalf("binary bytes modified in-place despite empty destination error for args %v", flagArgs)
+				}
+			})
+		}
+
+		// Also verify CLI rejects empty destination flag (-o "" or --output="")
+		cliSubDir := t.TempDir()
+		cliCopyFat := filepath.Join(cliSubDir, "cli_copy.fat")
+		require.NoError(t, os.WriteFile(cliCopyFat, goldenData, 0o755))
+
+		fiBefore, err := os.Stat(cliCopyFat)
+		require.NoError(t, err)
+		statBefore, okBefore := fiBefore.Sys().(*syscall.Stat_t)
+
+		for _, optFlags := range [][]string{{"-o="}, {"--output="}, {"-o", ""}, {"--output", ""}} {
+			cmdArgs := append([]string{"trim", cliCopyFat}, optFlags...)
+			cmd := exec.Command(cliPath, cmdArgs...)
+			var errBuf bytes.Buffer
+			cmd.Stderr = &errBuf
+			err := cmd.Run()
+			flagDesc := strings.Join(optFlags, " ")
+			if err == nil {
+				t.Fatalf("expected microfat trim %s to fail, but succeeded", flagDesc)
+			}
+			if !strings.Contains(errBuf.String(), "destination output path cannot be empty") {
+				t.Fatalf("expected 'destination output path cannot be empty' in stderr for %s, got: %s", flagDesc, errBuf.String())
+			}
+
+			fiAfter, err := os.Stat(cliCopyFat)
+			require.NoError(t, err)
+			statAfter, okAfter := fiAfter.Sys().(*syscall.Stat_t)
+
+			if fiBefore.Size() != fiAfter.Size() {
+				t.Fatalf("file size changed from %d to %d for %s", fiBefore.Size(), fiAfter.Size(), flagDesc)
+			}
+			if okBefore && okAfter && statBefore.Ino != statAfter.Ino {
+				t.Fatalf("inode changed from %d to %d for %s", statBefore.Ino, statAfter.Ino, flagDesc)
+			}
+
+			afterData, err := os.ReadFile(cliCopyFat)
+			require.NoError(t, err)
+			if !bytes.Equal(goldenData, afterData) {
+				t.Fatalf("binary modified in-place despite empty %s flag", flagDesc)
+			}
+		}
+	})
 }

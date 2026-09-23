@@ -96,3 +96,34 @@ func AcquireAdvisoryLockForTest(path string) (func(), error) {
 func SyncDirectoryForTest(dir string) error {
 	return syncDirectory(dir)
 }
+
+// SetReadFdXattrsFuncForTest sets readFdXattrsFunc for unit testing.
+func SetReadFdXattrsFuncForTest(fn func(int) (map[string][]byte, error)) func() {
+	orig := readFdXattrsFunc
+	readFdXattrsFunc = fn
+	return func() { readFdXattrsFunc = orig }
+}
+
+// SetRemoveFdXattrFuncForTest sets removeFdXattrFunc for unit testing.
+func SetRemoveFdXattrFuncForTest(fn func(int, string) error) func() {
+	orig := removeFdXattrFunc
+	removeFdXattrFunc = fn
+	return func() { removeFdXattrFunc = orig }
+}
+
+// SetLinkFuncForTest sets linkFunc for unit testing.
+func SetLinkFuncForTest(fn func(string, string) error) func() {
+	orig := linkFunc
+	linkFunc = fn
+	return func() { linkFunc = orig }
+}
+
+// ReadFdXattrsForTest exports readFdXattrs for unit testing.
+func ReadFdXattrsForTest(fd int) (map[string][]byte, error) {
+	return readFdXattrs(fd)
+}
+
+// RemoveFdXattrForTest exports removeFdXattr for unit testing.
+func RemoveFdXattrForTest(fd int, attr string) error {
+	return removeFdXattr(fd, attr)
+}

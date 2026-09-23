@@ -29,3 +29,24 @@ func SetGetxattrFuncForTest(fn func(string, string, []byte) (int, error)) func()
 	getxattrFunc = fn
 	return func() { getxattrFunc = orig }
 }
+
+// SetFlistxattrFuncForTest sets flistxattrFunc for unit testing on Linux.
+func SetFlistxattrFuncForTest(fn func(int, []byte) (int, error)) func() {
+	orig := flistxattrFunc
+	flistxattrFunc = fn
+	return func() { flistxattrFunc = orig }
+}
+
+// SetFgetxattrFuncForTest sets fgetxattrFunc for unit testing on Linux.
+func SetFgetxattrFuncForTest(fn func(int, string, []byte) (int, error)) func() {
+	orig := fgetxattrFunc
+	fgetxattrFunc = fn
+	return func() { fgetxattrFunc = orig }
+}
+
+// SetFremovexattrFuncForTest sets fremovexattrFunc for unit testing on Linux.
+func SetFremovexattrFuncForTest(fn func(int, string) error) func() {
+	orig := fremovexattrFunc
+	fremovexattrFunc = fn
+	return func() { fremovexattrFunc = orig }
+}

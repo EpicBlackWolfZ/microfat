@@ -413,9 +413,15 @@ func newTrimCmd() *cobra.Command {
 			}
 			targetLevel = policyRes.SelectedVariant
 
+			intent := lifecycle.IntentReplaceSource
 			destPath := srcPath
-			if outputPath != "" {
-				destPath = filepath.Clean(outputPath)
+			if cmd.Flags().Changed("output") {
+				cleaned := strings.TrimSpace(strings.TrimPrefix(outputPath, "="))
+				if cleaned == "" {
+					return errors.New("destination output path cannot be empty")
+				}
+				intent = lifecycle.IntentCreateOnly
+				destPath = filepath.Clean(cleaned)
 			} else {
 				realPath, err := filepath.EvalSymlinks(srcPath)
 				if err == nil && realPath != srcPath {
@@ -428,7 +434,8 @@ func newTrimCmd() *cobra.Command {
 			err = lifecycle.Execute(lifecycle.Transaction{
 				SrcPath:  srcPath,
 				SrcFile:  f,
-				DestPath: outputPath,
+				DestPath: destPath,
+				Intent:   intent,
 				Opts: lifecycle.Options{
 					Policy:         metaPolicy,
 					BreakHardlinks: breakHardlinks,

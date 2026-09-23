@@ -400,6 +400,32 @@ func TestHelperFunctions(t *testing.T) {
 	if err == nil {
 		t.Errorf("expected error when no target path provided")
 	}
+
+	_, err = extractTargetPath("--microfat:trim-to=", "--microfat:trim-to", "")
+	if err == nil {
+		t.Errorf("expected error for --microfat:trim-to=")
+	}
+
+	_, err = extractTargetPath("--microfat:specialize-to=", "--microfat:trim-to", "--microfat:specialize-to")
+	if err == nil {
+		t.Errorf("expected error for --microfat:specialize-to=")
+	}
+
+	os.Args = []string{testAppArg, "--microfat:trim-to", "  "}
+	_, err = extractTargetPath("--microfat:trim-to", "--microfat:trim-to", "")
+	if err == nil {
+		t.Errorf("expected error when target path is whitespace")
+	}
+
+	err = trimTo("", nil, 0, "v1", lifecycle.DefaultOptions())
+	if err == nil {
+		t.Errorf("expected trimTo with empty destPath to fail")
+	}
+
+	err = optimizeTo("", nil, nil, nil, lifecycle.DefaultOptions())
+	if err == nil {
+		t.Errorf("expected optimizeTo with empty destPath to fail")
+	}
 }
 
 func TestExtractVariantAndOptimize(t *testing.T) {

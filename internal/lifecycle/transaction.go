@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -29,6 +30,7 @@ type Transaction struct {
 	SrcPath   string
 	SrcFile   *os.File
 	DestPath  string
+	Intent    PublicationIntent
 	Opts      Options
 	Transform TransformFunc
 }
@@ -40,6 +42,16 @@ func Execute(tx Transaction) error {
 	}
 	if tx.SrcPath == "" {
 		return errors.New("source path must not be empty")
+	}
+
+	switch tx.Intent {
+	case IntentReplaceSource, IntentCreateOnly:
+	default:
+		return fmt.Errorf("%w: %q", ErrInvalidPublicationIntent, tx.Intent)
+	}
+
+	if tx.Intent == IntentCreateOnly && strings.TrimSpace(tx.DestPath) == "" {
+		return errors.New("destination path must not be empty for create-only intent")
 	}
 
 	policy, err := ParsePolicy(string(tx.Opts.Policy))
@@ -84,6 +96,10 @@ func Execute(tx Transaction) error {
 		return fmt.Errorf("%w: setting staging permissions: %w", ErrStagingFailed, err)
 	}
 
+	if err := stripInheritedStagingACLs(staged); err != nil {
+		return fmt.Errorf("%w: stripping inherited staging ACLs: %w", ErrStagingFailed, err)
+	}
+
 	if err := tx.Transform(staged); err != nil {
 		return fmt.Errorf("transformation callback failed: %w", err)
 	}
@@ -115,6 +131,16 @@ func Execute(tx Transaction) error {
 	return nil
 }
 
+func stripInheritedStagingACLs(staged *os.File) error {
+	if err := removeFdXattrFunc(int(staged.Fd()), "system.posix_acl_access"); err != nil {
+		return err
+	}
+	if err := removeFdXattrFunc(int(staged.Fd()), "system.posix_acl_default"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func resolveTargetAndSnapshot(tx *Transaction) (*SourceSnapshot, string, bool, error) {
 	cleanSrc := filepath.Clean(tx.SrcPath)
 	snap, err := TakeSourceSnapshot(tx.SrcFile, cleanSrc)
@@ -125,44 +151,61 @@ func resolveTargetAndSnapshot(tx *Transaction) (*SourceSnapshot, string, bool, e
 		return nil, "", false, err
 	}
 
-	inPlace := false
-	destPath := filepath.Clean(tx.DestPath)
-	if tx.DestPath == "" || destPath == cleanSrc {
-		inPlace = true
-		destPath = cleanSrc
-	} else if destFi, err := os.Stat(destPath); err == nil {
-		dev, ino, _, _, _, ok := fileStatMetadataFunc(destFi)
-		if ok && dev == snap.Dev && ino == snap.Ino {
-			inPlace = true
+	realSrc := cleanSrc
+	if realPath, evalErr := filepath.EvalSymlinks(cleanSrc); evalErr == nil && realPath != cleanSrc {
+		realSrc = realPath
+	}
+
+	if tx.SrcFile != nil {
+		srcFi, statErr := os.Stat(realSrc)
+		if statErr != nil {
+			return nil, "", false, fmt.Errorf("%w: stating source path %s: %w", ErrSourceModified, realSrc, statErr)
+		}
+		dev, ino, _, _, _, ok := fileStatMetadataFunc(srcFi)
+		if !ok || dev != snap.Dev || ino != snap.Ino {
+			return nil, "", false, fmt.Errorf("%w: source descriptor does not match path %s", ErrSourceModified, realSrc)
 		}
 	}
 
-	if inPlace {
-		if realSrc, err := filepath.EvalSymlinks(cleanSrc); err == nil && realSrc != cleanSrc {
-			destPath = realSrc
-			if realFi, err := os.Stat(realSrc); err == nil {
-				dev, ino, _, _, _, ok := fileStatMetadataFunc(realFi)
-				if ok && (dev != snap.Dev || ino != snap.Ino) {
-					snap, err = TakeSourceSnapshot(nil, realSrc)
-					if err != nil {
-						return nil, "", false, err
-					}
-					if err := ValidateSnapshot(snap, tx.Opts.Policy); err != nil {
-						return nil, "", false, err
-					}
+	var destPath string
+	var inPlace bool
+
+	switch tx.Intent {
+	case IntentReplaceSource:
+		inPlace = true
+		destPath = realSrc
+		if tx.DestPath != "" {
+			cleanDest := filepath.Clean(tx.DestPath)
+			if cleanDest != cleanSrc && cleanDest != realSrc {
+				destFi, statErr := os.Stat(cleanDest)
+				if statErr != nil {
+					return nil, "", false, fmt.Errorf("destination path %s does not match source for replace-source intent: %w", cleanDest, statErr)
 				}
+				dev, ino, _, _, _, ok := fileStatMetadataFunc(destFi)
+				if !ok || dev != snap.Dev || ino != snap.Ino {
+					return nil, "", false, fmt.Errorf("destination path %s does not match source inode for replace-source intent", cleanDest)
+				}
+				destPath = cleanDest
 			}
 		}
 		if snap.Nlink > 1 && !tx.Opts.BreakHardlinks {
 			return nil, "", false, fmt.Errorf("%w: %s has %d links; pass --break-hardlinks to break link",
 				ErrHardLinkDetected, cleanSrc, snap.Nlink)
 		}
+
+	case IntentCreateOnly:
+		inPlace = false
+		destPath = filepath.Clean(tx.DestPath)
 	}
 
 	return snap, destPath, inPlace, nil
 }
 
 func applyMetadata(staged *os.File, snap *SourceSnapshot, policy MetadataPolicy) (os.FileMode, error) {
+	if err := stripInheritedStagingACLs(staged); err != nil {
+		return 0, err
+	}
+
 	if policy == PolicyStrict {
 		if err := chownFunc(staged, snap.UID, snap.GID); err != nil {
 			if geteuidFunc() != snap.UID || os.Getegid() != snap.GID {
@@ -208,6 +251,31 @@ func verifyReadback(staged *os.File, targetMode os.FileMode, snap *SourceSnapsho
 		if ok && (uid != snap.UID || gid != snap.GID) {
 			return fmt.Errorf("%w: ownership %d:%d does not match %d:%d",
 				ErrReadbackVerification, uid, gid, snap.UID, snap.GID)
+		}
+	}
+
+	stagedAttrs, err := readFdXattrsFunc(int(staged.Fd()))
+	if err != nil {
+		return fmt.Errorf("%w: reading staged extended attributes: %w", ErrReadbackVerification, err)
+	}
+	for attr := range stagedAttrs {
+		switch {
+		case attr == "system.posix_acl_access" || attr == "system.posix_acl_default":
+			return fmt.Errorf("%w: staged file has unapproved inherited ACL %q", ErrReadbackVerification, attr)
+		case attr == attrSecurityCapability:
+			return fmt.Errorf("%w: staged file has unexpected capability %q", ErrReadbackVerification, attr)
+		case attr == attrSecurityIMA || attr == attrSecurityEVM:
+			return fmt.Errorf("%w: staged file has unexpected integrity attribute %q", ErrReadbackVerification, attr)
+		case policy == PolicyStrip:
+			if attr != attrSecuritySELinux {
+				return fmt.Errorf("%w: staged file has unexpected attribute %q under strip policy", ErrReadbackVerification, attr)
+			}
+		case policy == PolicyStrict:
+			if attr != attrSecuritySELinux {
+				if _, ok := snap.Xattrs[attr]; !ok {
+					return fmt.Errorf("%w: staged file has unexpected attribute %q not present on source", ErrReadbackVerification, attr)
+				}
+			}
 		}
 	}
 	return nil

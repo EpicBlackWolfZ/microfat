@@ -10,9 +10,12 @@ import (
 
 var (
 	readXattrsFunc        = readXattrs
+	readFdXattrsFunc      = readFdXattrs
 	setFdXattrFunc        = setFdXattr
+	removeFdXattrFunc     = removeFdXattr
 	chownFunc             = func(f *os.File, uid, gid int) error { return f.Chown(uid, gid) }
 	chmodFunc             = func(f *os.File, mode os.FileMode) error { return f.Chmod(mode) }
+	linkFunc              = os.Link
 	publishCreateOnlyFunc = publishCreateOnly
 	acquireLockFunc       = acquireAdvisoryLock
 	syncDirFunc           = syncDirectory
@@ -27,7 +30,15 @@ func readXattrs(_ string) (map[string][]byte, error) {
 	return nil, nil
 }
 
+func readFdXattrs(_ int) (map[string][]byte, error) {
+	return nil, nil
+}
+
 func setFdXattr(_ int, _ string, _ []byte) error {
+	return nil
+}
+
+func removeFdXattr(_ int, _ string) error {
 	return nil
 }
 

@@ -14,9 +14,12 @@ import (
 
 var (
 	readXattrsFunc        = readXattrs
+	readFdXattrsFunc      = readFdXattrs
 	setFdXattrFunc        = setFdXattr
+	removeFdXattrFunc     = removeFdXattr
 	chownFunc             = func(f *os.File, uid, gid int) error { return f.Chown(uid, gid) }
 	chmodFunc             = func(f *os.File, mode os.FileMode) error { return f.Chmod(mode) }
+	linkFunc              = os.Link
 	publishCreateOnlyFunc = publishCreateOnly
 	acquireLockFunc       = acquireAdvisoryLock
 	syncDirFunc           = syncDirectory
@@ -24,7 +27,10 @@ var (
 	flockFunc             = unix.Flock
 	listxattrFunc         = unix.Listxattr
 	getxattrFunc          = unix.Getxattr
+	flistxattrFunc        = unix.Flistxattr
+	fgetxattrFunc         = unix.Fgetxattr
 	fsetxattrFunc         = unix.Fsetxattr
+	fremovexattrFunc      = unix.Fremovexattr
 	fileStatMetadataFunc  = fileStatMetadata
 )
 
@@ -85,8 +91,64 @@ func readXattrs(path string) (map[string][]byte, error) {
 	return xattrs, nil
 }
 
+func readFdXattrs(fd int) (map[string][]byte, error) {
+	sz, err := flistxattrFunc(fd, nil)
+	if err != nil {
+		if errors.Is(err, unix.ENOTSUP) || errors.Is(err, unix.EOPNOTSUPP) || errors.Is(err, unix.ENOSYS) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if sz <= 0 {
+		return nil, nil
+	}
+
+	buf := make([]byte, sz)
+	sz, err = flistxattrFunc(fd, buf)
+	if err != nil {
+		if errors.Is(err, unix.ENOTSUP) || errors.Is(err, unix.EOPNOTSUPP) || errors.Is(err, unix.ENOSYS) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	rawAttrs := bytes.Split(buf[:sz], []byte{0})
+	xattrs := make(map[string][]byte)
+	for _, raw := range rawAttrs {
+		if len(raw) == 0 {
+			continue
+		}
+		attr := string(raw)
+		valSz, err := fgetxattrFunc(fd, attr, nil)
+		if err != nil {
+			if errors.Is(err, unix.ENODATA) || errors.Is(err, unix.ENOTSUP) || errors.Is(err, unix.EOPNOTSUPP) {
+				continue
+			}
+			return nil, err
+		}
+		val := make([]byte, valSz)
+		_, err = fgetxattrFunc(fd, attr, val)
+		if err != nil {
+			if errors.Is(err, unix.ENODATA) || errors.Is(err, unix.ENOTSUP) || errors.Is(err, unix.EOPNOTSUPP) {
+				continue
+			}
+			return nil, err
+		}
+		xattrs[attr] = val
+	}
+	return xattrs, nil
+}
+
 func setFdXattr(fd int, attr string, val []byte) error {
 	return fsetxattrFunc(fd, attr, val, 0)
+}
+
+func removeFdXattr(fd int, attr string) error {
+	err := fremovexattrFunc(fd, attr)
+	if err != nil && (errors.Is(err, unix.ENODATA) || errors.Is(err, unix.ENOTSUP) || errors.Is(err, unix.EOPNOTSUPP)) {
+		return nil
+	}
+	return err
 }
 
 func publishCreateOnly(stagedPath, destPath string) error {
@@ -97,15 +159,18 @@ func publishCreateOnly(stagedPath, destPath string) error {
 	if errors.Is(err, unix.EEXIST) {
 		return fmt.Errorf("%w: %s", ErrDestinationExists, destPath)
 	}
-	// Fallback for filesystems that do not implement RENAME_NOREPLACE
+	// Fallback for filesystems that do not implement RENAME_NOREPLACE:
+	// Use atomic link publication to guarantee existing destinations are not overwritten.
 	if errors.Is(err, unix.ENOSYS) || errors.Is(err, unix.EINVAL) {
-		if _, statErr := os.Lstat(destPath); statErr == nil {
+		linkErr := linkFunc(stagedPath, destPath)
+		if linkErr == nil {
+			_ = os.Remove(stagedPath)
+			return nil
+		}
+		if errors.Is(linkErr, unix.EEXIST) || os.IsExist(linkErr) {
 			return fmt.Errorf("%w: %s", ErrDestinationExists, destPath)
 		}
-		if renameErr := renameFunc(stagedPath, destPath); renameErr != nil {
-			return fmt.Errorf("fallback rename to %s: %w", destPath, renameErr)
-		}
-		return nil
+		return fmt.Errorf("fallback link publication to %s: %w", destPath, linkErr)
 	}
 	return fmt.Errorf("publishing to %s: %w", destPath, err)
 }
