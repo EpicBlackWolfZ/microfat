@@ -654,6 +654,10 @@ func TestRunBinaryMetaCommands(t *testing.T) {
 	os.Args = []string{fatPath, "myarg1", "--flag"}
 	require.NoError(t, runBinary(fatPath), "runBinary standard execution failed")
 
+	// 8. Invalid metadata policy flag fails fast
+	os.Args = []string{fatPath, "--microfat:trim", "--microfat:metadata-policy=invalid"}
+	require.Error(t, runBinary(fatPath), "expected error on invalid metadata-policy")
+
 	// 8. Error cases
 	os.Args = []string{stubPath, "--microfat:info"}
 	if err := runBinary(stubPath); err == nil {
@@ -3446,4 +3450,39 @@ func TestExecution_OriginalExePropagation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseLifecycleOptions(t *testing.T) {
+	t.Parallel()
+
+	// Default options
+	opts, err := parseLifecycleOptions([]string{})
+	require.NoError(t, err)
+	assert.Equal(t, lifecycle.PolicyStrict, opts.Policy)
+	assert.False(t, opts.BreakHardlinks)
+
+	// Valid policy flag strip
+	opts, err = parseLifecycleOptions([]string{"--microfat:metadata-policy=strip"})
+	require.NoError(t, err)
+	assert.Equal(t, lifecycle.PolicyStrip, opts.Policy)
+
+	// Valid policy flag strict
+	opts, err = parseLifecycleOptions([]string{"--microfat:metadata-policy=strict"})
+	require.NoError(t, err)
+	assert.Equal(t, lifecycle.PolicyStrict, opts.Policy)
+
+	// Valid break hardlinks flag
+	opts, err = parseLifecycleOptions([]string{"--microfat:break-hardlinks"})
+	require.NoError(t, err)
+	assert.True(t, opts.BreakHardlinks)
+
+	// Both flags
+	opts, err = parseLifecycleOptions([]string{"--microfat:metadata-policy=strict", "--microfat:break-hardlinks"})
+	require.NoError(t, err)
+	assert.Equal(t, lifecycle.PolicyStrict, opts.Policy)
+	assert.True(t, opts.BreakHardlinks)
+
+	// Invalid policy flag
+	_, err = parseLifecycleOptions([]string{"--microfat:metadata-policy=invalid"})
+	require.Error(t, err)
 }
