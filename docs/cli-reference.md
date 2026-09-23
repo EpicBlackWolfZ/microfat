@@ -290,6 +290,19 @@ microfat pack --manifest pgo.yaml -o bin/myapp
 | `--keep-intermediates` | *(none)* | `bool` | `false` | Retain intermediate compiled variant binaries when building via manifest. |
 | `--go-binary` | *(none)* | `string` | `""` | Path to custom Go toolchain binary (defaults to `$GO` or `go`). |
 
+#### Compression Precedence and Profile Resolution Contract
+
+When packaging multiple microarchitecture variants into a fat binary (via `microfat pack`, `pack --manifest`, or `pgo-pack`), compression codecs and levels are resolved according to strict hierarchical precedence:
+
+1. **Explicit Variant Algorithm Override**: A per-variant `compression` specification in the manifest (e.g. `compression: lz4` or `compression: zstd:best`) takes the highest precedence for that variant.
+2. **Explicit CLI Algorithm Override**: The `--compression` command-line flag (e.g. `--compression=zstd` or `--compression=lz4`) overrides top-level manifest algorithm settings and profile defaults across all packaged variants.
+3. **Explicit Root Manifest Algorithm**: A top-level `compression` entry in a declarative manifest applies to all variants unless specifically overridden by a per-variant `compression` field.
+4. **Compression Profile Resolution**: If compression algorithm is omitted (empty `""`), the compression profile (`--profile` on CLI or `profile` in manifest) resolves the target codec:
+   - `latency`: Sets uncompressed `none` for payloads smaller than 256 KiB (`DefaultLatencyUncompressedThreshold`); otherwise sets `lz4`.
+   - `size`: Sets `zstd:best` (maximum compression ratio).
+   - `balanced` (default when profile and algorithm are omitted): Sets `zstd:better`.
+5. **Launcher Stub Support**: The resulting binary can be executed with either the standard (full) launcher stub or the lightweight minimal launcher stub (built with `-tags minimal`).
+
 ---
 
 ### `microfat pgo-pack`

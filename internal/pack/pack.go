@@ -76,15 +76,16 @@ func (o *Options) warnf(format string, args ...any) {
 }
 
 // DefaultOptions returns a new Options instance initialized with safe, recommended defaults:
-// Format v2 binary table, balanced profile with Zstandard compression, standard 0755 file permissions,
+// Format v2 binary table, balanced profile, standard 0755 file permissions,
 // linux/amd64 target OS/architecture, and an initialized variants map.
+// Compression is left empty so profile defaults or explicit overrides resolve naturally.
 func DefaultOptions() Options {
 	return Options{
 		TargetOS:      "linux",
 		TargetArch:    microarch.ArchAMD64,
 		Variants:      make(map[string]string),
 		Profile:       codec.ProfileBalanced,
-		Compression:   codec.AlgorithmZstd,
+		Compression:   "",
 		Permissions:   defaultFileMode,
 		FormatVersion: format.FormatVersionCurrent,
 	}

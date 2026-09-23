@@ -1256,6 +1256,231 @@ func TestMultiCodecPackagingAndVerification(t *testing.T) {
 	}
 }
 
+func TestPackProfileOnlyArtifactCompression(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	stubPath := filepath.Join(tempDir, "stub")
+	require.NoError(t, os.WriteFile(stubPath, []byte("#!/bin/sh\necho Stub Launcher\n"), 0o755))
+
+	const (
+		subThresholdSize    = 100 * 1024
+		superThresholdSize  = 600 * 1024
+		overridePayloadSize = 200 * 1024
+	)
+
+	// v1: tiny payload (100KB < 512KB) -> auto-promotes to "none" under ProfileLatency
+	v1Path := filepath.Join(tempDir, "bin-v1")
+	v1Content := make([]byte, subThresholdSize)
+	for i := range v1Content {
+		v1Content[i] = byte(i % 256)
+	}
+	require.NoError(t, os.WriteFile(v1Path, v1Content, 0o755))
+
+	// v3: large payload (600KB >= 512KB) -> defaults to "lz4" under ProfileLatency
+	v3Path := filepath.Join(tempDir, "bin-v3")
+	v3Content := make([]byte, superThresholdSize)
+	for i := range v3Content {
+		v3Content[i] = byte((i % 256) ^ (i / 1024))
+	}
+	require.NoError(t, os.WriteFile(v3Path, v3Content, 0o755))
+
+	// v4: payload with explicit variant compression override (zstd:best)
+	v4Path := filepath.Join(tempDir, "bin-v4")
+	v4Content := make([]byte, overridePayloadSize)
+	for i := range v4Content {
+		v4Content[i] = byte((i * 7) % 256)
+	}
+	require.NoError(t, os.WriteFile(v4Path, v4Content, 0o755))
+
+	t.Run("ProfileLatencyWithOmittedAlgorithm", func(t *testing.T) {
+		t.Parallel()
+		outFat := filepath.Join(t.TempDir(), "fat-latency.bin")
+		opts := DefaultOptions()
+		opts.StubPath = stubPath
+		opts.OutputPath = outFat
+		opts.AppName = "latency-app"
+		opts.SkipELFValidation = true
+		opts.Profile = codec.ProfileLatency
+		opts.Variants = map[string]string{
+			"v1": v1Path,
+			"v3": v3Path,
+			"v4": v4Path,
+		}
+		opts.VariantCompression = map[string]VariantCompressionOptions{
+			"v4": {
+				Compression: codec.AlgorithmZstd,
+				Level:       "best",
+			},
+		}
+
+		idx, err := Pack(opts)
+		require.NoError(t, err)
+
+		v1Entry, _ := idx.FindVariant("v1")
+		require.Equal(t, codec.AlgorithmNone, v1Entry.Compression, "sub-512KiB under latency profile must resolve to none")
+		v3Entry, _ := idx.FindVariant("v3")
+		require.Equal(t, "lz4", v3Entry.Compression, ">=512KiB under latency profile must resolve to lz4")
+		v4Entry, _ := idx.FindVariant("v4")
+		require.Equal(t, codec.AlgorithmZstd, v4Entry.Compression, "explicit variant override must retain zstd")
+
+		f, err := os.Open(outFat)
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+
+		stat, err := f.Stat()
+		require.NoError(t, err)
+
+		storedIdx, err := format.ReadTrailerAndIndex(f, stat.Size())
+		require.NoError(t, err)
+
+		diskV1, _ := storedIdx.FindVariant("v1")
+		require.Equal(t, codec.AlgorithmNone, diskV1.Compression)
+		require.Equal(t, int64(subThresholdSize), diskV1.UncompressedSize)
+		require.Equal(t, int64(subThresholdSize), diskV1.CompressedSize)
+
+		diskV3, _ := storedIdx.FindVariant("v3")
+		require.Equal(t, "lz4", diskV3.Compression)
+
+		diskV4, _ := storedIdx.FindVariant("v4")
+		require.Equal(t, codec.AlgorithmZstd, diskV4.Compression)
+
+		_, results, err := VerifyBinary(f, stat.Size())
+		require.NoError(t, err)
+		for _, r := range results {
+			require.True(t, r.Valid, "variant %s must be valid: %v", r.Level, r.Error)
+		}
+	})
+
+	t.Run("ProfileSizeWithOmittedAlgorithm", func(t *testing.T) {
+		t.Parallel()
+		outFat := filepath.Join(t.TempDir(), "fat-size.bin")
+		opts := DefaultOptions()
+		opts.StubPath = stubPath
+		opts.OutputPath = outFat
+		opts.AppName = "size-app"
+		opts.SkipELFValidation = true
+		opts.Profile = codec.ProfileSize
+		opts.Variants = map[string]string{
+			"v1": v1Path,
+			"v3": v3Path,
+		}
+
+		idx, err := Pack(opts)
+		require.NoError(t, err)
+
+		v1Entry, _ := idx.FindVariant("v1")
+		require.Equal(t, codec.AlgorithmZstd, v1Entry.Compression)
+		v3Entry, _ := idx.FindVariant("v3")
+		require.Equal(t, codec.AlgorithmZstd, v3Entry.Compression)
+
+		f, err := os.Open(outFat)
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+
+		stat, err := f.Stat()
+		require.NoError(t, err)
+
+		storedIdx, err := format.ReadTrailerAndIndex(f, stat.Size())
+		require.NoError(t, err)
+		diskV1, _ := storedIdx.FindVariant("v1")
+		require.Equal(t, codec.AlgorithmZstd, diskV1.Compression)
+		diskV3, _ := storedIdx.FindVariant("v3")
+		require.Equal(t, codec.AlgorithmZstd, diskV3.Compression)
+
+		_, results, err := VerifyBinary(f, stat.Size())
+		require.NoError(t, err)
+		for _, r := range results {
+			require.True(t, r.Valid)
+		}
+	})
+
+	t.Run("ProfileBalancedWithOmittedAlgorithm", func(t *testing.T) {
+		t.Parallel()
+		outFat := filepath.Join(t.TempDir(), "fat-balanced.bin")
+		opts := DefaultOptions()
+		opts.StubPath = stubPath
+		opts.OutputPath = outFat
+		opts.AppName = "balanced-app"
+		opts.SkipELFValidation = true
+		opts.Profile = codec.ProfileBalanced
+		opts.Variants = map[string]string{
+			"v1": v1Path,
+			"v3": v3Path,
+		}
+
+		idx, err := Pack(opts)
+		require.NoError(t, err)
+
+		v1Entry, _ := idx.FindVariant("v1")
+		require.Equal(t, codec.AlgorithmZstd, v1Entry.Compression)
+		v3Entry, _ := idx.FindVariant("v3")
+		require.Equal(t, codec.AlgorithmZstd, v3Entry.Compression)
+
+		f, err := os.Open(outFat)
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+
+		stat, err := f.Stat()
+		require.NoError(t, err)
+
+		storedIdx, err := format.ReadTrailerAndIndex(f, stat.Size())
+		require.NoError(t, err)
+		diskV1, _ := storedIdx.FindVariant("v1")
+		require.Equal(t, codec.AlgorithmZstd, diskV1.Compression)
+
+		_, results, err := VerifyBinary(f, stat.Size())
+		require.NoError(t, err)
+		for _, r := range results {
+			require.True(t, r.Valid)
+		}
+	})
+
+	t.Run("ExplicitZstdOverridesLatencyProfile", func(t *testing.T) {
+		t.Parallel()
+		outFat := filepath.Join(t.TempDir(), "fat-explicit-zstd.bin")
+		opts := DefaultOptions()
+		opts.StubPath = stubPath
+		opts.OutputPath = outFat
+		opts.AppName = "explicit-zstd-app"
+		opts.SkipELFValidation = true
+		opts.Profile = codec.ProfileLatency
+		opts.Compression = codec.AlgorithmZstd
+		opts.Variants = map[string]string{
+			"v1": v1Path,
+			"v3": v3Path,
+		}
+
+		idx, err := Pack(opts)
+		require.NoError(t, err)
+
+		v1Entry, _ := idx.FindVariant("v1")
+		require.Equal(t, codec.AlgorithmZstd, v1Entry.Compression, "explicit root zstd must not be erased by latency profile")
+		v3Entry, _ := idx.FindVariant("v3")
+		require.Equal(t, codec.AlgorithmZstd, v3Entry.Compression)
+
+		f, err := os.Open(outFat)
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+
+		stat, err := f.Stat()
+		require.NoError(t, err)
+
+		storedIdx, err := format.ReadTrailerAndIndex(f, stat.Size())
+		require.NoError(t, err)
+		diskV1, _ := storedIdx.FindVariant("v1")
+		require.Equal(t, codec.AlgorithmZstd, diskV1.Compression)
+		diskV3, _ := storedIdx.FindVariant("v3")
+		require.Equal(t, codec.AlgorithmZstd, diskV3.Compression)
+
+		_, results, err := VerifyBinary(f, stat.Size())
+		require.NoError(t, err)
+		for _, r := range results {
+			require.True(t, r.Valid)
+		}
+	})
+}
+
 func createBenchmarkFixture(b *testing.B, variantCount int) (stubPath string, variants map[string]string, tempDir string) {
 	b.Helper()
 	tempDir = b.TempDir()
@@ -1646,8 +1871,8 @@ func TestDefaultOptions(t *testing.T) {
 		if opts.Profile != codec.ProfileBalanced {
 			t.Errorf("expected Profile %q, got %q", codec.ProfileBalanced, opts.Profile)
 		}
-		if opts.Compression != codec.AlgorithmZstd {
-			t.Errorf("expected Compression %q, got %q", codec.AlgorithmZstd, opts.Compression)
+		if opts.Compression != "" {
+			t.Errorf("expected Compression to be empty, got %q", opts.Compression)
 		}
 		if opts.Permissions != defaultFileMode {
 			t.Errorf("expected Permissions %o, got %o", defaultFileMode, opts.Permissions)

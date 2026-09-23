@@ -39,7 +39,7 @@ func TestRegistry(t *testing.T) {
 		t.Fatalf("expected at least 3 codecs, got %d: %v", len(list), list)
 	}
 
-	for _, name := range []string{testCodecZstd, "lz4", "none", "ZSTD", "Lz4", "NoNe", ""} {
+	for _, name := range []string{testCodecZstd, codec.AlgorithmLZ4, codec.AlgorithmNone, "ZSTD", "Lz4", "NoNe", ""} {
 		c, err := codec.Get(name)
 		if err != nil {
 			t.Fatalf("unexpected error getting codec %q: %v", name, err)
@@ -99,12 +99,32 @@ func TestResolveCompression(t *testing.T) {
 		{"Profile size", codec.ProfileSize, "", "", 1024, codec.AlgorithmZstd, "best", true, nil},
 		{"Profile latency tiny payload auto-promotes to none", codec.ProfileLatency, "", "",
 			testPayloadSizeTiny, codec.AlgorithmNone, "", false, nil},
+		{"Profile latency threshold - 1 selects none", codec.ProfileLatency, "", "",
+			codec.DefaultLatencyUncompressedThreshold - 1, codec.AlgorithmNone, "", false, nil},
+		{"Profile latency threshold selects lz4", codec.ProfileLatency, "", "",
+			codec.DefaultLatencyUncompressedThreshold, codec.AlgorithmLZ4, "", false, nil},
+		{"Profile latency threshold + 1 selects lz4", codec.ProfileLatency, "", "",
+			codec.DefaultLatencyUncompressedThreshold + 1, codec.AlgorithmLZ4, "", false, nil},
+		{"Profile latency zero size selects lz4", codec.ProfileLatency, "", "",
+			0, codec.AlgorithmLZ4, "", false, nil},
+		{"Profile latency negative size selects lz4", codec.ProfileLatency, "", "",
+			-1, codec.AlgorithmLZ4, "", false, nil},
 		{"Profile latency large payload defaults to lz4", codec.ProfileLatency, "", "",
 			testPayloadSizeLarge, codec.AlgorithmLZ4, "", false, nil},
-		{"Profile latency with explicit lz4 does not auto-promote", codec.ProfileLatency, "lz4", "",
+		{"Profile latency with explicit lz4 does not auto-promote", codec.ProfileLatency, codec.AlgorithmLZ4, "",
 			testPayloadSizeTiny, codec.AlgorithmLZ4, "", false, nil},
+		{"Profile latency with explicit zstd retained", codec.ProfileLatency, codec.AlgorithmZstd, "",
+			1024, codec.AlgorithmZstd, "", false, nil},
+		{"Profile size with explicit lz4 retained", codec.ProfileSize, codec.AlgorithmLZ4, "",
+			1024, codec.AlgorithmLZ4, "", false, nil},
+		{"Profile size with explicit none retained", codec.ProfileSize, codec.AlgorithmNone, "",
+			1024, codec.AlgorithmNone, "", false, nil},
 		{"Explicit algorithm and spec level override", codec.ProfileLatency, "zstd:9", "", 1024,
 			codec.AlgorithmZstd, "9", true, nil},
+		{"Explicit algo spec level overridden by explicit level", codec.ProfileLatency, "zstd:9", "3", 1024,
+			codec.AlgorithmZstd, "3", true, nil},
+		{"Explicit algo spec level beats profile default level", codec.ProfileSize, "zstd:1", "", 1024,
+			codec.AlgorithmZstd, "1", true, nil},
 		{"Profile size with custom algo and level", codec.ProfileSize, testCodecZstd, "19", 1024,
 			codec.AlgorithmZstd, "19", true, nil},
 		{"Profile balanced with explicit level", codec.ProfileBalanced, testCodecZstd, testLevelFastest, 1024,
