@@ -25,6 +25,7 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
+	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"github.com/EpicBlackWolfZ/microfat/internal/version"
@@ -339,11 +340,13 @@ func newVerifyCmd() *cobra.Command {
 
 func newTrimCmd() *cobra.Command {
 	var (
-		outputPath       string
-		targetLevel      string
-		maxLevel         string
-		disabledVariants string
-		policyName       string
+		outputPath        string
+		targetLevel       string
+		maxLevel          string
+		disabledVariants  string
+		policyName        string
+		metadataPolicyStr string
+		breakHardlinks    bool
 	)
 
 	cmd := &cobra.Command{
@@ -351,6 +354,10 @@ func newTrimCmd() *cobra.Command {
 		Short: "Trim away unneeded variant payloads, keeping the launcher stub and selected variant",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			metaPolicy, err := lifecycle.ParsePolicy(metadataPolicyStr)
+			if err != nil {
+				return err
+			}
 			srcPath := filepath.Clean(args[0])
 			// #nosec G304 -- user-supplied binary path to trim
 			f, err := inputfile.Open(srcPath)
@@ -417,37 +424,23 @@ func newTrimCmd() *cobra.Command {
 				}
 			}
 
-			destDir := filepath.Dir(destPath)
-			if err := os.MkdirAll(destDir, defaultDirMode); err != nil {
-				return fmt.Errorf("creating destination directory %s: %w", destDir, err)
-			}
-			tmpFile, err := os.CreateTemp(destDir, ".microfat-trim-*.tmp")
-			if err != nil {
-				return fmt.Errorf("creating temp file in %s: %w", destDir, err)
-			}
-			tmpPath := tmpFile.Name()
-			defer func() {
-				_ = tmpFile.Close()
-				_ = os.Remove(tmpPath)
-			}()
-
-			newIdx, err := pack.TrimBinary(f, stat.Size(), targetLevel, tmpFile)
+			var newIdx *format.Index
+			err = lifecycle.Execute(lifecycle.Transaction{
+				SrcPath:  srcPath,
+				SrcFile:  f,
+				DestPath: outputPath,
+				Opts: lifecycle.Options{
+					Policy:         metaPolicy,
+					BreakHardlinks: breakHardlinks,
+				},
+				Transform: func(staged *os.File) error {
+					var trimErr error
+					newIdx, trimErr = pack.TrimBinary(f, stat.Size(), targetLevel, staged)
+					return trimErr
+				},
+			})
 			if err != nil {
 				return fmt.Errorf("trimming binary: %w", err)
-			}
-
-			if err := tmpFile.Sync(); err != nil {
-				return fmt.Errorf("syncing file: %w", err)
-			}
-			if err := tmpFile.Chmod(stat.Mode()); err != nil {
-				return fmt.Errorf("chmodding file: %w", err)
-			}
-			if err := tmpFile.Close(); err != nil {
-				return fmt.Errorf("closing temp file: %w", err)
-			}
-
-			if err := os.Rename(tmpPath, destPath); err != nil {
-				return fmt.Errorf("writing trimmed binary to %s: %w", destPath, err)
 			}
 
 			newStat, _ := os.Stat(destPath)
@@ -471,6 +464,9 @@ func newTrimCmd() *cobra.Command {
 	cmd.Flags().StringVar(&maxLevel, "max-level", "", "Maximum microarchitecture level ceiling to retain")
 	cmd.Flags().StringVar(&disabledVariants, "disable-variants", "", "Comma-separated list of variant levels to exclude")
 	cmd.Flags().StringVar(&policyName, "policy", "", "Policy preset name (e.g. safe_avx512, no_downclock)")
+	cmd.Flags().StringVar(&metadataPolicyStr, "metadata-policy", "strict", "Metadata preservation policy: 'strict' (default) or 'strip'")
+	cmd.Flags().BoolVar(&breakHardlinks, "break-hardlinks", false,
+		"Allow in-place transformation to break hard links if multi-link file is detected")
 
 	return cmd
 }

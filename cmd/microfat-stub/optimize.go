@@ -9,14 +9,13 @@ import (
 	"path/filepath"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
-)
-
-const (
-	defaultExecMode = 0o755
+	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
 )
 
 // optimizeInPlace extracts the selected variant over the current executable on disk.
-func optimizeInPlace(selfPath string, selfFile *os.File, entry *format.VariantEntry, idx *format.Index) error {
+func optimizeInPlace(
+	selfPath string, selfFile *os.File, entry *format.VariantEntry, idx *format.Index, opts lifecycle.Options,
+) error {
 	if err := validateDeploymentPath(selfPath, selfFile); err != nil {
 		return err
 	}
@@ -28,86 +27,28 @@ func optimizeInPlace(selfPath string, selfFile *os.File, entry *format.VariantEn
 		fmt.Printf("[microfat] Notice: resolved symlink '%s' -> target '%s'\n", selfPath, realPath)
 	}
 
-	targetMode := os.FileMode(defaultExecMode)
-	if stat, err := selfFile.Stat(); err == nil {
-		targetMode = stat.Mode()
-	}
-
-	destDir := filepath.Dir(realPath)
-	tmpFile, err := os.CreateTemp(destDir, ".microfat-opt-*.tmp")
-	if err != nil {
-		return fmt.Errorf("creating temp file in %s (check write permissions): %w", destDir, err)
-	}
-	tmpPath := tmpFile.Name()
-	defer func() {
-		_ = tmpFile.Close()
-		// #nosec G703 -- cleanup temp file
-		_ = os.Remove(tmpPath)
-	}()
-
-	if err := extractVariantToWriter(selfFile, entry, idx, tmpFile); err != nil {
-		return fmt.Errorf("extracting variant: %w", err)
-	}
-
-	if err := tmpFile.Sync(); err != nil {
-		return fmt.Errorf("syncing file: %w", err)
-	}
-	if err := tmpFile.Chmod(targetMode); err != nil {
-		return fmt.Errorf("chmodding file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-
-	// #nosec G703 -- atomic replace of binary
-	if err := validateDeploymentPath(realPath, selfFile); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, realPath); err != nil {
-		return fmt.Errorf("replacing binary %s: %w", realPath, err)
-	}
-
-	return nil
+	return lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  realPath,
+		SrcFile:  selfFile,
+		DestPath: realPath,
+		Opts:     opts,
+		Transform: func(staged *os.File) error {
+			return extractVariantToWriter(selfFile, entry, idx, staged)
+		},
+	})
 }
 
 // optimizeTo extracts the selected variant directly to an explicit target path.
-func optimizeTo(destPath string, selfFile *os.File, entry *format.VariantEntry, idx *format.Index) error {
-	cleanDest := filepath.Clean(destPath)
-	destDir := filepath.Dir(cleanDest)
-	// #nosec G703 -- create destination directory
-	if err := os.MkdirAll(destDir, defaultExecMode); err != nil {
-		return fmt.Errorf("creating directory %s: %w", destDir, err)
-	}
-
-	tmpFile, err := os.CreateTemp(destDir, ".microfat-opt-*.tmp")
-	if err != nil {
-		return fmt.Errorf("creating temp file in %s: %w", destDir, err)
-	}
-	tmpPath := tmpFile.Name()
-	defer func() {
-		_ = tmpFile.Close()
-		// #nosec G703 -- cleanup temp file
-		_ = os.Remove(tmpPath)
-	}()
-
-	if err := extractVariantToWriter(selfFile, entry, idx, tmpFile); err != nil {
-		return fmt.Errorf("extracting variant: %w", err)
-	}
-
-	if err := tmpFile.Sync(); err != nil {
-		return fmt.Errorf("syncing file: %w", err)
-	}
-	if err := tmpFile.Chmod(defaultExecMode); err != nil {
-		return fmt.Errorf("chmodding file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-
-	// #nosec G703 -- move extracted binary
-	if err := os.Rename(tmpPath, cleanDest); err != nil {
-		return fmt.Errorf("moving extracted binary to %s: %w", cleanDest, err)
-	}
-
-	return nil
+func optimizeTo(
+	destPath string, selfFile *os.File, entry *format.VariantEntry, idx *format.Index, opts lifecycle.Options,
+) error {
+	return lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  selfFile.Name(),
+		SrcFile:  selfFile,
+		DestPath: destPath,
+		Opts:     opts,
+		Transform: func(staged *os.File) error {
+			return extractVariantToWriter(selfFile, entry, idx, staged)
+		},
+	})
 }

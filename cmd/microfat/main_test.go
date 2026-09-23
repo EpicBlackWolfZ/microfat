@@ -15,10 +15,12 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"github.com/EpicBlackWolfZ/microfat/internal/testutil"
 
@@ -1571,4 +1573,72 @@ func TestPprofBlockAndMutexEnvVars(t *testing.T) {
 	<-ch
 
 	assert.Greater(t, p.Count(), before)
+}
+
+func TestTrim_MetadataPolicyAndBreakHardlinks(t *testing.T) {
+	tempDir := t.TempDir()
+
+	stubPath := filepath.Join(tempDir, "stub")
+	require.NoError(t, os.WriteFile(stubPath, []byte("#!/bin/sh\necho stub\n"), 0o755))
+	v1Path := filepath.Join(tempDir, "v1")
+	require.NoError(t, os.WriteFile(v1Path, []byte("#!/bin/sh\necho v1\n"), 0o755))
+
+	fatPath := filepath.Join(tempDir, "app.fat")
+	packCmd := newPackCmd()
+	packCmd.SetArgs([]string{
+		flagStub, stubPath,
+		flagOutput, fatPath,
+		flagName, "demo-app",
+		"-v", "v1=" + v1Path,
+		flagSkipELF,
+	})
+	require.NoError(t, packCmd.Execute())
+
+	// 1. Invalid metadata policy fails
+	trimCmd := newTrimCmd()
+	trimCmd.SetArgs([]string{"--metadata-policy", "invalid", fatPath})
+	err := trimCmd.Execute()
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrInvalidMetadataPolicy)
+
+	// 2. Collision refusal on fresh destination
+	existingDest := filepath.Join(tempDir, "already_exists.fat")
+	require.NoError(t, os.WriteFile(existingDest, []byte("pre-existing"), 0o755))
+	trimCollision := newTrimCmd()
+	trimCollision.SetArgs([]string{"-o", existingDest, fatPath})
+	err = trimCollision.Execute()
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrDestinationExists)
+
+	// 3. Hard-link refusal without --break-hardlinks
+	hardlinkSrc := filepath.Join(tempDir, "fat_hardlink.fat")
+	require.NoError(t, os.Link(fatPath, hardlinkSrc))
+	trimHardlink := newTrimCmd()
+	trimHardlink.SetArgs([]string{hardlinkSrc})
+	err = trimHardlink.Execute()
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrHardLinkDetected)
+
+	// 4. In-place trim with --break-hardlinks succeeds and severs the link
+	trimBreak := newTrimCmd()
+	trimBreak.SetArgs([]string{"--break-hardlinks", "--metadata-policy", "strip", hardlinkSrc})
+	require.NoError(t, trimBreak.Execute())
+
+	// Verify hardlinkSrc and fatPath now have different inodes
+	fiOrig, err := os.Stat(fatPath)
+	require.NoError(t, err)
+	fiSevered, err := os.Stat(hardlinkSrc)
+	require.NoError(t, err)
+	statOrig, ok1 := fiOrig.Sys().(*syscall.Stat_t)
+	statSevered, ok2 := fiSevered.Sys().(*syscall.Stat_t)
+	if ok1 && ok2 && statOrig.Dev == statSevered.Dev {
+		assert.NotEqual(t, statOrig.Ino, statSevered.Ino, "hard link must be severed")
+	}
+
+	// 5. Trim to fresh destination with strict policy succeeds
+	freshStrict := filepath.Join(tempDir, "trimmed_strict.fat")
+	trimStrict := newTrimCmd()
+	trimStrict.SetArgs([]string{"--metadata-policy", "strict", "-o", freshStrict, fatPath})
+	require.NoError(t, trimStrict.Execute())
+	require.FileExists(t, freshStrict)
 }

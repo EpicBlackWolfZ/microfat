@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -143,6 +144,59 @@ func TestLifecycleReleaseSmoke(t *testing.T) {
 		}
 		if !strings.Contains(matStdout, "golden:variant="+currentHostLevel) {
 			t.Fatalf("unexpected output from materialized binary:\n%s", matStdout)
+		}
+	})
+
+	t.Run("Scenario42_TransformationSafety_CollisionAndHardlink", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+
+		// 1. Pre-existing destination collision on --microfat:trim-to
+		existingDest := filepath.Join(tempDir, "existing.fat")
+		require.NoError(t, os.WriteFile(existingDest, []byte("pre-existing content"), 0o755))
+
+		_, stderr, exitCode, err := executeFatBinary(t, goldenFatBin, nil, "--microfat:trim-to="+existingDest)
+		if err == nil && exitCode == defaultExitCode {
+			t.Fatalf("expected collision failure for --microfat:trim-to, but it succeeded")
+		}
+		if !strings.Contains(stderr, "destination already exists") {
+			t.Fatalf("expected 'destination already exists' error message in stderr, got: %s", stderr)
+		}
+
+		// 2. Hardlink refusal on in-place trim
+		copyFat := filepath.Join(tempDir, "copy.fat")
+		fatData, err := os.ReadFile(goldenFatBin)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(copyFat, fatData, 0o755))
+
+		hardlinkFat := filepath.Join(tempDir, "copy_link.fat")
+		require.NoError(t, os.Link(copyFat, hardlinkFat))
+
+		_, stderr, exitCode, err = executeFatBinary(t, hardlinkFat, nil, "--microfat:trim")
+		if err == nil && exitCode == defaultExitCode {
+			t.Fatalf("expected hard-link refusal for in-place trim without --break-hardlinks, but it succeeded")
+		}
+		if !strings.Contains(stderr, "multi-link file detected") {
+			t.Fatalf("expected 'multi-link file detected' error in stderr, got: %s", stderr)
+		}
+
+		// 3. In-place trim with --microfat:break-hardlinks succeeds and severs the link
+		_, stderr, exitCode, err = executeFatBinary(t, hardlinkFat, nil,
+			"--microfat:trim", "--microfat:break-hardlinks", "--microfat:metadata-policy=strip")
+		if err != nil || exitCode != defaultExitCode {
+			t.Fatalf("in-place trim with --break-hardlinks failed (code %d): %v\nstderr: %s", exitCode, err, stderr)
+		}
+
+		fiOrig, err := os.Stat(copyFat)
+		require.NoError(t, err)
+		fiSevered, err := os.Stat(hardlinkFat)
+		require.NoError(t, err)
+		statOrig, ok1 := fiOrig.Sys().(*syscall.Stat_t)
+		statSevered, ok2 := fiSevered.Sys().(*syscall.Stat_t)
+		if ok1 && ok2 && statOrig.Dev == statSevered.Dev {
+			if statOrig.Ino == statSevered.Ino {
+				t.Fatalf("expected hard link to be severed, but both still share inode %d", statOrig.Ino)
+			}
 		}
 	})
 }

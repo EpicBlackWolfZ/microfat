@@ -8,11 +8,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 )
 
 // trimInPlace trims the fat binary in-place to contain only the selected variant + stub.
-func trimInPlace(selfPath string, selfFile *os.File, totalSize int64, targetLevel string) error {
+func trimInPlace(selfPath string, selfFile *os.File, totalSize int64, targetLevel string, opts lifecycle.Options) error {
 	if err := validateDeploymentPath(selfPath, selfFile); err != nil {
 		return err
 	}
@@ -24,86 +25,28 @@ func trimInPlace(selfPath string, selfFile *os.File, totalSize int64, targetLeve
 		fmt.Printf("[microfat] Notice: resolved symlink '%s' -> target '%s'\n", selfPath, realPath)
 	}
 
-	targetMode := os.FileMode(defaultExecMode)
-	if stat, err := selfFile.Stat(); err == nil {
-		targetMode = stat.Mode()
-	}
-
-	destDir := filepath.Dir(realPath)
-	tmpFile, err := os.CreateTemp(destDir, ".microfat-trim-*.tmp")
-	if err != nil {
-		return fmt.Errorf("creating temp file in %s (check write permissions): %w", destDir, err)
-	}
-	tmpPath := tmpFile.Name()
-	defer func() {
-		_ = tmpFile.Close()
-		// #nosec G703 -- cleanup temp file
-		_ = os.Remove(tmpPath)
-	}()
-
-	if _, err := pack.TrimBinary(selfFile, totalSize, targetLevel, tmpFile); err != nil {
-		return fmt.Errorf("trimming binary: %w", err)
-	}
-
-	if err := tmpFile.Sync(); err != nil {
-		return fmt.Errorf("syncing file: %w", err)
-	}
-	if err := tmpFile.Chmod(targetMode); err != nil {
-		return fmt.Errorf("chmodding file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-
-	// #nosec G703 -- atomic replace of binary
-	if err := validateDeploymentPath(realPath, selfFile); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, realPath); err != nil {
-		return fmt.Errorf("replacing binary %s: %w", realPath, err)
-	}
-
-	return nil
+	return lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  realPath,
+		SrcFile:  selfFile,
+		DestPath: realPath,
+		Opts:     opts,
+		Transform: func(staged *os.File) error {
+			_, trimErr := pack.TrimBinary(selfFile, totalSize, targetLevel, staged)
+			return trimErr
+		},
+	})
 }
 
 // trimTo creates a new trimmed fat binary at the specified target destination path.
-func trimTo(destPath string, selfFile *os.File, totalSize int64, targetLevel string) error {
-	cleanDest := filepath.Clean(destPath)
-	destDir := filepath.Dir(cleanDest)
-	// #nosec G703 -- create destination directory
-	if err := os.MkdirAll(destDir, defaultExecMode); err != nil {
-		return fmt.Errorf("creating directory %s: %w", destDir, err)
-	}
-
-	tmpFile, err := os.CreateTemp(destDir, ".microfat-trim-*.tmp")
-	if err != nil {
-		return fmt.Errorf("creating temp file in %s: %w", destDir, err)
-	}
-	tmpPath := tmpFile.Name()
-	defer func() {
-		_ = tmpFile.Close()
-		// #nosec G703 -- cleanup temp file
-		_ = os.Remove(tmpPath)
-	}()
-
-	if _, err := pack.TrimBinary(selfFile, totalSize, targetLevel, tmpFile); err != nil {
-		return fmt.Errorf("trimming binary: %w", err)
-	}
-
-	if err := tmpFile.Sync(); err != nil {
-		return fmt.Errorf("syncing file: %w", err)
-	}
-	if err := tmpFile.Chmod(defaultExecMode); err != nil {
-		return fmt.Errorf("chmodding file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-
-	// #nosec G703 -- move trimmed binary
-	if err := os.Rename(tmpPath, cleanDest); err != nil {
-		return fmt.Errorf("moving trimmed binary to %s: %w", cleanDest, err)
-	}
-
-	return nil
+func trimTo(destPath string, selfFile *os.File, totalSize int64, targetLevel string, opts lifecycle.Options) error {
+	return lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  selfFile.Name(),
+		SrcFile:  selfFile,
+		DestPath: destPath,
+		Opts:     opts,
+		Transform: func(staged *os.File) error {
+			_, trimErr := pack.TrimBinary(selfFile, totalSize, targetLevel, staged)
+			return trimErr
+		},
+	})
 }
