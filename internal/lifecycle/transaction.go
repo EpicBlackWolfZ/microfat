@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -208,9 +209,14 @@ func applyMetadata(staged *os.File, snap *SourceSnapshot, policy MetadataPolicy)
 
 	if policy == PolicyStrict {
 		if err := chownFunc(staged, snap.UID, snap.GID); err != nil {
-			if geteuidFunc() != snap.UID || os.Getegid() != snap.GID {
-				return 0, fmt.Errorf("%w: cannot preserve uid=%d gid=%d (running as uid=%d): use --metadata-policy=strip: %w",
-					ErrOwnershipPreservation, snap.UID, snap.GID, geteuidFunc(), err)
+			stagedFi, statErr := staged.Stat()
+			if statErr != nil {
+				return 0, fmt.Errorf("%w: stating staged file after failed chown: %w", ErrOwnershipPreservation, statErr)
+			}
+			_, _, _, uid, gid, ok := fileStatMetadataFunc(stagedFi)
+			if !ok || uid != snap.UID || gid != snap.GID {
+				return 0, fmt.Errorf("%w: cannot preserve uid=%d gid=%d (staged file has uid=%d gid=%d): use --metadata-policy=strip: %w",
+					ErrOwnershipPreservation, snap.UID, snap.GID, uid, gid, err)
 			}
 		}
 		for attr, val := range snap.Xattrs {
@@ -246,7 +252,7 @@ func verifyReadback(staged *os.File, targetMode os.FileMode, snap *SourceSnapsho
 		return fmt.Errorf("%w: mode %v does not match target %v",
 			ErrReadbackVerification, stagedFi.Mode().Perm(), targetMode)
 	}
-	if policy == PolicyStrict && geteuidFunc() == 0 {
+	if policy == PolicyStrict {
 		_, _, _, uid, gid, ok := fileStatMetadataFunc(stagedFi)
 		if ok && (uid != snap.UID || gid != snap.GID) {
 			return fmt.Errorf("%w: ownership %d:%d does not match %d:%d",
@@ -275,6 +281,17 @@ func verifyReadback(staged *os.File, targetMode os.FileMode, snap *SourceSnapsho
 				if _, ok := snap.Xattrs[attr]; !ok {
 					return fmt.Errorf("%w: staged file has unexpected attribute %q not present on source", ErrReadbackVerification, attr)
 				}
+			}
+		}
+	}
+	if policy == PolicyStrict {
+		for attr, expectedVal := range snap.Xattrs {
+			actualVal, has := stagedAttrs[attr]
+			if !has {
+				return fmt.Errorf("%w: expected attribute %q missing on staged file", ErrReadbackVerification, attr)
+			}
+			if !bytes.Equal(actualVal, expectedVal) {
+				return fmt.Errorf("%w: attribute %q value mismatch on staged file", ErrReadbackVerification, attr)
 			}
 		}
 	}

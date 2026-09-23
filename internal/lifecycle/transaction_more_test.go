@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
@@ -512,40 +513,123 @@ func TestExecute_VerifyReadback_UnexpectedCapabilityOrClaim(t *testing.T) {
 	assert.Contains(t, err.Error(), "unexpected capability")
 }
 
-func TestExecute_ApplyMetadata_OwnershipError_NonRoot(t *testing.T) {
+func TestExecute_ApplyMetadata_OwnershipError_InheritedGroupMismatch(t *testing.T) {
 	tmpDir := t.TempDir()
-	src := createTestBinary(t, tmpDir, "app", []byte("bin"))
+	srcData := []byte("bin-unmodified")
+	src := createTestBinary(t, tmpDir, "app", srcData)
+	dest := filepath.Join(tmpDir, "dest_strict_chown.bin")
 
 	restoreChown := lifecycle.SetChownFuncForTest(func(_ *os.File, _, _ int) error {
 		return errors.New("chown EPERM")
 	})
 	defer restoreChown()
 
+	const (
+		ownerUID     = 21001
+		ownerGID     = 21001
+		inheritedGID = 21002
+	)
+
 	restoreGeteuid := lifecycle.SetGeteuidFuncForTest(func() int {
-		return 99999
+		return ownerUID
 	})
 	defer restoreGeteuid()
 
+	restoreStat := lifecycle.SetFileStatMetadataFuncForTest(func(fi os.FileInfo) (uint64, uint64, uint64, int, int, bool) {
+		if strings.HasPrefix(fi.Name(), ".microfat-tx-") {
+			// Staging file inherited group 21002 from setgid directory
+			return 1, 2, 1, ownerUID, inheritedGID, true
+		}
+		// Source file owned by 21001:21001
+		return 1, 1, 1, ownerUID, ownerGID, true
+	})
+	defer restoreStat()
+
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
-		DestPath: filepath.Join(tmpDir, "dest_strict_chown.bin"),
+		DestPath: dest,
 		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
-			_, err := staged.Write([]byte("transformed"))
-			return err
+			_, writeErr := staged.Write([]byte("transformed"))
+			return writeErr
 		},
 	})
 	require.Error(t, err)
 	require.ErrorIs(t, err, lifecycle.ErrOwnershipPreservation)
+	assert.Contains(t, err.Error(), "cannot preserve")
+
+	// No published output
+	_, statErr := os.Stat(dest)
+	assert.True(t, os.IsNotExist(statErr), "destination must not be published on ownership error")
+
+	// Unchanged source
+	readBackSrc, readErr := os.ReadFile(src)
+	require.NoError(t, readErr)
+	assert.Equal(t, srcData, readBackSrc, "source binary must remain completely unchanged")
+
+	// Staging cleanup
+	files, readDirErr := os.ReadDir(tmpDir)
+	require.NoError(t, readDirErr)
+	for _, f := range files {
+		assert.False(t, strings.HasPrefix(f.Name(), ".microfat-tx-"), "staging file must be cleaned up on error: %s", f.Name())
+	}
 }
 
-func TestExecute_VerifyReadback_RootOwnershipMismatch(t *testing.T) {
+func TestExecute_ApplyMetadata_OwnershipTolerance_SameOwner(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcData := []byte("bin-control")
+	src := createTestBinary(t, tmpDir, "app_control", srcData)
+	dest := filepath.Join(tmpDir, "dest_strict_chown_control.bin")
+
+	restoreChown := lifecycle.SetChownFuncForTest(func(_ *os.File, _, _ int) error {
+		return errors.New("chown EPERM")
+	})
+	defer restoreChown()
+
+	const (
+		ownerUID = 21001
+		ownerGID = 21001
+	)
+
+	restoreGeteuid := lifecycle.SetGeteuidFuncForTest(func() int {
+		return ownerUID
+	})
+	defer restoreGeteuid()
+
+	restoreStat := lifecycle.SetFileStatMetadataFuncForTest(func(fi os.FileInfo) (uint64, uint64, uint64, int, int, bool) {
+		// Both source and staging file have matching 21001:21001 ownership
+		if strings.HasPrefix(fi.Name(), ".microfat-tx-") {
+			return 1, 2, 1, ownerUID, ownerGID, true
+		}
+		return 1, 1, 1, ownerUID, ownerGID, true
+	})
+	defer restoreStat()
+
+	err := lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: dest,
+		Intent:   lifecycle.IntentCreateOnly,
+		Opts:     lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			_, writeErr := staged.Write([]byte("transformed"))
+			return writeErr
+		},
+	})
+	require.NoError(t, err, "failed chown should be tolerated when staging file already has expected ownership")
+
+	// Verify published output
+	destData, readErr := os.ReadFile(dest)
+	require.NoError(t, readErr)
+	assert.Equal(t, []byte("transformed"), destData)
+}
+
+func TestExecute_VerifyReadback_OwnershipMismatch_NonRoot(t *testing.T) {
 	tmpDir := t.TempDir()
 	src := createTestBinary(t, tmpDir, "app", []byte("bin"))
 
 	restoreGeteuid := lifecycle.SetGeteuidFuncForTest(func() int {
-		return 0
+		return 21001 // non-root
 	})
 	defer restoreGeteuid()
 
@@ -558,16 +642,16 @@ func TestExecute_VerifyReadback_RootOwnershipMismatch(t *testing.T) {
 	restoreStat := lifecycle.SetFileStatMetadataFuncForTest(func(fi os.FileInfo) (uint64, uint64, uint64, int, int, bool) {
 		call++
 		if call > 1 {
-			// Return different UID for staged file during verifyReadback
-			return 1, 1, 1, 9999, 9999, true
+			// Return different GID for staged file during verifyReadback
+			return 1, 1, 1, 21001, 21002, true
 		}
-		return 1, 1, 1, 1000, 1000, true
+		return 1, 1, 1, 21001, 21001, true
 	})
 	defer restoreStat()
 
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
-		DestPath: filepath.Join(tmpDir, "dest_root_mismatch.bin"),
+		DestPath: filepath.Join(tmpDir, "dest_nonroot_mismatch.bin"),
 		Intent:   lifecycle.IntentCreateOnly,
 		Opts:     lifecycle.DefaultOptions(),
 		Transform: func(staged *os.File) error {
@@ -578,6 +662,57 @@ func TestExecute_VerifyReadback_RootOwnershipMismatch(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, lifecycle.ErrReadbackVerification)
 	assert.Contains(t, err.Error(), "ownership")
+}
+
+func TestExecute_VerifyReadback_ExpectedXattrMissingOrMismatched(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := createTestBinary(t, tmpDir, "app", []byte("bin"))
+
+	// 1. Missing expected attribute on staged file
+	restoreRead := lifecycle.SetReadXattrsFuncForTest(func(string) (map[string][]byte, error) {
+		return map[string][]byte{"user.test": []byte("val")}, nil
+	})
+	defer restoreRead()
+
+	restoreReadFd := lifecycle.SetReadFdXattrsFuncForTest(func(int) (map[string][]byte, error) {
+		// Staged file is missing user.test
+		return map[string][]byte{}, nil
+	})
+	defer restoreReadFd()
+
+	err := lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: filepath.Join(tmpDir, "dest_missing_xattr.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
+		Opts:     lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			_, err := staged.Write([]byte("transformed"))
+			return err
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrReadbackVerification)
+	assert.Contains(t, err.Error(), "missing on staged file")
+
+	// 2. Mismatched attribute value on staged file
+	restoreReadFd2 := lifecycle.SetReadFdXattrsFuncForTest(func(int) (map[string][]byte, error) {
+		return map[string][]byte{"user.test": []byte("corrupted_value")}, nil
+	})
+	defer restoreReadFd2()
+
+	err = lifecycle.Execute(lifecycle.Transaction{
+		SrcPath:  src,
+		DestPath: filepath.Join(tmpDir, "dest_mismatch_xattr.bin"),
+		Intent:   lifecycle.IntentCreateOnly,
+		Opts:     lifecycle.DefaultOptions(),
+		Transform: func(staged *os.File) error {
+			_, err := staged.Write([]byte("transformed"))
+			return err
+		},
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrReadbackVerification)
+	assert.Contains(t, err.Error(), "value mismatch on staged file")
 }
 
 func TestExecute_PublishInPlace_RenameFails(t *testing.T) {
