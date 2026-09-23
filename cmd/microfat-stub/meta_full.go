@@ -15,23 +15,44 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"golang.org/x/sys/unix"
 )
 
 const (
-	flagInfo          = "--microfat:info"
-	flagOptimize      = "--microfat:optimize"
-	flagOptimizeTo    = "--microfat:optimize-to"
-	flagTrim          = "--microfat:trim"
-	flagTrimTo        = "--microfat:trim-to"
-	flagSpecialize    = "--microfat:specialize"
-	flagSpecializeTo  = "--microfat:specialize-to"
-	flagPrewarm       = "--microfat:prewarm"
-	flagHelp          = "--microfat:help"
-	minOptimizeToArgs = 2
+	flagInfo                 = "--microfat:info"
+	flagOptimize             = "--microfat:optimize"
+	flagOptimizeTo           = "--microfat:optimize-to"
+	flagTrim                 = "--microfat:trim"
+	flagTrimTo               = "--microfat:trim-to"
+	flagSpecialize           = "--microfat:specialize"
+	flagSpecializeTo         = "--microfat:specialize-to"
+	flagPrewarm              = "--microfat:prewarm"
+	flagHelp                 = "--microfat:help"
+	flagMetadataPolicyPrefix = "--microfat:metadata-policy="
+	flagBreakHardlinks       = "--microfat:break-hardlinks"
+	minOptimizeToArgs        = 2
 )
+
+func parseLifecycleOptions(args []string) (lifecycle.Options, error) {
+	opts := lifecycle.DefaultOptions()
+	for _, arg := range args {
+		switch {
+		case strings.HasPrefix(arg, flagMetadataPolicyPrefix):
+			val := strings.TrimPrefix(arg, flagMetadataPolicyPrefix)
+			pol, err := lifecycle.ParsePolicy(val)
+			if err != nil {
+				return opts, err
+			}
+			opts.Policy = pol
+		case arg == flagBreakHardlinks:
+			opts.BreakHardlinks = true
+		}
+	}
+	return opts, nil
+}
 
 func handleMetaCommand(
 	arg1 string,
@@ -48,6 +69,10 @@ func handleMetaCommand(
 			return true, err
 		}
 	}
+	opts, err := parseLifecycleOptions(os.Args[1:])
+	if err != nil {
+		return true, err
+	}
 	switch {
 	case arg1 == flagHelp:
 		printHelp(idx, hostInfo, selectedEntry, policyRes)
@@ -56,13 +81,13 @@ func handleMetaCommand(
 		jsonOutput := arg1 == flagInfo+"=json" || hasJSONFlag(os.Args[2:])
 		return true, printInfo(idx, hostInfo, selectedEntry, policyRes, statSize, jsonOutput)
 	case arg1 == flagTrim || arg1 == flagSpecialize:
-		return true, handleTrimInPlace(selfPath, selfFile, statSize, selectedEntry.Level)
+		return true, handleTrimInPlace(selfPath, selfFile, statSize, selectedEntry.Level, opts)
 	case isPrefixOrExact(arg1, flagTrimTo) || isPrefixOrExact(arg1, flagSpecializeTo):
-		return true, handleTrimTo(arg1, selfFile, statSize, selectedEntry.Level)
+		return true, handleTrimTo(arg1, selfFile, statSize, selectedEntry.Level, opts)
 	case arg1 == flagOptimize:
-		return true, handleOptimizeInPlace(selfPath, selfFile, statSize, selectedEntry, idx)
+		return true, handleOptimizeInPlace(selfPath, selfFile, statSize, selectedEntry, idx, opts)
 	case isPrefixOrExact(arg1, flagOptimizeTo):
-		return true, handleOptimizeTo(arg1, selfFile, selectedEntry, idx)
+		return true, handleOptimizeTo(arg1, selfFile, selectedEntry, idx, opts)
 	case isPrefixOrExact(arg1, flagPrewarm):
 		jsonOutput := strings.HasSuffix(arg1, "=json") || hasJSONFlag(os.Args[2:])
 		verifyMode := strings.Contains(arg1, "verify") || hasVerifyFlag(os.Args[2:])
@@ -77,9 +102,9 @@ func isImageMutation(arg string) bool {
 		isPrefixOrExact(arg, flagTrimTo) || isPrefixOrExact(arg, flagSpecializeTo) || isPrefixOrExact(arg, flagOptimizeTo)
 }
 
-func handleTrimInPlace(selfPath string, selfFile *os.File, statSize int64, selectedLevel string) error {
+func handleTrimInPlace(selfPath string, selfFile *os.File, statSize int64, selectedLevel string, opts lifecycle.Options) error {
 	fmt.Printf("[microfat] Trimming binary in-place to variant '%s' (keeping launcher stub & auto-tuning)...\n", selectedLevel)
-	if err := trimInPlace(selfPath, selfFile, statSize, selectedLevel); err != nil {
+	if err := trimInPlace(selfPath, selfFile, statSize, selectedLevel, opts); err != nil {
 		return err
 	}
 	newStat, _ := os.Stat(selfPath)
@@ -91,14 +116,14 @@ func handleTrimInPlace(selfPath string, selfFile *os.File, statSize int64, selec
 	return nil
 }
 
-func handleTrimTo(arg1 string, selfFile *os.File, statSize int64, selectedLevel string) error {
+func handleTrimTo(arg1 string, selfFile *os.File, statSize int64, selectedLevel string, opts lifecycle.Options) error {
 	targetPath, err := extractTargetPath(arg1, flagTrimTo, flagSpecializeTo)
 	if err != nil {
 		return err
 	}
 	cleanTarget := filepath.Clean(targetPath)
 	fmt.Printf("[microfat] Trimming variant '%s' to '%s' (single-variant fat binary)...\n", selectedLevel, cleanTarget)
-	if err := trimTo(cleanTarget, selfFile, statSize, selectedLevel); err != nil {
+	if err := trimTo(cleanTarget, selfFile, statSize, selectedLevel, opts); err != nil {
 		return err
 	}
 	// #nosec G703 -- stat user-supplied path for size reporting
@@ -112,10 +137,10 @@ func handleTrimTo(arg1 string, selfFile *os.File, statSize int64, selectedLevel 
 }
 
 func handleOptimizeInPlace(
-	selfPath string, selfFile *os.File, statSize int64, selectedEntry *format.VariantEntry, idx *format.Index,
+	selfPath string, selfFile *os.File, statSize int64, selectedEntry *format.VariantEntry, idx *format.Index, opts lifecycle.Options,
 ) error {
 	fmt.Printf("[microfat] Optimizing binary in-place to variant '%s' (raw uncompressed ELF)...\n", selectedEntry.Level)
-	if err := optimizeInPlace(selfPath, selfFile, selectedEntry, idx); err != nil {
+	if err := optimizeInPlace(selfPath, selfFile, selectedEntry, idx, opts); err != nil {
 		return err
 	}
 	fmt.Printf("[microfat] Successfully replaced '%s' with %s binary (%d bytes -> %d bytes)\n",
@@ -123,16 +148,17 @@ func handleOptimizeInPlace(
 	return nil
 }
 
-func handleOptimizeTo(arg1 string, selfFile *os.File, selectedEntry *format.VariantEntry, idx *format.Index) error {
+func handleOptimizeTo(arg1 string, selfFile *os.File, selectedEntry *format.VariantEntry, idx *format.Index, opts lifecycle.Options) error {
 	targetPath, err := extractTargetPath(arg1, flagOptimizeTo, "")
 	if err != nil {
 		return err
 	}
-	fmt.Printf("[microfat] Extracting variant '%s' to '%s'...\n", selectedEntry.Level, targetPath)
-	if err := optimizeTo(targetPath, selfFile, selectedEntry, idx); err != nil {
+	cleanTarget := filepath.Clean(targetPath)
+	fmt.Printf("[microfat] Extracting variant '%s' to '%s'...\n", selectedEntry.Level, cleanTarget)
+	if err := optimizeTo(cleanTarget, selfFile, selectedEntry, idx, opts); err != nil {
 		return err
 	}
-	fmt.Printf("[microfat] Successfully materialized '%s' (%d bytes)\n", targetPath, selectedEntry.UncompressedSize)
+	fmt.Printf("[microfat] Successfully materialized '%s' (%d bytes)\n", cleanTarget, selectedEntry.UncompressedSize)
 	return nil
 }
 
@@ -347,13 +373,27 @@ func isPrefixOrExact(arg, flag string) bool {
 
 func extractTargetPath(arg, primaryFlag, aliasFlag string) (string, error) {
 	if after, ok := strings.CutPrefix(arg, primaryFlag+"="); ok {
-		return after, nil
+		trimmed := strings.TrimSpace(after)
+		if trimmed == "" {
+			return "", fmt.Errorf("%s requires a destination path", primaryFlag)
+		}
+		return trimmed, nil
 	}
 	if aliasFlag != "" && strings.HasPrefix(arg, aliasFlag+"=") {
-		return strings.TrimPrefix(arg, aliasFlag+"="), nil
+		trimmed := strings.TrimSpace(strings.TrimPrefix(arg, aliasFlag+"="))
+		if trimmed == "" {
+			return "", fmt.Errorf("%s requires a destination path", aliasFlag)
+		}
+		return trimmed, nil
 	}
-	if len(os.Args) > minOptimizeToArgs {
-		return os.Args[minOptimizeToArgs], nil
+	for _, a := range os.Args[2:] {
+		if !strings.HasPrefix(a, "--microfat:") {
+			trimmed := strings.TrimSpace(a)
+			if trimmed == "" {
+				return "", fmt.Errorf("%s requires a destination path", primaryFlag)
+			}
+			return trimmed, nil
+		}
 	}
 	return "", fmt.Errorf("%s requires a destination path", primaryFlag)
 }
@@ -376,6 +416,9 @@ func printHelp(idx *format.Index, hostInfo microarch.Info, selected *format.Vari
 	fmt.Printf("  --microfat:optimize          Permanently extract raw uncompressed variant ELF over this file\n")
 	fmt.Printf("  --microfat:optimize-to PATH  Extract raw uncompressed variant ELF to a specific path\n")
 	fmt.Printf("  --microfat:help              Show this launcher help message\n\n")
+	fmt.Printf("Transformation Options:\n")
+	fmt.Printf("  --microfat:metadata-policy=strict|strip  Metadata policy (strict preserves xattrs/ownership, strip clears)\n")
+	fmt.Printf("  --microfat:break-hardlinks               Allow severing multi-link file on in-place transformation\n\n")
 	fmt.Printf("Policy Environment Variables:\n")
 	fmt.Printf("  MICROFAT_FORCE_LEVEL         Pin execution to a specific variant level (e.g. v1, v3)\n")
 	fmt.Printf("  MICROFAT_MAX_LEVEL           Cap selection ceiling (e.g. v3)\n")

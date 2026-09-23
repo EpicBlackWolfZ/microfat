@@ -164,6 +164,7 @@ listed boundaries; they are not a claim of protection against the out-of-scope a
 | Validated cache directory/entry descriptors; read-only verification | [cache descriptor operations](internal/format/cache_unix.go), [cache management](internal/cache/cache_unix.go) | [cache security](tests/e2e/cache_security_test.go), [FIFO entries](tests/e2e/cache_fifo_test.go), [read-only checks](tests/e2e/cache_readonly_test.go) |
 | Consistency-checked executable location hints | [origin resolution](internal/builder/origin.go) | [origin regressions](internal/builder/origin_test.go), [stub discovery](internal/builder/stub_test.go) |
 | Resource estimates with explicit unknown/unavailable observations | [cgroup observations](internal/cgroup/cgroup.go), [memory arithmetic](internal/cgroup/memory.go) | [unresolved/root cgroups](internal/cgroup/cgroup_test.go), [overflow and retained storage](internal/cgroup/memory_test.go) |
+| Safe transformation lifecycle: create-only publishing, serialization, hardlink defense, and privilege rejection | [transformation lifecycle](internal/lifecycle/transaction.go) | [lifecycle tests](tests/e2e/lifecycle_test.go), [transaction unit tests](internal/lifecycle/transaction_test.go) |
 
 ### Resource bounds and unavailable observations
 

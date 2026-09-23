@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -143,6 +144,155 @@ func TestLifecycleReleaseSmoke(t *testing.T) {
 		}
 		if !strings.Contains(matStdout, "golden:variant="+currentHostLevel) {
 			t.Fatalf("unexpected output from materialized binary:\n%s", matStdout)
+		}
+	})
+
+	t.Run("Scenario42_TransformationSafety_CollisionAndHardlink", func(t *testing.T) {
+		t.Parallel()
+		tempDir := t.TempDir()
+
+		// 1. Pre-existing destination collision on --microfat:trim-to
+		existingDest := filepath.Join(tempDir, "existing.fat")
+		require.NoError(t, os.WriteFile(existingDest, []byte("pre-existing content"), 0o755))
+
+		_, stderr, exitCode, err := executeFatBinary(t, goldenFatBin, nil, "--microfat:trim-to="+existingDest)
+		if err == nil && exitCode == defaultExitCode {
+			t.Fatalf("expected collision failure for --microfat:trim-to, but it succeeded")
+		}
+		if !strings.Contains(stderr, "destination already exists") {
+			t.Fatalf("expected 'destination already exists' error message in stderr, got: %s", stderr)
+		}
+
+		// 2. Hardlink refusal on in-place trim
+		copyFat := filepath.Join(tempDir, "copy.fat")
+		fatData, err := os.ReadFile(goldenFatBin)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(copyFat, fatData, 0o755))
+
+		hardlinkFat := filepath.Join(tempDir, "copy_link.fat")
+		require.NoError(t, os.Link(copyFat, hardlinkFat))
+
+		_, stderr, exitCode, err = executeFatBinary(t, hardlinkFat, nil, "--microfat:trim")
+		if err == nil && exitCode == defaultExitCode {
+			t.Fatalf("expected hard-link refusal for in-place trim without --break-hardlinks, but it succeeded")
+		}
+		if !strings.Contains(stderr, "multi-link file detected") {
+			t.Fatalf("expected 'multi-link file detected' error in stderr, got: %s", stderr)
+		}
+
+		// 3. In-place trim with --microfat:break-hardlinks succeeds and severs the link
+		_, stderr, exitCode, err = executeFatBinary(t, hardlinkFat, nil,
+			"--microfat:trim", "--microfat:break-hardlinks", "--microfat:metadata-policy=strip")
+		if err != nil || exitCode != defaultExitCode {
+			t.Fatalf("in-place trim with --break-hardlinks failed (code %d): %v\nstderr: %s", exitCode, err, stderr)
+		}
+
+		fiOrig, err := os.Stat(copyFat)
+		require.NoError(t, err)
+		fiSevered, err := os.Stat(hardlinkFat)
+		require.NoError(t, err)
+		statOrig, ok1 := fiOrig.Sys().(*syscall.Stat_t)
+		statSevered, ok2 := fiSevered.Sys().(*syscall.Stat_t)
+		if ok1 && ok2 && statOrig.Dev == statSevered.Dev {
+			if statOrig.Ino == statSevered.Ino {
+				t.Fatalf("expected hard link to be severed, but both still share inode %d", statOrig.Ino)
+			}
+		}
+	})
+
+	t.Run("Scenario43_TransformationSafety_EmptyDestinationRejection", func(t *testing.T) {
+		t.Parallel()
+
+		goldenData, err := os.ReadFile(goldenFatBin)
+		require.NoError(t, err)
+
+		flagsToTest := [][]string{
+			{"--microfat:optimize-to="},
+			{"--microfat:optimize-to", ""},
+			{"--microfat:trim-to="},
+			{"--microfat:trim-to", ""},
+		}
+
+		for _, flagArgs := range flagsToTest {
+			flagDesc := strings.Join(flagArgs, " ")
+			t.Run(flagDesc, func(t *testing.T) {
+				t.Parallel()
+				subDir := t.TempDir()
+				copyFat := filepath.Join(subDir, "copy.fat")
+				require.NoError(t, os.WriteFile(copyFat, goldenData, 0o755))
+
+				fiBefore, err := os.Stat(copyFat)
+				require.NoError(t, err)
+				statBefore, okBefore := fiBefore.Sys().(*syscall.Stat_t)
+
+				_, stderr, exitCode, err := executeFatBinary(t, copyFat, nil, flagArgs...)
+				if err == nil && exitCode == defaultExitCode {
+					t.Fatalf("expected empty destination to fail for args %v, but succeeded", flagArgs)
+				}
+				if !strings.Contains(stderr, "requires a destination path") {
+					t.Fatalf("expected 'requires a destination path' in stderr for args %v, got: %s", flagArgs, stderr)
+				}
+
+				fiAfter, err := os.Stat(copyFat)
+				require.NoError(t, err)
+				statAfter, okAfter := fiAfter.Sys().(*syscall.Stat_t)
+
+				if fiBefore.Size() != fiAfter.Size() {
+					t.Fatalf("file size changed from %d to %d for args %v", fiBefore.Size(), fiAfter.Size(), flagArgs)
+				}
+				if okBefore && okAfter {
+					if statBefore.Ino != statAfter.Ino {
+						t.Fatalf("inode changed from %d to %d for args %v", statBefore.Ino, statAfter.Ino, flagArgs)
+					}
+				}
+
+				afterData, err := os.ReadFile(copyFat)
+				require.NoError(t, err)
+				if !bytes.Equal(goldenData, afterData) {
+					t.Fatalf("binary bytes modified in-place despite empty destination error for args %v", flagArgs)
+				}
+			})
+		}
+
+		// Also verify CLI rejects empty destination flag (-o "" or --output="")
+		cliSubDir := t.TempDir()
+		cliCopyFat := filepath.Join(cliSubDir, "cli_copy.fat")
+		require.NoError(t, os.WriteFile(cliCopyFat, goldenData, 0o755))
+
+		fiBefore, err := os.Stat(cliCopyFat)
+		require.NoError(t, err)
+		statBefore, okBefore := fiBefore.Sys().(*syscall.Stat_t)
+
+		for _, optFlags := range [][]string{{"-o="}, {"--output="}, {"-o", ""}, {"--output", ""}} {
+			cmdArgs := append([]string{"trim", cliCopyFat}, optFlags...)
+			cmd := exec.Command(cliPath, cmdArgs...)
+			var errBuf bytes.Buffer
+			cmd.Stderr = &errBuf
+			err := cmd.Run()
+			flagDesc := strings.Join(optFlags, " ")
+			if err == nil {
+				t.Fatalf("expected microfat trim %s to fail, but succeeded", flagDesc)
+			}
+			if !strings.Contains(errBuf.String(), "destination output path cannot be empty") {
+				t.Fatalf("expected 'destination output path cannot be empty' in stderr for %s, got: %s", flagDesc, errBuf.String())
+			}
+
+			fiAfter, err := os.Stat(cliCopyFat)
+			require.NoError(t, err)
+			statAfter, okAfter := fiAfter.Sys().(*syscall.Stat_t)
+
+			if fiBefore.Size() != fiAfter.Size() {
+				t.Fatalf("file size changed from %d to %d for %s", fiBefore.Size(), fiAfter.Size(), flagDesc)
+			}
+			if okBefore && okAfter && statBefore.Ino != statAfter.Ino {
+				t.Fatalf("inode changed from %d to %d for %s", statBefore.Ino, statAfter.Ino, flagDesc)
+			}
+
+			afterData, err := os.ReadFile(cliCopyFat)
+			require.NoError(t, err)
+			if !bytes.Equal(goldenData, afterData) {
+				t.Fatalf("binary modified in-place despite empty %s flag", flagDesc)
+			}
 		}
 	})
 }

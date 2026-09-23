@@ -20,6 +20,7 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"github.com/EpicBlackWolfZ/microfat/internal/testutil"
@@ -399,6 +400,32 @@ func TestHelperFunctions(t *testing.T) {
 	if err == nil {
 		t.Errorf("expected error when no target path provided")
 	}
+
+	_, err = extractTargetPath("--microfat:trim-to=", "--microfat:trim-to", "")
+	if err == nil {
+		t.Errorf("expected error for --microfat:trim-to=")
+	}
+
+	_, err = extractTargetPath("--microfat:specialize-to=", "--microfat:trim-to", "--microfat:specialize-to")
+	if err == nil {
+		t.Errorf("expected error for --microfat:specialize-to=")
+	}
+
+	os.Args = []string{testAppArg, "--microfat:trim-to", "  "}
+	_, err = extractTargetPath("--microfat:trim-to", "--microfat:trim-to", "")
+	if err == nil {
+		t.Errorf("expected error when target path is whitespace")
+	}
+
+	err = trimTo("", nil, 0, "v1", lifecycle.DefaultOptions())
+	if err == nil {
+		t.Errorf("expected trimTo with empty destPath to fail")
+	}
+
+	err = optimizeTo("", nil, nil, nil, lifecycle.DefaultOptions())
+	if err == nil {
+		t.Errorf("expected optimizeTo with empty destPath to fail")
+	}
 }
 
 func TestExtractVariantAndOptimize(t *testing.T) {
@@ -420,7 +447,7 @@ func TestExtractVariantAndOptimize(t *testing.T) {
 
 	// Test optimizeTo
 	destPath := filepath.Join(tempDir, "sub", "extracted_binary")
-	if err := optimizeTo(destPath, rawFile, entry, nil); err != nil {
+	if err := optimizeTo(destPath, rawFile, entry, nil, lifecycle.DefaultOptions()); err != nil {
 		t.Fatalf("optimizeTo failed: %v", err)
 	}
 
@@ -435,7 +462,9 @@ func TestExtractVariantAndOptimize(t *testing.T) {
 	// Test optimizeInPlace
 	replaceTarget := filepath.Join(tempDir, "to_replace")
 	_ = os.Link(rawFile.Name(), replaceTarget)
-	if err := optimizeInPlace(replaceTarget, rawFile, entry, nil); err != nil {
+	breakOpts := lifecycle.DefaultOptions()
+	breakOpts.BreakHardlinks = true
+	if err := optimizeInPlace(replaceTarget, rawFile, entry, nil, breakOpts); err != nil {
 		t.Fatalf("optimizeInPlace failed: %v", err)
 	}
 	readReplaced, _ := os.ReadFile(replaceTarget)
@@ -475,7 +504,7 @@ func TestTrimToAndInPlace(t *testing.T) {
 
 	// Test trimTo
 	trimmedTarget := filepath.Join(tempDir, "sub2", "trimmed_app")
-	if err := trimTo(trimmedTarget, fatFile, stat.Size(), "v1"); err != nil {
+	if err := trimTo(trimmedTarget, fatFile, stat.Size(), "v1", lifecycle.DefaultOptions()); err != nil {
 		t.Fatalf("trimTo failed: %v", err)
 	}
 
@@ -486,7 +515,7 @@ func TestTrimToAndInPlace(t *testing.T) {
 	copyFile, _ := os.Open(copyPath)
 	defer func() { _ = copyFile.Close() }()
 
-	if err := trimInPlace(copyPath, copyFile, stat.Size(), "v1"); err != nil {
+	if err := trimInPlace(copyPath, copyFile, stat.Size(), "v1", lifecycle.DefaultOptions()); err != nil {
 		t.Fatalf("trimInPlace failed: %v", err)
 	}
 
@@ -501,7 +530,7 @@ func TestTrimToAndInPlace(t *testing.T) {
 	if err := os.Symlink(copyPath, symPath); err != nil {
 		t.Fatalf("creating symlink: %v", err)
 	}
-	if err := trimInPlace(symPath, copyFile, stat.Size(), "v1"); err != nil {
+	if err := trimInPlace(symPath, copyFile, stat.Size(), "v1", lifecycle.DefaultOptions()); err != nil {
 		t.Fatalf("trimInPlace on symlink failed: %v", err)
 	}
 }
@@ -624,6 +653,10 @@ func TestRunBinaryMetaCommands(t *testing.T) {
 	}
 	os.Args = []string{fatPath, "myarg1", "--flag"}
 	require.NoError(t, runBinary(fatPath), "runBinary standard execution failed")
+
+	// 8. Invalid metadata policy flag fails fast
+	os.Args = []string{fatPath, "--microfat:trim", "--microfat:metadata-policy=invalid"}
+	require.Error(t, runBinary(fatPath), "expected error on invalid metadata-policy")
 
 	// 8. Error cases
 	os.Args = []string{stubPath, "--microfat:info"}
@@ -813,7 +846,9 @@ func TestOptimizeInPlaceSymlink(t *testing.T) {
 		t.Fatalf("creating symlink: %v", err)
 	}
 
-	if err := optimizeInPlace(symTarget, rawFile, entry, nil); err != nil {
+	breakOptsReal := lifecycle.DefaultOptions()
+	breakOptsReal.BreakHardlinks = true
+	if err := optimizeInPlace(symTarget, rawFile, entry, nil, breakOptsReal); err != nil {
 		t.Fatalf("optimizeInPlace on symlink failed: %v", err)
 	}
 
@@ -835,10 +870,10 @@ func TestOptimizeInPlaceSymlink(t *testing.T) {
 	}
 
 	// Test optimizeTo and trimTo error on invalid destination directory
-	if err := optimizeTo("/dev/null/forbidden/bin", rawFile, entry, nil); err == nil {
+	if err := optimizeTo("/dev/null/forbidden/bin", rawFile, entry, nil, lifecycle.DefaultOptions()); err == nil {
 		t.Errorf("expected optimizeTo to fail on invalid destination directory")
 	}
-	if err := trimTo("/dev/null/forbidden/bin", rawFile, 1000, "v1"); err == nil {
+	if err := trimTo("/dev/null/forbidden/bin", rawFile, 1000, "v1", lifecycle.DefaultOptions()); err == nil {
 		t.Errorf("expected trimTo to fail on invalid destination directory")
 	}
 
@@ -850,41 +885,41 @@ func TestOptimizeInPlaceSymlink(t *testing.T) {
 	_ = os.Chmod(roDir, 0o555)
 	defer func() { _ = os.Chmod(roDir, 0o755) }()
 
-	if err := optimizeInPlace(roFile, rawFile, entry, nil); err == nil {
+	if err := optimizeInPlace(roFile, rawFile, entry, nil, lifecycle.DefaultOptions()); err == nil {
 		t.Errorf("expected optimizeInPlace to fail in read-only directory")
 	}
-	if err := trimInPlace(roFile, rawFile, 1000, "v1"); err == nil {
+	if err := trimInPlace(roFile, rawFile, 1000, "v1", lifecycle.DefaultOptions()); err == nil {
 		t.Errorf("expected trimInPlace to fail in read-only directory")
 	}
 
 	// Test optimizeInPlace and trimInPlace when selfPath is a directory (rename error)
 	dirTarget := filepath.Join(tempDir, "existing_target_dir")
 	_ = os.MkdirAll(dirTarget, 0o755)
-	if err := optimizeInPlace(dirTarget, rawFile, entry, nil); err == nil {
+	if err := optimizeInPlace(dirTarget, rawFile, entry, nil, lifecycle.DefaultOptions()); err == nil {
 		t.Errorf("expected optimizeInPlace to fail when selfPath is directory")
 	}
-	if err := trimInPlace(dirTarget, rawFile, 1000, "v1"); err == nil {
+	if err := trimInPlace(dirTarget, rawFile, 1000, "v1", lifecycle.DefaultOptions()); err == nil {
 		t.Errorf("expected trimInPlace to fail when selfPath is directory")
 	}
 
 	// Test optimizeTo with invalid entry
 	badEntry := &format.VariantEntry{Level: "v1", Offset: 0, CompressedSize: 10, UncompressedSize: 50}
-	if err := optimizeTo(filepath.Join(tempDir, "bad_opt"), rawFile, badEntry, nil); err == nil {
+	if err := optimizeTo(filepath.Join(tempDir, "bad_opt"), rawFile, badEntry, nil, lifecycle.DefaultOptions()); err == nil {
 		t.Errorf("expected optimizeTo with bad entry to fail")
 	}
 
 	// Test optimizeTo when destination is an existing directory
-	if err := optimizeTo(tempDir, rawFile, entry, nil); err == nil {
+	if err := optimizeTo(tempDir, rawFile, entry, nil, lifecycle.DefaultOptions()); err == nil {
 		t.Errorf("expected optimizeTo to fail when target is directory")
 	}
 
 	// Test trimTo with invalid variant level
-	if err := trimTo(filepath.Join(tempDir, "bad_trim"), rawFile, 1000, "nonexistent"); err == nil {
+	if err := trimTo(filepath.Join(tempDir, "bad_trim"), rawFile, 1000, "nonexistent", lifecycle.DefaultOptions()); err == nil {
 		t.Errorf("expected trimTo with nonexistent variant to fail")
 	}
 
 	// Test trimTo when destination is an existing directory
-	if err := trimTo(tempDir, rawFile, 1000, "v1"); err == nil {
+	if err := trimTo(tempDir, rawFile, 1000, "v1", lifecycle.DefaultOptions()); err == nil {
 		t.Errorf("expected trimTo to fail when target is directory")
 	}
 }
@@ -992,12 +1027,14 @@ func TestTrimAndOptimizeErrorPaths(t *testing.T) {
 	// Test optimizeInPlace error when extractVariantToWriter fails
 	optTarget := filepath.Join(tempDir, "opt_target")
 	_ = os.Link(corruptFile.Name(), optTarget)
-	if err := optimizeInPlace(optTarget, corruptFile, corruptEntry, nil); err == nil {
+	breakOptsCorrupt := lifecycle.DefaultOptions()
+	breakOptsCorrupt.BreakHardlinks = true
+	if err := optimizeInPlace(optTarget, corruptFile, corruptEntry, nil, breakOptsCorrupt); err == nil {
 		t.Errorf("expected optimizeInPlace to fail on corrupt variant")
 	}
 
 	// Test optimizeTo error when extractVariantToWriter fails
-	if err := optimizeTo(filepath.Join(tempDir, "opt_to_corrupt"), corruptFile, corruptEntry, nil); err == nil {
+	if err := optimizeTo(filepath.Join(tempDir, "opt_to_corrupt"), corruptFile, corruptEntry, nil, lifecycle.DefaultOptions()); err == nil {
 		t.Errorf("expected optimizeTo to fail on corrupt variant")
 	}
 
@@ -1028,17 +1065,18 @@ func TestTrimAndOptimizeErrorPaths(t *testing.T) {
 	stat, _ := fatErrFile.Stat()
 
 	// trimTo with nonexistent variant
-	if err := trimTo(filepath.Join(tempDir, "trimmed_err_out"), fatErrFile, stat.Size(), "nonexistent_variant_level"); err == nil {
+	trimmedErrOut := filepath.Join(tempDir, "trimmed_err_out")
+	if err := trimTo(trimmedErrOut, fatErrFile, stat.Size(), "nonexistent_variant_level", lifecycle.DefaultOptions()); err == nil {
 		t.Errorf("expected trimTo to fail with nonexistent variant level")
 	}
 
 	// Test optimizeInPlace and trimInPlace when rename fails (target is non-empty dir)
 	targetNonEmptyDir := filepath.Join(tempDir, "non_empty_dir")
 	_ = os.MkdirAll(filepath.Join(targetNonEmptyDir, "nested"), 0o755)
-	if err := optimizeInPlace(targetNonEmptyDir, corruptFile, corruptEntry, nil); err == nil {
+	if err := optimizeInPlace(targetNonEmptyDir, corruptFile, corruptEntry, nil, lifecycle.DefaultOptions()); err == nil {
 		t.Errorf("expected optimizeInPlace to fail when target is non-empty directory")
 	}
-	if err := trimInPlace(targetNonEmptyDir, fatErrFile, stat.Size(), "v1"); err == nil {
+	if err := trimInPlace(targetNonEmptyDir, fatErrFile, stat.Size(), "v1", lifecycle.DefaultOptions()); err == nil {
 		t.Errorf("expected trimInPlace to fail when target is non-empty directory")
 	}
 }
@@ -1957,7 +1995,7 @@ func TestStubMultiCodecExecutionAndErrors(t *testing.T) {
 
 	// 5. Test optimizeTo with lz4 variant
 	optDest := filepath.Join(tempDir, "opt_dest")
-	if err := optimizeTo(optDest, selfFile, v1Entry, nil); err != nil {
+	if err := optimizeTo(optDest, selfFile, v1Entry, nil, lifecycle.DefaultOptions()); err != nil {
 		t.Fatalf("optimizeTo with lz4 variant failed: %v", err)
 	}
 	optBytes, _ := os.ReadFile(optDest)
@@ -2125,7 +2163,7 @@ func TestStubDictionaryExecutionAndMetaCommands(t *testing.T) {
 
 	v3Entry, _ := idx.FindVariant("v3")
 	optDest := filepath.Join(tempDir, "opt_out_v3")
-	if err := optimizeTo(optDest, selfFile, v3Entry, idx); err != nil {
+	if err := optimizeTo(optDest, selfFile, v3Entry, idx, lifecycle.DefaultOptions()); err != nil {
 		t.Fatalf("optimizeTo failed on dict binary: %v", err)
 	}
 	optBytes, _ := os.ReadFile(optDest)
@@ -2136,7 +2174,9 @@ func TestStubDictionaryExecutionAndMetaCommands(t *testing.T) {
 	// 4. Test optimizeInPlace on dict binary
 	optInPlaceTarget := filepath.Join(tempDir, "opt_inplace_target")
 	_ = os.Link(selfFile.Name(), optInPlaceTarget)
-	if err := optimizeInPlace(optInPlaceTarget, selfFile, v3Entry, idx); err != nil {
+	breakOptsDict := lifecycle.DefaultOptions()
+	breakOptsDict.BreakHardlinks = true
+	if err := optimizeInPlace(optInPlaceTarget, selfFile, v3Entry, idx, breakOptsDict); err != nil {
 		t.Fatalf("optimizeInPlace failed on dict binary: %v", err)
 	}
 	inPlaceBytes, _ := os.ReadFile(optInPlaceTarget)
@@ -3410,4 +3450,39 @@ func TestExecution_OriginalExePropagation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseLifecycleOptions(t *testing.T) {
+	t.Parallel()
+
+	// Default options
+	opts, err := parseLifecycleOptions([]string{})
+	require.NoError(t, err)
+	assert.Equal(t, lifecycle.PolicyStrict, opts.Policy)
+	assert.False(t, opts.BreakHardlinks)
+
+	// Valid policy flag strip
+	opts, err = parseLifecycleOptions([]string{"--microfat:metadata-policy=strip"})
+	require.NoError(t, err)
+	assert.Equal(t, lifecycle.PolicyStrip, opts.Policy)
+
+	// Valid policy flag strict
+	opts, err = parseLifecycleOptions([]string{"--microfat:metadata-policy=strict"})
+	require.NoError(t, err)
+	assert.Equal(t, lifecycle.PolicyStrict, opts.Policy)
+
+	// Valid break hardlinks flag
+	opts, err = parseLifecycleOptions([]string{"--microfat:break-hardlinks"})
+	require.NoError(t, err)
+	assert.True(t, opts.BreakHardlinks)
+
+	// Both flags
+	opts, err = parseLifecycleOptions([]string{"--microfat:metadata-policy=strict", "--microfat:break-hardlinks"})
+	require.NoError(t, err)
+	assert.Equal(t, lifecycle.PolicyStrict, opts.Policy)
+	assert.True(t, opts.BreakHardlinks)
+
+	// Invalid policy flag
+	_, err = parseLifecycleOptions([]string{"--microfat:metadata-policy=invalid"})
+	require.Error(t, err)
 }
