@@ -107,7 +107,30 @@ When executing in-place mutations (`--microfat:trim` or `--microfat:optimize`):
 
 Before any `trim`, `specialize`, `optimize`, or corresponding `-to` command, the launcher checks that the original deployment path still identifies its open running image. If the deployment was unlinked or replaced, the command fails without transforming the newer file. Restart from the intended deployment before transforming it. Read-only `--microfat:info` continues to describe the original image.
 
-In-place operations recheck the destination before rename. This check and rename are separate operations: serialize deployment updates and transformations with the same external lock or maintenance window. Atomic replacement prevents a partially written executable; it does not provide a compare-and-swap transaction against a concurrent deployment. See [executable paths and re-exec](troubleshooting.md#9-executable-paths-assets-and-deliberate-re-exec).
+### Transactional Lifecycle & Metadata Policies
+
+All transformation operations (both CLI `microfat trim` and launcher stub meta-commands) execute within a shared, transactional lifecycle engine:
+
+1. **Create-Only Publication for Fresh Outputs**:
+   - Commands targeting a new destination (`-o <path>`, `--microfat:trim-to`, `--microfat:optimize-to`) enforce create-only semantics via `renameat2(..., RENAME_NOREPLACE)`.
+   - If the destination already exists (regular file, symlink, FIFO, directory), the operation immediately aborts without overwriting or truncating the target.
+
+2. **Writer Serialization via Advisory Locks**:
+   - In-place transformations acquire an exclusive non-blocking advisory write lock (`flock(fd, LOCK_EX | LOCK_NB)`) on the source executable before snapshotting metadata and staging changes.
+   - Concurrent `microfat` mutations return `ErrConcurrentTransformation` immediately instead of producing interleaved or corrupted files.
+
+3. **Hard-Link Protection**:
+   - In-place mutation of files with multiple directory entries (`nlink > 1`) is strictly rejected by default (`ErrHardLinkDetected`) to prevent silently altering other paths that reference the same inode.
+   - Operators can pass `--break-hardlinks` (CLI) or `--microfat:break-hardlinks` (launcher) to deliberately sever the hard link, writing the derivative to a new inode while preserving untouched aliases at the original inode.
+
+4. **Explicit Metadata Policies (`--metadata-policy=strict|strip`)**:
+   - **`strict` (Default)**: Preserves source file ownership (`chown`), file permissions (`chmod`), and supported extended attributes (`user.*`, `security.selinux`). Strictly rejects files with `setuid`/`setgid` bits, executable capabilities (`security.capability`), or content-bound integrity metadata (`security.ima`, `security.evm`).
+   - **`strip`**: Deliberately creates a standard caller-owned derivative (`0755` masked with source permissions) and strips non-policy extended metadata and ACLs.
+
+5. **Deployment Coordination & Integrity Boundary**:
+   - In-place operations recheck source identity (`dev`, `ino`, `size`, `modtime`) prior to final atomic rename.
+   - Note that Linux `rename` is an atomic directory update, not a kernel compare-and-swap (CAS). External deployers that do not participate in the `flock` protocol must be quiesced during maintenance windows.
+   - Transformed derivatives contain new composite bytes and do not inherit external signatures; re-sign derivatives using your organization's deployment signing infrastructure before distribution. See [Security Policy](../SECURITY.md#6-payload-integrity-vs-producer-authenticity-hashing-vs-signing).
 
 ---
 

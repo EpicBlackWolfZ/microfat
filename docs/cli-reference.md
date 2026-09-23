@@ -360,6 +360,8 @@ microfat trim bin/myapp --max-level v3 --policy safe_avx512 -o bin/myapp-safe
 | `--max-level` | *(none)* | `string` | `""` | Maximum microarchitecture level ceiling to retain. |
 | `--disable-variants` | *(none)* | `string` | `""` | Comma-separated list of variant levels to exclude. |
 | `--policy` | *(none)* | `string` | `""` | Policy preset name (`safe_avx512`, `no_downclock`). |
+| `--metadata-policy` | *(none)* | `string` | `"strict"` | Metadata policy (`strict`, `strip`). Strict preserves exact owner, mode, and supported xattrs; strip discards extra metadata. |
+| `--break-hardlinks` | *(none)* | `bool` | `false` | Allow in-place mutation of files with multiple hard links by breaking link and replacing only the invoked path. |
 
 ---
 
@@ -412,6 +414,8 @@ Every fat binary built with standard `microfat-stub` supports built-in meta-comm
 # 3. In-place trim unneeded variants on disk
 ./myapp --microfat:trim
 ./myapp --microfat:specialize
+# With metadata policy options (strict default, strip, or break-hardlinks):
+./myapp --microfat:trim --microfat:metadata-policy=strip --microfat:break-hardlinks
 
 # 4. Extract single-variant fat binary to a target file
 ./myapp --microfat:trim-to /usr/local/bin/myapp
@@ -419,6 +423,7 @@ Every fat binary built with standard `microfat-stub` supports built-in meta-comm
 
 # 5. In-place permanently specialize to raw uncompressed native ELF
 ./myapp --microfat:optimize
+./myapp --microfat:optimize --microfat:metadata-policy=strip
 
 # 6. Extract raw uncompressed native ELF to a target file
 ./myapp --microfat:optimize-to /usr/local/bin/myapp
