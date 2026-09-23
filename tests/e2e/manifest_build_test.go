@@ -112,3 +112,64 @@ func TestProfile(t *testing.T) {
 		}
 	}
 }
+
+func TestManifestTargetEnvironmentOverrides_Rejected(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	manifestDir := filepath.Join(root, "manifest_dir")
+	pkgDir := filepath.Join(manifestDir, "pkg")
+	writeManifestPackage(t, pkgDir)
+
+	fatOut := filepath.Join(manifestDir, "app-fat")
+	preexistingContent := []byte("untouched preexisting fat binary")
+	require.NoError(t, os.WriteFile(fatOut, preexistingContent, privateFilePerm))
+
+	// Conflicting manifest: declared level is currentHostLevel, but variant env overrides GOAMD64/GOARM64
+	contradictoryKey := "GOAMD64"
+	contradictoryVal := "v4"
+	if currentHostArch == "arm64" {
+		contradictoryKey = "GOARM64"
+		contradictoryVal = "v9.5"
+		if currentHostLevel == "v9.5" {
+			contradictoryVal = manifestARM64Base
+		}
+	} else if currentHostLevel == "v4" {
+		contradictoryVal = "v1"
+	}
+
+	manifestData := map[string]any{
+		"package":     "pkg",
+		"output":      "app-fat",
+		"target_arch": currentHostArch,
+		"stub":        stubPath,
+		"variants": []any{
+			map[string]any{
+				"level": currentHostLevel,
+				"pgo":   manifestPGOOff,
+				"env": map[string]string{
+					contradictoryKey: contradictoryVal,
+				},
+			},
+		},
+	}
+
+	manifestPath := filepath.Join(manifestDir, "bad_manifest.json")
+	writeManifestJSON(t, manifestPath, manifestData)
+
+	for _, command := range []string{inputPackCommand, "pgo-pack"} {
+		t.Run(command, func(t *testing.T) {
+			t.Parallel()
+			cmd := exec.Command(cliPath, command, "--manifest", manifestPath, inputStubFlag, stubPath)
+			cmd.Dir = manifestDir
+			output, err := cmd.CombinedOutput()
+			require.Error(t, err, "expected command %s to fail on contradictory target env", command)
+			require.Contains(t, string(output), "contradicts declared level")
+
+			// Verify preexisting file was not overwritten
+			data, readErr := os.ReadFile(fatOut)
+			require.NoError(t, readErr)
+			require.Equal(t, preexistingContent, data)
+		})
+	}
+}

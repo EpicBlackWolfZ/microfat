@@ -13,7 +13,6 @@ import (
 	"sync"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
-	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 )
 
@@ -61,6 +60,12 @@ func BuildAndPack(ctx context.Context, m *Manifest, opts BuildOptions) (*BuildRe
 	if m == nil {
 		return nil, ErrInvalidManifest
 	}
+
+	mOwned := cloneManifest(m)
+	if err := ValidateManifest(mOwned); err != nil {
+		return nil, err
+	}
+	m = mOwned
 
 	finalOutput := opts.OutputPath
 	if finalOutput == "" {
@@ -122,8 +127,20 @@ func BuildAndPack(ctx context.Context, m *Manifest, opts BuildOptions) (*BuildRe
 		return nil, err
 	}
 
-	compiledMap, err := compileVariantsConcurrently(ctx, m, pgoMap, tmpDir, goBinary, opts)
+	compiledMap, identities, err := compileVariantsConcurrently(ctx, m, pgoMap, tmpDir, goBinary, opts)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := verifyStagedIdentities(identities); err != nil {
+		return nil, err
+	}
+
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
@@ -210,7 +227,7 @@ func compileVariantsConcurrently(
 	tmpDir string,
 	goBinary string,
 	opts BuildOptions,
-) (map[string]string, error) {
+) (map[string]string, map[string]*StagedArtifactIdentity, error) {
 	concurrency := opts.Concurrency
 	if concurrency <= 0 {
 		concurrency = runtime.NumCPU()
@@ -232,10 +249,13 @@ func compileVariantsConcurrently(
 	}
 	close(tasks)
 
+	ambient := os.Environ()
+
 	var (
 		mu          sync.Mutex
 		firstErr    error
 		compiledMap = make(map[string]string, len(m.Variants))
+		identities  = make(map[string]*StagedArtifactIdentity, len(m.Variants))
 		wg          sync.WaitGroup
 	)
 
@@ -247,6 +267,15 @@ func compileVariantsConcurrently(
 			for task := range tasks {
 				select {
 				case <-ctxCancel.Done():
+					mu.Lock()
+					if firstErr == nil {
+						if ctx.Err() != nil {
+							firstErr = ctx.Err()
+						} else {
+							firstErr = ctxCancel.Err()
+						}
+					}
+					mu.Unlock()
 					return
 				default:
 				}
@@ -255,12 +284,37 @@ func compileVariantsConcurrently(
 				outBinary := filepath.Join(tmpDir, fmt.Sprintf("bin_%s_%s", m.TargetArch, v.Level))
 				pgoFlag := pgoMap[v.Level]
 
-				cmd := buildGoCommand(ctxCancel, goBinary, m, v, pgoFlag, outBinary)
+				cmd := buildGoCommand(ctxCancel, goBinary, m, v, pgoFlag, outBinary, ambient)
 				out, err := cmd.CombinedOutput()
 				if err != nil {
 					mu.Lock()
 					if firstErr == nil {
-						firstErr = fmt.Errorf("compiling variant %s: %w\nGo compiler output:\n%s", v.Level, err, strings.TrimSpace(string(out)))
+						if ctx.Err() != nil {
+							firstErr = ctx.Err()
+						} else {
+							firstErr = fmt.Errorf("compiling variant %s: %w\nGo compiler output:\n%s",
+								v.Level, err, strings.TrimSpace(string(out)))
+						}
+						cancel()
+					}
+					mu.Unlock()
+					return
+				}
+
+				expected := ExpectedTarget{
+					OS:   m.TargetOS,
+					Arch: m.TargetArch,
+					Tier: v.Level,
+				}
+				identity, valErr := ValidateArtifactBuildInfo(outBinary, expected)
+				if valErr != nil {
+					mu.Lock()
+					if firstErr == nil {
+						if ctx.Err() != nil {
+							firstErr = ctx.Err()
+						} else {
+							firstErr = fmt.Errorf("validating variant %s artifact: %w", v.Level, valErr)
+						}
 						cancel()
 					}
 					mu.Unlock()
@@ -269,6 +323,7 @@ func compileVariantsConcurrently(
 
 				mu.Lock()
 				compiledMap[v.Level] = outBinary
+				identities[v.Level] = identity
 				if opts.Stdout != nil {
 					_, _ = fmt.Fprintf(opts.Stdout, "  ✔ Compiled %-6s (pgo: %s)\n", v.Level, pgoFlag)
 				}
@@ -280,10 +335,23 @@ func compileVariantsConcurrently(
 	wg.Wait()
 
 	if firstErr != nil {
-		return nil, firstErr
+		return nil, nil, firstErr
 	}
 
-	return compiledMap, nil
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	if len(compiledMap) != len(m.Variants) {
+		return nil, nil, fmt.Errorf("incomplete build: compiled %d of %d variants", len(compiledMap), len(m.Variants))
+	}
+	for _, v := range m.Variants {
+		if _, ok := compiledMap[v.Level]; !ok {
+			return nil, nil, fmt.Errorf("incomplete build: variant %s was not compiled", v.Level)
+		}
+	}
+
+	return compiledMap, identities, nil
 }
 
 func buildGoCommand(
@@ -293,6 +361,7 @@ func buildGoCommand(
 	v VariantConfig,
 	pgoFlag string,
 	outBinary string,
+	ambient []string,
 ) *exec.Cmd {
 	pkgTarget := m.Package
 	workDir := m.Dir
@@ -327,24 +396,7 @@ func buildGoCommand(
 		cmd.Dir = workDir
 	}
 
-	env := os.Environ()
-	env = append(env, "GOOS="+m.TargetOS, "GOARCH="+m.TargetArch)
-
-	switch m.TargetArch {
-	case microarch.ArchAMD64:
-		env = append(env, "GOAMD64="+v.Level)
-	case microarch.ArchARM64:
-		env = append(env, "GOARM64="+v.Level)
-	}
-
-	for k, val := range m.Env {
-		env = append(env, fmt.Sprintf("%s=%s", k, val))
-	}
-	for k, val := range v.Env {
-		env = append(env, fmt.Sprintf("%s=%s", k, val))
-	}
-
-	cmd.Env = env
+	cmd.Env = assembleTargetEnv(ambient, m, v)
 	return cmd
 }
 
@@ -422,6 +474,18 @@ func assemblePackOptions(
 			}
 			_, _ = fmt.Fprintf(opts.Stderr, "[microfat:warn] %s\n", msg)
 		}
+	}
+
+	packOpts.VariantValidator = func(level, snapshottedPath string) error {
+		expected := ExpectedTarget{
+			OS:   m.TargetOS,
+			Arch: m.TargetArch,
+			Tier: level,
+		}
+		if _, err := ValidateArtifactBuildInfo(snapshottedPath, expected); err != nil {
+			return fmt.Errorf("validating snapshotted variant %s build metadata: %w", level, err)
+		}
+		return nil
 	}
 
 	return packOpts

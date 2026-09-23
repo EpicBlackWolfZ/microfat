@@ -155,7 +155,7 @@ func runSetupAndExecute(m *testing.M) int {
 	case archAMD64:
 		levelsToBuild = []string{"v1", "v2", "v3", "v4"}
 	case archARM64:
-		levelsToBuild = []string{"v8.0", "v8.2", "v9.0"}
+		levelsToBuild = []string{manifestARM64Base, "v8.2", "v9.0"}
 	default:
 		levelsToBuild = []string{"v1"}
 	}

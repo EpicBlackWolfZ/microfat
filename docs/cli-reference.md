@@ -335,6 +335,9 @@ variants:
 #### Flags
 Accepts all manifest and compiler flags matching `microfat pack` (`--manifest`, `-o`, `--stub`, `--concurrency`, `--profile`, `--compression`, `--dict`, `--keep-intermediates`, `--go-binary`, `--skip-elf-validation`).
 
+> [!NOTE]
+> **Authoritative Target Policy**: `GOOS`, `GOARCH`, `GOAMD64`, and `GOARM64` are reserved target variables. Ambient values for these variables are sanitized during compilation. Contradictory values declared in manifest `env` (at root or variant level) are rejected before compilation begins. In addition, every compiled Go artifact is validated via `debug/buildinfo` prior to packaging to ensure binary settings match declared variant levels.
+
 ---
 
 ### `microfat trim <binary>`
