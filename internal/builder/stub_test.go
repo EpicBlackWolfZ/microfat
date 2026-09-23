@@ -1036,9 +1036,9 @@ func testDispatchedIndexMismatchErrors(t *testing.T, tmpDir string) {
 	fatDir := filepath.Join(tmpDir, "mismatched-fat-dir")
 	_ = os.MkdirAll(fatDir, 0o755)
 
-	wrongArch := "arm64"
-	wrongLevel := "v8.0"
-	if runtime.GOARCH == "arm64" {
+	wrongArch := testArchARM64
+	wrongLevel := tierV8_0
+	if runtime.GOARCH == testArchARM64 {
 		wrongArch = testArchAMD64
 		wrongLevel = "v1"
 	}

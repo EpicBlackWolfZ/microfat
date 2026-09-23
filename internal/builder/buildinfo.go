@@ -34,6 +34,8 @@ type StagedArtifactIdentity struct {
 	ModTime time.Time
 }
 
+var readBuildInfoFunc = buildinfo.Read
+
 // ValidateArtifactBuildInfo opens a compiled artifact with input-safety conventions,
 // extracts its Go build settings via debug/buildinfo without executing it,
 // and verifies that GOOS, GOARCH, and the applicable CPU tier match expectations.
@@ -49,7 +51,7 @@ func ValidateArtifactBuildInfo(artifactPath string, expected ExpectedTarget) (*S
 		return nil, fmt.Errorf("%w: stating %s: %w", ErrInvalidArtifactBuildInfo, artifactPath, err)
 	}
 
-	bi, err := buildinfo.Read(f)
+	bi, err := readBuildInfoFunc(f)
 	if err != nil {
 		return nil, fmt.Errorf("%w: reading buildinfo from %s: %w", ErrInvalidArtifactBuildInfo, artifactPath, err)
 	}

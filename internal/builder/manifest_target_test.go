@@ -160,6 +160,38 @@ func TestValidateManifest_TargetEnvironment(t *testing.T) {
 			expectedErr: "empty reserved target variable \"GOAMD64\" in variant v1",
 		},
 		{
+			name: "rejects_empty_variant_GOOS",
+			manifest: &builder.Manifest{
+				TargetOS:   testOSLinux,
+				TargetArch: microarch.ArchAMD64,
+				Variants: []builder.VariantConfig{
+					{
+						Level: "v1",
+						Env: map[string]string{
+							keyGOOS: "",
+						},
+					},
+				},
+			},
+			expectedErr: "empty reserved target variable \"GOOS\" in variant v1",
+		},
+		{
+			name: "rejects_empty_variant_GOARCH",
+			manifest: &builder.Manifest{
+				TargetOS:   testOSLinux,
+				TargetArch: microarch.ArchAMD64,
+				Variants: []builder.VariantConfig{
+					{
+						Level: "v1",
+						Env: map[string]string{
+							keyGOARCH: "",
+						},
+					},
+				},
+			},
+			expectedErr: "empty reserved target variable \"GOARCH\" in variant v1",
+		},
+		{
 			name: "rejects_contradictory_root_GOOS",
 			manifest: &builder.Manifest{
 				TargetOS:   testOSLinux,

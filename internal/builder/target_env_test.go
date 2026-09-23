@@ -34,9 +34,9 @@ func TestAssembleTargetEnv(t *testing.T) {
 			Env: map[string]string{
 				"ROOT_VAR":   "root_val",
 				"CUSTOM_VAR": "root_override",
-				"GOOS":       testOSLinux,
-				"GOARCH":     testArchAMD64,
-				"GOAMD64":    "v1",
+				EnvGOOS:      testOSLinux,
+				EnvGOARCH:    testArchAMD64,
+				EnvGOAMD64:   "v1",
 			},
 			Variants: []VariantConfig{
 				{Level: "v1"},
@@ -48,9 +48,9 @@ func TestAssembleTargetEnv(t *testing.T) {
 			Env: map[string]string{
 				"VARIANT_VAR": "var_val",
 				"CUSTOM_VAR":  "variant_override",
-				"GOOS":        testOSLinux,
-				"GOARCH":      testArchAMD64,
-				"GOAMD64":     "v1",
+				EnvGOOS:       testOSLinux,
+				EnvGOARCH:     testArchAMD64,
+				EnvGOAMD64:    "v1",
 			},
 		}
 
@@ -67,12 +67,12 @@ func TestAssembleTargetEnv(t *testing.T) {
 		}
 
 		// Authoritative target variables
-		assert.Equal(t, "linux", envMap["GOOS"])
-		assert.Equal(t, "amd64", envMap["GOARCH"])
-		assert.Equal(t, "v1", envMap["GOAMD64"])
+		assert.Equal(t, testOSLinux, envMap[EnvGOOS])
+		assert.Equal(t, testArchAMD64, envMap[EnvGOARCH])
+		assert.Equal(t, "v1", envMap[EnvGOAMD64])
 
 		// Inactive tier variable must be absent
-		_, hasARM64 := envMap["GOARM64"]
+		_, hasARM64 := envMap[EnvGOARM64]
 		assert.False(t, hasARM64, "GOARM64 must be absent for amd64 target")
 
 		// Precedence: variant overrides root overrides ambient
@@ -87,11 +87,11 @@ func TestAssembleTargetEnv(t *testing.T) {
 
 		ambient := []string{
 			"GOAMD64=v3",
-			"GOARM64=v8.0",
+			EnvGOARM64 + "=v8.0",
 		}
 
 		m := &Manifest{
-			TargetOS:   "linux",
+			TargetOS:   testOSLinux,
 			TargetArch: microarch.ArchARM64,
 			Variants: []VariantConfig{
 				{Level: "v8.2"},

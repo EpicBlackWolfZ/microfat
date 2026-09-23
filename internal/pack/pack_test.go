@@ -34,6 +34,28 @@ const (
 	testAliasAMD64v3       = "amd64_v3"
 )
 
+func TestPack_VariantValidatorError(t *testing.T) {
+	tempDir := t.TempDir()
+	stubPath := filepath.Join(tempDir, "microfat-stub")
+	require.NoError(t, os.WriteFile(stubPath, []byte("stub"), 0o755))
+	v1Path := filepath.Join(tempDir, "bin-v1")
+	require.NoError(t, os.WriteFile(v1Path, []byte("v1"), 0o755))
+
+	opts := Options{
+		StubPath:          stubPath,
+		OutputPath:        filepath.Join(tempDir, "fat-app"),
+		AppName:           "validator-app",
+		Variants:          map[string]string{"v1": v1Path},
+		SkipELFValidation: true,
+		VariantValidator: func(string, string) error {
+			return errors.New("simulated validator rejection")
+		},
+	}
+	_, err := Pack(opts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "simulated validator rejection")
+}
+
 func TestPackAndVerify(t *testing.T) {
 	tempDir := t.TempDir()
 
