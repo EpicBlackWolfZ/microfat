@@ -50,6 +50,12 @@ func snapshotInputs(opts *Options) (func(), error) {
 			cleanup()
 			return nil, fmt.Errorf("%w: snapshot variant %s: %w", ErrVariantNotFound, level, err)
 		}
+		if opts.VariantValidator != nil {
+			if err := opts.VariantValidator(level, variants[level]); err != nil {
+				cleanup()
+				return nil, err
+			}
+		}
 	}
 	opts.StubPath = stub
 	opts.Variants = variants

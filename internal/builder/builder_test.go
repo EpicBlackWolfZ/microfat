@@ -24,6 +24,13 @@ const (
 	testArchARM64      = "arm64"
 	dummyELFExtraBytes = 100
 	pgoOff             = "off"
+	testLevelV8_0      = "v8.0"
+	testLevelV8_1      = "v8.1"
+	testLevelV8_2      = "v8.2"
+	keyGOOS            = "GOOS"
+	keyGOARCH          = "GOARCH"
+	keyGOAMD64         = "GOAMD64"
+	keyGOARM64         = "GOARM64"
 )
 
 func createDummyELF(t *testing.T, dir, name string, arch string) string {
@@ -155,7 +162,7 @@ func TestLoadManifest_JSON(t *testing.T) {
 		TargetOS:   testOSLinux,
 		TargetArch: testArchARM64,
 		Variants: []builder.VariantConfig{
-			{Level: "v8.0"},
+			{Level: testLevelV8_0},
 			{Level: "v8.2"},
 		},
 	}
@@ -840,6 +847,7 @@ func TestAssemblePackOptions_WarnFuncAndStderr(t *testing.T) {
 				SkipELFValidation: true,
 			},
 		)
+		packOpts.VariantValidator = nil // bypass buildinfo check on synthetic 3-byte test payload
 
 		idx, err := pack.Pack(packOpts)
 		if err != nil {

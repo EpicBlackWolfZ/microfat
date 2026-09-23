@@ -63,9 +63,10 @@ type Options struct {
 	DictSize           int               // Target dictionary size in bytes (default: 112 KB)
 	VariantCompression map[string]VariantCompressionOptions
 	Permissions        os.FileMode
-	FormatVersion      int      // FormatVersion1 (JSON) or FormatVersion2 (Binary, default)
-	SkipELFValidation  bool     // Optional flag to bypass ELF header validation (primarily for testing)
-	WarnFunc           WarnFunc // Optional diagnostic warning callback for non-fatal assembly telemetry
+	FormatVersion      int                                       // FormatVersion1 (JSON) or FormatVersion2 (Binary, default)
+	SkipELFValidation  bool                                      // Optional flag to bypass ELF header validation (primarily for testing)
+	WarnFunc           WarnFunc                                  // Optional diagnostic warning callback for non-fatal assembly telemetry
+	VariantValidator   func(level, snapshottedPath string) error // Optional validation callback on privately snapshotted variants
 }
 
 func (o *Options) warnf(format string, args ...any) {

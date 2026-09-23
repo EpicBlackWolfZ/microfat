@@ -137,7 +137,7 @@ func TestGoldenVariantSelection_Deterministic(t *testing.T) {
 		targetFallback := "v1"
 		disabledVal := "v2,v3,v4"
 		if currentHostArch == archARM64 {
-			targetFallback = "v8.0"
+			targetFallback = manifestARM64Base
 			disabledVal = "v8.2,v9.0"
 		}
 
