@@ -545,6 +545,7 @@ func TestBuildAndPack_CancelledContext(t *testing.T) {
 	cancel()
 
 	tmpDir := t.TempDir()
+	stubFile := createDummyELF(t, tmpDir, "microfat-stub", testArchAMD64)
 	m := &Manifest{
 		TargetOS:   testOSLinux,
 		TargetArch: testArchAMD64,
@@ -555,6 +556,7 @@ func TestBuildAndPack_CancelledContext(t *testing.T) {
 		},
 	}
 	_, err := BuildAndPack(ctx, m, BuildOptions{
+		StubPath:   stubFile,
 		OutputPath: filepath.Join(tmpDir, "out"),
 	})
 	require.Error(t, err)
