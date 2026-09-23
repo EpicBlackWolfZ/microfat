@@ -212,6 +212,10 @@ func verifyStagedIdentities(identities map[string]*StagedArtifactIdentity) error
 			return fmt.Errorf("%w: size changed for variant %s (expected %d, got %d)",
 				ErrStagedArtifactModified, level, id.Size, fi.Size())
 		}
+		if !fi.ModTime().Equal(id.ModTime) {
+			return fmt.Errorf("%w: modtime changed for variant %s (%s)",
+				ErrStagedArtifactModified, level, id.Path)
+		}
 		dev, ino, ok := fileDevIno(fi)
 		if ok && (dev != id.Dev || ino != id.Ino) {
 			return fmt.Errorf("%w: device/inode changed for variant %s (%s)",

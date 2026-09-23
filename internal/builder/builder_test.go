@@ -847,6 +847,7 @@ func TestAssemblePackOptions_WarnFuncAndStderr(t *testing.T) {
 				SkipELFValidation: true,
 			},
 		)
+		packOpts.VariantValidator = nil // bypass buildinfo check on synthetic 3-byte test payload
 
 		idx, err := pack.Pack(packOpts)
 		if err != nil {

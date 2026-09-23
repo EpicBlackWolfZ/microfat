@@ -1,13 +1,17 @@
 package builder_test
 
 import (
+	"bytes"
 	"context"
 	"debug/buildinfo"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/builder"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
@@ -253,4 +257,173 @@ exit 0
 		require.NoError(t, err)
 		assert.Equal(t, preexistingBytes, data)
 	})
+}
+
+type fileMutatingWriter struct {
+	mu          sync.Mutex
+	searchDir   string
+	restoreTime bool
+	mutated     bool
+}
+
+func (w *fileMutatingWriter) Write(p []byte) (n int, err error) {
+	s := string(p)
+	if strings.Contains(s, "Compiled v1") {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if !w.mutated {
+			_ = filepath.Walk(w.searchDir, func(path string, info os.FileInfo, walkErr error) error {
+				if walkErr == nil && filepath.Base(path) == "bin_amd64_v1" && !info.IsDir() {
+					data, readErr := os.ReadFile(path)
+					if readErr == nil && bytes.Contains(data, []byte("GOAMD64=v1")) {
+						stat, _ := os.Stat(path)
+						data = bytes.ReplaceAll(data, []byte("GOAMD64=v1"), []byte("GOAMD64=v4"))
+						_ = os.WriteFile(path, data, 0o755)
+						if w.restoreTime && stat != nil {
+							_ = os.Chtimes(path, stat.ModTime(), stat.ModTime())
+						} else if stat != nil {
+							newTime := stat.ModTime().Add(2 * time.Second)
+							_ = os.Chtimes(path, newTime, newTime)
+						}
+						w.mutated = true
+						return filepath.SkipAll
+					}
+				}
+				return nil
+			})
+		}
+	}
+	return len(p), nil
+}
+
+func TestBuildAndPack_SameLengthModificationRejection(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	stubFile := createDummyELF(t, tmpDir, "microfat-stub", testArchAMD64)
+
+	pkgDir := filepath.Join(tmpDir, "pkg")
+	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samelengthpkg\ngo 1.27.1\n"), 0o644))
+
+	binDir := filepath.Join(tmpDir, "bin")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	outFile := filepath.Join(binDir, "samelength_fat")
+	preexistingBytes := []byte("PREEXISTING_ORIGINAL_FAT_FILE_CONTENT")
+	require.NoError(t, os.WriteFile(outFile, preexistingBytes, 0o755))
+
+	m := &builder.Manifest{
+		AppName:    "samelength-test",
+		Package:    pkgDir,
+		Output:     outFile,
+		Stub:       stubFile,
+		TargetOS:   testOSLinux,
+		TargetArch: microarch.ArchAMD64,
+		Variants: []builder.VariantConfig{
+			{Level: "v1", PGO: pgoOff},
+		},
+		Dir: tmpDir,
+	}
+
+	t.Run("modtime_changed_rejected_by_verifyStagedIdentities", func(t *testing.T) {
+		writer := &fileMutatingWriter{
+			searchDir:   binDir,
+			restoreTime: false,
+		}
+
+		res, err := builder.BuildAndPack(context.Background(), m, builder.BuildOptions{
+			Stdout: writer,
+		})
+		require.Error(t, err)
+		require.ErrorIs(t, err, builder.ErrStagedArtifactModified)
+		assert.Contains(t, err.Error(), "modtime changed")
+		assert.Nil(t, res)
+
+		// Preexisting output untouched
+		data, readErr := os.ReadFile(outFile)
+		require.NoError(t, readErr)
+		assert.Equal(t, preexistingBytes, data)
+	})
+
+	t.Run("modtime_forged_rejected_by_pack_VariantValidator_on_snapshot", func(t *testing.T) {
+		writer := &fileMutatingWriter{
+			searchDir:   binDir,
+			restoreTime: true,
+		}
+
+		res, err := builder.BuildAndPack(context.Background(), m, builder.BuildOptions{
+			Stdout: writer,
+		})
+		require.Error(t, err)
+		// Caught by VariantValidator validating the snapshotted bytes
+		assert.Contains(t, err.Error(), "validating snapshotted variant v1 build metadata")
+		assert.Nil(t, res)
+
+		// Preexisting output untouched
+		data, readErr := os.ReadFile(outFile)
+		require.NoError(t, readErr)
+		assert.Equal(t, preexistingBytes, data)
+	})
+}
+
+type cancellingWriter struct {
+	cancel context.CancelFunc
+}
+
+func (w *cancellingWriter) Write(p []byte) (n int, err error) {
+	if strings.Contains(string(p), "Compiled v1") {
+		w.cancel()
+	}
+	return len(p), nil
+}
+
+func TestBuildAndPack_CancellationBetweenVariants(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	stubFile := createDummyELF(t, tmpDir, "microfat-stub", testArchAMD64)
+
+	pkgDir := filepath.Join(tmpDir, "pkg")
+	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module cancelpkg\ngo 1.27.1\n"), 0o644))
+
+	binDir := filepath.Join(tmpDir, "bin")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	outFile := filepath.Join(binDir, "cancel_fat")
+	preexistingBytes := []byte("PREEXISTING_ORIGINAL_FAT_FILE_CONTENT")
+	require.NoError(t, os.WriteFile(outFile, preexistingBytes, 0o755))
+
+	m := &builder.Manifest{
+		AppName:    "cancel-test",
+		Package:    pkgDir,
+		Output:     outFile,
+		Stub:       stubFile,
+		TargetOS:   testOSLinux,
+		TargetArch: microarch.ArchAMD64,
+		Variants: []builder.VariantConfig{
+			{Level: "v1", PGO: pgoOff},
+			{Level: "v3", PGO: pgoOff},
+		},
+		Dir: tmpDir,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	writer := &cancellingWriter{cancel: cancel}
+
+	res, err := builder.BuildAndPack(ctx, m, builder.BuildOptions{
+		Concurrency: 1,
+		Stdout:      writer,
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, res)
+
+	// Preexisting output untouched
+	data, readErr := os.ReadFile(outFile)
+	require.NoError(t, readErr)
+	assert.Equal(t, preexistingBytes, data)
 }

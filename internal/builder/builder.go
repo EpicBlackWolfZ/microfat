@@ -132,7 +132,15 @@ func BuildAndPack(ctx context.Context, m *Manifest, opts BuildOptions) (*BuildRe
 		return nil, err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	if err := verifyStagedIdentities(identities); err != nil {
+		return nil, err
+	}
+
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
@@ -259,6 +267,15 @@ func compileVariantsConcurrently(
 			for task := range tasks {
 				select {
 				case <-ctxCancel.Done():
+					mu.Lock()
+					if firstErr == nil {
+						if ctx.Err() != nil {
+							firstErr = ctx.Err()
+						} else {
+							firstErr = ctxCancel.Err()
+						}
+					}
+					mu.Unlock()
 					return
 				default:
 				}
@@ -272,8 +289,12 @@ func compileVariantsConcurrently(
 				if err != nil {
 					mu.Lock()
 					if firstErr == nil {
-						firstErr = fmt.Errorf("compiling variant %s: %w\nGo compiler output:\n%s",
-							v.Level, err, strings.TrimSpace(string(out)))
+						if ctx.Err() != nil {
+							firstErr = ctx.Err()
+						} else {
+							firstErr = fmt.Errorf("compiling variant %s: %w\nGo compiler output:\n%s",
+								v.Level, err, strings.TrimSpace(string(out)))
+						}
 						cancel()
 					}
 					mu.Unlock()
@@ -289,7 +310,11 @@ func compileVariantsConcurrently(
 				if valErr != nil {
 					mu.Lock()
 					if firstErr == nil {
-						firstErr = fmt.Errorf("validating variant %s artifact: %w", v.Level, valErr)
+						if ctx.Err() != nil {
+							firstErr = ctx.Err()
+						} else {
+							firstErr = fmt.Errorf("validating variant %s artifact: %w", v.Level, valErr)
+						}
 						cancel()
 					}
 					mu.Unlock()
@@ -311,6 +336,19 @@ func compileVariantsConcurrently(
 
 	if firstErr != nil {
 		return nil, nil, firstErr
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	if len(compiledMap) != len(m.Variants) {
+		return nil, nil, fmt.Errorf("incomplete build: compiled %d of %d variants", len(compiledMap), len(m.Variants))
+	}
+	for _, v := range m.Variants {
+		if _, ok := compiledMap[v.Level]; !ok {
+			return nil, nil, fmt.Errorf("incomplete build: variant %s was not compiled", v.Level)
+		}
 	}
 
 	return compiledMap, identities, nil
@@ -436,6 +474,18 @@ func assemblePackOptions(
 			}
 			_, _ = fmt.Fprintf(opts.Stderr, "[microfat:warn] %s\n", msg)
 		}
+	}
+
+	packOpts.VariantValidator = func(level, snapshottedPath string) error {
+		expected := ExpectedTarget{
+			OS:   m.TargetOS,
+			Arch: m.TargetArch,
+			Tier: level,
+		}
+		if _, err := ValidateArtifactBuildInfo(snapshottedPath, expected); err != nil {
+			return fmt.Errorf("validating snapshotted variant %s build metadata: %w", level, err)
+		}
+		return nil
 	}
 
 	return packOpts
