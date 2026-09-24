@@ -507,13 +507,15 @@ func newPackCmd() *cobra.Command {
 				return nil
 			}
 
-			actualStubPath := flags.StubPath
-			if actualStubPath == "" {
-				resolvedStub, err := builder.ResolveStubPath("", "", "")
-				if err != nil {
-					return fmt.Errorf("launcher stub resolution failed: %w (provide --stub flag or specify --manifest)", err)
-				}
-				actualStubPath = resolvedStub
+			actualStubPath, err := builder.ResolveStubWithOptions(builder.ResolveStubOptions{
+				CLIStub:    flags.StubPath,
+				CLIProfile: flags.StubProfile,
+				TargetArch: targetArch,
+			})
+			if err != nil {
+				return fmt.Errorf("launcher stub resolution failed: %w (provide --stub flag or specify --manifest)", err)
+			}
+			if flags.StubPath == "" {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Using auto-discovered launcher stub: %s\n", actualStubPath)
 			}
 			if flags.OutputPath == "" {
@@ -623,6 +625,7 @@ func manifestBuildOptions(cmd *cobra.Command, flags builder.BuildOptions) builde
 }
 
 func bindManifestBuildFlags(cmd *cobra.Command, flags *builder.BuildOptions) {
+	cmd.Flags().StringVar(&flags.StubProfile, "stub-profile", "", "Launcher stub profile: full (default) or minimal")
 	cmd.Flags().StringVar(&flags.Profile, "profile", "", "Compression profile preset: latency, balanced, size")
 	cmd.Flags().StringVar(&flags.Compression, "compression", "", "Compression algorithm: lz4, zstd, none (e.g. lz4 or zstd:11)")
 	cmd.Flags().StringVar(&flags.CompressionLevel, "compression-level", "",
