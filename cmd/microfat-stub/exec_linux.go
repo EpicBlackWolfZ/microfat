@@ -55,6 +55,7 @@ var (
 	openCachedBinaryAtFunc = func(dirFD int, name string) (int, error) {
 		return cache.OpenFileAtFunc(dirFD, name)
 	}
+	filepathAbsFunc = filepath.Abs
 )
 
 // extractVariantToWriter seeks to the variant offset and streams decompressed bytes to w,
@@ -235,11 +236,10 @@ func buildAutoTunedEnviron(
 		}
 	}
 
-	trimmedSelf := strings.TrimSpace(selfPath)
-	if trimmedSelf != "" {
-		absPath, err := filepath.Abs(trimmedSelf)
+	if selfPath != "" {
+		absPath, err := filepathAbsFunc(selfPath)
 		if err != nil {
-			absPath = filepath.Clean(trimmedSelf)
+			absPath = filepath.Clean(selfPath)
 		}
 		env = upsertEnv(env, keyIndex, format.EnvOriginalExe, absPath)
 	}
@@ -501,7 +501,6 @@ func executeViaMemfd(
 		return err
 	}
 
-	selfPath = strings.TrimSpace(selfPath)
 	if selfPath == "" && selfFile != nil {
 		selfPath = selfFile.Name()
 	}

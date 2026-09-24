@@ -54,7 +54,7 @@ var (
 // or sibling CLI binaries). Applications and libraries must NOT use this value as a
 // cryptographic identity, access-control token, or trusted binary origin.
 func Executable() (string, error) {
-	if origExe := strings.TrimSpace(getenvFunc(format.EnvOriginalExe)); origExe != "" {
+	if origExe := getenvFunc(format.EnvOriginalExe); origExe != "" {
 		if abs, err := absFunc(origExe); err == nil {
 			return abs, nil
 		}
