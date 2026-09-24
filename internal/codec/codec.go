@@ -143,32 +143,51 @@ func Register(c Codec) {
 	registry[strings.ToLower(strings.TrimSpace(c.Name()))] = c
 }
 
-// Get retrieves a registered Codec by name. If name is empty, it defaults to "zstd".
-func Get(name string) (Codec, error) {
+// listLocked returns an unsorted slice of registered codec names while registryMu is held for reading.
+// Callers must hold registryMu.RLock() or registryMu.Lock() and must NOT acquire registryMu again.
+func listLocked() []string {
+	names := make([]string, 0, len(registry))
+	for name := range registry {
+		names = append(names, name)
+	}
+	return names
+}
+
+func getWithHook(name string, postLookup func()) (Codec, error) {
 	cleanName := strings.ToLower(strings.TrimSpace(name))
 	if cleanName == "" {
 		cleanName = AlgorithmZstd
 	}
 
 	registryMu.RLock()
-	defer registryMu.RUnlock()
-
 	c, ok := registry[cleanName]
+	var supported []string
 	if !ok {
-		return nil, fmt.Errorf("%w: %q (supported: %s)", ErrUnsupportedCodec, name, strings.Join(List(), ", "))
+		if postLookup != nil {
+			postLookup()
+		}
+		supported = listLocked()
+	}
+	registryMu.RUnlock()
+
+	if !ok {
+		sort.Strings(supported)
+		return nil, fmt.Errorf("%w: %q (supported: %s)", ErrUnsupportedCodec, name, strings.Join(supported, ", "))
 	}
 	return c, nil
+}
+
+// Get retrieves a registered Codec by name. If name is empty, it defaults to "zstd".
+func Get(name string) (Codec, error) {
+	return getWithHook(name, nil)
 }
 
 // List returns a sorted list of registered codec names.
 func List() []string {
 	registryMu.RLock()
-	defer registryMu.RUnlock()
+	names := listLocked()
+	registryMu.RUnlock()
 
-	names := make([]string, 0, len(registry))
-	for name := range registry {
-		names = append(names, name)
-	}
 	sort.Strings(names)
 	return names
 }
