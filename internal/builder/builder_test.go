@@ -691,6 +691,52 @@ variants:
 	}
 }
 
+func TestLoadManifest_CompressionDocumentedExamples(t *testing.T) {
+	t.Parallel()
+
+	// 1. Flow mapping format as documented in docs/cli-reference.md:
+	// compression: {algorithm: lz4} and compression: {algorithm: zstd, level: best}
+	flowYaml := `
+name: doc-flow-mappings
+package: .
+target_os: linux
+target_arch: amd64
+variants:
+  - level: v1
+    compression: {algorithm: lz4}
+  - level: v3
+    compression: {algorithm: zstd, level: best}
+`
+	mFlow, err := builder.ParseManifest([]byte(flowYaml), ".yaml")
+	require.NoError(t, err)
+	require.NoError(t, builder.ValidateManifest(mFlow))
+	require.Equal(t, "lz4", mFlow.Variants[0].Compression.Algorithm)
+	require.Empty(t, mFlow.Variants[0].Compression.Level)
+	require.Equal(t, "zstd", mFlow.Variants[1].Compression.Algorithm)
+	require.Equal(t, "best", mFlow.Variants[1].Compression.Level)
+
+	// 2. Profile-only fragment (omitted algorithms at root and variant scopes)
+	profileOnlyYaml := `
+name: doc-profile-only
+package: .
+target_os: linux
+target_arch: amd64
+compression:
+  profile: balanced
+variants:
+  - level: v1
+    compression:
+      profile: latency
+`
+	mProfile, err := builder.ParseManifest([]byte(profileOnlyYaml), ".yaml")
+	require.NoError(t, err)
+	require.NoError(t, builder.ValidateManifest(mProfile))
+	require.Equal(t, "balanced", mProfile.Compression.Profile)
+	require.Empty(t, mProfile.Compression.Algorithm)
+	require.Equal(t, "latency", mProfile.Variants[0].Compression.Profile)
+	require.Empty(t, mProfile.Variants[0].Compression.Algorithm)
+}
+
 func TestBuildAndPack_CompressionProfiles(t *testing.T) {
 	t.Parallel()
 
