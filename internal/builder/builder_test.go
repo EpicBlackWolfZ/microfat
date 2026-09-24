@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/builder"
+	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 
@@ -31,6 +32,7 @@ const (
 	keyGOARCH          = "GOARCH"
 	keyGOAMD64         = "GOAMD64"
 	keyGOARM64         = "GOARM64"
+	testCodecLZ4       = codec.AlgorithmLZ4
 )
 
 func createDummyELF(t *testing.T, dir, name string, arch string) string {
@@ -654,7 +656,7 @@ variants:
 	if err != nil {
 		t.Fatalf("LoadManifest valid compression failed: %v", err)
 	}
-	if m.Compression == nil || m.Compression.Profile != "latency" || m.Compression.Algorithm != "lz4" {
+	if m.Compression == nil || m.Compression.Profile != "latency" || m.Compression.Algorithm != testCodecLZ4 {
 		t.Fatalf("unexpected root compression: %+v", m.Compression)
 	}
 	if len(m.Variants) != 2 || m.Variants[0].Compression.Algorithm != "none" || m.Variants[1].Compression.Algorithm != "zstd" {
@@ -689,6 +691,52 @@ variants:
 	}
 }
 
+func TestLoadManifest_CompressionDocumentedExamples(t *testing.T) {
+	t.Parallel()
+
+	// 1. Flow mapping format as documented in docs/cli-reference.md:
+	// compression: {algorithm: lz4} and compression: {algorithm: zstd, level: best}
+	flowYaml := `
+name: doc-flow-mappings
+package: .
+target_os: linux
+target_arch: amd64
+variants:
+  - level: v1
+    compression: {algorithm: lz4}
+  - level: v3
+    compression: {algorithm: zstd, level: best}
+`
+	mFlow, err := builder.ParseManifest([]byte(flowYaml), ".yaml")
+	require.NoError(t, err)
+	require.NoError(t, builder.ValidateManifest(mFlow))
+	require.Equal(t, "lz4", mFlow.Variants[0].Compression.Algorithm)
+	require.Empty(t, mFlow.Variants[0].Compression.Level)
+	require.Equal(t, "zstd", mFlow.Variants[1].Compression.Algorithm)
+	require.Equal(t, "best", mFlow.Variants[1].Compression.Level)
+
+	// 2. Profile-only fragment (omitted algorithms at root and variant scopes)
+	profileOnlyYaml := `
+name: doc-profile-only
+package: .
+target_os: linux
+target_arch: amd64
+compression:
+  profile: balanced
+variants:
+  - level: v1
+    compression:
+      profile: latency
+`
+	mProfile, err := builder.ParseManifest([]byte(profileOnlyYaml), ".yaml")
+	require.NoError(t, err)
+	require.NoError(t, builder.ValidateManifest(mProfile))
+	require.Equal(t, "balanced", mProfile.Compression.Profile)
+	require.Empty(t, mProfile.Compression.Algorithm)
+	require.Equal(t, "latency", mProfile.Variants[0].Compression.Profile)
+	require.Empty(t, mProfile.Variants[0].Compression.Algorithm)
+}
+
 func TestBuildAndPack_CompressionProfiles(t *testing.T) {
 	t.Parallel()
 
@@ -712,7 +760,7 @@ func TestBuildAndPack_CompressionProfiles(t *testing.T) {
 		TargetArch: testArchAMD64,
 		Compression: &builder.CompressionConfig{
 			Profile:   "latency",
-			Algorithm: "lz4",
+			Algorithm: testCodecLZ4,
 		},
 		Variants: []builder.VariantConfig{
 			{
@@ -742,8 +790,8 @@ func TestBuildAndPack_CompressionProfiles(t *testing.T) {
 		t.Errorf("expected v1 to be 'none', got %q", v1.Compression)
 	}
 	v3, _ := res.Index.FindVariant("v3")
-	if v3.Compression != "lz4" {
-		t.Errorf("expected v3 to inherit 'lz4', got %q", v3.Compression)
+	if v3.Compression != testCodecLZ4 {
+		t.Errorf("expected v3 to inherit %q, got %q", testCodecLZ4, v3.Compression)
 	}
 }
 
@@ -859,5 +907,408 @@ func TestAssemblePackOptions_WarnFuncAndStderr(t *testing.T) {
 		if !strings.Contains(stderrBuf.String(), "[microfat:warn] shared dictionary training failed") {
 			t.Errorf("expected [microfat:warn] diagnostic on stderr, got %q", stderrBuf.String())
 		}
+	})
+}
+
+func TestManifestCompressionPrecedenceArtifacts(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	stubFile := createDummyELF(t, tempDir, "microfat-stub", testArchAMD64)
+
+	const (
+		subThresholdSize   = 100 * 1024
+		superThresholdSize = 600 * 1024
+	)
+
+	// Create real binary files to use in packaging tests
+	v1Path := filepath.Join(tempDir, "bin-v1")
+	v1Bytes := make([]byte, subThresholdSize)
+	for i := range v1Bytes {
+		v1Bytes[i] = byte(i % 256)
+	}
+	if err := os.WriteFile(v1Path, v1Bytes, 0o755); err != nil {
+		t.Fatalf("failed to write v1 binary: %v", err)
+	}
+
+	v3Path := filepath.Join(tempDir, "bin-v3")
+	v3Bytes := make([]byte, superThresholdSize)
+	for i := range v3Bytes {
+		v3Bytes[i] = byte((i % 256) ^ (i / 1024))
+	}
+	if err := os.WriteFile(v3Path, v3Bytes, 0o755); err != nil {
+		t.Fatalf("failed to write v3 binary: %v", err)
+	}
+
+	compiledMap := map[string]string{
+		"v1": v1Path,
+		"v3": v3Path,
+	}
+
+	t.Run("YAML_RootBalancedImplicit_ChildLatency", func(t *testing.T) {
+		t.Parallel()
+		yamlContent := `app_name: yaml-latency-app
+target_os: linux
+target_arch: amd64
+variants:
+  - level: v1
+    compression:
+      profile: latency
+  - level: v3
+    compression:
+      profile: latency
+`
+		manifestPath := filepath.Join(t.TempDir(), "microfat.yaml")
+		require.NoError(t, os.WriteFile(manifestPath, []byte(yamlContent), 0o644))
+
+		m, err := builder.LoadManifest(manifestPath)
+		require.NoError(t, err)
+
+		outFat := filepath.Join(t.TempDir(), "out-yaml-latency.fat")
+		packOpts := builder.AssemblePackOptionsForTest(
+			m, stubFile, outFat, m.AppName, compiledMap,
+			builder.BuildOptions{SkipELFValidation: true},
+		)
+		packOpts.VariantValidator = nil
+
+		idx, err := pack.Pack(packOpts)
+		require.NoError(t, err)
+
+		v1Entry, _ := idx.FindVariant("v1")
+		require.Equal(t, codec.AlgorithmNone, v1Entry.Compression)
+		v3Entry, _ := idx.FindVariant("v3")
+		require.Equal(t, testCodecLZ4, v3Entry.Compression)
+
+		f, err := os.Open(outFat)
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+
+		stat, err := f.Stat()
+		require.NoError(t, err)
+
+		storedIdx, err := format.ReadTrailerAndIndex(f, stat.Size())
+		require.NoError(t, err)
+		diskV1, _ := storedIdx.FindVariant("v1")
+		require.Equal(t, codec.AlgorithmNone, diskV1.Compression)
+		diskV3, _ := storedIdx.FindVariant("v3")
+		require.Equal(t, testCodecLZ4, diskV3.Compression)
+
+		_, results, err := pack.VerifyBinary(f, stat.Size())
+		require.NoError(t, err)
+		for _, r := range results {
+			require.True(t, r.Valid)
+		}
+	})
+
+	t.Run("JSON_RootExplicitZstd_ChildLatencyRetainsZstd", func(t *testing.T) {
+		t.Parallel()
+		jsonContent := `{
+  "app_name": "json-zstd-app",
+  "target_os": "linux",
+  "target_arch": "amd64",
+  "compression": {
+    "algorithm": "zstd"
+  },
+  "variants": [
+    {
+      "level": "v1",
+      "compression": {
+        "profile": "latency"
+      }
+    },
+    {
+      "level": "v3"
+    }
+  ]
+}`
+		manifestPath := filepath.Join(t.TempDir(), "microfat.json")
+		require.NoError(t, os.WriteFile(manifestPath, []byte(jsonContent), 0o644))
+
+		m, err := builder.LoadManifest(manifestPath)
+		require.NoError(t, err)
+
+		outFat := filepath.Join(t.TempDir(), "out-json-zstd.fat")
+		packOpts := builder.AssemblePackOptionsForTest(
+			m, stubFile, outFat, m.AppName, compiledMap,
+			builder.BuildOptions{SkipELFValidation: true},
+		)
+		packOpts.VariantValidator = nil
+
+		idx, err := pack.Pack(packOpts)
+		require.NoError(t, err)
+
+		v1Entry, _ := idx.FindVariant("v1")
+		require.Equal(t, codec.AlgorithmZstd, v1Entry.Compression, "explicit root zstd must be retained despite child latency profile")
+		v3Entry, _ := idx.FindVariant("v3")
+		require.Equal(t, codec.AlgorithmZstd, v3Entry.Compression)
+
+		f, err := os.Open(outFat)
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+
+		stat, err := f.Stat()
+		require.NoError(t, err)
+
+		storedIdx, err := format.ReadTrailerAndIndex(f, stat.Size())
+		require.NoError(t, err)
+		diskV1, _ := storedIdx.FindVariant("v1")
+		require.Equal(t, codec.AlgorithmZstd, diskV1.Compression)
+
+		_, results, err := pack.VerifyBinary(f, stat.Size())
+		require.NoError(t, err)
+		for _, r := range results {
+			require.True(t, r.Valid)
+		}
+	})
+
+	t.Run("JSON_RootExplicitZstd_ChildExplicitLZ4", func(t *testing.T) {
+		t.Parallel()
+		jsonContent := `{
+  "app_name": "json-lz4-app",
+  "target_os": "linux",
+  "target_arch": "amd64",
+  "compression": {
+    "algorithm": "zstd"
+  },
+  "variants": [
+    {
+      "level": "v1",
+      "compression": {
+        "algorithm": "lz4"
+      }
+    },
+    {
+      "level": "v3"
+    }
+  ]
+}`
+		manifestPath := filepath.Join(t.TempDir(), "microfat.json")
+		require.NoError(t, os.WriteFile(manifestPath, []byte(jsonContent), 0o644))
+
+		m, err := builder.LoadManifest(manifestPath)
+		require.NoError(t, err)
+
+		outFat := filepath.Join(t.TempDir(), "out-child-lz4.fat")
+		packOpts := builder.AssemblePackOptionsForTest(
+			m, stubFile, outFat, m.AppName, compiledMap,
+			builder.BuildOptions{SkipELFValidation: true},
+		)
+		packOpts.VariantValidator = nil
+
+		idx, err := pack.Pack(packOpts)
+		require.NoError(t, err)
+
+		v1Entry, _ := idx.FindVariant("v1")
+		require.Equal(t, testCodecLZ4, v1Entry.Compression, "explicit variant lz4 must override root zstd")
+		v3Entry, _ := idx.FindVariant("v3")
+		require.Equal(t, codec.AlgorithmZstd, v3Entry.Compression, "v3 inherits root zstd")
+
+		f, err := os.Open(outFat)
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+
+		stat, err := f.Stat()
+		require.NoError(t, err)
+
+		storedIdx, err := format.ReadTrailerAndIndex(f, stat.Size())
+		require.NoError(t, err)
+		diskV1, _ := storedIdx.FindVariant("v1")
+		require.Equal(t, testCodecLZ4, diskV1.Compression)
+		diskV3, _ := storedIdx.FindVariant("v3")
+		require.Equal(t, codec.AlgorithmZstd, diskV3.Compression)
+
+		_, results, err := pack.VerifyBinary(f, stat.Size())
+		require.NoError(t, err)
+		for _, r := range results {
+			require.True(t, r.Valid)
+		}
+	})
+
+	t.Run("CLIOverrideBeatsManifestRoot", func(t *testing.T) {
+		t.Parallel()
+		m := &builder.Manifest{
+			AppName:    "cliapp",
+			TargetOS:   testOSLinux,
+			TargetArch: testArchAMD64,
+			Compression: &builder.CompressionConfig{
+				Algorithm: "zstd",
+			},
+			Variants: []builder.VariantConfig{
+				{Level: "v1"},
+				{Level: "v3"},
+			},
+		}
+
+		outFat := filepath.Join(t.TempDir(), "out-cli-override.fat")
+		packOpts := builder.AssemblePackOptionsForTest(
+			m, stubFile, outFat, m.AppName, compiledMap,
+			builder.BuildOptions{
+				Compression:       testCodecLZ4,
+				SkipELFValidation: true,
+			},
+		)
+		packOpts.VariantValidator = nil
+
+		idx, err := pack.Pack(packOpts)
+		require.NoError(t, err)
+
+		v1Entry, _ := idx.FindVariant("v1")
+		require.Equal(t, testCodecLZ4, v1Entry.Compression)
+		v3Entry, _ := idx.FindVariant("v3")
+		require.Equal(t, testCodecLZ4, v3Entry.Compression)
+
+		f, err := os.Open(outFat)
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+
+		stat, err := f.Stat()
+		require.NoError(t, err)
+
+		storedIdx, err := format.ReadTrailerAndIndex(f, stat.Size())
+		require.NoError(t, err)
+		diskV1, _ := storedIdx.FindVariant("v1")
+		require.Equal(t, testCodecLZ4, diskV1.Compression)
+	})
+
+	t.Run("VariantAlgorithmBeatsCLIOverride", func(t *testing.T) {
+		t.Parallel()
+		m := &builder.Manifest{
+			AppName:    "varbeatscliapp",
+			TargetOS:   testOSLinux,
+			TargetArch: testArchAMD64,
+			Variants: []builder.VariantConfig{
+				{
+					Level: "v1",
+					Compression: &builder.CompressionConfig{
+						Algorithm: "zstd",
+					},
+				},
+				{Level: "v3"},
+			},
+		}
+
+		outFat := filepath.Join(t.TempDir(), "out-var-cli.fat")
+		packOpts := builder.AssemblePackOptionsForTest(
+			m, stubFile, outFat, m.AppName, compiledMap,
+			builder.BuildOptions{
+				Compression:       testCodecLZ4,
+				SkipELFValidation: true,
+			},
+		)
+		packOpts.VariantValidator = nil
+
+		idx, err := pack.Pack(packOpts)
+		require.NoError(t, err)
+
+		v1Entry, _ := idx.FindVariant("v1")
+		require.Equal(t, codec.AlgorithmZstd, v1Entry.Compression, "explicit variant zstd must beat CLI lz4 override")
+		v3Entry, _ := idx.FindVariant("v3")
+		require.Equal(t, testCodecLZ4, v3Entry.Compression, "unspecified variant v3 must follow CLI lz4 override")
+
+		f, err := os.Open(outFat)
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+
+		stat, err := f.Stat()
+		require.NoError(t, err)
+
+		storedIdx, err := format.ReadTrailerAndIndex(f, stat.Size())
+		require.NoError(t, err)
+		diskV1, _ := storedIdx.FindVariant("v1")
+		require.Equal(t, codec.AlgorithmZstd, diskV1.Compression)
+		diskV3, _ := storedIdx.FindVariant("v3")
+		require.Equal(t, testCodecLZ4, diskV3.Compression)
+	})
+
+	t.Run("RootInlineLevelReplacedByChildAlgorithmSpec", func(t *testing.T) {
+		t.Parallel()
+		m := &builder.Manifest{
+			AppName:    "specapp",
+			TargetOS:   testOSLinux,
+			TargetArch: testArchAMD64,
+			Compression: &builder.CompressionConfig{
+				Algorithm: "zstd:fastest",
+			},
+			Variants: []builder.VariantConfig{
+				{
+					Level: "v1",
+					Compression: &builder.CompressionConfig{
+						Algorithm: "lz4:best",
+					},
+				},
+				{Level: "v3"},
+			},
+		}
+
+		outFat := filepath.Join(t.TempDir(), "out-spec.fat")
+		packOpts := builder.AssemblePackOptionsForTest(
+			m, stubFile, outFat, m.AppName, compiledMap,
+			builder.BuildOptions{SkipELFValidation: true},
+		)
+		packOpts.VariantValidator = nil
+
+		idx, err := pack.Pack(packOpts)
+		require.NoError(t, err)
+
+		v1Entry, _ := idx.FindVariant("v1")
+		require.Equal(t, testCodecLZ4, v1Entry.Compression)
+		v3Entry, _ := idx.FindVariant("v3")
+		require.Equal(t, codec.AlgorithmZstd, v3Entry.Compression)
+	})
+
+	t.Run("RootCompression_DictionaryAndLevelOptions", func(t *testing.T) {
+		t.Parallel()
+		const dictSizeVal = 65536
+		jsonContent := `{
+  "app_name": "dict-options-app",
+  "target_os": "linux",
+  "target_arch": "amd64",
+  "compression": {
+    "profile": "size",
+    "algorithm": "zstd",
+    "level": "5",
+    "dict": true,
+    "dict_size": 65536
+  },
+  "variants": [
+    {"level": "v1"}
+  ]
+}`
+		manifestPath := filepath.Join(t.TempDir(), "microfat.json")
+		require.NoError(t, os.WriteFile(manifestPath, []byte(jsonContent), 0o644))
+
+		m, err := builder.LoadManifest(manifestPath)
+		require.NoError(t, err)
+
+		packOpts := builder.AssemblePackOptionsForTest(
+			m, stubFile, filepath.Join(t.TempDir(), "out.fat"), m.AppName,
+			map[string]string{"v1": v1Path},
+			builder.BuildOptions{SkipELFValidation: true},
+		)
+		require.Equal(t, "size", packOpts.Profile)
+		require.Equal(t, "zstd", packOpts.Compression)
+		require.Equal(t, "5", packOpts.CompressionLevel)
+		require.True(t, packOpts.EnableDict)
+		require.Equal(t, dictSizeVal, packOpts.DictSize)
+	})
+
+	t.Run("WhitespaceOnlyProfileFailsValidation", func(t *testing.T) {
+		t.Parallel()
+		jsonContent := `{
+  "app_name": "whitespace-profile-app",
+  "target_os": "linux",
+  "target_arch": "amd64",
+  "compression": {
+    "profile": "   "
+  },
+  "variants": [
+    {"level": "v1"}
+  ]
+}`
+		manifestPath := filepath.Join(t.TempDir(), "microfat.json")
+		require.NoError(t, os.WriteFile(manifestPath, []byte(jsonContent), 0o644))
+
+		_, err := builder.LoadManifest(manifestPath)
+		require.ErrorIs(t, err, builder.ErrInvalidManifest)
 	})
 }

@@ -423,11 +423,21 @@ func assemblePackOptions(
 	}
 
 	if m.Compression != nil {
-		packOpts.Profile = m.Compression.Profile
-		packOpts.Compression = m.Compression.Algorithm
-		packOpts.CompressionLevel = m.Compression.Level
-		packOpts.EnableDict = m.Compression.EnableDict
-		packOpts.DictSize = m.Compression.DictSize
+		if m.Compression.Profile != "" {
+			packOpts.Profile = m.Compression.Profile
+		}
+		if m.Compression.Algorithm != "" {
+			packOpts.Compression = m.Compression.Algorithm
+		}
+		if m.Compression.Level != "" {
+			packOpts.CompressionLevel = m.Compression.Level
+		}
+		if m.Compression.EnableDict {
+			packOpts.EnableDict = true
+		}
+		if m.Compression.DictSize > 0 {
+			packOpts.DictSize = m.Compression.DictSize
+		}
 	}
 
 	if opts.Profile != "" {
