@@ -56,11 +56,13 @@ flowchart TD
 
 Given an effective cgroup memory ceiling $C$ and page-rounded retained memfd storage $S$, use $M = C - S$. Cache execution uses $S = 0$; cache pages still contribute to memory pressure. If storage exhausts the ceiling, no new runtime budget is injected.
 
-$$\text{GOMEMLIMIT} = \min(M \times \text{ratio}, M - \text{minHeadroom})$$
+$$\text{ratioBudget} = \lfloor M \times \text{ratio} \rfloor$$
+$$\text{headroomBudget} = \max(\lfloor M / 2 \rfloor, M - \text{minHeadroom})$$
+$$\text{GOMEMLIMIT} = \min(\text{ratioBudget}, \text{headroomBudget})$$
 
-- **Default Ratio**: `0.90` (90% of container memory limit)
-- **Minimum Headroom**: `64 MB` (`67,108,864` bytes reserved for thread stacks, runtime overhead, and OS file caches)
-- **Small Container Fallback**: For containers $< 64\text{ MB}$, allocates 50% of total memory to prevent integer underflow.
+- **Default Ratio**: `0.90` (requested 90% of usable memory ceiling)
+- **Minimum Headroom**: `64 MB` (`67,108,864` bytes requested reserve for thread stacks, runtime overhead, and OS file caches)
+- **Capped Headroom Policy**: For small containers where $M < 2 \times \text{minHeadroom}$ (e.g. $< 128\text{ MB}$), headroom reservation is capped at $\lceil M / 2 \rceil$ bytes. This prevents headroom from consuming more than half the container ceiling, removes the non-monotonic 64 MiB boundary cliff, and preserves lower operator ratios (e.g. `0.25` still bounds allocation at 25%).
 
 `GOMEMLIMIT` excludes memory outside the Go runtime and may be exceeded to maintain progress.
 It does not bound total process or container memory. See the [Go GC guide](https://go.dev/doc/gc-guide#Memory_limit).
@@ -118,7 +120,7 @@ flowchart TD
     LimitGC --> CheckThrash{"Live Heap > Limit / (1 + GOGC/100)?"}
     
     CheckThrash -->|"No"| SmoothLimit["Smooth GC Pacing without Thrashing"]
-    CheckThrash -->|"Yes"| Limiter["50% CPU GC Limiter Engaged<br>Latency Tail Cliff / High CPU"]
+    CheckThrash -->|"Yes"| Limiter["Pacing Tightens Toward Limit<br>50% CPU Limiter Engages if Allocation Saturates Throughput"]
     
     SmoothLimit --> RunGC
     Limiter --> RunGC
@@ -141,22 +143,22 @@ flowchart TD
 
 ---
 
-### 5.2 The GC Thrashing Cliff & Threshold Sizing Formula
+### 5.2 The Proportional Target Crossover & Threshold Sizing Formula
 
-A common failure mode in containerized microservices occurs when steady-state live heap memory approaches the configured container memory limit.
+A common operational concern in containerized Go services occurs when steady-state live heap memory approaches the configured memory budget.
 
-#### The Thrashing Condition
-When live heap $L$ exceeds the ratio $\frac{\text{GOMEMLIMIT}}{1 + \text{GOGC}/100}$, the garbage collector cannot satisfy the proportional growth target:
+#### The Proportional Target Crossover
+When live heap $L$ exceeds the ratio $\frac{\text{GOMEMLIMIT}}{1 + \text{GOGC}/100}$, the garbage collector's proportional growth target would exceed the memory limit:
 
 $$\text{Live Heap} > \frac{\text{GOMEMLIMIT}}{1 + \frac{\text{GOGC}}{100}}$$
 
-For example, with `GOGC=100` and $\text{GOMEMLIMIT} = 1\text{ GB}$, if the live heap is $600\text{ MB}$, the calculated target heap is $1.2\text{ GB} > 1\text{ GB}$. The runtime triggers back-to-back GC cycles, saturating the 50% CPU limiter, creating high latency spikes (p99/p999 latency cliffs) and causing severe CPU starvation.
+In this condition, Go paces garbage collection more aggressively to respect `GOMEMLIMIT`. A proportional growth target exceeding `GOMEMLIMIT` does not alone demonstrate sustained GC thrashing or CPU-limiter saturation; whether thrashing occurs depends on allocation rate, object lifetimes, and collector throughput. If sustained allocation pressure forces the collector to consume 50% of CPU capacity, the runtime engages its 50% CPU limiter, temporarily allowing memory to exceed the soft `GOMEMLIMIT` to prevent CPU starvation.
 
 #### Recommended `GOGC` Calculation Formula
-Given a container memory ceiling $M$ (in bytes) and an expected peak live heap $L$:
+Given an effective container memory ceiling $M$ (in bytes) and an expected peak live heap $L$, let $\text{Budget} = \text{CalculateGOMEMLIMIT}(M, \text{ratio}, \text{minHeadroom})$. If $\text{Budget} > L$:
 
-$$\text{Available Headroom} = (M \times \text{ratio}) - \text{minHeadroom}$$
-$$\text{Recommended GOGC} \le \min\left(100, \; \max\left(10, \; \left(\frac{\text{Available Headroom}}{L} - 1\right) \times 100\right)\right)$$
+$$\text{Available Headroom} = \text{Budget} - L$$
+$$\text{Recommended GOGC} \le \min\left(100, \; \max\left(10, \; \left(\frac{\text{Budget}}{L} - 1\right) \times 100\right)\right)$$
 
 ---
 

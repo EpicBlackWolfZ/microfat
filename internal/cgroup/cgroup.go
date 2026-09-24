@@ -27,7 +27,9 @@ const (
 	// UnlimitedCgroupV1MemoryThreshold represents a memory limit >= 1 Petabyte (considered unlimited in cgroup v1).
 	UnlimitedCgroupV1MemoryThreshold int64 = 1024 * 1024 * 1024 * 1024 * 1024
 
-	smallContainerFallbackRatio = 0.50
+	// smallContainerHeadroomDivisor caps the reserved headroom to at most ceil(limit/2) bytes,
+	// ensuring headroom reservation never consumes more than half of a small container's ceiling.
+	smallContainerHeadroomDivisor = 2
 
 	defaultCgroupMount    = "/sys/fs/cgroup"
 	defaultProcSelfCgroup = "/proc/self/cgroup"
@@ -683,7 +685,18 @@ func DetermineConstrainingLimit(maxBytes, highBytes int64) string {
 	}
 }
 
-// CalculateGOMEMLIMIT computes the recommended GOMEMLIMIT in bytes given a raw memory limit.
+// CalculateGOMEMLIMIT computes the recommended GOMEMLIMIT in bytes given an effective memory limit.
+// It implements a capped-headroom policy:
+//
+//	ratioBudget = floor(limitBytes * ratio)
+//	half = limitBytes / 2
+//	reserved = min(minHeadroomBytes, limitBytes - half)
+//	headroomBudget = limitBytes - reserved
+//	budget = min(ratioBudget, headroomBudget)
+//
+// This caps headroom reservation at ceil(limitBytes/2) bytes for small containers so that
+// headroom never consumes more than half of the container ceiling, while preserving
+// monotonic scaling and respecting lower operator-configured ratios.
 // Returns (computedBytes, true) if a valid limit is determined, or (0, false) if unlimited or invalid.
 func CalculateGOMEMLIMIT(limitBytes int64, ratio float64, minHeadroomBytes int64) (int64, bool) {
 	if limitBytes <= 0 || limitBytes >= UnlimitedCgroupV1MemoryThreshold {
@@ -696,21 +709,17 @@ func CalculateGOMEMLIMIT(limitBytes int64, ratio float64, minHeadroomBytes int64
 		minHeadroomBytes = DefaultMinHeadroomBytes
 	}
 
-	ratioBased := float64(limitBytes) * ratio
-	headroomBased := float64(limitBytes - minHeadroomBytes)
+	ratioBudget := int64(math.Floor(float64(limitBytes) * ratio))
 
-	// Take the smaller of the two to guarantee safety headroom on both small and large containers
-	chosen := math.Min(ratioBased, headroomBased)
-	if chosen <= 0 {
-		// Extremely small container (e.g. < 64MB): allocate at least 50%
-		chosen = float64(limitBytes) * smallContainerFallbackRatio
-	}
+	half := limitBytes / smallContainerHeadroomDivisor
+	reserved := min(minHeadroomBytes, limitBytes-half)
+	headroomBudget := limitBytes - reserved
 
-	res := int64(chosen)
-	if res <= 0 {
+	budget := min(ratioBudget, headroomBudget)
+	if budget <= 0 {
 		return 0, false
 	}
-	return res, true
+	return budget, true
 }
 
 // CalculateGOMAXPROCS computes the recommended GOMAXPROCS value from a fractional CPU quota.

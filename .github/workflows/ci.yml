@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, 'fix/**', 'feat/**']
     types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
     inputs:

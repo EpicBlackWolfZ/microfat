@@ -2,6 +2,7 @@ package cgroup
 
 import (
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1613,5 +1614,195 @@ func TestReadLimitsCgroupV2_MemoryHighCorrupted(t *testing.T) {
 				t.Fatalf("expected VersionUnknown + ErrCgroupLimitCorrupted, got limits=%+v, err=%v", limits, err)
 			}
 		})
+	}
+}
+
+func TestCalculateGOMEMLIMITHeadroomBoundaries(t *testing.T) {
+	t.Parallel()
+
+	const (
+		ratio    = 0.90
+		headroom = 64 * 1024 * 1024
+	)
+
+	tests := []struct {
+		name       string
+		limitBytes int64
+		expected   int64
+		wantOK     bool
+	}{
+		{
+			name:       "64 MiB - 1 byte",
+			limitBytes: 64*1024*1024 - 1,
+			expected:   33554431,
+			wantOK:     true,
+		},
+		{
+			name:       "64 MiB",
+			limitBytes: 64 * 1024 * 1024,
+			expected:   33554432,
+			wantOK:     true,
+		},
+		{
+			name:       "64 MiB + 1 byte",
+			limitBytes: 64*1024*1024 + 1,
+			expected:   33554432,
+			wantOK:     true,
+		},
+		{
+			name:       "65 MiB",
+			limitBytes: 65 * 1024 * 1024,
+			expected:   34078720,
+			wantOK:     true,
+		},
+		{
+			name:       "128 MiB - 1 byte",
+			limitBytes: 128*1024*1024 - 1,
+			expected:   67108863,
+			wantOK:     true,
+		},
+		{
+			name:       "128 MiB",
+			limitBytes: 128 * 1024 * 1024,
+			expected:   67108864,
+			wantOK:     true,
+		},
+		{
+			name:       "512 MiB",
+			limitBytes: 512 * 1024 * 1024,
+			expected:   469762048,
+			wantOK:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := CalculateGOMEMLIMIT(tt.limitBytes, ratio, headroom)
+			require.Equal(t, tt.wantOK, ok)
+			require.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestCalculateGOMEMLIMITMonotonic(t *testing.T) {
+	t.Parallel()
+
+	ratios := []float64{0.10, 0.25, 0.50, 0.80, 0.90, 1.00, 0.0, -0.5, 1.5, math.NaN(), math.Inf(1)}
+	headrooms := []int64{32 * 1024 * 1024, 64 * 1024 * 1024, 128 * 1024 * 1024, 0, -1}
+
+	for _, r := range ratios {
+		for _, h := range headrooms {
+			normH := h
+			if normH <= 0 {
+				normH = DefaultMinHeadroomBytes
+			}
+			normR := r
+			if math.IsNaN(normR) || math.IsInf(normR, 0) || normR <= 0 || normR > 1.0 {
+				normR = DefaultMemoryRatio
+			}
+
+			// Boundary values around H, 2H, and small boundaries
+			boundaries := []int64{
+				1, 2, 3, 10, 100, 1024,
+				normH - 2, normH - 1, normH, normH + 1, normH + 2,
+				2*normH - 2, 2*normH - 1, 2 * normH, 2*normH + 1, 2*normH + 2,
+				4 * normH,
+			}
+
+			for i := 0; i < len(boundaries)-1; i++ {
+				e1 := boundaries[i]
+				e2 := boundaries[i+1]
+				if e1 <= 0 || e2 <= 0 {
+					continue
+				}
+				b1, ok1 := CalculateGOMEMLIMIT(e1, r, h)
+				b2, ok2 := CalculateGOMEMLIMIT(e2, r, h)
+
+				if ok1 {
+					require.Positive(t, b1)
+					require.LessOrEqual(t, b1, e1)
+					// Verify operator ratio constraint is respected
+					expectedMaxRatio := int64(math.Floor(float64(e1) * normR))
+					require.LessOrEqual(t, b1, expectedMaxRatio)
+				}
+				if ok2 {
+					require.Positive(t, b2)
+					require.LessOrEqual(t, b2, e2)
+					expectedMaxRatio := int64(math.Floor(float64(e2) * normR))
+					require.LessOrEqual(t, b2, expectedMaxRatio)
+				}
+				if ok1 && ok2 {
+					require.LessOrEqual(t, b1, b2, "Monotonicity failure between e1=%d and e2=%d (r=%f, h=%d)", e1, e2, r, h)
+				}
+			}
+
+			// Dense 1-byte sweep around H and 2H
+			testSweep := func(center int64, radius int64) {
+				var prevBudget int64
+				for e := center - radius; e <= center+radius; e++ {
+					if e <= 0 {
+						continue
+					}
+					b, ok := CalculateGOMEMLIMIT(e, r, h)
+					if ok {
+						require.Positive(t, b)
+						require.LessOrEqual(t, b, e)
+						if prevBudget > 0 {
+							require.LessOrEqual(t, prevBudget, b,
+								"Monotonicity failure at e=%d: prev=%d, curr=%d (r=%f, h=%d)", e, prevBudget, b, r, h)
+						}
+						prevBudget = b
+					}
+				}
+			}
+
+			testSweep(normH, 20)
+			testSweep(2*normH, 20)
+		}
+	}
+}
+
+func TestTuningPlanRetainedBudgetMonotonic(t *testing.T) {
+	t.Parallel()
+
+	const ceiling = int64(512 * 1024 * 1024) // 512 MiB
+	retainedSteps := []int64{
+		0,
+		1,
+		1024,
+		32 * 1024 * 1024,
+		64 * 1024 * 1024,
+		128 * 1024 * 1024,
+		256 * 1024 * 1024,
+		ceiling - 1,
+		ceiling,
+		ceiling + 1,
+		ceiling + 1024,
+		-1,
+	}
+
+	var prevBudget int64 = math.MaxInt64
+
+	for _, retained := range retainedSteps {
+		limits := Limits{
+			CgroupVersion:           VersionV2,
+			MemoryLimitBytes:        ceiling,
+			RetainedExecutableBytes: retained,
+		}
+		plan := ResolveTuningPlanWithProfile(limits, "", DefaultMemoryRatio, DefaultMinHeadroomBytes, GCProfileDefault, 0)
+
+		if retained < 0 || retained >= ceiling {
+			require.Zero(t, plan.GOMEMLIMITBytes)
+		} else {
+			require.LessOrEqual(t, plan.GOMEMLIMITBytes, prevBudget,
+				"Budget increased with higher retained bytes: retained=%d, budget=%d, prevBudget=%d",
+				retained, plan.GOMEMLIMITBytes, prevBudget)
+			prevBudget = plan.GOMEMLIMITBytes
+		}
+
+		// Verify repeated resolution is idempotent and derives from raw ceiling without double deduction
+		plan2 := ResolveTuningPlanWithProfile(limits, "", DefaultMemoryRatio, DefaultMinHeadroomBytes, GCProfileDefault, 0)
+		require.Equal(t, plan.GOMEMLIMITBytes, plan2.GOMEMLIMITBytes)
 	}
 }

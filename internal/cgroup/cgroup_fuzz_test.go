@@ -13,6 +13,9 @@ func FuzzCalculateGOMEMLIMIT(f *testing.F) {
 	f.Add(int64(0), 0.90, int64(64*1024*1024))
 	f.Add(int64(-1), 0.90, int64(64*1024*1024))
 	f.Add(UnlimitedCgroupV1MemoryThreshold+100, 0.90, int64(64*1024*1024))
+	f.Add(int64(64*1024*1024-1), 0.90, int64(64*1024*1024))
+	f.Add(int64(64*1024*1024), 0.90, int64(64*1024*1024))
+	f.Add(int64(64*1024*1024+1), 0.90, int64(64*1024*1024))
 
 	f.Fuzz(func(t *testing.T, limitBytes int64, ratio float64, minHeadroomBytes int64) {
 		res, ok := CalculateGOMEMLIMIT(limitBytes, ratio, minHeadroomBytes)
@@ -22,6 +25,13 @@ func FuzzCalculateGOMEMLIMIT(f *testing.F) {
 			}
 			if res > limitBytes {
 				t.Fatalf("CalculateGOMEMLIMIT returned result (%d) greater than container limit (%d)", res, limitBytes)
+			}
+			if limitBytes < UnlimitedCgroupV1MemoryThreshold-1 {
+				resNext, okNext := CalculateGOMEMLIMIT(limitBytes+1, ratio, minHeadroomBytes)
+				if okNext && resNext < res {
+					t.Fatalf("Monotonicity violation: CalculateGOMEMLIMIT(%d) = %d > CalculateGOMEMLIMIT(%d) = %d",
+						limitBytes, res, limitBytes+1, resNext)
+				}
 			}
 		}
 	})
@@ -105,6 +115,7 @@ func FuzzResolveTuningPlan(f *testing.F) {
 	f.Add(int64(1024*1024*1024), int64(512*1024*1024), 2.5, "0.80", int64(32*1024*1024), "latency_critical", int64(100*1024*1024))
 	f.Add(int64(0), int64(0), 0.0, "invalid", int64(0), "adaptive", int64(50*1024*1024))
 	f.Add(int64(-1), int64(-100), -5.0, "-0.5", int64(-1), "batch_etl", int64(0))
+	f.Add(int64(1<<50), int64(0), 0.0, "0.90", int64(64<<20), "default", int64(0))
 
 	f.Fuzz(func(
 		t *testing.T,
@@ -129,6 +140,14 @@ func FuzzResolveTuningPlan(f *testing.F) {
 		}
 		if plan.GOMAXPROCS < 0 {
 			t.Fatalf("negative GOMAXPROCS: %d", plan.GOMAXPROCS)
+		}
+
+		limitsWithRetained := limits
+		limitsWithRetained.RetainedExecutableBytes = 64 * 1024 * 1024
+		planWithRetained := ResolveTuningPlanWithProfile(limitsWithRetained, ratioStr, DefaultMemoryRatio, headroom, prof, liveHeap)
+		if plan.GOMEMLIMITBytes > 0 && planWithRetained.GOMEMLIMITBytes > plan.GOMEMLIMITBytes {
+			t.Fatalf("Retained storage increased GOMEMLIMITBytes in finite-budget domain: without=%d with=%d",
+				plan.GOMEMLIMITBytes, planWithRetained.GOMEMLIMITBytes)
 		}
 	})
 }
