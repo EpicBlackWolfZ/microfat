@@ -80,9 +80,22 @@ func FuzzParseByteSize(f *testing.F) {
 	f.Add("invalid")
 	f.Add("-10MB")
 	f.Add("99999999999999999999999999TB")
+	f.Add("9223372036854775807")
+	f.Add("9223372036854775808")
+	f.Add("9223372036854775806.5B")
+	f.Add("9223372036854775807.1B")
+	f.Add(".5B")
+	f.Add("0")
+	f.Add("0B")
+	f.Add("1.5KiB")
 
 	f.Fuzz(func(t *testing.T, input string) {
-		_, _ = ParseByteSize(input)
+		val, err := ParseByteSize(input)
+		if err == nil {
+			if val < 0 {
+				t.Fatalf("ParseByteSize(%q) returned negative value %d with nil error", input, val)
+			}
+		}
 	})
 }
 

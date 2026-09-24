@@ -31,6 +31,9 @@ const (
 	// ensuring headroom reservation never consumes more than half of a small container's ceiling.
 	smallContainerHeadroomDivisor = 2
 
+	decimalBase     = 10
+	halfDecimalBase = 5
+
 	defaultCgroupMount    = "/sys/fs/cgroup"
 	defaultProcSelfCgroup = "/proc/self/cgroup"
 	expectedCgroupParts   = 3
@@ -754,52 +757,138 @@ func ParseGCProfile(s string) (GCProfile, error) {
 	}
 }
 
-// ParseByteSize parses human-readable byte sizes (e.g. "150MB", "150MiB", "150M", "1.5GB", "1024").
-func ParseByteSize(s string) (int64, error) {
+func splitByteSizeToken(s string) (string, string, int, error) {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" {
-		return 0, errors.New("empty byte size string")
+		return "", "", -1, errors.New("empty byte size string")
 	}
 
+	dotIndex := -1
+	digitsCount := 0
 	i := 0
-	for i < len(trimmed) && (trimmed[i] >= '0' && trimmed[i] <= '9' || trimmed[i] == '.') {
-		i++
+	for i < len(trimmed) {
+		ch := trimmed[i]
+		switch {
+		case ch >= '0' && ch <= '9':
+			digitsCount++
+			i++
+		case ch == '.':
+			if dotIndex >= 0 {
+				return "", "", -1, fmt.Errorf("invalid byte size %q: multiple decimal points", s)
+			}
+			dotIndex = i
+			i++
+		default:
+			goto done
+		}
+	}
+done:
+	if digitsCount == 0 {
+		return "", "", -1, fmt.Errorf("missing numeric value in byte size string %q", s)
 	}
 
-	numStr := strings.TrimSpace(trimmed[:i])
+	numStr := trimmed[:i]
 	unitStr := strings.ToLower(strings.TrimSpace(trimmed[i:]))
+	return numStr, unitStr, dotIndex, nil
+}
 
-	if numStr == "" {
-		return 0, fmt.Errorf("missing numeric value in byte size string %q", s)
-	}
-
-	val, err := strconv.ParseFloat(numStr, 64)
-	if err != nil || val < 0 || math.IsNaN(val) || math.IsInf(val, 0) {
-		return 0, fmt.Errorf("invalid numeric value %q in byte size: %w", numStr, err)
-	}
-
-	var multiplier float64
+func resolveByteMultiplier(unitStr string, s string) (uint64, error) {
 	switch unitStr {
 	case "", "b", "byte", "bytes":
-		multiplier = 1
+		return 1, nil
 	case "k", "kb", "kib":
-		multiplier = float64(byteUnitKibi)
+		return byteUnitKibi, nil
 	case "m", "mb", "mib":
-		multiplier = float64(byteUnitMebi)
+		return byteUnitMebi, nil
 	case "g", "gb", "gib":
-		multiplier = float64(byteUnitGibi)
+		return byteUnitGibi, nil
 	case "t", "tb", "tib":
-		multiplier = float64(byteUnitTebi)
+		return byteUnitTebi, nil
 	default:
 		return 0, fmt.Errorf("unknown byte unit %q in %q", unitStr, s)
 	}
+}
 
-	total := val * multiplier
-	if total > float64(math.MaxInt64) {
+// ParseByteSize parses human-readable byte sizes (e.g. "150MB", "150MiB", "150M", "1.5GB", "1024").
+// It uses checked decimal arithmetic to avoid loss of precision or architecture-dependent overflow
+// associated with float64-to-int64 conversion.
+// Rejects negative quantities, signed-plus prefixes, exponent notation, hex syntax, multiple dots,
+// missing digits, unknown units, and quantities exceeding math.MaxInt64.
+// Nonnegative half-byte ties are rounded up to the nearest whole byte.
+func ParseByteSize(s string) (int64, error) {
+	numStr, unitStr, dotIndex, err := splitByteSizeToken(s)
+	if err != nil {
+		return 0, err
+	}
+
+	multiplier, err := resolveByteMultiplier(unitStr, s)
+	if err != nil {
+		return 0, err
+	}
+
+	var wholeStr, fracStr string
+	if dotIndex < 0 {
+		wholeStr = numStr
+	} else {
+		wholeStr = numStr[:dotIndex]
+		fracStr = numStr[dotIndex+1:]
+	}
+
+	const maxInt64 = uint64(math.MaxInt64)
+	maxWhole := maxInt64 / multiplier
+
+	var whole uint64
+	for j := 0; j < len(wholeStr); j++ {
+		d := uint64(wholeStr[j] - '0')
+		if whole > maxWhole/decimalBase || (whole == maxWhole/decimalBase && d > maxWhole%decimalBase) {
+			return 0, fmt.Errorf("byte size %q exceeds max int64", s)
+		}
+		whole = whole*decimalBase + d
+	}
+	wholeBytes := whole * multiplier
+
+	var fracCarry uint64
+	var firstFracDigit uint64
+	hasNonzeroFrac := false
+
+	for j := len(fracStr) - 1; j >= 0; j-- {
+		d := uint64(fracStr[j] - '0')
+		v := d*multiplier + fracCarry
+		rem := v % decimalBase
+		fracCarry = v / decimalBase
+		if rem != 0 {
+			hasNonzeroFrac = true
+		}
+		firstFracDigit = rem
+	}
+
+	remaining := maxInt64 - wholeBytes
+	if fracCarry > remaining {
+		return 0, fmt.Errorf("byte size %q exceeds max int64", s)
+	}
+	integralBytes := wholeBytes + fracCarry
+
+	if integralBytes == maxInt64 && hasNonzeroFrac {
 		return 0, fmt.Errorf("byte size %q exceeds max int64", s)
 	}
 
-	return int64(math.Round(total)), nil
+	var roundCarry uint64
+	if firstFracDigit >= halfDecimalBase {
+		roundCarry = 1
+	}
+
+	if roundCarry > 0 {
+		if integralBytes >= maxInt64 {
+			return 0, fmt.Errorf("byte size %q exceeds max int64", s)
+		}
+		integralBytes += roundCarry
+	}
+
+	if integralBytes > maxInt64 {
+		return 0, fmt.Errorf("byte size %q exceeds max int64", s)
+	}
+
+	return int64(integralBytes), nil
 }
 
 // CalculateAdaptiveGOGC computes the recommended GOGC percentage given available headroom and estimated live heap.

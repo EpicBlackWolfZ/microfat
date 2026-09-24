@@ -3,8 +3,10 @@ package cgroup
 import (
 	"errors"
 	"math"
+	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -605,6 +607,196 @@ func TestParseByteSize(t *testing.T) {
 				t.Errorf("ParseByteSize(%q) = %d, expected %d", tt.input, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestParseByteSizeExactBounds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input       string
+		expected    int64
+		expectError bool
+	}{
+		{"9223372036854775807", math.MaxInt64, false},
+		{"9223372036854775807B", math.MaxInt64, false},
+		{"9223372036854775807.0", math.MaxInt64, false},
+		{"9223372036854775807.0B", math.MaxInt64, false},
+		{"9223372036854775808", 0, true},
+		{"9223372036854775808B", 0, true},
+		{"8388608TiB", 0, true}, // 8388608 * 2^40 = 2^23 * 2^40 = 2^63 (exceeds MaxInt64)
+		{"9223372036854775806.5B", math.MaxInt64, false},
+		{"9223372036854775807.1B", 0, true},
+		{"9223372036854775807.5B", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			got, err := ParseByteSize(tt.input)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("ParseByteSize(%q) error = %v, expectError = %v", tt.input, err, tt.expectError)
+			}
+			if !tt.expectError && got != tt.expected {
+				t.Errorf("ParseByteSize(%q) = %d, expected %d", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseByteSizeExactFractionalRounding(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input       string
+		expected    int64
+		expectError bool
+	}{
+		{"0", 0, false},
+		{"0B", 0, false},
+		{"0.0MiB", 0, false},
+		{".49B", 0, false},
+		{".5B", 1, false},
+		{"1.5B", 2, false},
+		{"1.", 1, false},
+		{"1.5KiB", 1536, false},
+		{"1KB", 1024, false},
+		{"1MB", 1048576, false},
+		{"001.500KiB", 1536, false},
+		{"  1.5  kib  ", 1536, false},
+		// Invalid syntax cases
+		{".", 0, true},
+		{"..", 0, true},
+		{"1.2.3", 0, true},
+		{"+10MB", 0, true},
+		{"1e6", 0, true},
+		{"0x10", 0, true},
+		{"NaN", 0, true},
+		{"Inf", 0, true},
+		{"1.5foo", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			got, err := ParseByteSize(tt.input)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("ParseByteSize(%q) error = %v, expectError = %v", tt.input, err, tt.expectError)
+			}
+			if !tt.expectError && got != tt.expected {
+				t.Errorf("ParseByteSize(%q) = %d, expected %d", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func parseByteSizeWithBigRatOracle(s string) (int64, error) {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return 0, errors.New("empty")
+	}
+
+	dotIndex := -1
+	digitsCount := 0
+	i := 0
+	for i < len(trimmed) {
+		ch := trimmed[i]
+		switch {
+		case ch >= '0' && ch <= '9':
+			digitsCount++
+			i++
+		case ch == '.':
+			if dotIndex >= 0 {
+				return 0, errors.New("multiple dots")
+			}
+			dotIndex = i
+			i++
+		default:
+			goto done
+		}
+	}
+done:
+	if digitsCount == 0 {
+		return 0, errors.New("missing digits")
+	}
+
+	numStr := trimmed[:i]
+	unitStr := strings.ToLower(strings.TrimSpace(trimmed[i:]))
+
+	var multiplier int64
+	switch unitStr {
+	case "", "b", "byte", "bytes":
+		multiplier = 1
+	case "k", "kb", "kib":
+		multiplier = byteUnitKibi
+	case "m", "mb", "mib":
+		multiplier = byteUnitMebi
+	case "g", "gb", "gib":
+		multiplier = byteUnitGibi
+	case "t", "tb", "tib":
+		multiplier = byteUnitTebi
+	default:
+		return 0, errors.New("unknown unit")
+	}
+
+	rat, ok := new(big.Rat).SetString(numStr)
+	if !ok || rat.Sign() < 0 {
+		return 0, errors.New("invalid numeric value")
+	}
+
+	mulRat := new(big.Rat).SetInt64(multiplier)
+	exact := new(big.Rat).Mul(rat, mulRat)
+
+	maxRat := new(big.Rat).SetInt64(math.MaxInt64)
+	if exact.Cmp(maxRat) > 0 {
+		return 0, errors.New("exceeds MaxInt64")
+	}
+
+	const (
+		oneHalfNum   = 1
+		oneHalfDenom = 2
+	)
+	halfRat := new(big.Rat).SetFrac64(oneHalfNum, oneHalfDenom)
+	shifted := new(big.Rat).Add(exact, halfRat)
+
+	intPart := new(big.Int).Quo(shifted.Num(), shifted.Denom())
+	if !intPart.IsInt64() {
+		return 0, errors.New("overflow")
+	}
+
+	return intPart.Int64(), nil
+}
+
+func TestParseByteSizeBigRatOracle(t *testing.T) {
+	t.Parallel()
+
+	units := []string{"", "B", "bytes", "K", "KB", "KiB", "M", "MB", "MiB", "G", "GB", "GiB", "T", "TB", "TiB"}
+	numericSamples := []string{
+		"0", "0.0", "1", "1.0", "1.5", "1.25", "1.75", "1.500", "0.49", "0.5", "0.51",
+		".5", ".49", ".51", "1.", "1024", "4096.125",
+		"100", "512", "999.999", "12345.6789",
+		"8388607", "8388608",
+		"9223372036854775806", "9223372036854775806.5", "9223372036854775807",
+		"9223372036854775807.0", "9223372036854775807.1", "9223372036854775808",
+	}
+
+	for _, num := range numericSamples {
+		for _, u := range units {
+			input := num + u
+			t.Run(input, func(t *testing.T) {
+				t.Parallel()
+				got, err := ParseByteSize(input)
+				oracleGot, oracleErr := parseByteSizeWithBigRatOracle(input)
+
+				if (err != nil) != (oracleErr != nil) {
+					t.Fatalf("ParseByteSize(%q) error=%v, oracleError=%v", input, err, oracleErr)
+				}
+				if err == nil {
+					require.Equal(t, oracleGot, got, "Mismatch with big.Rat oracle for %q", input)
+					require.GreaterOrEqual(t, got, int64(0))
+				}
+			})
+		}
 	}
 }
 
