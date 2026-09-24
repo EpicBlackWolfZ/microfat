@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/memfd"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/EpicBlackWolfZ/microfat/internal/version"
 	"github.com/spf13/cobra"
@@ -26,6 +27,8 @@ const (
 	glyphWarning = "[!]"
 	glyphFailure = "[✖]"
 	glyphInfo    = "[-]"
+
+	executionUnavailable = "unavailable"
 )
 
 var (
@@ -48,11 +51,19 @@ type DoctorReport struct {
 	CPU       CPUReport       `json:"cpu"`
 	Memfd     MemfdReport     `json:"memfd"`
 	Cache     CacheReport     `json:"cache"`
+	Execution ExecutionReport `json:"execution"`
 	Cgroup    *CgroupReport   `json:"cgroup,omitempty"`
 	Toolchain ToolchainReport `json:"toolchain"`
 	Summary   string          `json:"summary"`
 	Warnings  []string        `json:"warnings,omitempty"`
 	Errors    []string        `json:"errors,omitempty"`
+}
+
+// ExecutionReport clarifies execution status vs prerequisite verification.
+type ExecutionReport struct {
+	Status string `json:"status"`
+	Reason string `json:"reason"`
+	Notice string `json:"notice"`
 }
 
 // CPUReport contains CPU microarchitecture level and vector capability details.
@@ -68,12 +79,16 @@ type CPUReport struct {
 
 // MemfdReport contains in-memory anonymous file descriptor capability details.
 type MemfdReport struct {
-	Available bool   `json:"available"`
-	Status    string `json:"status"`
-	Kernel    string `json:"kernel,omitempty"`
-	Seccomp   string `json:"seccomp,omitempty"`
-	Error     string `json:"error,omitempty"`
-	Hint      string `json:"hint,omitempty"`
+	Available        bool                    `json:"available"`
+	Status           string                  `json:"status"`
+	Kernel           string                  `json:"kernel,omitempty"`
+	Seccomp          string                  `json:"seccomp,omitempty"`
+	CreationStrategy string                  `json:"creation_strategy,omitempty"`
+	Mode             *memfd.ModeObservation  `json:"mode,omitempty"`
+	Seals            *memfd.SealsObservation `json:"seals,omitempty"`
+	Execution        string                  `json:"execution,omitempty"`
+	Error            string                  `json:"error,omitempty"`
+	Hint             string                  `json:"hint,omitempty"`
 }
 
 // CacheReport contains disk cache directory status and write permission details.
@@ -82,6 +97,7 @@ type CacheReport struct {
 	ResolvedPath string `json:"path"`
 	Permissions  string `json:"permissions"`
 	Writable     bool   `json:"writable"`
+	Execution    string `json:"execution,omitempty"`
 	Error        string `json:"error,omitempty"`
 	Hint         string `json:"hint,omitempty"`
 }
@@ -131,7 +147,9 @@ in-memory anonymous execution (memfd_create), disk cache fallback permissions, a
 					return fmt.Errorf("writing newline: %w", err)
 				}
 			} else {
-				printDoctorReport(opts.Out, report)
+				if err := printDoctorReport(opts.Out, report); err != nil {
+					return fmt.Errorf("printing doctor report: %w", err)
+				}
 			}
 
 			if !report.Ready {
@@ -224,10 +242,15 @@ func runDoctor(opts DoctorOptions) *DoctorReport {
 	}
 
 	return &DoctorReport{
-		Ready:     ready,
-		CPU:       cpuRep,
-		Memfd:     memfdRep,
-		Cache:     cacheRep,
+		Ready: ready,
+		CPU:   cpuRep,
+		Memfd: memfdRep,
+		Cache: cacheRep,
+		Execution: ExecutionReport{
+			Status: "unknown",
+			Reason: "not_tested",
+			Notice: "Doctor inspects environment prerequisites; runtime process execution is not tested during doctor probes.",
+		},
 		Cgroup:    cgroupRep,
 		Toolchain: toolchainRep,
 		Summary:   summary,
@@ -244,9 +267,10 @@ func probeCache(customDir string) CacheReport {
 			hint = "Ensure $XDG_CACHE_HOME, $TMPDIR, or custom cache path is writable."
 		}
 		return CacheReport{
-			Ready: false,
-			Error: err.Error(),
-			Hint:  hint,
+			Ready:     false,
+			Execution: executionUnavailable,
+			Error:     err.Error(),
+			Hint:      hint,
 		}
 	}
 
@@ -254,6 +278,7 @@ func probeCache(customDir string) CacheReport {
 	if err != nil {
 		return CacheReport{
 			Ready:        false,
+			Execution:    executionUnavailable,
 			ResolvedPath: resolved,
 			Error:        err.Error(),
 			Hint:         "Cache directory stat failed.",
@@ -270,6 +295,7 @@ func probeCache(customDir string) CacheReport {
 		}
 		return CacheReport{
 			Ready:        false,
+			Execution:    executionUnavailable,
 			ResolvedPath: resolved,
 			Permissions:  permStr,
 			Writable:     false,
@@ -288,6 +314,7 @@ func probeCache(customDir string) CacheReport {
 	if _, err := tmpFile.Write(testPayload); err != nil {
 		return CacheReport{
 			Ready:        false,
+			Execution:    executionUnavailable,
 			ResolvedPath: resolved,
 			Permissions:  permStr,
 			Writable:     false,
@@ -299,6 +326,7 @@ func probeCache(customDir string) CacheReport {
 	if err := tmpFile.Sync(); err != nil {
 		return CacheReport{
 			Ready:        false,
+			Execution:    executionUnavailable,
 			ResolvedPath: resolved,
 			Permissions:  permStr,
 			Writable:     false,
@@ -313,6 +341,7 @@ func probeCache(customDir string) CacheReport {
 	if err != nil || string(readData) != string(testPayload) {
 		return CacheReport{
 			Ready:        false,
+			Execution:    executionUnavailable,
 			ResolvedPath: resolved,
 			Permissions:  permStr,
 			Writable:     false,
@@ -327,41 +356,76 @@ func probeCache(customDir string) CacheReport {
 		ResolvedPath: resolved,
 		Permissions:  permStr,
 		Writable:     true,
+		Execution:    "unknown (write-only probe; noexec mount not tested)",
 	}
 }
 
-func printDoctorReport(w io.Writer, rep *DoctorReport) {
-	_, _ = fmt.Fprintln(w, "=== Microfat Host Environment Doctor ===")
-	_, _ = fmt.Fprintln(w)
-
-	printCPUSection(w, &rep.CPU)
-	printMemfdSection(w, &rep.Memfd)
-	printCacheSection(w, &rep.Cache)
-	printCgroupSection(w, rep.Cgroup)
-	printToolchainSection(w, &rep.Toolchain)
-	printIssuesAndSummary(w, rep)
+func writeLine(w io.Writer, a ...any) error {
+	_, err := fmt.Fprintln(w, a...)
+	return err
 }
 
-func printCPUSection(w io.Writer, cpu *CPUReport) {
+func writeFormat(w io.Writer, f string, a ...any) error {
+	_, err := fmt.Fprintf(w, f, a...)
+	return err
+}
+
+func printDoctorReport(w io.Writer, rep *DoctorReport) error {
+	if err := writeLine(w, "=== Microfat Host Environment Doctor ==="); err != nil {
+		return err
+	}
+	if err := writeLine(w); err != nil {
+		return err
+	}
+
+	if err := printCPUSection(w, &rep.CPU); err != nil {
+		return err
+	}
+	if err := printMemfdSection(w, &rep.Memfd); err != nil {
+		return err
+	}
+	if err := printCacheSection(w, &rep.Cache); err != nil {
+		return err
+	}
+	if err := printCgroupSection(w, rep.Cgroup); err != nil {
+		return err
+	}
+	if err := printToolchainSection(w, &rep.Toolchain); err != nil {
+		return err
+	}
+	return printIssuesAndSummary(w, rep)
+}
+
+func printCPUSection(w io.Writer, cpu *CPUReport) error {
 	cpuGlyph := glyphSuccess
 	if cpu.Level == "" {
 		cpuGlyph = glyphFailure
 	} else if cpu.AVX512DownclockRisk {
 		cpuGlyph = glyphWarning
 	}
-	_, _ = fmt.Fprintf(w, "%s Host CPU Microarchitecture\n", cpuGlyph)
-	_, _ = fmt.Fprintf(w, "    • OS/Arch:        %s/%s\n", cpu.OS, cpu.Arch)
-	_, _ = fmt.Fprintf(w, "    • Detected Level: %s\n", cpu.Level)
+	if err := writeFormat(w, "%s Host CPU Microarchitecture\n", cpuGlyph); err != nil {
+		return err
+	}
+	if err := writeFormat(w, "    • OS/Arch:        %s/%s\n", cpu.OS, cpu.Arch); err != nil {
+		return err
+	}
+	if err := writeFormat(w, "    • Detected Level: %s\n", cpu.Level); err != nil {
+		return err
+	}
 	if len(cpu.Features) > 0 {
-		_, _ = fmt.Fprintf(w, "    • Key Features:   %s\n", strings.Join(cpu.Features, ", "))
+		if err := writeFormat(w, "    • Key Features:   %s\n", strings.Join(cpu.Features, ", ")); err != nil {
+			return err
+		}
 	}
 	if cpu.AVX512DownclockNotice != "" {
-		_, _ = fmt.Fprintf(w, "    • AVX-512 Status: %s\n", cpu.AVX512DownclockNotice)
+		if err := writeFormat(w, "    • AVX-512 Status: %s\n", cpu.AVX512DownclockNotice); err != nil {
+			return err
+		}
 	}
-	_, _ = fmt.Fprintln(w)
+	return writeLine(w)
 }
 
-func printMemfdSection(w io.Writer, memfd *MemfdReport) {
+func printMemfdSection(w io.Writer, memfd *MemfdReport) error {
 	memfdGlyph := glyphSuccess
 	if !memfd.Available {
 		if runtime.GOOS == "linux" {
@@ -370,106 +434,203 @@ func printMemfdSection(w io.Writer, memfd *MemfdReport) {
 			memfdGlyph = glyphInfo
 		}
 	}
-	_, _ = fmt.Fprintf(w, "%s In-Memory Execution (memfd_create)\n", memfdGlyph)
+	if err := writeFormat(w, "%s In-Memory Execution (memfd_create) Prerequisites\n", memfdGlyph); err != nil {
+		return err
+	}
 	if memfd.Kernel != "" {
-		_, _ = fmt.Fprintf(w, "    • Kernel Support: %s (%s)\n", memfd.Status, memfd.Kernel)
+		if err := writeFormat(w, "    • Kernel Support:    %s (%s)\n", memfd.Status, memfd.Kernel); err != nil {
+			return err
+		}
 	} else {
-		_, _ = fmt.Fprintf(w, "    • Kernel Support: %s\n", memfd.Status)
+		if err := writeFormat(w, "    • Kernel Support:    %s\n", memfd.Status); err != nil {
+			return err
+		}
+	}
+	if memfd.CreationStrategy != "" {
+		if err := writeFormat(w, "    • Creation Strategy: %s\n", memfd.CreationStrategy); err != nil {
+			return err
+		}
+	}
+	if memfd.Mode != nil {
+		if err := writeFormat(w, "    • Descriptor Mode:   %s (executable: %t)\n", memfd.Mode.ModeOctal, memfd.Mode.IsExecutable); err != nil {
+			return err
+		}
+	}
+	if memfd.Seals != nil {
+		if memfd.Seals.Supported {
+			if err := writeFormat(w, "    • Mandatory Seals:   supported (matched: %t)\n", memfd.Seals.Matches); err != nil {
+				return err
+			}
+		} else {
+			if err := writeFormat(w, "    • Mandatory Seals:   unsupported or blocked (%s)\n", memfd.Seals.Error); err != nil {
+				return err
+			}
+		}
 	}
 	if memfd.Seccomp != "" {
-		_, _ = fmt.Fprintf(w, "    • Seccomp Filter: %s\n", memfd.Seccomp)
+		if err := writeFormat(w, "    • Seccomp Filter:    %s\n", memfd.Seccomp); err != nil {
+			return err
+		}
+	}
+	if memfd.Execution != "" {
+		if err := writeFormat(w, "    • Execution Test:    %s\n", memfd.Execution); err != nil {
+			return err
+		}
 	}
 	if memfd.Hint != "" && !memfd.Available {
-		_, _ = fmt.Fprintf(w, "    • Diagnostic:     %s\n", memfd.Hint)
+		if err := writeFormat(w, "    • Diagnostic:        %s\n", memfd.Hint); err != nil {
+			return err
+		}
 	}
-	_, _ = fmt.Fprintln(w)
+	return writeLine(w)
 }
 
-func printCacheSection(w io.Writer, cache *CacheReport) {
+func printCacheSection(w io.Writer, cache *CacheReport) error {
 	cacheGlyph := glyphSuccess
 	if !cache.Ready {
 		cacheGlyph = glyphFailure
 	}
-	_, _ = fmt.Fprintf(w, "%s Disk Cache Execution Fallback\n", cacheGlyph)
+	if err := writeFormat(w, "%s Disk Cache Execution Fallback Prerequisites\n", cacheGlyph); err != nil {
+		return err
+	}
 	if cache.ResolvedPath != "" {
-		_, _ = fmt.Fprintf(w, "    • Resolved Path:  %s\n", cache.ResolvedPath)
+		if err := writeFormat(w, "    • Resolved Path:     %s\n", cache.ResolvedPath); err != nil {
+			return err
+		}
 	}
 	if cache.Permissions != "" {
 		writableStr := "read/write OK"
 		if !cache.Writable {
 			writableStr = "unwritable"
 		}
-		_, _ = fmt.Fprintf(w, "    • Permissions:    %s (%s)\n", cache.Permissions, writableStr)
+		if err := writeFormat(w, "    • Permissions:       %s (%s)\n", cache.Permissions, writableStr); err != nil {
+			return err
+		}
+	}
+	if cache.Execution != "" {
+		if err := writeFormat(w, "    • Execution Test:    %s\n", cache.Execution); err != nil {
+			return err
+		}
 	}
 	if cache.Error != "" {
-		_, _ = fmt.Fprintf(w, "    • Error:          %s\n", cache.Error)
+		if err := writeFormat(w, "    • Error:             %s\n", cache.Error); err != nil {
+			return err
+		}
 	}
 	if cache.Hint != "" {
-		_, _ = fmt.Fprintf(w, "    • Diagnostic:     %s\n", cache.Hint)
+		if err := writeFormat(w, "    • Diagnostic:        %s\n", cache.Hint); err != nil {
+			return err
+		}
 	}
-	_, _ = fmt.Fprintln(w)
+	return writeLine(w)
 }
 
-func printCgroupSection(w io.Writer, cg *CgroupReport) {
+func printCgroupSection(w io.Writer, cg *CgroupReport) error {
 	if cg != nil && cg.Detected {
-		_, _ = fmt.Fprintf(w, "%s Container Resource Limits (cgroup v%d)\n", glyphSuccess, cg.Version)
+		if err := writeFormat(w, "%s Container Resource Limits (cgroup v%d)\n", glyphSuccess, cg.Version); err != nil {
+			return err
+		}
 		if cg.MemoryLimitBytes > 0 {
-			_, _ = fmt.Fprintf(w, "    • Memory Limit:   %s\n", formatBytes(cg.MemoryLimitBytes))
+			if err := writeFormat(w, "    • Memory Limit:   %s\n", formatBytes(cg.MemoryLimitBytes)); err != nil {
+				return err
+			}
 		} else {
-			_, _ = fmt.Fprintf(w, "    • Memory Limit:   unlimited\n")
+			if err := writeLine(w, "    • Memory Limit:   unlimited"); err != nil {
+				return err
+			}
 		}
 		if cg.MemoryHighBytes > 0 {
-			_, _ = fmt.Fprintf(w, "    • Memory High:    %s\n", formatBytes(cg.MemoryHighBytes))
+			if err := writeFormat(w, "    • Memory High:    %s\n", formatBytes(cg.MemoryHighBytes)); err != nil {
+				return err
+			}
 		}
 		if cg.CPUQuota > 0 {
-			_, _ = fmt.Fprintf(w, "    • CFS CPU Quota:  %.2f cores\n", cg.CPUQuota)
+			if err := writeFormat(w, "    • CFS CPU Quota:  %.2f cores\n", cg.CPUQuota); err != nil {
+				return err
+			}
 		} else {
-			_, _ = fmt.Fprintf(w, "    • CFS CPU Quota:  unlimited\n")
+			if err := writeLine(w, "    • CFS CPU Quota:  unlimited"); err != nil {
+				return err
+			}
 		}
 		if cg.GOMEMLIMITStr != "" {
 			constraintNote := ""
 			if cg.ConstrainingLimit != "" {
 				constraintNote = fmt.Sprintf(" [bounded by %s]", cg.ConstrainingLimit)
 			}
-			_, _ = fmt.Fprintf(w, "    • Auto GOMEMLIMIT: %s (~%s)%s\n", cg.GOMEMLIMITStr, formatBytes(cg.GOMEMLIMITBytes), constraintNote)
+			if err := writeFormat(
+				w,
+				"    • Auto GOMEMLIMIT: %s (~%s)%s\n",
+				cg.GOMEMLIMITStr,
+				formatBytes(cg.GOMEMLIMITBytes),
+				constraintNote,
+			); err != nil {
+				return err
+			}
 		}
 		if cg.GOMAXPROCS > 0 {
-			_, _ = fmt.Fprintf(w, "    • Auto GOMAXPROCS: %d\n", cg.GOMAXPROCS)
+			if err := writeFormat(w, "    • Auto GOMAXPROCS: %d\n", cg.GOMAXPROCS); err != nil {
+				return err
+			}
 		}
 	} else {
-		_, _ = fmt.Fprintf(w, "%s Container Resource Limits\n", glyphInfo)
-		_, _ = fmt.Fprintf(w, "    • Status:         No container cgroup limits detected (bare-metal / unconstrained host)\n")
-	}
-	_, _ = fmt.Fprintln(w)
-}
-
-func printToolchainSection(w io.Writer, tc *ToolchainReport) {
-	_, _ = fmt.Fprintf(w, "%s Toolchain & Version Metadata\n", glyphSuccess)
-	_, _ = fmt.Fprintf(w, "    • Version:        %s\n", tc.Version)
-	_, _ = fmt.Fprintf(w, "    • Commit:         %s\n", tc.Commit)
-	if tc.Date != "" {
-		_, _ = fmt.Fprintf(w, "    • Build Date:     %s\n", tc.Date)
-	}
-	_, _ = fmt.Fprintln(w)
-}
-
-func printIssuesAndSummary(w io.Writer, rep *DoctorReport) {
-	if len(rep.Warnings) > 0 {
-		_, _ = fmt.Fprintln(w, "Warnings:")
-		for _, warn := range rep.Warnings {
-			_, _ = fmt.Fprintf(w, "  [!] %s\n", warn)
+		if err := writeFormat(w, "%s Container Resource Limits\n", glyphInfo); err != nil {
+			return err
 		}
-		_, _ = fmt.Fprintln(w)
+		if err := writeLine(w, "    • Status:         No container cgroup limits detected (bare-metal / unconstrained host)"); err != nil {
+			return err
+		}
+	}
+	return writeLine(w)
+}
+
+func printToolchainSection(w io.Writer, tc *ToolchainReport) error {
+	if err := writeFormat(w, "%s Toolchain & Version Metadata\n", glyphSuccess); err != nil {
+		return err
+	}
+	if err := writeFormat(w, "    • Version:        %s\n", tc.Version); err != nil {
+		return err
+	}
+	if err := writeFormat(w, "    • Commit:         %s\n", tc.Commit); err != nil {
+		return err
+	}
+	if tc.Date != "" {
+		if err := writeFormat(w, "    • Build Date:     %s\n", tc.Date); err != nil {
+			return err
+		}
+	}
+	return writeLine(w)
+}
+
+func printIssuesAndSummary(w io.Writer, rep *DoctorReport) error {
+	if len(rep.Warnings) > 0 {
+		if err := writeLine(w, "Warnings:"); err != nil {
+			return err
+		}
+		for _, warn := range rep.Warnings {
+			if err := writeFormat(w, "  [!] %s\n", warn); err != nil {
+				return err
+			}
+		}
+		if err := writeLine(w); err != nil {
+			return err
+		}
 	}
 	if len(rep.Errors) > 0 {
-		_, _ = fmt.Fprintln(w, "Errors:")
-		for _, errStr := range rep.Errors {
-			_, _ = fmt.Fprintf(w, "  [✖] %s\n", errStr)
+		if err := writeLine(w, "Errors:"); err != nil {
+			return err
 		}
-		_, _ = fmt.Fprintln(w)
+		for _, errStr := range rep.Errors {
+			if err := writeFormat(w, "  [✖] %s\n", errStr); err != nil {
+				return err
+			}
+		}
+		if err := writeLine(w); err != nil {
+			return err
+		}
 	}
 
-	_, _ = fmt.Fprintf(w, "Summary: %s\n", rep.Summary)
+	return writeFormat(w, "Summary: %s\n", rep.Summary)
 }
 
 func formatBytes(bytes int64) string {

@@ -12,6 +12,7 @@ func probeMemfd() MemfdReport {
 		Available: false,
 		Status:    fmt.Sprintf("N/A (%s host; microfat fat execution targets Linux ELF)", runtime.GOOS),
 		Seccomp:   "N/A",
+		Execution: executionUnavailable,
 	}
 }
 

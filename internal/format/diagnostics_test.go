@@ -34,7 +34,7 @@ func TestDiagnoseError(t *testing.T) {
 			name:         "memfd_create EACCES wrapped",
 			stage:        StageMemfdCreate,
 			err:          fmt.Errorf("memfd probe failed: %w", syscall.EACCES),
-			expectedHint: HintMemfdSeccomp,
+			expectedHint: HintMemfdEACCES,
 		},
 		{
 			name:         "memfd_create ENOSYS unsupported kernel",
@@ -136,7 +136,7 @@ func TestDiagnoseError(t *testing.T) {
 			name:         "memfd execve EPERM",
 			stage:        StageMemfdExec,
 			err:          syscall.EPERM,
-			expectedHint: HintExecNoExec,
+			expectedHint: HintExecEPERM,
 		},
 		{
 			name:         "cache execve ETXTBSY text file busy",
@@ -250,7 +250,7 @@ func TestDiagnoseError(t *testing.T) {
 			name:         "generic launcher_main ErrExecve with EPERM",
 			stage:        StageLauncherMain,
 			err:          fmt.Errorf("%w: %w", ErrExecve, syscall.EPERM),
-			expectedHint: HintExecNoExec,
+			expectedHint: HintExecEPERM,
 		},
 		{
 			name:         "generic launcher_main ErrExecve with ETXTBSY",
@@ -268,13 +268,13 @@ func TestDiagnoseError(t *testing.T) {
 			name:         "generic launcher_main ErrMemfdCreate with EPERM",
 			stage:        StageLauncherMain,
 			err:          fmt.Errorf("%w: %w", ErrMemfdCreate, syscall.EPERM),
-			expectedHint: HintMemfdSeccomp,
+			expectedHint: HintMemfdEPERM,
 		},
 		{
 			name:         "generic launcher_main ErrMemfdCreate with EACCES",
 			stage:        StageLauncherMain,
 			err:          fmt.Errorf("%w: %w", ErrMemfdCreate, syscall.EACCES),
-			expectedHint: HintMemfdSeccomp,
+			expectedHint: HintMemfdEACCES,
 		},
 		{
 			name:         "generic launcher_main ErrMemfdCreate with ENOSYS",

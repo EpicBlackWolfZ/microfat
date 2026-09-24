@@ -3508,3 +3508,110 @@ func TestParseLifecycleOptions(t *testing.T) {
 	_, err = parseLifecycleOptions([]string{"--microfat:metadata-policy=invalid"})
 	require.Error(t, err)
 }
+
+func TestErrorTelemetryFormatting(t *testing.T) {
+	t.Parallel()
+
+	tel := format.ErrorTelemetry{
+		Event:             format.EventError,
+		TimestampUnixNano: 123456789,
+		HostArch:          "amd64",
+		HostLevel:         "v3",
+		SelectedVariant:   "v3",
+		PolicyApplied:     "safe_avx512",
+		PolicyReason:      "downclock_risk",
+		RequestedMode:     "auto",
+		AttemptedMode:     "memfd",
+		Stage:             format.StageMemfdCreate,
+		Error:             "operation not permitted",
+		Errno:             1,
+		ErrnoName:         "EPERM",
+		Attempts: []format.ExecutionAttempt{
+			{
+				Stage:         format.StageMemfdCreate,
+				RequestedMode: "auto",
+				AttemptedMode: "memfd",
+				Error:         "operation not permitted",
+				Errno:         1,
+				ErrnoName:     "EPERM",
+			},
+			{
+				Stage:         format.StageCacheDirInit,
+				RequestedMode: "auto",
+				AttemptedMode: "cache",
+				Error:         "permission denied",
+				Errno:         13,
+				ErrnoName:     "EACCES",
+			},
+		},
+		Details: "falling back to cache",
+		Hint:    format.HintMemfdEPERM,
+	}
+
+	raw := formatErrorTelemetryJSON(tel)
+	require.NotEmpty(t, raw)
+	assert.Contains(t, raw, `"requested_mode":"auto"`)
+	assert.Contains(t, raw, `"attempted_mode":"memfd"`)
+	assert.Contains(t, raw, `"errno":1`)
+	assert.Contains(t, raw, `"errno_name":"EPERM"`)
+	assert.Contains(t, raw, `"attempts":[`)
+	assert.Contains(t, raw, `"stage":"memfd_create"`)
+	assert.Contains(t, raw, `"stage":"cache_dir_init"`)
+}
+
+func TestCombinedDispatchError(t *testing.T) {
+	t.Parallel()
+
+	primaryErr := fmt.Errorf("%w: memfd_create failed: %w", format.ErrMemfdCreate, syscall.EPERM)
+	cacheErr := fmt.Errorf("%w: cache dir init failed: %w", format.ErrCacheInit, syscall.EACCES)
+
+	dispErr := buildCombinedDispatchError(format.ErrCacheInit, format.ExecModeAuto, primaryErr, format.StageCacheDirInit, cacheErr)
+	require.NotNil(t, dispErr)
+
+	// Check Is and Unwrap
+	assert.True(t, errors.Is(dispErr, format.ErrCacheInit))
+	assert.Equal(t, format.ErrCacheInit, errors.Unwrap(dispErr))
+
+	// Check As
+	var target *format.DispatchError
+	assert.True(t, errors.As(dispErr, &target))
+	assert.Equal(t, format.ExecModeAuto, target.RequestedMode)
+	require.Len(t, target.Attempts, 2)
+	assert.Equal(t, format.ExecModeMemfd, target.Attempts[0].AttemptedMode)
+	assert.Equal(t, format.ExecModeCache, target.Attempts[1].AttemptedMode)
+	assert.Equal(t, 1, target.Attempts[0].Errno)
+	assert.Equal(t, "EPERM", target.Attempts[0].ErrnoName)
+	assert.Equal(t, 13, target.Attempts[1].Errno)
+	assert.Equal(t, "EACCES", target.Attempts[1].ErrnoName)
+
+	// Check error string contains both attempts and primary memfd error
+	errStr := dispErr.Error()
+	assert.Contains(t, errStr, "primary memfd error")
+	assert.Contains(t, errStr, "attempt 1: memfd")
+	assert.Contains(t, errStr, "attempt 2: cache")
+
+	// Check empty summary fallback
+	emptyDispErr := &format.DispatchError{PrimarySentinel: format.ErrExecve}
+	assert.Contains(t, emptyDispErr.Error(), format.ErrExecve.Error())
+	assert.Contains(t, emptyDispErr.Error(), "dispatch failed")
+}
+
+func TestExtractErrno(t *testing.T) {
+	t.Parallel()
+
+	num, name := format.ExtractErrno(syscall.ENOENT)
+	assert.Equal(t, 2, num)
+	assert.Equal(t, "ENOENT", name)
+
+	num, name = format.ExtractErrno(fmt.Errorf("wrapped: %w", syscall.EACCES))
+	assert.Equal(t, 13, num)
+	assert.Equal(t, "EACCES", name)
+
+	num, name = format.ExtractErrno(errors.New("generic error without errno"))
+	assert.Equal(t, 0, num)
+	assert.Empty(t, name)
+
+	num, name = format.ExtractErrno(nil)
+	assert.Equal(t, 0, num)
+	assert.Empty(t, name)
+}

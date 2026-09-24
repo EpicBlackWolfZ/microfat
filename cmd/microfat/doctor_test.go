@@ -12,6 +12,7 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/memfd"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"golang.org/x/sys/unix"
 )
@@ -306,15 +307,34 @@ func TestPrintDoctorReportVariations(t *testing.T) {
 
 func TestProbeMemfdMocking(t *testing.T) {
 	origMemfd := memfdProbeSyscall
+	origFstat := memfdProbeFstat
+	origFcntl := memfdProbeFcntl
+	origClose := memfdProbeClose
 	origUname := unameSyscall
 	defer func() {
 		memfdProbeSyscall = origMemfd
+		memfdProbeFstat = origFstat
+		memfdProbeFcntl = origFcntl
+		memfdProbeClose = origClose
 		unameSyscall = origUname
 	}()
 
 	t.Run("successful memfd create", func(t *testing.T) {
 		memfdProbeSyscall = func(name string, flags int) (int, error) {
 			return 42, nil
+		}
+		memfdProbeFstat = func(fd int, stat *unix.Stat_t) error {
+			stat.Mode = unix.S_IFREG | 0o700
+			return nil
+		}
+		memfdProbeFcntl = func(fd uintptr, cmd int, arg int) (int, error) {
+			if cmd == unix.F_GET_SEALS {
+				return memfd.TargetSeals, nil
+			}
+			return 0, nil
+		}
+		memfdProbeClose = func(fd int) error {
+			return nil
 		}
 		unameSyscall = func(buf *unix.Utsname) error {
 			copy(buf.Release[:], []byte("6.10.0-custom\x00"))
@@ -327,6 +347,75 @@ func TestProbeMemfdMocking(t *testing.T) {
 		}
 		if !strings.Contains(rep.Kernel, "6.10.0-custom") {
 			t.Errorf("expected kernel release string, got %s", rep.Kernel)
+		}
+		if rep.Mode == nil || !rep.Mode.IsExecutable {
+			t.Errorf("expected executable mode in probe result, got: %+v", rep.Mode)
+		}
+		if rep.Seals == nil || !rep.Seals.Matches {
+			t.Errorf("expected matching seals in probe result, got: %+v", rep.Seals)
+		}
+		if !strings.Contains(rep.Execution, "prerequisite check only") {
+			t.Errorf("expected unknown execution status, got: %s", rep.Execution)
+		}
+	})
+
+	t.Run("creation allowed sealing denied", func(t *testing.T) {
+		memfdProbeSyscall = func(name string, flags int) (int, error) {
+			return 42, nil
+		}
+		memfdProbeFstat = func(fd int, stat *unix.Stat_t) error {
+			stat.Mode = unix.S_IFREG | 0o700
+			return nil
+		}
+		memfdProbeFcntl = func(fd uintptr, cmd int, arg int) (int, error) {
+			if cmd == unix.F_ADD_SEALS {
+				return -1, syscall.EPERM
+			}
+			return 0, nil
+		}
+		memfdProbeClose = func(fd int) error {
+			return nil
+		}
+
+		rep := probeMemfd()
+		if rep.Available {
+			t.Errorf("expected unavailable memfd probe when sealing is denied")
+		}
+		if !strings.Contains(rep.Status, "Sealing failed") {
+			t.Errorf("expected Sealing failed status, got: %s", rep.Status)
+		}
+		if rep.Seals == nil || rep.Seals.Supported {
+			t.Errorf("expected seals to be reported as unsupported/blocked, got: %+v", rep.Seals)
+		}
+	})
+
+	t.Run("creation allowed non-executable descriptor", func(t *testing.T) {
+		memfdProbeSyscall = func(name string, flags int) (int, error) {
+			return 42, nil
+		}
+		memfdProbeFstat = func(fd int, stat *unix.Stat_t) error {
+			stat.Mode = unix.S_IFREG | 0o600 // lacking execute permissions
+			return nil
+		}
+		memfdProbeFcntl = func(fd uintptr, cmd int, arg int) (int, error) {
+			if cmd == unix.F_GET_SEALS {
+				return memfd.TargetSeals, nil
+			}
+			return 0, nil
+		}
+		memfdProbeClose = func(fd int) error {
+			return nil
+		}
+
+		rep := probeMemfd()
+		if rep.Available {
+			t.Errorf("expected unavailable memfd probe when descriptor lacks execute permissions")
+		}
+		if !strings.Contains(rep.Status, "Descriptor non-executable") {
+			t.Errorf("expected Descriptor non-executable status, got: %s", rep.Status)
+		}
+		if rep.Mode == nil || rep.Mode.IsExecutable {
+			t.Errorf("expected Mode.IsExecutable == false, got: %+v", rep.Mode)
 		}
 	})
 
@@ -514,4 +603,206 @@ func TestRunDoctorEdgeCases(t *testing.T) {
 		}
 		createTempFileFunc = origTemp
 	})
+}
+
+func TestRunDoctorTruthTable(t *testing.T) {
+	tempDir := t.TempDir()
+	validCacheDir := filepath.Join(tempDir, "tt_cache_valid")
+	invalidCacheDir := "/dev/null/forbidden_cache_path"
+
+	origDetect := microarchDetectFunc
+	origMemfd := memfdProbeSyscall
+	origFstat := memfdProbeFstat
+	origFcntl := memfdProbeFcntl
+	origClose := memfdProbeClose
+	defer func() {
+		microarchDetectFunc = origDetect
+		memfdProbeSyscall = origMemfd
+		memfdProbeFstat = origFstat
+		memfdProbeFcntl = origFcntl
+		memfdProbeClose = origClose
+	}()
+
+	mockMemfdSuccess := func() {
+		memfdProbeSyscall = func(name string, flags int) (int, error) { return 42, nil }
+		memfdProbeFstat = func(fd int, stat *unix.Stat_t) error { stat.Mode = unix.S_IFREG | 0o700; return nil }
+		memfdProbeFcntl = func(fd uintptr, cmd int, arg int) (int, error) {
+			if cmd == unix.F_GET_SEALS {
+				return memfd.TargetSeals, nil
+			}
+			return 0, nil
+		}
+		memfdProbeClose = func(fd int) error { return nil }
+	}
+
+	mockMemfdBlocked := func() {
+		memfdProbeSyscall = func(name string, flags int) (int, error) { return -1, syscall.EPERM }
+	}
+
+	tests := []struct {
+		name         string
+		cpuLevel     string
+		memfdMock    func()
+		cacheDir     string
+		strict       bool
+		expectReady  bool
+		expectErrors bool
+	}{
+		{
+			name:         "normal: CPU OK, Memfd OK, Cache OK -> Ready",
+			cpuLevel:     "v3",
+			memfdMock:    mockMemfdSuccess,
+			cacheDir:     validCacheDir,
+			strict:       false,
+			expectReady:  true,
+			expectErrors: false,
+		},
+		{
+			name:         "strict: CPU OK, Memfd OK, Cache OK -> Ready",
+			cpuLevel:     "v3",
+			memfdMock:    mockMemfdSuccess,
+			cacheDir:     validCacheDir,
+			strict:       true,
+			expectReady:  true,
+			expectErrors: false,
+		},
+		{
+			name:         "normal: CPU OK, Memfd blocked, Cache OK -> Ready with warning",
+			cpuLevel:     "v3",
+			memfdMock:    mockMemfdBlocked,
+			cacheDir:     validCacheDir,
+			strict:       false,
+			expectReady:  true,
+			expectErrors: false,
+		},
+		{
+			name:         "strict: CPU OK, Memfd blocked, Cache OK -> Fails",
+			cpuLevel:     "v3",
+			memfdMock:    mockMemfdBlocked,
+			cacheDir:     validCacheDir,
+			strict:       true,
+			expectReady:  false,
+			expectErrors: true,
+		},
+		{
+			name:         "normal: CPU OK, Memfd OK, Cache invalid -> Ready with warning",
+			cpuLevel:     "v3",
+			memfdMock:    mockMemfdSuccess,
+			cacheDir:     invalidCacheDir,
+			strict:       false,
+			expectReady:  true,
+			expectErrors: false,
+		},
+		{
+			name:         "strict: CPU OK, Memfd OK, Cache invalid -> Fails",
+			cpuLevel:     "v3",
+			memfdMock:    mockMemfdSuccess,
+			cacheDir:     invalidCacheDir,
+			strict:       true,
+			expectReady:  false,
+			expectErrors: true,
+		},
+		{
+			name:         "normal: CPU OK, Memfd blocked, Cache invalid -> Fails",
+			cpuLevel:     "v3",
+			memfdMock:    mockMemfdBlocked,
+			cacheDir:     invalidCacheDir,
+			strict:       false,
+			expectReady:  false,
+			expectErrors: true,
+		},
+		{
+			name:         "normal: CPU empty level, Memfd OK, Cache OK -> Fails",
+			cpuLevel:     "",
+			memfdMock:    mockMemfdSuccess,
+			cacheDir:     validCacheDir,
+			strict:       false,
+			expectReady:  false,
+			expectErrors: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			microarchDetectFunc = func() microarch.Info {
+				return microarch.Info{
+					OS:       testOSLinux,
+					Arch:     testArchAMD64,
+					Level:    tc.cpuLevel,
+					Features: []string{"avx2"},
+				}
+			}
+			tc.memfdMock()
+
+			rep := runDoctor(DoctorOptions{
+				CacheDir: tc.cacheDir,
+				Strict:   tc.strict,
+			})
+
+			if rep.Ready != tc.expectReady {
+				t.Errorf("expected Ready=%t, got Ready=%t (errors=%v)", tc.expectReady, rep.Ready, rep.Errors)
+			}
+			if tc.expectErrors && len(rep.Errors) == 0 {
+				t.Errorf("expected errors in report, got none")
+			}
+			if !tc.expectErrors && len(rep.Errors) > 0 {
+				t.Errorf("expected no errors in report, got: %v", rep.Errors)
+			}
+			if rep.Execution.Status != "unknown" || rep.Execution.Reason != "not_tested" {
+				t.Errorf("expected Execution {unknown, not_tested}, got %+v", rep.Execution)
+			}
+		})
+	}
+}
+
+type errWriter struct {
+	failAfter int
+	written   int
+}
+
+func (ew *errWriter) Write(p []byte) (n int, err error) {
+	if ew.written >= ew.failAfter {
+		return 0, errors.New("simulated write error")
+	}
+	ew.written += len(p)
+	return len(p), nil
+}
+
+func TestPrintDoctorReport_WriterError(t *testing.T) {
+	report := &DoctorReport{
+		Ready: true,
+		CPU: CPUReport{
+			OS:    testOSLinux,
+			Arch:  testArchAMD64,
+			Level: "v3",
+		},
+		Memfd: MemfdReport{
+			Available:        true,
+			Status:           "Available",
+			CreationStrategy: "MFD_EXEC",
+			Mode: &memfd.ModeObservation{
+				ModeOctal:    "0700",
+				IsExecutable: true,
+			},
+			Seals: &memfd.SealsObservation{
+				Supported: true,
+				Matches:   true,
+			},
+			Execution: "unknown (prerequisite check only)",
+		},
+		Cache: CacheReport{
+			Ready:        true,
+			ResolvedPath: "/tmp/cache",
+			Permissions:  "0700",
+			Writable:     true,
+			Execution:    "unknown (write-only probe)",
+		},
+		Summary: "Ready",
+	}
+
+	ew := &errWriter{failAfter: 5}
+	err := printDoctorReport(ew, report)
+	if err == nil {
+		t.Errorf("expected printDoctorReport to fail when writer fails")
+	}
 }
