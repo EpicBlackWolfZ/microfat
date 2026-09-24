@@ -65,6 +65,8 @@ type Options struct {
 	Permissions        os.FileMode
 	FormatVersion      int                                       // FormatVersion1 (JSON) or FormatVersion2 (Binary, default)
 	SkipELFValidation  bool                                      // Optional flag to bypass ELF header validation (primarily for testing)
+	AllowMixedABI      bool                                      // Allow packaging variants with differing declared ABI requirements
+	ABIReportCallback  func(report *ArtifactABIReport)           // Optional callback receiving the aggregate ABI report
 	WarnFunc           WarnFunc                                  // Optional diagnostic warning callback for non-fatal assembly telemetry
 	VariantValidator   func(level, snapshottedPath string) error // Optional validation callback on privately snapshotted variants
 }
@@ -240,6 +242,10 @@ func Pack(opts Options) (*format.Index, error) {
 	}
 
 	levels := sortVariantLevels(opts.Variants, opts.TargetArch)
+
+	if err := validatePayloadABIs(&opts, levels); err != nil {
+		return nil, err
+	}
 
 	dictBytes, dictSHAHex, err := prepareSharedDictionary(&opts, levels)
 	if err != nil {
@@ -666,11 +672,66 @@ func VerifyBinary(r io.ReaderAt, totalSize int64) (*format.Index, []Verification
 	return idx, results, nil
 }
 
+func validatePayloadABIs(opts *Options, levels []string) error {
+	if opts.SkipELFValidation {
+		if opts.ABIReportCallback != nil {
+			variantReports := make([]*VariantABIReport, 0, len(levels))
+			for _, lvl := range levels {
+				variantReports = append(variantReports, &VariantABIReport{
+					Level:        lvl,
+					Path:         opts.Variants[lvl],
+					Completeness: MetadataSkipped,
+				})
+			}
+			opts.ABIReportCallback(&ArtifactABIReport{
+				TargetOS:   opts.TargetOS,
+				TargetArch: opts.TargetArch,
+				Variants:   variantReports,
+				Consistent: true,
+			})
+		}
+		return nil
+	}
+
+	variantReports := make([]*VariantABIReport, 0, len(levels))
+	for _, lvl := range levels {
+		varData, err := readBoundedInput(opts.Variants[lvl], format.MaxPayloadSize)
+		if err != nil {
+			return fmt.Errorf("reading snapshotted variant %s: %w", lvl, err)
+		}
+		rep, err := InspectELFABI(varData)
+		if err != nil {
+			return fmt.Errorf("inspecting declared ABI for variant %s: %w", lvl, err)
+		}
+		rep.Level = lvl
+		rep.Path = opts.Variants[lvl]
+		variantReports = append(variantReports, rep)
+	}
+
+	artifactReport, err := CompareVariantABIs(variantReports, opts.AllowMixedABI)
+	if err != nil {
+		return err
+	}
+	artifactReport.TargetOS = opts.TargetOS
+	artifactReport.TargetArch = opts.TargetArch
+
+	for _, w := range artifactReport.Warnings {
+		opts.warnf("%s", w)
+	}
+	if opts.ABIReportCallback != nil {
+		opts.ABIReportCallback(artifactReport)
+	}
+	return nil
+}
+
 // ValidateELFBinary checks if the file at path is a valid 64-bit ELF binary matching targetOS and targetArch.
 func ValidateELFBinary(path string, targetOS, targetArch string) error {
 	data, err := readBoundedInput(path, format.MaxPayloadSize)
 	if err != nil {
 		return err
+	}
+	if err := PreflightELFHeaders(data); err != nil {
+		return fmt.Errorf("%w (%s): %w", ErrInvalidELF, path, err)
 	}
 	f, err := elf.NewFile(bytes.NewReader(data))
 	if err != nil {
