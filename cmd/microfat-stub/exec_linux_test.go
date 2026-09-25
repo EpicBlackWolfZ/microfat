@@ -250,3 +250,39 @@ func TestLauncherOriginalExeWhitespace(t *testing.T) {
 		}
 	})
 }
+
+func TestHandleCacheError_Branches(t *testing.T) {
+	t.Parallel()
+
+	hostInfo := microarch.Info{Arch: "amd64", Level: "v3"}
+	policyRes := microarch.PolicyResult{SelectedVariant: "v3", PolicyApplied: "direct match"}
+	entry := &format.VariantEntry{Level: "v3"}
+
+	err1 := handleCacheError(
+		format.ErrExecve,
+		format.StageCacheExec,
+		errors.New("permission denied"),
+		nil,
+		format.ExecModeAuto,
+		hostInfo,
+		entry,
+		policyRes,
+		"/path/to/proc",
+	)
+	require.Error(t, err1)
+	assert.Contains(t, err1.Error(), "cache execve failed (/path/to/proc)")
+
+	err2 := handleCacheError(
+		format.ErrCacheInit,
+		format.StageCacheDirInit,
+		errors.New("operation not permitted"),
+		nil,
+		format.ExecModeAuto,
+		hostInfo,
+		entry,
+		policyRes,
+		"cache directory creation failed",
+	)
+	require.Error(t, err2)
+	assert.ErrorIs(t, err2, format.ErrCacheInit)
+}

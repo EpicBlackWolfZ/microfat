@@ -54,7 +54,7 @@ func TestDoctorCmdExecution(t *testing.T) {
 		cmd := newDoctorCmd()
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
-		cmd.SetArgs([]string{"--json", flagCacheDir, validCacheDir})
+		cmd.SetArgs([]string{flagJSON, flagCacheDir, validCacheDir})
 
 		err := cmd.Execute()
 		if err != nil {
@@ -830,7 +830,7 @@ func TestPrintDoctorReport_WriterError(t *testing.T) {
 		Summary: "Ready",
 	}
 
-	ew := &errWriter{failAfter: 5}
+	ew := &errWriter{failAfter: 0}
 	err := printDoctorReport(ew, report)
 	if err == nil {
 		t.Errorf("expected printDoctorReport to fail when writer fails")
@@ -897,12 +897,221 @@ func TestPrintSections_ComprehensiveWriterErrors(t *testing.T) {
 	}
 }
 
+func TestProbeCache_FailureBranches(t *testing.T) {
+	tempDir := t.TempDir()
+	validCacheDir := filepath.Join(tempDir, "probe_cache_branch")
+	_ = os.MkdirAll(validCacheDir, 0o700)
+
+	origStat := statCacheFunc
+	origTemp := createTempFileFunc
+	origRead := readFileFunc
+	defer func() {
+		statCacheFunc = origStat
+		createTempFileFunc = origTemp
+		readFileFunc = origRead
+	}()
+
+	t.Run("stat failure", func(t *testing.T) {
+		statCacheFunc = func(name string) (os.FileInfo, error) {
+			return nil, syscall.EACCES
+		}
+		res := probeCache(validCacheDir)
+		if res.Passed || res.Phase != "stat" || res.ErrnoName != "EACCES" {
+			t.Errorf("expected stat failure, got: %+v", res)
+		}
+		statCacheFunc = origStat
+	})
+
+	t.Run("write probe file error", func(t *testing.T) {
+		createTempFileFunc = func(dir, pattern string) (*os.File, error) {
+			f, err := origTemp(dir, pattern)
+			if err != nil {
+				return nil, err
+			}
+			_ = f.Close()
+			return f, nil
+		}
+		res := probeCache(validCacheDir)
+		if res.Passed || res.Phase != "write" {
+			t.Errorf("expected write failure, got: %+v", res)
+		}
+		createTempFileFunc = origTemp
+	})
+
+	t.Run("read probe file error", func(t *testing.T) {
+		readFileFunc = func(name string) ([]byte, error) {
+			return nil, syscall.EIO
+		}
+		res := probeCache(validCacheDir)
+		if res.Passed || res.Phase != "read" || res.ErrnoName != "EIO" {
+			t.Errorf("expected read failure, got: %+v", res)
+		}
+		readFileFunc = origRead
+	})
+
+	t.Run("read probe file content mismatch", func(t *testing.T) {
+		readFileFunc = func(name string) ([]byte, error) {
+			return []byte("corrupted"), nil
+		}
+		res := probeCache(validCacheDir)
+		if res.Passed || res.Phase != "read" || !strings.Contains(res.Error, "verifying written probe") {
+			t.Errorf("expected payload mismatch failure, got: %+v", res)
+		}
+		readFileFunc = origRead
+	})
+}
+
+func TestDoctorCmd_WriterErrors(t *testing.T) {
+	cmd := newDoctorCmd()
+	cmd.SetArgs([]string{flagJSON})
+	ew := &errWriter{failAfter: 0}
+	cmd.SetOut(ew)
+	if err := cmd.Execute(); err == nil {
+		t.Errorf("expected error when JSON writer fails")
+	}
+
+	cmd = newDoctorCmd()
+	cmd.SetArgs([]string{})
+	cmd.SetOut(ew)
+	if err := cmd.Execute(); err == nil {
+		t.Errorf("expected error when plain text writer fails")
+	}
+}
+
+func TestProbeMemfd_AdditionalBranches(t *testing.T) {
+	origMemfd := memfdProbeSyscall
+	origFstat := memfdProbeFstat
+	origFcntl := memfdProbeFcntl
+	origClose := memfdProbeClose
+	origUname := unameSyscall
+	defer func() {
+		memfdProbeSyscall = origMemfd
+		memfdProbeFstat = origFstat
+		memfdProbeFcntl = origFcntl
+		memfdProbeClose = origClose
+		unameSyscall = origUname
+	}()
+
+	t.Run("uname failure release string", func(t *testing.T) {
+		unameSyscall = func(buf *unix.Utsname) error {
+			return errors.New("uname failed")
+		}
+		rep := probeMemfd()
+		if rep.Kernel != "Linux (unknown release)" {
+			t.Errorf("expected Linux (unknown release), got: %s", rep.Kernel)
+		}
+	})
+
+	t.Run("fstat failure in probeMemfd", func(t *testing.T) {
+		memfdProbeSyscall = func(name string, flags int) (int, error) { return 10, nil }
+		memfdProbeFstat = func(fd int, stat *unix.Stat_t) error { return syscall.EBADF }
+		memfdProbeFcntl = func(fd uintptr, cmd int, arg int) (int, error) { return 0, nil }
+		memfdProbeClose = func(fd int) error { return nil }
+
+		rep := probeMemfd()
+		if rep.Passed || rep.Phase != "fstat" {
+			t.Errorf("expected fstat failure phase, got: %+v", rep)
+		}
+		if rep.Hint == "" {
+			t.Errorf("expected hint for fstat failure")
+		}
+	})
+
+	t.Run("seals failure with non-perm errno", func(t *testing.T) {
+		memfdProbeSyscall = func(name string, flags int) (int, error) { return 10, nil }
+		memfdProbeFstat = func(fd int, stat *unix.Stat_t) error { stat.Mode = unix.S_IFREG | 0o700; return nil }
+		memfdProbeFcntl = func(fd uintptr, cmd int, arg int) (int, error) {
+			if cmd == unix.F_ADD_SEALS {
+				return -1, syscall.EINVAL
+			}
+			return 0, nil
+		}
+		memfdProbeClose = func(fd int) error { return nil }
+
+		rep := probeMemfd()
+		if rep.Passed || rep.Phase != "seals" {
+			t.Errorf("expected seals failure phase, got: %+v", rep)
+		}
+		if rep.Seccomp != "Restricted (seals blocked)" {
+			t.Errorf("expected Restricted (seals blocked), got: %s", rep.Seccomp)
+		}
+	})
+}
+
+func TestPrintSections_AllFormattingBranches(t *testing.T) {
+	rep := &DoctorReport{
+		Ready: false,
+		CPU: CPUReport{
+			OS:                    testOSLinux,
+			Arch:                  testArchAMD64,
+			Level:                 "", // triggers failure glyph
+			Features:              nil,
+			AVX512DownclockNotice: "",
+		},
+		Memfd: MemfdReport{
+			Passed:                false,
+			Kernel:                "", // empty kernel branch
+			Status:                "Disabled",
+			CreationStrategy:      "standard",
+			Mode:                  &memfd.ModeObservation{ModeOctal: "0600", IsExecutable: false},
+			Seals:                 &memfd.SealsObservation{Supported: false, Error: "not supported"},
+			Seccomp:               "Restricted",
+			Execution:             "unavailable",
+			Phase:                 "creation",
+			ErrnoName:             "ENOSYS",
+			ErrnoValue:            38,
+			CandidateExplanations: []string{"syscall missing"},
+			Hint:                  "enable kernel option",
+		},
+		Cache: CacheReport{
+			Passed:                false,
+			ResolvedPath:          "/cache/dir",
+			Permissions:           "0444",
+			Writable:              false,
+			Execution:             "untested",
+			Phase:                 "write",
+			ErrnoName:             "EROFS",
+			ErrnoValue:            30,
+			CandidateExplanations: []string{"read-only filesystem"},
+			Error:                 "read-only",
+			Hint:                  "remount rw",
+		},
+		Cgroup: &CgroupReport{
+			Detected:          true,
+			Version:           2,
+			MemoryLimitBytes:  0, // unlimited branch
+			MemoryHighBytes:   1024,
+			CPUQuota:          0, // unlimited branch
+			GOMEMLIMITStr:     "1024B",
+			ConstrainingLimit: "memory.max",
+			GOMAXPROCS:        4,
+		},
+		Toolchain: ToolchainReport{
+			Version: "v1.0.0",
+			Commit:  "abcdef",
+			Date:    "2026-09-25",
+		},
+		Warnings: []string{"w1"},
+		Errors:   []string{"e1"},
+		Summary:  "Failure",
+	}
+
+	var buf bytes.Buffer
+	if err := printDoctorReport(&buf, rep); err != nil {
+		t.Fatalf("unexpected print error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "unlimited") {
+		t.Errorf("expected unlimited in cgroup output: %s", out)
+	}
+}
+
 func TestDoctorCmdFailingNonZeroExit(t *testing.T) {
 	cmd := newDoctorCmd()
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	invalidDir := "/dev/null/forbidden_cache_path"
-	cmd.SetArgs([]string{"--json", flagCacheDir, invalidDir, "--strict"})
+	cmd.SetArgs([]string{flagJSON, flagCacheDir, invalidDir, "--strict"})
 
 	err := cmd.Execute()
 	if err == nil {

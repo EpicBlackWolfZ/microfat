@@ -26,7 +26,7 @@ func TestBenchmarkCmd_JSONStreamHygiene(t *testing.T) {
 	cmd.SetErr(&stderrBuf)
 	cmd.SetArgs([]string{
 		cmdBenchmark,
-		"--json",
+		flagJSON,
 		"--trials", "1",
 		"--trial-time", "20ms",
 		"--warmup", "10ms",

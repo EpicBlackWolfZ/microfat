@@ -433,4 +433,41 @@ func TestCheckMemfdSupport_Mocked(t *testing.T) {
 		assert.Len(t, strictVerdict.Errors, 1)
 		assert.Contains(t, strictVerdict.Errors[0], "Strict mode requirement failed: in-memory memfd_create prerequisites failed")
 	})
+
+	t.Run("SealsReadbackMismatchWithoutError", func(t *testing.T) {
+		adapter := &memfd.SyscallAdapter{
+			MemfdCreate: func(name string, flags int) (int, error) { return 108, nil },
+			Fstat: func(fd int, stat *unix.Stat_t) error {
+				stat.Mode = unix.S_IFREG | 0o700
+				return nil
+			},
+			FcntlInt: func(fd uintptr, cmd int, arg int) (int, error) {
+				if cmd == unix.F_GET_SEALS {
+					return 0, nil // no seals returned
+				}
+				return 0, nil
+			},
+			Close: func(fd int) error { return nil },
+		}
+
+		obs := CheckMemfdSupport(adapter)
+		assert.False(t, obs.Available)
+		assert.False(t, obs.Passed)
+		assert.Equal(t, "seals", obs.Phase)
+		assert.Contains(t, obs.Status, "mandatory seals missing in readback")
+	})
+}
+
+func TestResolveCandidateExplanations_Nil(t *testing.T) {
+	t.Parallel()
+
+	name, val, exp := ResolveCandidateExplanations(nil)
+	assert.Empty(t, name)
+	assert.Equal(t, 0, val)
+	assert.Nil(t, exp)
+
+	name, val, exp = ResolveCandidateExplanations(syscall.Errno(9999))
+	assert.Equal(t, "ERRNO_9999", name)
+	assert.Equal(t, 9999, val)
+	assert.Len(t, exp, 1)
 }

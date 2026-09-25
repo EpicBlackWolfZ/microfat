@@ -288,7 +288,7 @@ func TestVerifyCorruptedOutput(t *testing.T) {
 	}
 
 	verifyJSONCmd := newVerifyCmd()
-	verifyJSONCmd.SetArgs([]string{"--json", fatPath})
+	verifyJSONCmd.SetArgs([]string{flagJSON, fatPath})
 	require.Error(t, verifyJSONCmd.Execute())
 }
 

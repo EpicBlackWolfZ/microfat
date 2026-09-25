@@ -338,3 +338,26 @@ func TestRealSystemMemfd(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, sealsObs.Matches, "target seals must match observed seals")
 }
+
+func TestCreateResult_CreationStrategy(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "MFD_EXEC", CreateResult{ExplicitExecSucceeded: true}.CreationStrategy())
+	assert.Equal(t, "legacy retry (implicit execution)", CreateResult{LegacyRetryUsed: true}.CreationStrategy())
+	assert.Equal(t, "standard", CreateResult{}.CreationStrategy())
+}
+
+func TestCloseFD_WithAdapterClose(t *testing.T) {
+	t.Parallel()
+
+	closed := false
+	adapter := &SyscallAdapter{
+		Close: func(fd int) error {
+			closed = true
+			return nil
+		},
+	}
+	err := adapter.closeFD(10)
+	require.NoError(t, err)
+	assert.True(t, closed)
+}
