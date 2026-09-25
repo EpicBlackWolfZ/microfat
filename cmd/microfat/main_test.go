@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"debug/elf"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -1198,6 +1199,7 @@ func TestStubAutoDiscovery(t *testing.T) {
 	packCmd.SetArgs([]string{
 		flagOutput, fatPath,
 		flagName, "autodiscover-app",
+		"--arch", runtime.GOARCH,
 		"-v", "v1=" + v1Path,
 		flagSkipELF,
 	})
@@ -1205,11 +1207,24 @@ func TestStubAutoDiscovery(t *testing.T) {
 		t.Fatalf("expected pack without stub to fail when no stub is discoverable")
 	}
 
-	// 2. Put microfat-stub into a directory on PATH
+	// 2. Put valid 64-byte microfat-stub into a directory on PATH
 	binDir := filepath.Join(tempDir, "fakebin")
 	_ = os.MkdirAll(binDir, 0o755)
 	fakeStub := filepath.Join(binDir, "microfat-stub")
-	_ = os.WriteFile(fakeStub, []byte("FAKE_STUB_ELF"), 0o755)
+	stubHeader := make([]byte, 64)
+	copy(stubHeader[0:4], []byte{0x7f, 'E', 'L', 'F'})
+	stubHeader[4] = byte(elf.ELFCLASS64)
+	stubHeader[5] = byte(elf.ELFDATA2LSB)
+	stubHeader[6] = byte(elf.EV_CURRENT)
+	stubHeader[16] = 2 // ET_EXEC
+	stubHeader[20] = byte(elf.EV_CURRENT)
+	if runtime.GOARCH == "arm64" {
+		binary.LittleEndian.PutUint16(stubHeader[18:20], uint16(elf.EM_AARCH64))
+	} else {
+		binary.LittleEndian.PutUint16(stubHeader[18:20], uint16(elf.EM_X86_64))
+	}
+	binary.LittleEndian.PutUint16(stubHeader[52:54], 64) // e_ehsize >= 64
+	_ = os.WriteFile(fakeStub, stubHeader, 0o755)
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+origPath)
 
@@ -1219,6 +1234,7 @@ func TestStubAutoDiscovery(t *testing.T) {
 	packDiscoverCmd.SetArgs([]string{
 		flagOutput, fatPath,
 		flagName, "autodiscover-app",
+		"--arch", runtime.GOARCH,
 		"-v", "v1=" + v1Path,
 		flagSkipELF,
 	})
@@ -1228,6 +1244,55 @@ func TestStubAutoDiscovery(t *testing.T) {
 	if !strings.Contains(stderrBuf.String(), "Using auto-discovered launcher stub") {
 		t.Errorf("expected auto-discovery notice in stderr, got: %q", stderrBuf.String())
 	}
+}
+
+func TestPackStubFlags_EmptyRejected(t *testing.T) {
+	tempDir := t.TempDir()
+	v1Path := filepath.Join(tempDir, "v1")
+	_ = os.WriteFile(v1Path, []byte("PAYLOAD_V1"), 0o755)
+	fatPath := filepath.Join(tempDir, "app.fat")
+
+	// Pack with empty --stub
+	cmd1 := newPackCmd()
+	cmd1.SetArgs([]string{
+		"--stub=",
+		flagOutput, fatPath,
+		"-v", "v1=" + v1Path,
+	})
+	err := cmd1.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub cannot be empty")
+
+	// Pack with empty --stub-profile
+	cmd2 := newPackCmd()
+	cmd2.SetArgs([]string{
+		"--stub-profile=",
+		flagOutput, fatPath,
+		"-v", "v1=" + v1Path,
+	})
+	err = cmd2.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub-profile cannot be empty")
+
+	// PGO-pack with empty --stub
+	cmd3 := newPgoPackCmd()
+	cmd3.SetArgs([]string{
+		"--stub=",
+		"-m", filepath.Join(tempDir, "dummy.yaml"),
+	})
+	err = cmd3.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub cannot be empty")
+
+	// PGO-pack with empty --stub-profile
+	cmd4 := newPgoPackCmd()
+	cmd4.SetArgs([]string{
+		"--stub-profile=",
+		"-m", filepath.Join(tempDir, "dummy.yaml"),
+	})
+	err = cmd4.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub-profile cannot be empty")
 }
 
 func TestInspectAndInfo_SubprocessStreams(t *testing.T) {

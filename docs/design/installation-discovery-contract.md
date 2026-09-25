@@ -9,8 +9,8 @@
 ## 1. Executive Summary & Purpose
 
 The `microfat` toolchain packages microarchitecture-specialized Go ELF binaries (e.g. `amd64_v1`..`v4`, `arm64_v8.0`..`v9.5`) into self-dispatching fat executables. At packaging time, `microfat` prepends a launcher stub to the payload. To support different production requirements, `microfat` ships two companion launcher stubs alongside the CLI:
-1. **`microfat-stub` (`full`)**: The standard launcher stub featuring interactive runtime meta-commands (`--microfat-info`, `--microfat-optimize`, `--microfat-trim`, etc.), container resource auto-tuning, and direct in-memory (`memfd_create`) / cache dispatch.
-2. **`microfat-stub-minimal` (`minimal`)**: A lean, reflection-free launcher stub compiled with `-tags minimal` with meta-commands stripped (< 1.2 MB footprint) for resource-constrained environments.
+1. **`microfat-stub` (`full`)**: The standard launcher stub featuring interactive runtime meta-commands (`--microfat:info`, `--microfat:optimize`, `--microfat:trim`, etc.), container resource auto-tuning, and direct in-memory (`memfd_create`) / cache dispatch.
+2. **`microfat-stub-minimal` (`minimal`)**: A lightweight launcher stub compiled with `-tags minimal` with interactive introspection and optimization commands stripped for smallest payload overhead in resource-constrained environments.
 
 This document defines the formal, durable contract between:
 - **Installer & Distribution (#203)**: How release artifacts are downloaded, cryptographically verified, staged, atomically installed, and tracked without requiring `sudo` or pre-existing dependencies (Go/Cosign).
@@ -55,14 +55,16 @@ When packaging fat binaries (`microfat pack` or `microfat pgo-pack`), `microfat`
 ```mermaid
 flowchart TD
     Start["Begin Stub Resolution"] --> CheckCLIStub{"CLI --stub &lt;path&gt; specified?"}
-    CheckCLIStub -- Yes --> ValCLIConflict{"Conflicts with CLI --stub-profile?"}
-    ValCLIConflict -- Yes --> ErrorConflict["Fail Fast: ErrStubProfileConflict"]
-    ValCLIConflict -- No --> RetCLI["Use Explicit CLI Stub"]
+    CheckCLIStub -- Yes --> CheckCLIProfile{"Explicit profile requested?"}
+    CheckCLIProfile -- Yes --> WarnCLI["Emit Bypass Notice"]
+    CheckCLIProfile -- No --> RetCLI["Use Explicit CLI Stub"]
+    WarnCLI --> RetCLI
     
     CheckCLIStub -- No --> CheckManifestStub{"Manifest stub: &lt;path&gt; specified?"}
-    CheckManifestStub -- Yes --> ValManConflict{"Conflicts with CLI or Manifest Profile?"}
-    ValManConflict -- Yes --> ErrorConflict
-    ValManConflict -- No --> RetManifest["Use Manifest Stub (Relative to Manifest)"]
+    CheckManifestStub -- Yes --> CheckManProfile{"Explicit profile requested?"}
+    CheckManProfile -- Yes --> WarnMan["Emit Bypass Notice"]
+    CheckManProfile -- No --> RetManifest["Use Manifest Stub (Relative to Manifest)"]
+    WarnMan --> RetManifest
     
     CheckManifestStub -- No --> DetermineProfile["Determine Effective Profile (CLI --stub-profile &gt; Manifest stub_profile &gt; full)"]
     DetermineProfile --> LookSibling{"Companion Stub in Sibling Directory?"}
@@ -79,14 +81,19 @@ flowchart TD
 ```
 
 1. **Explicit CLI `--stub <path>`**:
-   - Takes absolute precedence over automatic discovery.
+   - Takes absolute precedence over automatic profile discovery and manifest declarations.
    - Evaluated relative to the caller's working directory.
    - Must resolve to a regular, readable file. Fails fast with `ErrStubNotFound` if missing or invalid (no silent fallback).
-   - If `--stub-profile` is also supplied on the CLI, `microfat` validates compatibility. If the supplied stub's profile contradicts the requested profile (e.g., `--stub .../microfat-stub --stub-profile minimal`), execution terminates immediately with `ErrStubProfileConflict`.
+   - When an explicit profile was requested (`--stub-profile` or manifest `stub_profile`), the custom stub path wins unconditionally and `microfat` emits an operational notice:
+     `Using explicit launcher stub <quoted path>; automatic stub-profile selection was bypassed. The requested profile is not asserted for this custom path.`
+   - Does not warn merely because omission defaults automatic discovery to `full`.
+   - When specified, a lower-priority manifest stub path is neither opened nor compared.
 
 2. **Manifest `stub:` field**:
    - Evaluated relative to the manifest directory.
-   - Evaluated for conflict against `stub_profile` (in manifest or CLI override). Fails fast on conflict (`ErrStubProfileConflict`).
+   - Unconditionally overrides automatic companion discovery when CLI `--stub` is omitted.
+   - Must resolve to a regular, readable file. Fails fast with `ErrStubNotFound` if missing or invalid.
+   - When an explicit profile was requested, emits the operational bypass notice.
 
 3. **Sibling Discovery via `ResolveInstallationDirectory()`**:
    - Evaluates the directory containing the running `microfat` executable.
@@ -109,6 +116,9 @@ To prevent executing untrusted, foreign, or malicious binaries during discovery:
 - The ELF identification header (64 bytes) is validated for:
   - Magic bytes: `0x7F, 'E', 'L', 'F'`
   - ELF Class: `ELFCLASS64` (64-bit)
+  - ELF Data Encoding: `ELFDATA2LSB` (1) or `ELFDATA2MSB` (2)
+  - ELF Version: `EV_CURRENT` (1)
+  - Header Size: `e_ehsize >= 64`
   - ELF Machine Type: `EM_X86_64` (0x3E) for `amd64` / `x86_64`, `EM_AARCH64` (0xB7) for `arm64` / `aarch64`.
 - Candidates targeting an incompatible CPU architecture (e.g. attempting to package an `arm64` fat binary using an `amd64` host stub) are rejected during discovery without process execution.
 
@@ -118,7 +128,7 @@ To prevent executing untrusted, foreign, or malicious binaries during discovery:
 
 ### 4.1 Transaction Lifecycle
 
-The installer implements a strictly staged, transactional installation model:
+The installer implements a staged, immutable generation model:
 
 ```mermaid
 sequenceDiagram
@@ -126,6 +136,7 @@ sequenceDiagram
     participant User as Operator / CI
     participant Installer as microfat-installer
     participant Staging as Private Staging Dir (0700)
+    participant Gen as Generation Store ($DATA_DIR/generations/<id>)
     participant Dest as $BIN_DIR (~/.local/bin)
     participant Meta as $DATA_DIR (~/.local/share/microfat)
 
@@ -137,17 +148,20 @@ sequenceDiagram
     Installer->>Installer: Verify SHA-256 digests of release archive
     Installer->>Staging: Extract archive (microfat, microfat-stub, microfat-stub-minimal)
     Installer->>Staging: Validate ELF headers & architecture compatibility
-    Installer->>Dest: Atomic file rename (renameat / os.Rename)
-    Installer->>Meta: Atomically write install-manifest.json
+    Installer->>Gen: Populate immutable generation directory
+    Installer->>Meta: Atomically write staged install-manifest.json
+    Installer->>Dest: Single atomic activation switch (symlink / generation pointer switch)
     Installer->>Staging: Clean up staging directory
     Installer->>User: Success report (version, bin dir, PATH guidance)
 ```
 
-### 4.2 Atomicity Guarantees
+### 4.2 Atomicity & Recovery Guarantees
 
-1. **Failure Invariance**: If network download fails, signature verification fails, checksums mismatch, or disk quota is exhausted, the target installation directory `$BIN_DIR` remains completely untouched.
-2. **Cross-Device Rename Prevention**: The staging directory is created on the same filesystem/mount point as `$BIN_DIR` (e.g. `$BIN_DIR/.microfat-staging-XXXXXX`) so that binary promotion uses atomic POSIX `renameat` / `rename(2)` syscalls, avoiding partial copies.
-3. **No Broken Links**: Replacement of all three binaries (`microfat`, `microfat-stub`, `microfat-stub-minimal`) is ordered, and any mid-flight fatal signal triggers a rollback from temporary backup links.
+1. **Failure Invariance**: If network download fails, signature verification fails, checksums mismatch, or disk quota is exhausted before activation, the target installation directory `$BIN_DIR` and previous active generation remain completely untouched.
+2. **Atomic Generation Switch**: Release assets (`microfat`, `microfat-stub`, `microfat-stub-minimal`) are prepared into a complete, verified, immutable generation under `$DATA_DIR/generations/<gen_id>`. Activation is accomplished via a single atomic switch on the same filesystem (e.g., updating atomic symlinks or generation pointer), eliminating partial tripartite state where only some binaries are updated.
+3. **State Recovery Behavior**: If an installation or update is interrupted mid-flight (such as by SIGKILL or sudden power loss), the installer does not rely on fragile asynchronous signal-trap rollbacks. Instead, state recovery logic during subsequent invocations inspects `install-manifest.json` and available generations to verify active link integrity:
+   - If the active generation is intact, the installation is considered successful.
+   - If the switch was not completed, the previous intact generation remains active, and dangling incomplete generations are pruned cleanly.
 
 ---
 

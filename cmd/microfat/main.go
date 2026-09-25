@@ -478,6 +478,32 @@ func newTrimCmd() *cobra.Command {
 	return cmd
 }
 
+func validateEmptyStubFlags(cmd *cobra.Command, flags builder.BuildOptions) error {
+	if cmd.Flags().Changed("stub") && strings.TrimSpace(flags.StubPath) == "" {
+		return errors.New("flag --stub cannot be empty")
+	}
+	if cmd.Flags().Changed("stub-profile") && strings.TrimSpace(flags.StubProfile) == "" {
+		return errors.New("flag --stub-profile cannot be empty")
+	}
+	return nil
+}
+
+func parseRawVariants(rawVariants []string) (map[string]string, error) {
+	variants := make(map[string]string, len(rawVariants))
+	for _, item := range rawVariants {
+		parts := strings.SplitN(item, "=", keyValueParts)
+		if len(parts) != keyValueParts || parts[0] == "" || parts[1] == "" {
+			return nil, fmt.Errorf("invalid variant specification %q, expected <level>=<path> (e.g. v3=dist/app_v3)", item)
+		}
+		level := parts[0]
+		if _, exists := variants[level]; exists {
+			return nil, fmt.Errorf("duplicate variant level %q specified", level)
+		}
+		variants[level] = parts[1]
+	}
+	return variants, nil
+}
+
 func newPackCmd() *cobra.Command {
 	var flags builder.BuildOptions
 	var (
@@ -489,6 +515,10 @@ func newPackCmd() *cobra.Command {
 		Use:   "pack [--manifest <file> | [--stub <stub>] -v <level>=<path> ... -o <output>]",
 		Short: "Package multiple Go microarchitecture binaries into a single fat binary",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateEmptyStubFlags(cmd, flags); err != nil {
+				return err
+			}
+
 			if flags.ManifestPath != "" {
 				m, err := builder.LoadManifest(flags.ManifestPath)
 				if err != nil {
@@ -507,10 +537,21 @@ func newPackCmd() *cobra.Command {
 				return nil
 			}
 
+			warnFunc := func(format string, args ...any) {
+				var msg string
+				if len(args) == 0 {
+					msg = format
+				} else {
+					msg = fmt.Sprintf(format, args...)
+				}
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), msg)
+			}
+
 			actualStubPath, err := builder.ResolveStubWithOptions(builder.ResolveStubOptions{
 				CLIStub:    flags.StubPath,
 				CLIProfile: flags.StubProfile,
 				TargetArch: targetArch,
+				WarnFunc:   warnFunc,
 			})
 			if err != nil {
 				return fmt.Errorf("launcher stub resolution failed: %w (provide --stub flag or specify --manifest)", err)
@@ -525,17 +566,9 @@ func newPackCmd() *cobra.Command {
 				return errors.New("required flag(s) \"variant\" not set (or specify --manifest)")
 			}
 
-			variants := make(map[string]string)
-			for _, item := range rawVariants {
-				parts := strings.SplitN(item, "=", keyValueParts)
-				if len(parts) != keyValueParts || parts[0] == "" || parts[1] == "" {
-					return fmt.Errorf("invalid variant specification %q, expected <level>=<path> (e.g. v3=dist/app_v3)", item)
-				}
-				level := parts[0]
-				if _, exists := variants[level]; exists {
-					return fmt.Errorf("duplicate variant level %q specified", level)
-				}
-				variants[level] = parts[1]
+			variants, err := parseRawVariants(rawVariants)
+			if err != nil {
+				return err
 			}
 
 			opts := pack.DefaultOptions()
@@ -621,6 +654,17 @@ func manifestBuildOptions(cmd *cobra.Command, flags builder.BuildOptions) builde
 	flags.DictSize = explicitDictionarySize(cmd, flags.DictSize)
 	flags.Stdout = cmd.OutOrStdout()
 	flags.Stderr = cmd.ErrOrStderr()
+	if flags.WarnFunc == nil {
+		flags.WarnFunc = func(format string, args ...any) {
+			var msg string
+			if len(args) == 0 {
+				msg = format
+			} else {
+				msg = fmt.Sprintf(format, args...)
+			}
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), msg)
+		}
+	}
 	return flags
 }
 
@@ -651,6 +695,10 @@ func newPgoPackCmd() *cobra.Command {
 (e.g., v1, v3, v4 on AMD64 or v8.0, v8.2 on ARM64) with Profile-Guided Optimization (-pgo) profiles,
 then packages them into a self-dispatching microfat binary.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateEmptyStubFlags(cmd, flags); err != nil {
+				return err
+			}
+
 			if flags.ManifestPath == "" && len(args) > 0 {
 				flags.ManifestPath = args[0]
 			}

@@ -2,14 +2,17 @@ package builder
 
 import (
 	"debug/buildinfo"
+	"encoding/binary"
 	"errors"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStubCompanionName(t *testing.T) {
@@ -135,6 +138,15 @@ func TestInspectCandidateELF(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "too short")
 
+	// 3b. File too short for ELF64 (63 bytes)
+	shortELF := filepath.Join(tempDir, "short63")
+	shortELFData := make([]byte, 63)
+	copy(shortELFData, []byte{0x7f, 'E', 'L', 'F'})
+	require.NoError(t, os.WriteFile(shortELF, shortELFData, 0o755))
+	err = inspectCandidateELF(shortELF, testArchAMD64)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "too short for ELF64 header")
+
 	// 4. Invalid magic
 	badMagic := filepath.Join(tempDir, "badmagic")
 	badData := make([]byte, 64)
@@ -144,10 +156,52 @@ func TestInspectCandidateELF(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid ELF magic")
 
+	// 4b. Invalid class (32-bit ELF)
+	badClass := filepath.Join(tempDir, "badclass")
+	badClassData := make([]byte, 64)
+	copy(badClassData, []byte{0x7f, 'E', 'L', 'F', 1, 1, 1})
+	require.NoError(t, os.WriteFile(badClass, badClassData, 0o755))
+	err = inspectCandidateELF(badClass, testArchAMD64)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid ELF class")
+
+	// 4c. Invalid data encoding
+	badDataEnc := filepath.Join(tempDir, "baddataenc")
+	badDataEncData := make([]byte, 64)
+	copy(badDataEncData, []byte{0x7f, 'E', 'L', 'F', 2, 0, 1})
+	require.NoError(t, os.WriteFile(badDataEnc, badDataEncData, 0o755))
+	err = inspectCandidateELF(badDataEnc, testArchAMD64)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid ELF data encoding")
+
+	// 4d. Invalid version
+	badVersion := filepath.Join(tempDir, "badversion")
+	badVersionData := make([]byte, 64)
+	copy(badVersionData, []byte{0x7f, 'E', 'L', 'F', 2, 1, 0})
+	require.NoError(t, os.WriteFile(badVersion, badVersionData, 0o755))
+	err = inspectCandidateELF(badVersion, testArchAMD64)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid ELF version")
+
+	// 4e. Invalid e_ehsize (< 64)
+	badEHSize := filepath.Join(tempDir, "badehsize")
+	badEHSizeData := make([]byte, 64)
+	copy(badEHSizeData, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1})
+	binary.LittleEndian.PutUint16(badEHSizeData[52:54], 40)
+	require.NoError(t, os.WriteFile(badEHSize, badEHSizeData, 0o755))
+	err = inspectCandidateELF(badEHSize, testArchAMD64)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid ELF header size")
+
 	// 5. AMD64 ELF candidate matching AMD64
 	amd64File := createDummyELF(t, tempDir, "amd64.elf", testArchAMD64)
 	require.NoError(t, inspectCandidateELF(amd64File, testArchAMD64))
 	require.NoError(t, inspectCandidateELF(amd64File, ""))
+
+	// 5b. Unsupported target architecture
+	err = inspectCandidateELF(amd64File, "mips")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported target architecture")
 
 	// 6. AMD64 ELF candidate against ARM64 target -> mismatch
 	err = inspectCandidateELF(amd64File, testArchARM64)
@@ -229,65 +283,122 @@ func TestResolveStubWithOptions_MinimalProfile(t *testing.T) {
 	})
 }
 
-func TestResolveStubWithOptions_Conflicts(t *testing.T) {
+func TestResolveStubWithOptions_PrecedenceAndNotices(t *testing.T) {
 	tempDir := t.TempDir()
 	fullStub := createDummyELF(t, tempDir, StubBinaryFull, testArchAMD64)
 	minStub := createDummyELF(t, tempDir, StubBinaryMinimal, testArchAMD64)
 
-	t.Run("CLIStub_Full_With_CLIProfile_Minimal_FailsWithConflict", func(t *testing.T) {
-		_, err := ResolveStubWithOptions(ResolveStubOptions{
-			CLIStub:    fullStub,
-			CLIProfile: StubProfileMinimal,
-		})
-		require.Error(t, err)
-		require.ErrorIs(t, err, ErrStubProfileConflict)
-		assert.Contains(t, err.Error(), "conflicts with")
-	})
-
-	t.Run("CLIStub_Minimal_With_CLIProfile_Full_FailsWithConflict", func(t *testing.T) {
-		_, err := ResolveStubWithOptions(ResolveStubOptions{
-			CLIStub:    minStub,
-			CLIProfile: StubProfileFull,
-		})
-		require.Error(t, err)
-		require.ErrorIs(t, err, ErrStubProfileConflict)
-		assert.Contains(t, err.Error(), "conflicts with")
-	})
-
-	t.Run("CLIStub_Minimal_With_CLIProfile_Minimal_Succeeds", func(t *testing.T) {
-		res, err := ResolveStubWithOptions(ResolveStubOptions{
-			CLIStub:    minStub,
-			CLIProfile: StubProfileMinimal,
-		})
-		require.NoError(t, err)
-		assert.Equal(t, minStub, res)
-	})
-
-	t.Run("CLIStub_Full_With_CLIProfile_Full_Succeeds", func(t *testing.T) {
+	t.Run("CLIStub_Full_With_CLIProfile_Minimal_WinsWithNotice", func(t *testing.T) {
+		var notices []string
+		warnFunc := func(format string, args ...any) {
+			notices = append(notices, fmt.Sprintf(format, args...))
+		}
 		res, err := ResolveStubWithOptions(ResolveStubOptions{
 			CLIStub:    fullStub,
-			CLIProfile: StubProfileFull,
+			CLIProfile: StubProfileMinimal,
+			WarnFunc:   warnFunc,
 		})
 		require.NoError(t, err)
 		assert.Equal(t, fullStub, res)
+		require.Len(t, notices, 1)
+		assert.Contains(t, notices[0], "Using explicit launcher stub")
+		assert.Contains(t, notices[0], "automatic stub-profile selection was bypassed")
 	})
 
-	t.Run("ManifestStub_Full_With_ManifestProfile_Minimal_FailsWithConflict", func(t *testing.T) {
-		_, err := ResolveStubWithOptions(ResolveStubOptions{
+	t.Run("CLIStub_Minimal_With_CLIProfile_Full_WinsWithNotice", func(t *testing.T) {
+		var notices []string
+		warnFunc := func(format string, args ...any) {
+			notices = append(notices, fmt.Sprintf(format, args...))
+		}
+		res, err := ResolveStubWithOptions(ResolveStubOptions{
+			CLIStub:    minStub,
+			CLIProfile: StubProfileFull,
+			WarnFunc:   warnFunc,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, minStub, res)
+		require.Len(t, notices, 1)
+		assert.Contains(t, notices[0], "Using explicit launcher stub")
+		assert.Contains(t, notices[0], "automatic stub-profile selection was bypassed")
+	})
+
+	t.Run("CLIStub_Minimal_With_CLIProfile_Minimal_WinsWithNotice", func(t *testing.T) {
+		var notices []string
+		warnFunc := func(format string, args ...any) {
+			notices = append(notices, fmt.Sprintf(format, args...))
+		}
+		res, err := ResolveStubWithOptions(ResolveStubOptions{
+			CLIStub:    minStub,
+			CLIProfile: StubProfileMinimal,
+			WarnFunc:   warnFunc,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, minStub, res)
+		require.Len(t, notices, 1)
+		assert.Contains(t, notices[0], "Using explicit launcher stub")
+	})
+
+	t.Run("CLIStub_Without_ExplicitProfile_EmitsNoNotice", func(t *testing.T) {
+		var notices []string
+		warnFunc := func(format string, args ...any) {
+			notices = append(notices, fmt.Sprintf(format, args...))
+		}
+		res, err := ResolveStubWithOptions(ResolveStubOptions{
+			CLIStub:  fullStub,
+			WarnFunc: warnFunc,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, fullStub, res)
+		assert.Empty(t, notices)
+	})
+
+	t.Run("ManifestStub_Full_With_ManifestProfile_Minimal_WinsWithNotice", func(t *testing.T) {
+		var notices []string
+		warnFunc := func(format string, args ...any) {
+			notices = append(notices, fmt.Sprintf(format, args...))
+		}
+		res, err := ResolveStubWithOptions(ResolveStubOptions{
 			ManifestStub:    fullStub,
 			ManifestProfile: StubProfileMinimal,
+			WarnFunc:        warnFunc,
 		})
-		require.Error(t, err)
-		require.ErrorIs(t, err, ErrStubProfileConflict)
+		require.NoError(t, err)
+		assert.Equal(t, fullStub, res)
+		require.Len(t, notices, 1)
+		assert.Contains(t, notices[0], "Using explicit launcher stub")
 	})
 
-	t.Run("ManifestStub_Full_With_CLIProfile_Minimal_FailsWithConflict", func(t *testing.T) {
-		_, err := ResolveStubWithOptions(ResolveStubOptions{
+	t.Run("ManifestStub_Full_With_CLIProfile_Minimal_WinsWithNotice", func(t *testing.T) {
+		var notices []string
+		warnFunc := func(format string, args ...any) {
+			notices = append(notices, fmt.Sprintf(format, args...))
+		}
+		res, err := ResolveStubWithOptions(ResolveStubOptions{
 			ManifestStub: fullStub,
 			CLIProfile:   StubProfileMinimal,
+			WarnFunc:     warnFunc,
 		})
-		require.Error(t, err)
-		require.ErrorIs(t, err, ErrStubProfileConflict)
+		require.NoError(t, err)
+		assert.Equal(t, fullStub, res)
+		require.Len(t, notices, 1)
+		assert.Contains(t, notices[0], "Using explicit launcher stub")
+	})
+
+	t.Run("CLIStub_Precedence_Over_ManifestStub_ManifestNotEvaluated", func(t *testing.T) {
+		var notices []string
+		warnFunc := func(format string, args ...any) {
+			notices = append(notices, fmt.Sprintf(format, args...))
+		}
+		res, err := ResolveStubWithOptions(ResolveStubOptions{
+			CLIStub:         fullStub,
+			ManifestStub:    "nonexistent-manifest-stub-that-would-error-if-evaluated",
+			ManifestProfile: StubProfileMinimal,
+			WarnFunc:        warnFunc,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, fullStub, res)
+		require.Len(t, notices, 1)
+		assert.Contains(t, notices[0], "Using explicit launcher stub")
 	})
 
 	t.Run("Invalid_CLIProfile_FailsWithErrInvalidStubProfile", func(t *testing.T) {
@@ -371,7 +482,7 @@ func TestManifestValidation_StubProfile(t *testing.T) {
 		require.ErrorIs(t, err, ErrInvalidStubProfile)
 	})
 
-	t.Run("ConflictingStubAndProfile_Fails", func(t *testing.T) {
+	t.Run("ExplicitStubWithProfile_Succeeds", func(t *testing.T) {
 		m := &Manifest{
 			AppName:     "test",
 			TargetOS:    "linux",
@@ -380,9 +491,9 @@ func TestManifestValidation_StubProfile(t *testing.T) {
 			StubProfile: StubProfileMinimal,
 			Variants:    []VariantConfig{{Level: "v1"}},
 		}
-		err := ValidateManifest(m)
-		require.Error(t, err)
-		require.ErrorIs(t, err, ErrStubProfileConflict)
+		require.NoError(t, ValidateManifest(m))
+		assert.Equal(t, StubProfileMinimal, m.StubProfile)
+		assert.Equal(t, "bin/microfat-stub", m.Stub)
 	})
 }
 

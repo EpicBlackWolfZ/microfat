@@ -87,6 +87,7 @@ func BuildAndPack(ctx context.Context, m *Manifest, opts BuildOptions) (*BuildRe
 		ManifestProfile: m.StubProfile,
 		ManifestDir:     m.Dir,
 		TargetArch:      m.TargetArch,
+		WarnFunc:        opts.WarnFunc,
 	})
 	if err != nil {
 		return nil, err

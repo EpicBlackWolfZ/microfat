@@ -159,14 +159,6 @@ func ValidateManifest(m *Manifest) error {
 		}
 	}
 
-	if m.Stub != "" && m.StubProfile != "" {
-		detected := DetectStubProfile(m.Stub)
-		if detected != "" && detected != m.StubProfile {
-			return fmt.Errorf("%w: manifest stub %q has profile %q, which conflicts with declared stub_profile %q",
-				ErrStubProfileConflict, m.Stub, detected, m.StubProfile)
-		}
-	}
-
 	seenLevels := make(map[string]struct{}, len(m.Variants))
 	for i, v := range m.Variants {
 		levelTrimmed := strings.TrimSpace(v.Level)

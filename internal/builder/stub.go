@@ -33,6 +33,7 @@ type ResolveStubOptions struct {
 	ManifestProfile string
 	ManifestDir     string
 	TargetArch      string
+	WarnFunc        func(format string, args ...any)
 }
 
 // StubCompanionName returns the expected binary filename for the specified stub profile.
@@ -89,27 +90,46 @@ func inspectCandidateELF(path, targetArch string) error {
 	}
 	defer func() { _ = f.Close() }()
 
-	const minELFHeaderSize = 20
-	var hdr [minELFHeaderSize]byte
+	const elf64HeaderSize = 64
+	var hdr [elf64HeaderSize]byte
 	n, err := f.ReadAt(hdr[:], 0)
 	if err != nil && err != io.EOF {
 		return err
 	}
-	if n < minELFHeaderSize {
-		return errors.New("file too short for ELF header")
+	if n < elf64HeaderSize {
+		return errors.New("file too short for ELF64 header")
 	}
 	// Check ELF magic: \x7fELF
 	if hdr[0] != 0x7f || hdr[1] != 'E' || hdr[2] != 'L' || hdr[3] != 'F' {
 		return errors.New("invalid ELF magic")
 	}
+	// Check ELF class: ELFCLASS64 (2)
+	if hdr[4] != byte(elf.ELFCLASS64) {
+		return fmt.Errorf("invalid ELF class: %d (expected 64-bit ELFCLASS64)", hdr[4])
+	}
+	// Check data encoding: ELFDATA2LSB (1) or ELFDATA2MSB (2)
+	var byteOrder binary.ByteOrder
+	switch elf.Data(hdr[5]) {
+	case elf.ELFDATA2LSB:
+		byteOrder = binary.LittleEndian
+	case elf.ELFDATA2MSB:
+		byteOrder = binary.BigEndian
+	default:
+		return fmt.Errorf("invalid ELF data encoding: %d", hdr[5])
+	}
+	// Check version: EV_CURRENT (1)
+	if hdr[6] != byte(elf.EV_CURRENT) {
+		return fmt.Errorf("invalid ELF version: %d", hdr[6])
+	}
 
+	// Check e_ehsize >= 64
+	ehsize := byteOrder.Uint16(hdr[52:54])
+	if ehsize < elf64HeaderSize {
+		return fmt.Errorf("invalid ELF header size e_ehsize: %d (expected >= 64)", ehsize)
+	}
+
+	machine := byteOrder.Uint16(hdr[18:20])
 	if targetArch != "" {
-		var machine uint16
-		if hdr[5] == 1 { // Little-endian
-			machine = binary.LittleEndian.Uint16(hdr[18:20])
-		} else { // Big-endian
-			machine = binary.BigEndian.Uint16(hdr[18:20])
-		}
 		switch targetArch {
 		case "amd64", "x86_64":
 			if machine != uint16(elf.EM_X86_64) {
@@ -119,6 +139,8 @@ func inspectCandidateELF(path, targetArch string) error {
 			if machine != uint16(elf.EM_AARCH64) {
 				return fmt.Errorf("candidate ELF machine %d does not match target architecture %s", machine, targetArch)
 			}
+		default:
+			return fmt.Errorf("unsupported target architecture %s", targetArch)
 		}
 	}
 	return nil
@@ -214,14 +236,28 @@ func findStubInPATH(stubName, targetArch string) (string, error) {
 	return "", ErrStubNotFound
 }
 
+func emitStubBypassNotice(warnFunc func(format string, args ...any), stubPath string) {
+	msg := fmt.Sprintf(
+		"Using explicit launcher stub %q; automatic stub-profile selection was bypassed. "+
+			"The requested profile is not asserted for this custom path.",
+		stubPath,
+	)
+	if warnFunc != nil {
+		warnFunc("%s", msg)
+	} else {
+		_, _ = fmt.Fprintln(os.Stderr, msg)
+	}
+}
+
 // ResolveStubWithOptions resolves the path to the microfat launcher stub binary using strict precedence:
-// 1. Validates profile flags/fields (full or minimal).
-// 2. Evaluates explicit stub and profile conflicts across CLI and manifest inputs.
-// 3. Explicit CLI flag `--stub`: resolved against current working directory; invalid value returns immediate error with no fallback.
-// 4. Manifest field `stub:`: resolved against manifest directory; invalid value returns immediate error with no fallback.
-// 5. Sibling companion stub beside the original installed CLI as resolved by ResolveInstallationDirectory().
-// 6. Companion stub in the caller's PATH, searching only absolute directories in order (skipping empty, relative, ".", "bin" entries).
-// 7. Returns ErrStubNotFound with an explanatory error.
+//  1. Validates profile flags/fields (full or minimal).
+//  2. Explicit CLI flag `--stub`: resolved against current working directory; invalid value returns immediate error with no fallback.
+//     Unconditionally overrides automatic profile selection. If an explicit profile was requested, emits an operational bypass notice.
+//  3. Manifest field `stub:`: resolved against manifest directory; invalid value returns immediate error with no fallback.
+//     Unconditionally overrides automatic profile selection. If an explicit profile was requested, emits an operational bypass notice.
+//  4. Sibling companion stub beside the original installed CLI as resolved by ResolveInstallationDirectory().
+//  5. Companion stub in the caller's PATH, searching only absolute directories in order (skipping empty, relative, ".", "bin" entries).
+//  6. Returns ErrStubNotFound with an explanatory error.
 //
 // Implicit repository-relative lookups (such as bin/microfat-stub or ../bin/microfat-stub) are strictly forbidden.
 func validateStubOptions(opts ResolveStubOptions) error {
@@ -230,33 +266,6 @@ func validateStubOptions(opts ResolveStubOptions) error {
 	}
 	if opts.ManifestProfile != "" && opts.ManifestProfile != StubProfileFull && opts.ManifestProfile != StubProfileMinimal {
 		return fmt.Errorf("%w: %q (expected %q or %q)", ErrInvalidStubProfile, opts.ManifestProfile, StubProfileFull, StubProfileMinimal)
-	}
-
-	// Conflict check: Manifest stub vs Manifest profile
-	if opts.ManifestStub != "" && opts.ManifestProfile != "" {
-		detected := DetectStubProfile(opts.ManifestStub)
-		if detected != "" && detected != opts.ManifestProfile {
-			return fmt.Errorf("%w: manifest stub %q has profile %q, which conflicts with manifest stub_profile %q",
-				ErrStubProfileConflict, opts.ManifestStub, detected, opts.ManifestProfile)
-		}
-	}
-
-	// Conflict check: CLI stub vs CLI profile
-	if opts.CLIStub != "" && opts.CLIProfile != "" {
-		detected := DetectStubProfile(opts.CLIStub)
-		if detected != "" && detected != opts.CLIProfile {
-			return fmt.Errorf("%w: explicit stub %q has profile %q, which conflicts with explicit stub profile %q",
-				ErrStubProfileConflict, opts.CLIStub, detected, opts.CLIProfile)
-		}
-	}
-
-	// Conflict check: CLI profile vs Manifest stub (when CLI stub is omitted)
-	if opts.CLIStub == "" && opts.CLIProfile != "" && opts.ManifestStub != "" {
-		detected := DetectStubProfile(opts.ManifestStub)
-		if detected != "" && detected != opts.CLIProfile {
-			return fmt.Errorf("%w: explicit CLI stub profile %q conflicts with manifest stub %q (profile %q)",
-				ErrStubProfileConflict, opts.CLIProfile, opts.ManifestStub, detected)
-		}
 	}
 	return nil
 }
@@ -282,14 +291,30 @@ func ResolveStubWithOptions(opts ResolveStubOptions) (string, error) {
 		return "", err
 	}
 
-	// 1. Explicit CLI flag `--stub` takes deliberate precedence
+	profileRequested := opts.CLIProfile != "" || opts.ManifestProfile != ""
+
+	// 1. Explicit CLI flag `--stub` takes unconditional precedence
 	if opts.CLIStub != "" {
-		return resolveExplicitStub(opts.CLIStub, "", "specified via --stub")
+		resolved, err := resolveExplicitStub(opts.CLIStub, "", "specified via --stub")
+		if err != nil {
+			return "", err
+		}
+		if profileRequested {
+			emitStubBypassNotice(opts.WarnFunc, resolved)
+		}
+		return resolved, nil
 	}
 
-	// 2. Manifest field `stub:`
+	// 2. Manifest field `stub:` takes precedence when CLI stub is omitted
 	if opts.ManifestStub != "" {
-		return resolveExplicitStub(opts.ManifestStub, opts.ManifestDir, "specified in manifest")
+		resolved, err := resolveExplicitStub(opts.ManifestStub, opts.ManifestDir, "specified in manifest")
+		if err != nil {
+			return "", err
+		}
+		if profileRequested {
+			emitStubBypassNotice(opts.WarnFunc, resolved)
+		}
+		return resolved, nil
 	}
 
 	// 3. Determine effective profile for companion stub discovery
