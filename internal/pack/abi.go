@@ -1689,14 +1689,23 @@ func compareVariantInterpreters(reports []*VariantABIReport, ra *ReportAccountin
 	return differences, nil
 }
 
-// isDependencyKnown will be enabled in ABI-2 commit.
+func isDependencyKnown(r *VariantABIReport) bool {
+	if r == nil || r.Completeness == MetadataSkipped {
+		return false
+	}
+	if r.Linkage == LinkageDynamic || r.Linkage == LinkageAmbiguous ||
+		r.Linkage == LinkageStatic || r.Linkage == LinkageStaticPIE {
+		return true
+	}
+	return len(r.Dependencies) > 0 || r.InspectionSource != ""
+}
 
 func compareVariantDependencies(reports []*VariantABIReport, ra *ReportAccounting) ([]string, []string, error) {
 	var differences []string
 	var warnings []string
 	var depRef *VariantABIReport
 	for _, r := range reports {
-		if r.Linkage == LinkageDynamic {
+		if isDependencyKnown(r) {
 			if depRef == nil {
 				depRef = r
 				continue

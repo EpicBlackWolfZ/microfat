@@ -983,3 +983,196 @@ func TestABI_R3_RecordWorkAndLimits(t *testing.T) {
 		assert.Less(t, acc.metadataBytesRead, uint64(maxExpectedMetadata))
 	})
 }
+
+func TestABI_R3_AmbiguousDependencyComparison(t *testing.T) {
+	t.Parallel()
+
+	t.Run("two_ambiguous_differing_dependencies", func(t *testing.T) {
+		t.Parallel()
+		r1 := &VariantABIReport{Level: "v1", Linkage: LinkageAmbiguous, Dependencies: []string{testLibA}}
+		r2 := &VariantABIReport{Level: "v2", Linkage: LinkageAmbiguous, Dependencies: []string{testLibB}}
+
+		// Default: must reject with ErrABIMismatch
+		repDef, errDef := CompareVariantABIs([]*VariantABIReport{r1, r2}, false)
+		require.Error(t, errDef)
+		assert.True(t, errors.Is(errDef, ErrABIMismatch))
+		assert.False(t, repDef.Consistent)
+		assert.Equal(t, ComparisonInconsistent, repDef.Status)
+
+		// Override: admitted with recorded difference and inconsistent status
+		repOvr, errOvr := CompareVariantABIs([]*VariantABIReport{r1, r2}, true)
+		require.NoError(t, errOvr)
+		assert.False(t, repOvr.Consistent)
+		assert.Equal(t, ComparisonInconsistent, repOvr.Status)
+		assert.True(t, repOvr.Overridden)
+		require.NotEmpty(t, repOvr.Warnings)
+		assert.Contains(t, repOvr.Warnings[len(repOvr.Warnings)-1], "[OVERRIDDEN] differing declared dependencies")
+	})
+
+	t.Run("dynamic_vs_ambiguous_differing_dependencies", func(t *testing.T) {
+		t.Parallel()
+		rDyn := &VariantABIReport{
+			Level: "v1", Linkage: LinkageDynamic, HasInterpreter: true,
+			Interpreter: "/lib64/ld-linux-x86-64.so.2", Dependencies: []string{testLibA, testLibC},
+		}
+		rAmb := &VariantABIReport{
+			Level: "v2", Linkage: LinkageAmbiguous, Dependencies: []string{testLibB, testLibC},
+		}
+
+		repDef, errDef := CompareVariantABIs([]*VariantABIReport{rDyn, rAmb}, false)
+		require.Error(t, errDef)
+		assert.True(t, errors.Is(errDef, ErrABIMismatch))
+		assert.False(t, repDef.Consistent)
+
+		repOvr, errOvr := CompareVariantABIs([]*VariantABIReport{rDyn, rAmb}, true)
+		require.NoError(t, errOvr)
+		assert.False(t, repOvr.Consistent)
+		assert.True(t, repOvr.Overridden)
+	})
+
+	t.Run("same_known_sets_with_ambiguous_linkage_preserves_uncertainty", func(t *testing.T) {
+		t.Parallel()
+		r1 := &VariantABIReport{Level: "v1", Linkage: LinkageAmbiguous, Dependencies: []string{testLibC}}
+		r2 := &VariantABIReport{Level: "v2", Linkage: LinkageAmbiguous, Dependencies: []string{testLibC}}
+
+		repDef, errDef := CompareVariantABIs([]*VariantABIReport{r1, r2}, false)
+		require.NoError(t, errDef)
+		assert.False(t, repDef.Consistent, "must not upgrade uncertain linkage into proven consistency")
+		assert.Equal(t, ComparisonUnknown, repDef.Status)
+
+		repOvr, errOvr := CompareVariantABIs([]*VariantABIReport{r1, r2}, true)
+		require.NoError(t, errOvr)
+		assert.False(t, repOvr.Consistent)
+		assert.Equal(t, ComparisonUnknown, repOvr.Status)
+	})
+
+	t.Run("unsupported_version_observation_differing_dependencies", func(t *testing.T) {
+		t.Parallel()
+		r1 := &VariantABIReport{
+			Level: "v1", Linkage: LinkageDynamic, Completeness: MetadataUnsupported, Dependencies: []string{testLibA},
+		}
+		r2 := &VariantABIReport{
+			Level: "v2", Linkage: LinkageDynamic, Completeness: MetadataComplete, Dependencies: []string{testLibB},
+		}
+
+		repDef, errDef := CompareVariantABIs([]*VariantABIReport{r1, r2}, false)
+		require.Error(t, errDef)
+		assert.True(t, errors.Is(errDef, ErrABIMismatch))
+		assert.False(t, repDef.Consistent)
+	})
+
+	t.Run("one_skipped_two_differing_known_dependencies", func(t *testing.T) {
+		t.Parallel()
+		rSkip := &VariantABIReport{Level: "v1", Completeness: MetadataSkipped}
+		rA := &VariantABIReport{Level: "v2", Linkage: LinkageAmbiguous, Dependencies: []string{testLibA}}
+		rB := &VariantABIReport{Level: "v3", Linkage: LinkageAmbiguous, Dependencies: []string{testLibB}}
+
+		repDef, errDef := CompareVariantABIs([]*VariantABIReport{rSkip, rA, rB}, false)
+		require.Error(t, errDef)
+		assert.True(t, errors.Is(errDef, ErrABIMismatch))
+		assert.False(t, repDef.Consistent)
+	})
+
+	t.Run("known_empty_static_vs_known_nonempty_dynamic", func(t *testing.T) {
+		t.Parallel()
+		rStatic := &VariantABIReport{Level: "v1", Linkage: LinkageStatic, Dependencies: nil}
+		rDyn := &VariantABIReport{Level: "v2", Linkage: LinkageDynamic, Dependencies: []string{testLibC}}
+
+		repDef, errDef := CompareVariantABIs([]*VariantABIReport{rStatic, rDyn}, false)
+		require.Error(t, errDef)
+		assert.True(t, errors.Is(errDef, ErrABIMismatch))
+		assert.False(t, repDef.Consistent)
+	})
+
+	t.Run("same_set_different_search_order", func(t *testing.T) {
+		t.Parallel()
+		r1 := &VariantABIReport{Level: "v1", Linkage: LinkageDynamic, Dependencies: []string{testLibA, testLibB}}
+		r2 := &VariantABIReport{Level: "v2", Linkage: LinkageDynamic, Dependencies: []string{testLibB, testLibA}}
+
+		rep, err := CompareVariantABIs([]*VariantABIReport{r1, r2}, false)
+		require.NoError(t, err)
+		assert.True(t, rep.Consistent)
+		assert.Equal(t, ComparisonConsistent, rep.Status)
+		require.NotEmpty(t, rep.Warnings)
+		assert.Contains(t, rep.Warnings[0], "declared dependency search order differs")
+	})
+
+	t.Run("all_skipped", func(t *testing.T) {
+		t.Parallel()
+		r1 := &VariantABIReport{Level: "v1", Completeness: MetadataSkipped}
+		r2 := &VariantABIReport{Level: "v2", Completeness: MetadataSkipped}
+
+		rep, err := CompareVariantABIs([]*VariantABIReport{r1, r2}, false)
+		require.NoError(t, err)
+		assert.False(t, rep.Consistent)
+		assert.Equal(t, ComparisonSkipped, rep.Status)
+	})
+
+	t.Run("permutation_invariance", func(t *testing.T) {
+		t.Parallel()
+		r1 := &VariantABIReport{Level: "v1", Linkage: LinkageAmbiguous, Dependencies: []string{testLibA}}
+		r2 := &VariantABIReport{Level: "v2", Linkage: LinkageAmbiguous, Dependencies: []string{testLibB}}
+
+		// Pair orders
+		_, err12 := CompareVariantABIs([]*VariantABIReport{r1, r2}, false)
+		require.Error(t, err12)
+		assert.True(t, errors.Is(err12, ErrABIMismatch))
+
+		_, err21 := CompareVariantABIs([]*VariantABIReport{r2, r1}, false)
+		require.Error(t, err21)
+		assert.True(t, errors.Is(err21, ErrABIMismatch))
+
+		// 3-variant permutations
+		r3 := &VariantABIReport{Level: "v3", Linkage: LinkageAmbiguous, Dependencies: []string{"libC.so"}}
+		perms := [][]*VariantABIReport{
+			{r1, r2, r3},
+			{r1, r3, r2},
+			{r2, r1, r3},
+			{r2, r3, r1},
+			{r3, r1, r2},
+			{r3, r2, r1},
+		}
+		for i, p := range perms {
+			rep, pErr := CompareVariantABIs(p, false)
+			require.Error(t, pErr, "perm %d must fail", i)
+			assert.True(t, errors.Is(pErr, ErrABIMismatch), "perm %d must wrap ErrABIMismatch", i)
+			assert.False(t, rep.Consistent, "perm %d must be inconsistent", i)
+			assert.Equal(t, ComparisonInconsistent, rep.Status, "perm %d status must be ComparisonInconsistent", i)
+		}
+	})
+
+	t.Run("parser_to_comparator_linkage_ambiguous_from_fixture_bytes", func(t *testing.T) {
+		t.Parallel()
+		elfA := buildTestELFWithDynTags([][2]uint64{
+			{uint64(elf.DT_STRTAB), 0xdeadbeef},
+			{uint64(elf.DT_STRSZ), uint64(len("\x00" + testLibA + "\x00"))},
+			{uint64(elf.DT_NEEDED), 1},
+		}, []byte("\x00"+testLibA+"\x00"))
+
+		elfB := buildTestELFWithDynTags([][2]uint64{
+			{uint64(elf.DT_STRTAB), 0xdeadbeef},
+			{uint64(elf.DT_STRSZ), uint64(len("\x00" + testLibB + "\x00"))},
+			{uint64(elf.DT_NEEDED), 1},
+		}, []byte("\x00"+testLibB+"\x00"))
+
+		repA, errA := InspectELFABI(elfA)
+		require.NoError(t, errA)
+		assert.Equal(t, LinkageAmbiguous, repA.Linkage)
+		assert.Equal(t, []string{testLibA}, repA.Dependencies)
+
+		repB, errB := InspectELFABI(elfB)
+		require.NoError(t, errB)
+		assert.Equal(t, LinkageAmbiguous, repB.Linkage)
+		assert.Equal(t, []string{testLibB}, repB.Dependencies)
+
+		repA.Level = "v1"
+		repB.Level = "v2"
+
+		// Compare them
+		rep, cErr := CompareVariantABIs([]*VariantABIReport{repA, repB}, false)
+		require.Error(t, cErr)
+		assert.True(t, errors.Is(cErr, ErrABIMismatch))
+		assert.False(t, rep.Consistent)
+		assert.Equal(t, ComparisonInconsistent, rep.Status)
+	})
+}
