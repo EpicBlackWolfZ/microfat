@@ -8,6 +8,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// ExecutionNotTested indicates that doctor evaluated prerequisites only and did not execute a runtime process.
+const ExecutionNotTested = "not_tested"
+
 // PrerequisiteVerdict evaluates environment prerequisite readiness across CPU, memfd, and cache.
 type PrerequisiteVerdict struct {
 	Ready    bool

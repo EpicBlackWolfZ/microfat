@@ -38,6 +38,7 @@ const (
 	flagVerify   = "--verify"
 	flagStub     = "--stub"
 	flagName     = "--name"
+	flagStrict   = "--strict"
 
 	testBinaryMicrofat = "microfat"
 	testOSLinux        = "linux"

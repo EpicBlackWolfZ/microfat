@@ -84,7 +84,7 @@ func TestDoctorCmdExecution(t *testing.T) {
 		cmd := newDoctorCmd()
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
-		cmd.SetArgs([]string{"--strict", flagCacheDir, validCacheDir})
+		cmd.SetArgs([]string{flagStrict, flagCacheDir, validCacheDir})
 
 		_ = cmd.Execute()
 	})
@@ -94,7 +94,7 @@ func TestDoctorCmdExecution(t *testing.T) {
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
 		invalidDir := "/dev/null/forbidden_cache_path"
-		cmd.SetArgs([]string{flagCacheDir, invalidDir, "--strict"})
+		cmd.SetArgs([]string{flagCacheDir, invalidDir, flagStrict})
 
 		err := cmd.Execute()
 		if err == nil {
@@ -354,8 +354,11 @@ func TestProbeMemfdMocking(t *testing.T) {
 		if rep.Seals == nil || !rep.Seals.Matches {
 			t.Errorf("expected matching seals in probe result, got: %+v", rep.Seals)
 		}
-		if !strings.Contains(rep.Execution, "prerequisite check only") {
-			t.Errorf("expected unknown execution status, got: %s", rep.Execution)
+		if rep.Execution != "not_tested" {
+			t.Errorf("expected not_tested execution status, got: %s", rep.Execution)
+		}
+		if rep.Seccomp != "Unknown (not independently tested)" {
+			t.Errorf("expected Unknown (not independently tested) seccomp status, got: %s", rep.Seccomp)
 		}
 	})
 
@@ -381,8 +384,14 @@ func TestProbeMemfdMocking(t *testing.T) {
 		if rep.Available {
 			t.Errorf("expected unavailable memfd probe when sealing is denied")
 		}
-		if !strings.Contains(rep.Status, "Sealing failed") {
-			t.Errorf("expected Sealing failed status, got: %s", rep.Status)
+		if !strings.Contains(rep.Status, "Seal application denied (F_ADD_SEALS failed)") {
+			t.Errorf("expected Seal application denied status, got: %s", rep.Status)
+		}
+		if rep.Operation != "add_seals" {
+			t.Errorf("expected add_seals operation, got: %s", rep.Operation)
+		}
+		if rep.Seccomp != "Unknown (not independently tested)" {
+			t.Errorf("expected Unknown (not independently tested) seccomp status, got: %s", rep.Seccomp)
 		}
 		if rep.Seals == nil || rep.Seals.Supported {
 			t.Errorf("expected seals to be reported as unsupported/blocked, got: %+v", rep.Seals)
@@ -414,6 +423,9 @@ func TestProbeMemfdMocking(t *testing.T) {
 		if !strings.Contains(rep.Status, "Descriptor non-executable") {
 			t.Errorf("expected Descriptor non-executable status, got: %s", rep.Status)
 		}
+		if rep.Operation != "mode" {
+			t.Errorf("expected mode operation, got: %s", rep.Operation)
+		}
 		if rep.Mode == nil || rep.Mode.IsExecutable {
 			t.Errorf("expected Mode.IsExecutable == false, got: %+v", rep.Mode)
 		}
@@ -431,11 +443,17 @@ func TestProbeMemfdMocking(t *testing.T) {
 		if rep.Available {
 			t.Errorf("expected unavailable memfd probe on EPERM")
 		}
-		if !strings.Contains(rep.Status, "seccomp") {
-			t.Errorf("expected seccomp status on EPERM, got %s", rep.Status)
+		if !strings.Contains(rep.Status, "Creation denied") {
+			t.Errorf("expected Creation denied status on EPERM, got %s", rep.Status)
 		}
-		if rep.Seccomp != "Restricted (EPERM/EACCES)" {
-			t.Errorf("expected Restricted seccomp status, got %s", rep.Seccomp)
+		if rep.Operation != "create" {
+			t.Errorf("expected create operation, got %s", rep.Operation)
+		}
+		if rep.ErrnoName != "EPERM" || rep.ErrnoValue != int(syscall.EPERM) {
+			t.Errorf("expected EPERM errno, got %s (%d)", rep.ErrnoName, rep.ErrnoValue)
+		}
+		if rep.Seccomp != "Unknown (not independently tested)" {
+			t.Errorf("expected Unknown (not independently tested) seccomp status, got %s", rep.Seccomp)
 		}
 	})
 
@@ -448,8 +466,14 @@ func TestProbeMemfdMocking(t *testing.T) {
 		if rep.Available {
 			t.Errorf("expected unavailable memfd probe on ENOSYS")
 		}
-		if !strings.Contains(rep.Status, "Unsupported") {
-			t.Errorf("expected Unsupported status on ENOSYS, got %s", rep.Status)
+		if !strings.Contains(rep.Status, "Creation unsupported") {
+			t.Errorf("expected Creation unsupported status on ENOSYS, got %s", rep.Status)
+		}
+		if rep.Operation != "create" {
+			t.Errorf("expected create operation, got %s", rep.Operation)
+		}
+		if rep.ErrnoName != "ENOSYS" {
+			t.Errorf("expected ENOSYS errno, got %s", rep.ErrnoName)
 		}
 	})
 
@@ -778,8 +802,8 @@ func TestRunDoctorTruthTable(t *testing.T) {
 			if !tc.expectErrors && len(rep.Errors) > 0 {
 				t.Errorf("expected no errors in report, got: %v", rep.Errors)
 			}
-			if rep.Execution.Status != "unknown" || rep.Execution.Reason != "not_tested" {
-				t.Errorf("expected Execution {unknown, not_tested}, got %+v", rep.Execution)
+			if rep.Execution.Status != "not_tested" || rep.Execution.Reason != "not_tested" {
+				t.Errorf("expected Execution {not_tested, not_tested}, got %+v", rep.Execution)
 			}
 		})
 	}
@@ -1032,8 +1056,11 @@ func TestProbeMemfd_AdditionalBranches(t *testing.T) {
 		if rep.Passed || rep.Phase != "seals" {
 			t.Errorf("expected seals failure phase, got: %+v", rep)
 		}
-		if rep.Seccomp != "Restricted (seals blocked)" {
-			t.Errorf("expected Restricted (seals blocked), got: %s", rep.Seccomp)
+		if rep.Operation != "add_seals" {
+			t.Errorf("expected add_seals operation, got: %s", rep.Operation)
+		}
+		if rep.Seccomp != "Unknown (not independently tested)" {
+			t.Errorf("expected Unknown (not independently tested), got: %s", rep.Seccomp)
 		}
 	})
 }
@@ -1111,7 +1138,7 @@ func TestDoctorCmdFailingNonZeroExit(t *testing.T) {
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	invalidDir := "/dev/null/forbidden_cache_path"
-	cmd.SetArgs([]string{flagJSON, flagCacheDir, invalidDir, "--strict"})
+	cmd.SetArgs([]string{flagJSON, flagCacheDir, invalidDir, flagStrict})
 
 	err := cmd.Execute()
 	if err == nil {

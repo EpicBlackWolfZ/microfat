@@ -3,7 +3,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -45,6 +44,7 @@ func probeMemfd() MemfdReport {
 	rep.Available = obs.Available
 	rep.Passed = obs.Passed
 	rep.Phase = obs.Phase
+	rep.Operation = obs.Operation
 	rep.CreationStrategy = obs.CreationStrategy
 	rep.Mode = obs.Mode
 	rep.Seals = obs.Seals
@@ -54,40 +54,11 @@ func probeMemfd() MemfdReport {
 	rep.ErrnoValue = obs.ErrnoValue
 	rep.CandidateExplanations = obs.CandidateExplanations
 	rep.Status = obs.Status
-	rep.Execution = obs.Execution
+	rep.Execution = "not_tested"
+	rep.Hint = obs.Hint
+	rep.Cause = obs.Cause
+	rep.Seccomp = "Unknown (not independently tested)"
 
-	if !obs.Passed {
-		rep.Execution = executionUnavailable
-		switch {
-		case obs.ErrnoName == "EPERM" || obs.ErrnoName == "EACCES":
-			rep.Seccomp = "Restricted (EPERM/EACCES)"
-		case obs.ErrnoName == "ENOSYS":
-			rep.Seccomp = "N/A (ENOSYS)"
-		case obs.Phase == "mode":
-			rep.Seccomp = "Permitted (creation), execution denied"
-		case obs.Phase == "seals":
-			rep.Seccomp = "Restricted (seals blocked)"
-		default:
-			rep.Seccomp = "Unknown"
-		}
-
-		switch obs.Phase {
-		case "creation":
-			rep.Hint = format.DiagnoseError(format.StageMemfdCreate, errors.New(obs.Error))
-			if rep.Hint == "" {
-				rep.Hint = "memfd_create failed. If disk cache execution is permitted, run with MICROFAT_EXEC_MODE=cache."
-			}
-		case "mode":
-			rep.Hint = "Host system enforces vm.memfd_noexec without execution permissions. Set MICROFAT_EXEC_MODE=cache."
-		case "seals":
-			rep.Hint = "memfd creation succeeded but descriptor sealing failed. Check seccomp filters or kernel seal support."
-		case "fstat":
-			rep.Hint = "fstat failed on memfd descriptor. Check kernel status or security policies."
-		}
-		return rep
-	}
-
-	rep.Seccomp = "Permitted"
 	return rep
 }
 

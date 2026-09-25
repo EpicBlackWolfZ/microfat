@@ -88,6 +88,7 @@ type MemfdReport struct {
 	Available             bool                    `json:"available"`
 	Passed                bool                    `json:"passed"`
 	Phase                 string                  `json:"phase,omitempty"`
+	Operation             string                  `json:"operation,omitempty"`
 	Status                string                  `json:"status"`
 	Kernel                string                  `json:"kernel,omitempty"`
 	Seccomp               string                  `json:"seccomp,omitempty"`
@@ -101,6 +102,7 @@ type MemfdReport struct {
 	ErrnoValue            int                     `json:"errno_value,omitempty"`
 	CandidateExplanations []string                `json:"candidate_explanations,omitempty"`
 	Hint                  string                  `json:"hint,omitempty"`
+	Cause                 error                   `json:"-"`
 }
 
 // CacheReport contains disk cache directory status and write permission details.
@@ -246,7 +248,7 @@ func runDoctor(opts DoctorOptions) *DoctorReport {
 		Memfd:  memfdRep,
 		Cache:  cacheRep,
 		Execution: ExecutionReport{
-			Status: "unknown",
+			Status: "not_tested",
 			Reason: "not_tested",
 			Notice: "Doctor inspects environment prerequisites; runtime process execution is not tested during doctor probes.",
 		},
@@ -492,6 +494,9 @@ func printMemfdSection(b *strings.Builder, memfd *MemfdReport) {
 func printMemfdFailureDetails(b *strings.Builder, memfd *MemfdReport) {
 	if memfd.Phase != "" && !memfd.Passed {
 		appendFormat(b, "    • Failed Phase:      %s\n", memfd.Phase)
+	}
+	if memfd.Operation != "" && !memfd.Passed {
+		appendFormat(b, "    • Failed Operation:  %s\n", memfd.Operation)
 	}
 	if memfd.ErrnoName != "" {
 		appendFormat(b, "    • Errno:             %s (%d)\n", memfd.ErrnoName, memfd.ErrnoValue)

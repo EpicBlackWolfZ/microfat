@@ -13,7 +13,7 @@ func probeMemfd() MemfdReport {
 		Passed:    obs.Passed,
 		Status:    obs.Status,
 		Seccomp:   "N/A",
-		Execution: executionUnavailable,
+		Execution: "not_tested",
 	}
 }
 

@@ -14,6 +14,7 @@ type MemfdSupportObservation struct {
 	Available             bool
 	Passed                bool
 	Phase                 string
+	Operation             string
 	Status                string
 	CreationStrategy      string
 	Mode                  *memfd.ModeObservation
@@ -25,6 +26,7 @@ type MemfdSupportObservation struct {
 	ErrnoValue            int
 	CandidateExplanations []string
 	Hint                  string
+	Cause                 error `json:"-"`
 }
 
 // CheckMemfdSupport reports unsupported on non-Linux platforms.
@@ -33,6 +35,6 @@ func CheckMemfdSupport(adapter *memfd.SyscallAdapter) MemfdSupportObservation {
 		Available: false,
 		Passed:    false,
 		Status:    fmt.Sprintf("N/A (%s host; microfat fat execution targets Linux ELF)", runtime.GOOS),
-		Execution: "unavailable",
+		Execution: ExecutionNotTested,
 	}
 }
