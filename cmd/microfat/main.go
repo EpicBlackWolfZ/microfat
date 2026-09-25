@@ -507,6 +507,18 @@ func parseRawVariants(rawVariants []string) (map[string]string, error) {
 	return variants, nil
 }
 
+func cmdWarnFunc(cmd *cobra.Command) func(string, ...any) {
+	return func(format string, args ...any) {
+		var msg string
+		if len(args) == 0 {
+			msg = format
+		} else {
+			msg = fmt.Sprintf(format, args...)
+		}
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), msg)
+	}
+}
+
 func newPackCmd() *cobra.Command {
 	var flags builder.BuildOptions
 	var (
@@ -540,15 +552,7 @@ func newPackCmd() *cobra.Command {
 				return nil
 			}
 
-			warnFunc := func(format string, args ...any) {
-				var msg string
-				if len(args) == 0 {
-					msg = format
-				} else {
-					msg = fmt.Sprintf(format, args...)
-				}
-				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), msg)
-			}
+			warnFunc := cmdWarnFunc(cmd)
 
 			actualStubPath, err := builder.ResolveStubWithOptions(builder.ResolveStubOptions{
 				CLIStub:    flags.StubPath,
@@ -658,15 +662,7 @@ func manifestBuildOptions(cmd *cobra.Command, flags builder.BuildOptions) builde
 	flags.Stdout = cmd.OutOrStdout()
 	flags.Stderr = cmd.ErrOrStderr()
 	if flags.WarnFunc == nil {
-		flags.WarnFunc = func(format string, args ...any) {
-			var msg string
-			if len(args) == 0 {
-				msg = format
-			} else {
-				msg = fmt.Sprintf(format, args...)
-			}
-			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), msg)
-		}
+		flags.WarnFunc = cmdWarnFunc(cmd)
 	}
 	return flags
 }

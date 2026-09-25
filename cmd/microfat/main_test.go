@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/builder"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
@@ -1777,4 +1778,87 @@ func TestPackStubWithStubProfileNotice(t *testing.T) {
 	})
 	_ = packCmd.Execute()
 	assert.Contains(t, errBuf.String(), "automatic stub-profile selection was bypassed")
+}
+
+func TestParseRawVariants(t *testing.T) {
+	t.Parallel()
+
+	// Valid cases
+	v, err := parseRawVariants([]string{"v1=path1", "v2=path2"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"v1": "path1", "v2": "path2"}, v)
+
+	// Missing equal sign
+	_, err = parseRawVariants([]string{"v1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid variant specification")
+
+	// Empty level
+	_, err = parseRawVariants([]string{"=path"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid variant specification")
+
+	// Empty path
+	_, err = parseRawVariants([]string{"v1="})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid variant specification")
+
+	// Duplicate variant level
+	_, err = parseRawVariants([]string{"v1=path1", "v1=path2"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate variant level")
+}
+
+func TestPackCmd_InvalidVariantSpec(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	stubPath := filepath.Join(tempDir, "microfat-stub")
+	require.NoError(t, os.WriteFile(stubPath, []byte("\x7fELFfake_stub"), 0o755))
+
+	packCmd := newPackCmd()
+	packCmd.SetArgs([]string{
+		"--stub", stubPath,
+		"-o", filepath.Join(tempDir, "out.fat"),
+		"-v", "invalid_variant_spec",
+	})
+	err := packCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid variant specification")
+}
+
+func TestCmdWarnFunc(t *testing.T) {
+	t.Parallel()
+
+	cmd := newPackCmd()
+	var errBuf bytes.Buffer
+	cmd.SetErr(&errBuf)
+
+	warn := cmdWarnFunc(cmd)
+
+	// 0 args
+	warn("plain warning message")
+	assert.Contains(t, errBuf.String(), "plain warning message\n")
+
+	// with args
+	errBuf.Reset()
+	warn("formatted warning: %s %d", "arg", 123)
+	assert.Contains(t, errBuf.String(), "formatted warning: arg 123\n")
+}
+
+func TestManifestBuildOptions_CustomWarnFunc(t *testing.T) {
+	t.Parallel()
+
+	cmd := newPackCmd()
+	var called bool
+	customWarn := func(format string, args ...any) {
+		called = true
+	}
+
+	opts := manifestBuildOptions(cmd, builder.BuildOptions{
+		WarnFunc: customWarn,
+	})
+	require.NotNil(t, opts.WarnFunc)
+	opts.WarnFunc("test")
+	assert.True(t, called)
 }
