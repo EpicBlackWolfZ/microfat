@@ -352,6 +352,16 @@ func TestResolveStubWithOptions_PrecedenceAndNotices(t *testing.T) {
 		assert.Empty(t, notices)
 	})
 
+	t.Run("CLIStub_With_ExplicitProfile_NilWarnFunc_FallbackToStderr", func(t *testing.T) {
+		res, err := ResolveStubWithOptions(ResolveStubOptions{
+			CLIStub:    fullStub,
+			CLIProfile: StubProfileMinimal,
+			WarnFunc:   nil,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, fullStub, res)
+	})
+
 	t.Run("ManifestStub_Full_With_ManifestProfile_Minimal_WinsWithNotice", func(t *testing.T) {
 		var notices []string
 		warnFunc := func(format string, args ...any) {

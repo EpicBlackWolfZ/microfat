@@ -354,6 +354,13 @@ func newTrimCmd() *cobra.Command {
 		Short: "Trim away unneeded variant payloads, keeping the launcher stub and selected variant",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("output") {
+				cleaned := strings.TrimSpace(strings.TrimPrefix(outputPath, "="))
+				if cleaned == "" {
+					return errors.New("destination output path cannot be empty")
+				}
+			}
+
 			metaPolicy, err := lifecycle.ParsePolicy(metadataPolicyStr)
 			if err != nil {
 				return err
@@ -416,12 +423,8 @@ func newTrimCmd() *cobra.Command {
 			intent := lifecycle.IntentReplaceSource
 			destPath := srcPath
 			if cmd.Flags().Changed("output") {
-				cleaned := strings.TrimSpace(strings.TrimPrefix(outputPath, "="))
-				if cleaned == "" {
-					return errors.New("destination output path cannot be empty")
-				}
 				intent = lifecycle.IntentCreateOnly
-				destPath = filepath.Clean(cleaned)
+				destPath = filepath.Clean(strings.TrimSpace(strings.TrimPrefix(outputPath, "=")))
 			} else {
 				realPath, err := filepath.EvalSymlinks(srcPath)
 				if err == nil && realPath != srcPath {

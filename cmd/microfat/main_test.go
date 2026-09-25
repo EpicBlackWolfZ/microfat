@@ -1713,3 +1713,68 @@ func TestTrim_MetadataPolicyAndBreakHardlinks(t *testing.T) {
 	require.NoError(t, trimStrict.Execute())
 	require.FileExists(t, freshStrict)
 }
+
+func TestValidateEmptyStubFlags(t *testing.T) {
+	t.Parallel()
+
+	// 1. pack --stub ""
+	packCmd := newPackCmd()
+	packCmd.SetArgs([]string{"--stub", "", "-o", "out", "-v", "v1=p"})
+	err := packCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub cannot be empty")
+
+	// 2. pack --stub-profile ""
+	packCmd2 := newPackCmd()
+	packCmd2.SetArgs([]string{"--stub-profile", "", "-o", "out", "-v", "v1=p"})
+	err = packCmd2.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub-profile cannot be empty")
+
+	// 3. pgo-pack --stub ""
+	pgoCmd := newPgoPackCmd()
+	pgoCmd.SetArgs([]string{"--stub", "", "--manifest", "m.yaml"})
+	err = pgoCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub cannot be empty")
+
+	// 4. pgo-pack --stub-profile ""
+	pgoCmd2 := newPgoPackCmd()
+	pgoCmd2.SetArgs([]string{"--stub-profile", "", "--manifest", "m.yaml"})
+	err = pgoCmd2.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub-profile cannot be empty")
+}
+
+func TestTrimEmptyOutputPath(t *testing.T) {
+	t.Parallel()
+
+	trimCmd := newTrimCmd()
+	trimCmd.SetArgs([]string{"-o", "  ", "some_file"})
+	err := trimCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "destination output path cannot be empty")
+}
+
+func TestPackStubWithStubProfileNotice(t *testing.T) {
+	tempDir := t.TempDir()
+	stubPath := filepath.Join(tempDir, "microfat-stub")
+	_ = os.WriteFile(stubPath, []byte("\x7fELFfake_stub"), 0o755)
+
+	v1Path := filepath.Join(tempDir, "v1_bin")
+	_ = os.WriteFile(v1Path, []byte("v1_bin"), 0o755)
+
+	fatOut := filepath.Join(tempDir, "out.fat")
+	packCmd := newPackCmd()
+	var errBuf bytes.Buffer
+	packCmd.SetErr(&errBuf)
+	packCmd.SetArgs([]string{
+		"--stub", stubPath,
+		"--stub-profile", "minimal",
+		"-o", fatOut,
+		"-v", "v1=" + v1Path,
+		flagSkipELF,
+	})
+	_ = packCmd.Execute()
+	assert.Contains(t, errBuf.String(), "automatic stub-profile selection was bypassed")
+}
