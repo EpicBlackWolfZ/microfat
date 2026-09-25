@@ -14,6 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	testLibA = "libA.so"
+	testLibB = "libB.so"
+	testLibC = "libc.so"
+)
+
 // R3 Regression: Known-field comparison independent of first variant.
 func TestCompareVariantABIs_R3_Permutations(t *testing.T) {
 	vUnknown := &VariantABIReport{
@@ -780,5 +786,200 @@ func TestABI_R3_AuxiliaryAndNameValidation(t *testing.T) {
 		require.Error(t, pErr2)
 		assert.True(t, errors.Is(pErr2, ErrABIMetadata))
 		assert.NoFileExists(t, absentDest, "absent destination file must not be created on validation failure")
+	})
+}
+
+func TestABI_R3_RecordWorkAndLimits(t *testing.T) {
+	t.Parallel()
+
+	t.Run("allowance_16_fails_before_aux_allowance_32_admits_both", func(t *testing.T) {
+		t.Parallel()
+		// 1 parent (16 bytes) + 1 auxiliary (16 bytes)
+		vnData := make([]byte, 32)
+		// Parent record
+		binary.LittleEndian.PutUint16(vnData[0:2], 1)   // vn_version = 1
+		binary.LittleEndian.PutUint16(vnData[2:4], 1)   // vn_cnt = 1
+		binary.LittleEndian.PutUint32(vnData[4:8], 1)   // vn_file offset in strtab
+		binary.LittleEndian.PutUint32(vnData[8:12], 16) // vn_aux offset = 16
+		binary.LittleEndian.PutUint32(vnData[12:16], 0) // vn_next = 0
+
+		// Auxiliary record at offset 16
+		binary.LittleEndian.PutUint16(vnData[20:22], 0)  // vna_flags
+		binary.LittleEndian.PutUint32(vnData[24:28], 11) // vna_name offset in strtab
+		binary.LittleEndian.PutUint32(vnData[28:32], 0)  // vna_next = 0
+
+		strtab := []byte("\x00libc.so.6\x00GLIBC_2.2.5\x00")
+		loads := []loadSegment{{off: 0, vaddr: 0x1000, filesz: 1000, memsz: 1000}}
+
+		// Allowance 16: parent succeeds (16 bytes), but auxiliary fails (16 + 16 = 32 > 16)
+		acc16 := &inputAccounting{maxMetadataBytes: 16}
+		err16 := parseVerneed(vnData, loads, 1000, binary.LittleEndian, 0x1000, 1, strtab, acc16, &VariantABIReport{})
+		require.Error(t, err16)
+		assert.True(t, errors.Is(err16, ErrABIResourceLimit))
+		assert.Equal(t, uint64(16), acc16.metadataBytesRead, "must have charged exactly 16 bytes for parent before auxiliary failure")
+
+		// Allowance 32: both parent (16) and auxiliary (16) succeed
+		acc32 := &inputAccounting{maxMetadataBytes: 32}
+		err32 := parseVerneed(vnData, loads, 1000, binary.LittleEndian, 0x1000, 1, strtab, acc32, &VariantABIReport{})
+		require.NoError(t, err32)
+		assert.Equal(t, uint64(32), acc32.metadataBytesRead, "must have charged 32 bytes for parent and auxiliary")
+	})
+
+	t.Run("multiple_parents_and_auxiliaries_shared_and_local_charged", func(t *testing.T) {
+		t.Parallel()
+		// 2 parents, each with 2 auxiliaries = 6 records * 16 = 96 bytes
+		vnData := make([]byte, 96)
+		// Parent 1 at offset 0 (aux at offset 16, next at offset 48)
+		binary.LittleEndian.PutUint16(vnData[0:2], 1)
+		binary.LittleEndian.PutUint16(vnData[2:4], 2)
+		binary.LittleEndian.PutUint32(vnData[4:8], 1)
+		binary.LittleEndian.PutUint32(vnData[8:12], 16)
+		binary.LittleEndian.PutUint32(vnData[12:16], 48)
+
+		// Aux 1.1 at offset 16 (next at offset 16 -> 32)
+		binary.LittleEndian.PutUint32(vnData[24:28], 11)
+		binary.LittleEndian.PutUint32(vnData[28:32], 16)
+		// Aux 1.2 at offset 32 (next = 0)
+		binary.LittleEndian.PutUint32(vnData[40:44], 11)
+		binary.LittleEndian.PutUint32(vnData[44:48], 0)
+
+		// Parent 2 at offset 48 (aux at offset 16 -> 64, next = 0)
+		binary.LittleEndian.PutUint16(vnData[48:50], 1)
+		binary.LittleEndian.PutUint16(vnData[50:52], 2)
+		binary.LittleEndian.PutUint32(vnData[52:56], 1)
+		binary.LittleEndian.PutUint32(vnData[56:60], 16)
+		binary.LittleEndian.PutUint32(vnData[60:64], 0)
+
+		// Aux 2.1 at offset 64 (next at offset 16 -> 80)
+		binary.LittleEndian.PutUint32(vnData[72:76], 11)
+		binary.LittleEndian.PutUint32(vnData[76:80], 16)
+		// Aux 2.2 at offset 80 (next = 0)
+		binary.LittleEndian.PutUint32(vnData[88:92], 11)
+		binary.LittleEndian.PutUint32(vnData[92:96], 0)
+
+		strtab := []byte("\x00libc.so.6\x00GLIBC_2.2.5\x00")
+		loads := []loadSegment{{off: 0, vaddr: 0x1000, filesz: 1000, memsz: 1000}}
+
+		shared := NewArtifactMetadataAccounting(1000)
+		acc := &inputAccounting{shared: shared}
+		err := parseVerneed(vnData, loads, 1000, binary.LittleEndian, 0x1000, 2, strtab, acc, &VariantABIReport{})
+		require.NoError(t, err)
+		const expectedRecordBytes = 96
+		const expectedVersionRecords = 6
+		assert.Equal(t, uint64(expectedRecordBytes), acc.metadataBytesRead)
+		assert.Equal(t, uint64(expectedRecordBytes), shared.usedBytes)
+		assert.Equal(t, uint64(expectedVersionRecords), acc.versionRecords)
+	})
+
+	t.Run("missing_nul_budget_exhaustion_vs_end_of_table", func(t *testing.T) {
+		t.Parallel()
+		strtab := []byte("unterminated_string_without_nul")
+
+		// Case 1: Budget sufficient to reach end of table without NUL -> ErrABIMetadata
+		accFull := &inputAccounting{maxStringScanBytes: 1000}
+		_, errFull := scanBoundedCString(strtab, 0, accFull, "test_field", true)
+		require.Error(t, errFull)
+		assert.True(t, errors.Is(errFull, ErrABIMetadata))
+		assert.Contains(t, errFull.Error(), "not NUL-terminated")
+
+		// Case 2: Budget exhausted before reaching end of table -> ErrABIResourceLimit
+		accShort := &inputAccounting{maxStringScanBytes: 5}
+		_, errShort := scanBoundedCString(strtab, 0, accShort, "test_field", true)
+		require.Error(t, errShort)
+		assert.True(t, errors.Is(errShort, ErrABIResourceLimit))
+		assert.Contains(t, errShort.Error(), "exceeds per-input budget")
+	})
+
+	t.Run("repeated_string_offsets_work_charged_and_string_budgeted", func(t *testing.T) {
+		t.Parallel()
+		strtab := []byte("libc.so.6\x00")
+		acc := &inputAccounting{maxMetadataBytes: 1000, maxStringBytes: 1000}
+		deps, err := parseNeededDependencies(strtab, uint64(len(strtab)), []uint64{0, 0, 0, 0, 0}, acc)
+		require.NoError(t, err)
+		assert.Len(t, deps, 5)
+		for _, d := range deps {
+			assert.Equal(t, "libc.so.6", d)
+		}
+		expectedRetained := uint64(5 * len("libc.so.6"))
+		assert.Equal(t, expectedRetained, acc.retainedStringBytes)
+	})
+
+	t.Run("report_reservation_checked_before_construction", func(t *testing.T) {
+		t.Parallel()
+		const smallBudget = 10
+		ra := NewReportAccounting(smallBudget)
+		builder := newBoundedReportBuilder(ra)
+		err := builder.writeString("a very long string that exceeds small budget")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrABIResourceLimit))
+		assert.Empty(t, builder.string())
+	})
+
+	t.Run("format_mismatch_error_bounded_on_budget_exhaustion", func(t *testing.T) {
+		t.Parallel()
+		diffs := []string{"diff 1", "diff 2", "diff 3"}
+		const smallBudget = 10
+		ra := NewReportAccounting(smallBudget)
+		err := formatMismatchError(diffs, ra)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrABIMismatch))
+		assert.Contains(t, err.Error(), "3 declared differences (detailed output omitted")
+	})
+
+	t.Run("presentation_size_preflight_fails_before_pack_canary_preserved", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		canaryPath := filepath.Join(tmpDir, "canary.fat")
+		canaryContent := []byte("CANARY_PREFLIGHT_PROTECTION")
+		require.NoError(t, os.WriteFile(canaryPath, canaryContent, 0o644))
+
+		// Build two valid ELFs
+		elf1 := buildTestELFWithDynTags([][2]uint64{
+			{uint64(elf.DT_STRTAB), 0xdeadbeef},
+			{uint64(elf.DT_STRSZ), uint64(len("\x00libA.so\x00"))},
+			{uint64(elf.DT_NEEDED), 1},
+		}, []byte("\x00libA.so\x00"))
+
+		// Pack with extremely small report limit via custom test
+		rep1, err := InspectELFABI(elf1)
+		require.NoError(t, err)
+		rep1.Level = "v1"
+
+		tinyLimits := defaultABILimits
+		tinyLimits.MaxArtifactReportBytes = 50 // too small for presentation
+		_, cErr := CompareVariantABIsWithOptions([]*VariantABIReport{rep1}, false, tinyLimits)
+		require.Error(t, cErr)
+		assert.True(t, errors.Is(cErr, ErrABIResourceLimit))
+
+		// Canary remains untouched
+		content, err := os.ReadFile(canaryPath)
+		require.NoError(t, err)
+		assert.Equal(t, canaryContent, content)
+	})
+
+	t.Run("large_elf_small_metadata_unrelated_payload_size_does_not_inflate_metadata_work", func(t *testing.T) {
+		t.Parallel()
+		baseELF := buildTestELFWithDynTags([][2]uint64{
+			{uint64(elf.DT_STRTAB), 0xdeadbeef},
+			{uint64(elf.DT_STRSZ), uint64(len("\x00" + testLibA + "\x00"))},
+			{uint64(elf.DT_NEEDED), 1},
+		}, []byte("\x00"+testLibA+"\x00"))
+
+		// Append 2 MiB of padding to simulate large code/assets
+		const paddingSize = 2 * 1024 * 1024
+		largeELF := make([]byte, len(baseELF)+paddingSize)
+		copy(largeELF, baseELF)
+		// Update PT_LOAD segment filesz in ELF header to cover total size
+		binary.LittleEndian.PutUint64(largeELF[64+32:64+40], uint64(len(largeELF)))
+		binary.LittleEndian.PutUint64(largeELF[64+40:64+48], uint64(len(largeELF)))
+
+		acc := &inputAccounting{}
+		rep, err := InspectELFABIWithAccounting(largeELF, nil)
+		require.NoError(t, err)
+		assert.Equal(t, []string{testLibA}, rep.Dependencies)
+
+		// Metadata charged must be small (header + program headers + dynamic tags + strtab), NOT 2 MiB!
+		const maxExpectedMetadata = 16 * 1024
+		assert.Less(t, acc.metadataBytesRead, uint64(maxExpectedMetadata))
 	})
 }

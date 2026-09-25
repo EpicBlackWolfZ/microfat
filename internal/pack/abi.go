@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -30,6 +31,9 @@ const (
 	verneedEntrySize               = 16
 	vernauxEntrySize               = 16
 	versionReportSeparatorOverhead = 2
+	mismatchDiffBulletOverhead     = 6
+	depPresentationOverhead        = 4
+	versionPresentationOverhead    = 24
 )
 
 // ABILimits specifies configurable resource bounds for ABI metadata inspection and comparison.
@@ -194,13 +198,15 @@ type inputAccounting struct {
 	shared              *ArtifactMetadataAccounting
 	maxMetadataBytes    uint64
 	maxStringBytes      uint64
+	maxStringScanBytes  uint64
 	maxVersionRecords   uint64
 	metadataBytesRead   uint64
+	stringScanBytesRead uint64
 	retainedStringBytes uint64
 	versionRecords      uint64
 }
 
-func (acc *inputAccounting) chargeMetadata(n uint64) error {
+func (acc *inputAccounting) checkMetadata(n uint64) error {
 	limit := acc.maxMetadataBytes
 	if limit == 0 {
 		limit = MaxMetadataBytesPerInput
@@ -214,11 +220,65 @@ func (acc *inputAccounting) chargeMetadata(n uint64) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (acc *inputAccounting) chargeMetadata(n uint64) error {
+	if err := acc.checkMetadata(n); err != nil {
+		return err
+	}
 	acc.metadataBytesRead += n
 	if acc.shared != nil {
 		acc.shared.commit(n)
 	}
 	return nil
+}
+
+func (acc *inputAccounting) checkStringScan(n uint64) error {
+	limit := acc.maxStringScanBytes
+	if limit == 0 {
+		if acc.maxStringBytes != 0 {
+			limit = acc.maxStringBytes
+		} else {
+			limit = MaxABIStringBytesPerInput
+		}
+	}
+	if n > limit || acc.stringScanBytesRead > limit-n {
+		return fmt.Errorf("%w: string scan bytes (%d + %d) exceeds per-input budget %d",
+			ErrABIResourceLimit, acc.stringScanBytesRead, n, limit)
+	}
+	return nil
+}
+
+func (acc *inputAccounting) chargeStringScan(n uint64) error {
+	if err := acc.checkStringScan(n); err != nil {
+		return err
+	}
+	acc.stringScanBytesRead += n
+	return nil
+}
+
+func (acc *inputAccounting) remainingStringScanBudget() uint64 {
+	limit := acc.maxStringScanBytes
+	if limit == 0 {
+		if acc.maxStringBytes != 0 {
+			limit = acc.maxStringBytes
+		} else {
+			limit = MaxABIStringBytesPerInput
+		}
+	}
+	if acc.stringScanBytesRead >= limit {
+		return 0
+	}
+	return limit - acc.stringScanBytesRead
+}
+
+func (acc *inputAccounting) refundStringScan(n uint64) {
+	if n > acc.stringScanBytesRead {
+		acc.stringScanBytesRead = 0
+	} else {
+		acc.stringScanBytesRead -= n
+	}
 }
 
 func (acc *inputAccounting) chargeString(n uint64) error {
@@ -278,26 +338,22 @@ func EscapedMetadataLen(s string) (int, bool) {
 	return outputLen, truncated
 }
 
-// EscapeMetadata escapes untrusted metadata bytes for safe terminal / log display.
-// Control characters (including \r, \n, \t, ESC), DEL, C1 controls (0x80..0x9F),
-// and invalid UTF-8 sequences are escaped as \xNN, \n, \r, \t to prevent display injection.
-func EscapeMetadata(s string) string {
-	needed, truncated := EscapedMetadataLen(s)
+func writeEscapedIntoBuilder(buf *strings.Builder, s string) {
 	const maxDisplayLen = 4096
+	truncated := false
 	if len(s) > maxDisplayLen {
 		s = s[:maxDisplayLen]
+		truncated = true
 	}
-	var buf strings.Builder
-	buf.Grow(needed)
 	for i := 0; i < len(s); {
 		r, size := utf8.DecodeRuneInString(s[i:])
 		if r == utf8.RuneError && size == 1 {
-			fmt.Fprintf(&buf, "\\x%02x", s[i])
+			fmt.Fprintf(buf, "\\x%02x", s[i])
 			i++
 			continue
 		}
 		if r < 32 || r == 127 || (r >= 0x80 && r <= 0x9f) {
-			fmt.Fprintf(&buf, "\\x%02x", r)
+			fmt.Fprintf(buf, "\\x%02x", r)
 		} else {
 			buf.WriteRune(r)
 		}
@@ -306,7 +362,103 @@ func EscapeMetadata(s string) string {
 	if truncated {
 		buf.WriteString("...[truncated]")
 	}
+}
+
+// EscapeMetadata escapes untrusted metadata bytes for safe terminal / log display.
+// Control characters (including \r, \n, \t, ESC), DEL, C1 controls (0x80..0x9F),
+// and invalid UTF-8 sequences are escaped as \xNN, \n, \r, \t to prevent display injection.
+func EscapeMetadata(s string) string {
+	needed, _ := EscapedMetadataLen(s)
+	var buf strings.Builder
+	buf.Grow(needed)
+	writeEscapedIntoBuilder(&buf, s)
 	return buf.String()
+}
+
+type boundedReportBuilder struct {
+	ra *ReportAccounting
+	sb strings.Builder
+}
+
+func newBoundedReportBuilder(ra *ReportAccounting) *boundedReportBuilder {
+	return &boundedReportBuilder{ra: ra}
+}
+
+func (b *boundedReportBuilder) writeString(s string) error {
+	if err := b.ra.reserve(uint64(len(s))); err != nil {
+		return err
+	}
+	b.sb.WriteString(s)
+	return nil
+}
+
+func (b *boundedReportBuilder) writeEscaped(s string) error {
+	needed, _ := EscapedMetadataLen(s)
+	if needed < 0 {
+		return fmt.Errorf("%w: invalid escaped metadata length %d", ErrABIMetadata, needed)
+	}
+	if err := b.ra.reserve(uint64(needed)); err != nil {
+		return err
+	}
+	writeEscapedIntoBuilder(&b.sb, s)
+	return nil
+}
+
+func (b *boundedReportBuilder) writeQuotedEscaped(s string) error {
+	needed, _ := EscapedMetadataLen(s)
+	if needed < 0 {
+		return fmt.Errorf("%w: invalid escaped metadata length %d", ErrABIMetadata, needed)
+	}
+	const quotesOverhead = 2
+	total := uint64(needed) + quotesOverhead
+	if err := b.ra.reserve(total); err != nil {
+		return err
+	}
+	b.sb.WriteByte('"')
+	writeEscapedIntoBuilder(&b.sb, s)
+	b.sb.WriteByte('"')
+	return nil
+}
+
+func (b *boundedReportBuilder) writeInt(n int) error {
+	s := strconv.Itoa(n)
+	return b.writeString(s)
+}
+
+func (b *boundedReportBuilder) writeBoundedDepList(deps []string, maxItems int) error {
+	if len(deps) == 0 {
+		return b.writeString("none")
+	}
+	if err := b.writeString("["); err != nil {
+		return err
+	}
+	n := min(len(deps), maxItems)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			if err := b.writeString(", "); err != nil {
+				return err
+			}
+		}
+		if err := b.writeEscaped(deps[i]); err != nil {
+			return err
+		}
+	}
+	if len(deps) > maxItems {
+		if err := b.writeString(" ... (+"); err != nil {
+			return err
+		}
+		if err := b.writeInt(len(deps) - maxItems); err != nil {
+			return err
+		}
+		if err := b.writeString(" more)"); err != nil {
+			return err
+		}
+	}
+	return b.writeString("]")
+}
+
+func (b *boundedReportBuilder) string() string {
+	return b.sb.String()
 }
 
 // SanitizeName sanitizes untrusted ELF names to prevent terminal control escape sequences or malformed output.
@@ -320,6 +472,67 @@ func sanitizeStringSlice(ss []string) []string {
 		res[i] = EscapeMetadata(s)
 	}
 	return res
+}
+
+const stringScanChunkSize = 64
+
+func scanBoundedCString(
+	strtab []byte,
+	off uint64,
+	acc *inputAccounting,
+	fieldName string,
+	requireNonEmpty bool,
+) (string, error) {
+	strtabSize := uint64(len(strtab))
+	if off >= strtabSize {
+		return "", fmt.Errorf("%w: %s string offset %d out of bounds for STRTAB size %d", ErrABIMetadata, fieldName, off, strtabSize)
+	}
+
+	curr := off
+	var scanned uint64
+	nulFound := false
+	var strLen uint64
+
+	for curr < strtabSize {
+		availInTable := strtabSize - curr
+		wantScan := min(uint64(stringScanChunkSize), availInTable)
+		remBudget := acc.remainingStringScanBudget()
+		toCharge := min(wantScan, remBudget)
+		if toCharge == 0 {
+			return "", acc.chargeStringScan(1)
+		}
+		if err := acc.chargeStringScan(toCharge); err != nil {
+			return "", err
+		}
+
+		idx := bytes.IndexByte(strtab[curr:curr+toCharge], 0)
+		if idx >= 0 {
+			nulFound = true
+			bytesScanned := uint64(idx + 1)
+			if toCharge > bytesScanned {
+				acc.refundStringScan(toCharge - bytesScanned)
+			}
+			strLen = scanned + uint64(idx)
+			break
+		}
+
+		scanned += toCharge
+		curr += toCharge
+		if toCharge < wantScan {
+			return "", acc.chargeStringScan(1)
+		}
+	}
+
+	if !nulFound {
+		return "", fmt.Errorf("%w: %s string at offset %d is not NUL-terminated", ErrABIMetadata, fieldName, off)
+	}
+	if requireNonEmpty && strLen == 0 {
+		return "", fmt.Errorf("%w: %s string at offset %d is empty", ErrABIMetadata, fieldName, off)
+	}
+	if err := acc.chargeString(strLen); err != nil {
+		return "", err
+	}
+	return string(strtab[off : off+strLen]), nil
 }
 
 func validateELFHeaderMagicAndEncoding(data []byte) (binary.ByteOrder, error) {
@@ -589,6 +802,9 @@ func inspectELFABIWithAccounting(acc *inputAccounting, data []byte) (*VariantABI
 	}
 
 	if interpProg != nil {
+		if err := acc.chargeMetadata(interpProg.filesz); err != nil {
+			return nil, err
+		}
 		rawInterp := data[interpProg.off : interpProg.off+interpProg.filesz]
 		nulIdx := bytes.IndexByte(rawInterp, 0)
 		if nulIdx < 0 {
@@ -685,27 +901,19 @@ func parseNeededDependencies(
 	neededOffsets []uint64,
 	acc *inputAccounting,
 ) ([]string, error) {
+	if uint64(len(strtab)) > strtabSize {
+		strtab = strtab[:strtabSize]
+	}
 	if uint64(len(neededOffsets)) > MaxDynamicEntries {
 		return nil, fmt.Errorf("%w: needed dependencies count %d exceeds budget %d",
 			ErrABIResourceLimit, len(neededOffsets), MaxDynamicEntries)
 	}
 	deps := make([]string, 0, len(neededOffsets))
 	for _, off := range neededOffsets {
-		if off >= strtabSize {
-			return nil, fmt.Errorf("%w: DT_NEEDED offset %d out of bounds for STRTAB size %d", ErrABIMetadata, off, strtabSize)
-		}
-		nulIdx := bytes.IndexByte(strtab[off:], 0)
-		if nulIdx < 0 {
-			return nil, fmt.Errorf("%w: DT_NEEDED string at offset %d is not NUL-terminated", ErrABIMetadata, off)
-		}
-		strLen := uint64(nulIdx)
-		if strLen == 0 {
-			return nil, fmt.Errorf("%w: DT_NEEDED string at offset %d is empty", ErrABIMetadata, off)
-		}
-		if err := acc.chargeString(strLen); err != nil {
+		depName, err := scanBoundedCString(strtab, off, acc, "DT_NEEDED", true)
+		if err != nil {
 			return nil, err
 		}
-		depName := string(strtab[off : off+strLen])
 		deps = append(deps, depName)
 	}
 	return deps, nil
@@ -839,10 +1047,16 @@ func parseVernauxChain(
 	acc *inputAccounting,
 	report *VariantABIReport,
 ) error {
+	if uint64(len(strtab)) > strtabSize {
+		strtab = strtab[:strtabSize]
+	}
 	visitedVernaux := make(map[uint64]bool)
 
 	for auxIdx := range vnCnt {
 		if err := acc.chargeVersionRecord(); err != nil {
+			return err
+		}
+		if err := acc.chargeMetadata(uint64(vernauxEntrySize)); err != nil {
 			return err
 		}
 		maxVernaux := (verneedOff + availableBytes) - uint64(vernauxEntrySize)
@@ -861,21 +1075,10 @@ func parseVernauxChain(
 		vnaName := order.Uint32(data[currVernauxOff+8 : currVernauxOff+12])
 		vnaNext := order.Uint32(data[currVernauxOff+12 : currVernauxOff+16])
 
-		if uint64(vnaName) >= strtabSize {
-			return fmt.Errorf("%w: vna_name string offset %d out of bounds", ErrABIMetadata, vnaName)
-		}
-		nameNul := bytes.IndexByte(strtab[vnaName:], 0)
-		if nameNul < 0 {
-			return fmt.Errorf("%w: vna_name string at offset %d is not NUL-terminated", ErrABIMetadata, vnaName)
-		}
-		verLen := uint64(nameNul)
-		if verLen == 0 {
-			return fmt.Errorf("%w: vna_name string at offset %d is empty", ErrABIMetadata, vnaName)
-		}
-		if err := acc.chargeString(verLen); err != nil {
+		verName, err := scanBoundedCString(strtab, uint64(vnaName), acc, "vna_name", true)
+		if err != nil {
 			return err
 		}
-		verName := string(strtab[vnaName : uint64(vnaName)+verLen])
 
 		report.VersionRequirements = append(report.VersionRequirements, VersionRequirement{
 			Library: libName,
@@ -959,11 +1162,11 @@ func parseVerneed(
 		return fmt.Errorf("%w: DT_VERNEEDNUM %d exceeds budget limit %d",
 			ErrABIResourceLimit, verneedNum, MaxVersionRecordsPerInput)
 	}
-	verneedBytes := verneedNum * uint64(verneedEntrySize)
-	if err := acc.chargeMetadata(verneedBytes); err != nil {
-		return err
+	if verneedNum > 0 {
+		if err := acc.checkMetadata(uint64(verneedEntrySize)); err != nil {
+			return err
+		}
 	}
-
 	verneedOff, err := translateVaddr(loads, fileSize, verneedVaddr, verneedEntrySize)
 	if err != nil {
 		return fmt.Errorf("%w: translating DT_VERNEED address: %w", ErrABIMetadata, err)
@@ -977,12 +1180,14 @@ func parseVerneed(
 		}
 	}
 
-	strtabSize := uint64(len(strtab))
 	visitedVerneed := make(map[uint64]bool)
 	currVerneedOff := verneedOff
 
 	for recordIdx := range verneedNum {
 		if err := acc.chargeVersionRecord(); err != nil {
+			return err
+		}
+		if err := acc.chargeMetadata(uint64(verneedEntrySize)); err != nil {
 			return err
 		}
 		maxVerneed := (verneedOff + availableBytes) - uint64(verneedEntrySize)
@@ -997,7 +1202,11 @@ func parseVerneed(
 		vnVersion := order.Uint16(data[currVerneedOff : currVerneedOff+2])
 		if vnVersion != 1 {
 			report.Completeness = MetadataUnsupported
-			report.Warnings = append(report.Warnings, fmt.Sprintf("unsupported Elf64_Verneed version %d", vnVersion))
+			vnWarn := fmt.Sprintf("unsupported Elf64_Verneed version %d", vnVersion)
+			if wErr := acc.chargeString(uint64(len(vnWarn))); wErr != nil {
+				return wErr
+			}
+			report.Warnings = append(report.Warnings, vnWarn)
 			break
 		}
 		vnCnt := order.Uint16(data[currVerneedOff+2 : currVerneedOff+4])
@@ -1010,27 +1219,16 @@ func parseVerneed(
 			return err
 		}
 
-		if uint64(vnFile) >= strtabSize {
-			return fmt.Errorf("%w: vn_file string offset %d out of bounds", ErrABIMetadata, vnFile)
-		}
-		fileNul := bytes.IndexByte(strtab[vnFile:], 0)
-		if fileNul < 0 {
-			return fmt.Errorf("%w: vn_file string at offset %d is not NUL-terminated", ErrABIMetadata, vnFile)
-		}
-		libLen := uint64(fileNul)
-		if libLen == 0 {
-			return fmt.Errorf("%w: vn_file string at offset %d is empty", ErrABIMetadata, vnFile)
-		}
-		if err := acc.chargeString(libLen); err != nil {
+		libName, err := scanBoundedCString(strtab, uint64(vnFile), acc, "vn_file", true)
+		if err != nil {
 			return err
 		}
-		libName := string(strtab[vnFile : uint64(vnFile)+libLen])
 
 		if vnCnt > 0 {
 			currVernauxOff := currVerneedOff + uint64(vnAux)
 			if err := parseVernauxChain(
 				data, order, verneedOff, availableBytes, currVernauxOff,
-				vnCnt, currVerneedOff, libName, strtab, strtabSize, acc, report,
+				vnCnt, currVerneedOff, libName, strtab, uint64(len(strtab)), acc, report,
 			); err != nil {
 				return err
 			}
@@ -1179,6 +1377,72 @@ func formatBoundedDepList(deps []string, maxItems int) string {
 	return "[" + res + "]"
 }
 
+func formatDependencySetDiff(
+	ra *ReportAccounting,
+	baseline, current *VariantABIReport,
+	missingInCurr, missingInBase []string,
+) (string, error) {
+	const maxDisplayItems = 8
+	b := newBoundedReportBuilder(ra)
+	if err := b.writeString("differing declared dependencies between variant "); err != nil {
+		return "", err
+	}
+	if err := b.writeEscaped(baseline.Level); err != nil {
+		return "", err
+	}
+	if err := b.writeString(" and "); err != nil {
+		return "", err
+	}
+	if err := b.writeEscaped(current.Level); err != nil {
+		return "", err
+	}
+	if err := b.writeString(": missing in "); err != nil {
+		return "", err
+	}
+	if err := b.writeEscaped(current.Level); err != nil {
+		return "", err
+	}
+	if err := b.writeString(": "); err != nil {
+		return "", err
+	}
+	if err := b.writeBoundedDepList(missingInCurr, maxDisplayItems); err != nil {
+		return "", err
+	}
+	if err := b.writeString("; missing in "); err != nil {
+		return "", err
+	}
+	if err := b.writeEscaped(baseline.Level); err != nil {
+		return "", err
+	}
+	if err := b.writeString(": "); err != nil {
+		return "", err
+	}
+	if err := b.writeBoundedDepList(missingInBase, maxDisplayItems); err != nil {
+		return "", err
+	}
+	return b.string(), nil
+}
+
+func formatDependencyOrderWarning(ra *ReportAccounting, baseline, current *VariantABIReport) (string, error) {
+	b := newBoundedReportBuilder(ra)
+	if err := b.writeString("declared dependency search order differs between variant "); err != nil {
+		return "", err
+	}
+	if err := b.writeEscaped(baseline.Level); err != nil {
+		return "", err
+	}
+	if err := b.writeString(" and "); err != nil {
+		return "", err
+	}
+	if err := b.writeEscaped(current.Level); err != nil {
+		return "", err
+	}
+	if err := b.writeString(" (may affect dynamic symbol resolution order)"); err != nil {
+		return "", err
+	}
+	return b.string(), nil
+}
+
 func compareDependencySets(ra *ReportAccounting, baseline, current *VariantABIReport) (string, string, error) {
 	baseDeps := baseline.Dependencies
 	currDeps := current.Dependencies
@@ -1206,12 +1470,8 @@ func compareDependencySets(ra *ReportAccounting, baseline, current *VariantABIRe
 	}
 
 	if len(missingInCurr) > 0 || len(missingInBase) > 0 {
-		const maxDisplayItems = 8
-		diff := fmt.Sprintf("differing declared dependencies between variant %s and %s: missing in %s: %s; missing in %s: %s",
-			EscapeMetadata(baseline.Level), EscapeMetadata(current.Level),
-			EscapeMetadata(current.Level), formatBoundedDepList(missingInCurr, maxDisplayItems),
-			EscapeMetadata(baseline.Level), formatBoundedDepList(missingInBase, maxDisplayItems))
-		if err := ra.reserve(uint64(len(diff))); err != nil {
+		diff, err := formatDependencySetDiff(ra, baseline, current, missingInCurr, missingInBase)
+		if err != nil {
 			return "", "", err
 		}
 		return diff, "", nil
@@ -1220,10 +1480,8 @@ func compareDependencySets(ra *ReportAccounting, baseline, current *VariantABIRe
 	if len(baseDeps) == len(currDeps) {
 		for idx := range baseDeps {
 			if baseDeps[idx] != currDeps[idx] {
-				warn := fmt.Sprintf(
-					"declared dependency search order differs between variant %s and %s (may affect dynamic symbol resolution order)",
-					EscapeMetadata(baseline.Level), EscapeMetadata(current.Level))
-				if err := ra.reserve(uint64(len(warn))); err != nil {
+				warn, err := formatDependencyOrderWarning(ra, baseline, current)
+				if err != nil {
 					return "", "", err
 				}
 				return "", warn, nil
@@ -1233,19 +1491,35 @@ func compareDependencySets(ra *ReportAccounting, baseline, current *VariantABIRe
 	return "", "", nil
 }
 
-func evaluateVariantCompleteness(rep *VariantABIReport) (isSkipped, isUnknown bool, warning string) {
+func evaluateVariantCompleteness(rep *VariantABIReport) (isSkipped, isUnknown bool) {
 	switch rep.Completeness {
 	case MetadataSkipped:
-		return true, false, ""
+		return true, false
 	case MetadataPartial, MetadataUnsupported:
-		return false, true, fmt.Sprintf(
-			"variant %s has partial or unsupported version metadata (%s); "+
-				"complete symbol version compatibility cannot be verified",
-			EscapeMetadata(rep.Level), rep.Completeness,
-		)
+		return false, true
 	default:
-		return false, false, ""
+		return false, false
 	}
+}
+
+func formatIncompleteMetadataWarning(ra *ReportAccounting, rep *VariantABIReport) (string, error) {
+	b := newBoundedReportBuilder(ra)
+	if err := b.writeString("variant "); err != nil {
+		return "", err
+	}
+	if err := b.writeEscaped(rep.Level); err != nil {
+		return "", err
+	}
+	if err := b.writeString(" has partial or unsupported version metadata ("); err != nil {
+		return "", err
+	}
+	if err := b.writeString(string(rep.Completeness)); err != nil {
+		return "", err
+	}
+	if err := b.writeString("); complete symbol version compatibility cannot be verified"); err != nil {
+		return "", err
+	}
+	return b.string(), nil
 }
 
 func isVersionKnown(r *VariantABIReport) bool {
@@ -1260,7 +1534,7 @@ func CompareVariantABIs(reports []*VariantABIReport, allowMixedABI bool) (*Artif
 }
 
 func handleSingleReport(r *VariantABIReport, ra *ReportAccounting, artifactReport *ArtifactABIReport) (*ArtifactABIReport, error) {
-	isSkipped, isUnknown, warn := evaluateVariantCompleteness(r)
+	isSkipped, isUnknown := evaluateVariantCompleteness(r)
 	switch {
 	case isSkipped:
 		artifactReport.Status = ComparisonSkipped
@@ -1268,12 +1542,11 @@ func handleSingleReport(r *VariantABIReport, ra *ReportAccounting, artifactRepor
 	case isUnknown:
 		artifactReport.Status = ComparisonUnknown
 		artifactReport.Consistent = false
-		if warn != "" {
-			if err := ra.reserve(uint64(len(warn))); err != nil {
-				return nil, err
-			}
-			artifactReport.Warnings = append(artifactReport.Warnings, warn)
+		warn, err := formatIncompleteMetadataWarning(ra, r)
+		if err != nil {
+			return nil, err
 		}
+		artifactReport.Warnings = append(artifactReport.Warnings, warn)
 	default:
 		artifactReport.Status = ComparisonConsistent
 		artifactReport.Consistent = true
@@ -1302,15 +1575,89 @@ func compareVariantLinkages(reports []*VariantABIReport, ra *ReportAccounting) (
 		}
 	}
 	if firstStatic != nil && firstDynamic != nil {
-		diff := fmt.Sprintf("mixed static and dynamic payloads: variant %s is %s, variant %s is %s",
-			EscapeMetadata(firstStatic.Level), firstStatic.Linkage,
-			EscapeMetadata(firstDynamic.Level), firstDynamic.Linkage)
-		if err := ra.reserve(uint64(len(diff))); err != nil {
+		b := newBoundedReportBuilder(ra)
+		if err := b.writeString("mixed static and dynamic payloads: variant "); err != nil {
 			return nil, err
 		}
-		return []string{diff}, nil
+		if err := b.writeEscaped(firstStatic.Level); err != nil {
+			return nil, err
+		}
+		if err := b.writeString(" is "); err != nil {
+			return nil, err
+		}
+		if err := b.writeString(string(firstStatic.Linkage)); err != nil {
+			return nil, err
+		}
+		if err := b.writeString(", variant "); err != nil {
+			return nil, err
+		}
+		if err := b.writeEscaped(firstDynamic.Level); err != nil {
+			return nil, err
+		}
+		if err := b.writeString(" is "); err != nil {
+			return nil, err
+		}
+		if err := b.writeString(string(firstDynamic.Linkage)); err != nil {
+			return nil, err
+		}
+		return []string{b.string()}, nil
 	}
 	return nil, nil
+}
+
+func formatInterpreterConfigDiff(ra *ReportAccounting, interpRef, r *VariantABIReport) (string, error) {
+	b := newBoundedReportBuilder(ra)
+	if err := b.writeString("differing interpreter configuration: variant "); err != nil {
+		return "", err
+	}
+	if err := b.writeEscaped(interpRef.Level); err != nil {
+		return "", err
+	}
+	if err := b.writeString(" has interpreter ("); err != nil {
+		return "", err
+	}
+	if err := b.writeQuotedEscaped(interpRef.Interpreter); err != nil {
+		return "", err
+	}
+	if err := b.writeString("), variant "); err != nil {
+		return "", err
+	}
+	if err := b.writeEscaped(r.Level); err != nil {
+		return "", err
+	}
+	if err := b.writeString(" does not"); err != nil {
+		return "", err
+	}
+	return b.string(), nil
+}
+
+func formatInterpreterPathDiff(ra *ReportAccounting, interpRef, r *VariantABIReport) (string, error) {
+	b := newBoundedReportBuilder(ra)
+	if err := b.writeString("differing interpreter pathnames: variant "); err != nil {
+		return "", err
+	}
+	if err := b.writeEscaped(interpRef.Level); err != nil {
+		return "", err
+	}
+	if err := b.writeString(" requires "); err != nil {
+		return "", err
+	}
+	if err := b.writeQuotedEscaped(interpRef.Interpreter); err != nil {
+		return "", err
+	}
+	if err := b.writeString(", variant "); err != nil {
+		return "", err
+	}
+	if err := b.writeEscaped(r.Level); err != nil {
+		return "", err
+	}
+	if err := b.writeString(" requires "); err != nil {
+		return "", err
+	}
+	if err := b.writeQuotedEscaped(r.Interpreter); err != nil {
+		return "", err
+	}
+	return b.string(), nil
 }
 
 func compareVariantInterpreters(reports []*VariantABIReport, ra *ReportAccounting) ([]string, error) {
@@ -1325,17 +1672,14 @@ func compareVariantInterpreters(reports []*VariantABIReport, ra *ReportAccountin
 			hasInterp1 := interpRef.HasInterpreter || interpRef.Interpreter != ""
 			hasInterp2 := r.HasInterpreter || r.Interpreter != ""
 			if hasInterp1 != hasInterp2 {
-				diff := fmt.Sprintf("differing interpreter configuration: variant %s has interpreter (%q), variant %s does not",
-					EscapeMetadata(interpRef.Level), EscapeMetadata(interpRef.Interpreter), EscapeMetadata(r.Level))
-				if err := ra.reserve(uint64(len(diff))); err != nil {
+				diff, err := formatInterpreterConfigDiff(ra, interpRef, r)
+				if err != nil {
 					return nil, err
 				}
 				differences = append(differences, diff)
 			} else if hasInterp1 && hasInterp2 && interpRef.Interpreter != r.Interpreter {
-				diff := fmt.Sprintf("differing interpreter pathnames: variant %s requires %q, variant %s requires %q",
-					EscapeMetadata(interpRef.Level), EscapeMetadata(interpRef.Interpreter),
-					EscapeMetadata(r.Level), EscapeMetadata(r.Interpreter))
-				if err := ra.reserve(uint64(len(diff))); err != nil {
+				diff, err := formatInterpreterPathDiff(ra, interpRef, r)
+				if err != nil {
 					return nil, err
 				}
 				differences = append(differences, diff)
@@ -1345,12 +1689,14 @@ func compareVariantInterpreters(reports []*VariantABIReport, ra *ReportAccountin
 	return differences, nil
 }
 
+// isDependencyKnown will be enabled in ABI-2 commit.
+
 func compareVariantDependencies(reports []*VariantABIReport, ra *ReportAccounting) ([]string, []string, error) {
 	var differences []string
 	var warnings []string
 	var depRef *VariantABIReport
 	for _, r := range reports {
-		if r.Linkage == LinkageDynamic || (r.Linkage == "" && len(r.Dependencies) > 0) {
+		if r.Linkage == LinkageDynamic {
 			if depRef == nil {
 				depRef = r
 				continue
@@ -1383,17 +1729,173 @@ func compareVariantVersions(reports []*VariantABIReport, ra *ReportAccounting) (
 			}
 			normCurr := normalizeVersionRequirements(r.VersionRequirements)
 			if !versionRequirementsEqual(normVerRef, normCurr) {
-				diff := fmt.Sprintf("differing symbol version requirements: variant %s (%d requirements) vs variant %s (%d requirements)",
-					EscapeMetadata(verRef.Level), len(verRef.VersionRequirements),
-					EscapeMetadata(r.Level), len(r.VersionRequirements))
-				if err := ra.reserve(uint64(len(diff))); err != nil {
+				b := newBoundedReportBuilder(ra)
+				if err := b.writeString("differing symbol version requirements: variant "); err != nil {
 					return nil, err
 				}
-				differences = append(differences, diff)
+				if err := b.writeEscaped(verRef.Level); err != nil {
+					return nil, err
+				}
+				if err := b.writeString(" ("); err != nil {
+					return nil, err
+				}
+				if err := b.writeInt(len(verRef.VersionRequirements)); err != nil {
+					return nil, err
+				}
+				if err := b.writeString(" requirements) vs variant "); err != nil {
+					return nil, err
+				}
+				if err := b.writeEscaped(r.Level); err != nil {
+					return nil, err
+				}
+				if err := b.writeString(" ("); err != nil {
+					return nil, err
+				}
+				if err := b.writeInt(len(r.VersionRequirements)); err != nil {
+					return nil, err
+				}
+				if err := b.writeString(" requirements)"); err != nil {
+					return nil, err
+				}
+				differences = append(differences, b.string())
 			}
 		}
 	}
 	return differences, nil
+}
+
+func formatMismatchError(differences []string, ra *ReportAccounting) error {
+	var needed uint64 = uint64(len(ErrABIMismatch.Error()))
+	for _, d := range differences {
+		needed += uint64(len(d) + mismatchDiffBulletOverhead)
+	}
+	if err := ra.reserve(needed); err != nil {
+		return fmt.Errorf("%w: %d declared differences (detailed output omitted: %w)",
+			ErrABIMismatch, len(differences), err)
+	}
+	b := newBoundedReportBuilder(ra)
+	_ = b.writeString(ErrABIMismatch.Error())
+	for _, d := range differences {
+		_ = b.writeString("\n  • ")
+		_ = b.writeString(d)
+	}
+	return fmt.Errorf("%w:\n  • %s", ErrABIMismatch, strings.Join(differences, "\n  • "))
+}
+
+func estimateABIReportPresentationBytes(report *ArtifactABIReport) uint64 {
+	if report == nil {
+		return 0
+	}
+	var total uint64 = 512
+	for _, v := range report.Variants {
+		if v == nil {
+			continue
+		}
+		total += 256
+		total += uint64(len(v.Level) + len(v.Linkage) + len(v.Interpreter) + len(v.Completeness))
+		for i, d := range v.Dependencies {
+			if i >= 8 {
+				total += 32
+				break
+			}
+			total += uint64(len(d) + depPresentationOverhead)
+		}
+		for i, vr := range v.VersionRequirements {
+			if i >= 8 {
+				total += 32
+				break
+			}
+			total += uint64(len(vr.Library) + len(vr.Version) + versionPresentationOverhead)
+		}
+	}
+	for _, w := range report.Warnings {
+		total += uint64(len(w) + 16)
+	}
+	for _, d := range report.Differences {
+		total += uint64(len(d) + 16)
+	}
+	return total
+}
+
+func evaluateAllReportsCompleteness(
+	reports []*VariantABIReport,
+	ra *ReportAccounting,
+) (hasSkipped, hasUnknown bool, warnings []string, err error) {
+	for _, r := range reports {
+		isSkipped, isUnknownVar := evaluateVariantCompleteness(r)
+		if isSkipped {
+			hasSkipped = true
+		}
+		if isUnknownVar {
+			hasUnknown = true
+			warn, wErr := formatIncompleteMetadataWarning(ra, r)
+			if wErr != nil {
+				return false, false, nil, wErr
+			}
+			warnings = append(warnings, warn)
+		}
+		if r.Linkage == LinkageAmbiguous {
+			hasUnknown = true
+		}
+		for _, w := range r.Warnings {
+			if rErr := ra.reserve(uint64(len(w))); rErr != nil {
+				return false, false, nil, rErr
+			}
+			warnings = append(warnings, w)
+		}
+	}
+	return hasSkipped, hasUnknown, warnings, nil
+}
+
+func collectVariantDifferences(
+	reports []*VariantABIReport,
+	ra *ReportAccounting,
+) (differences, warnings []string, err error) {
+	diffs, err := compareVariantLinkages(reports, ra)
+	if err != nil {
+		return nil, nil, err
+	}
+	differences = append(differences, diffs...)
+
+	interpDiffs, err := compareVariantInterpreters(reports, ra)
+	if err != nil {
+		return nil, nil, err
+	}
+	differences = append(differences, interpDiffs...)
+
+	depDiffs, depWarns, err := compareVariantDependencies(reports, ra)
+	if err != nil {
+		return nil, nil, err
+	}
+	differences = append(differences, depDiffs...)
+	warnings = append(warnings, depWarns...)
+
+	verDiffs, err := compareVariantVersions(reports, ra)
+	if err != nil {
+		return nil, nil, err
+	}
+	differences = append(differences, verDiffs...)
+
+	return differences, warnings, nil
+}
+
+func applyOverriddenDifferences(
+	artifactReport *ArtifactABIReport,
+	differences []string,
+	ra *ReportAccounting,
+) error {
+	artifactReport.Overridden = true
+	for _, d := range differences {
+		b := newBoundedReportBuilder(ra)
+		if err := b.writeString("[OVERRIDDEN] "); err != nil {
+			return err
+		}
+		if err := b.writeString(d); err != nil {
+			return err
+		}
+		artifactReport.Warnings = append(artifactReport.Warnings, b.string())
+	}
+	return nil
 }
 
 // CompareVariantABIsWithOptions evaluates declared ABI consistency across variant reports with custom limits.
@@ -1417,64 +1919,32 @@ func CompareVariantABIsWithOptions(reports []*VariantABIReport, allowMixedABI bo
 	}
 
 	if len(reports) == 0 {
+		if err := ra.reserve(estimateABIReportPresentationBytes(artifactReport)); err != nil {
+			return nil, err
+		}
 		return artifactReport, nil
 	}
 	if len(reports) == 1 {
-		return handleSingleReport(reports[0], ra, artifactReport)
+		rep, err := handleSingleReport(reports[0], ra, artifactReport)
+		if err != nil {
+			return nil, err
+		}
+		if err := ra.reserve(estimateABIReportPresentationBytes(rep)); err != nil {
+			return nil, err
+		}
+		return rep, nil
 	}
 
-	var differences []string
-	var warnings []string
-	hasUnknown := false
-	hasSkipped := false
-
-	// Evaluate completeness and warnings for all variants
-	for _, r := range reports {
-		isSkipped, isUnknown, warn := evaluateVariantCompleteness(r)
-		if isSkipped {
-			hasSkipped = true
-		}
-		if isUnknown {
-			hasUnknown = true
-			if warn != "" {
-				if err := ra.reserve(uint64(len(warn))); err != nil {
-					return nil, err
-				}
-				warnings = append(warnings, warn)
-			}
-		}
-		for _, w := range r.Warnings {
-			if err := ra.reserve(uint64(len(w))); err != nil {
-				return nil, err
-			}
-			warnings = append(warnings, w)
-		}
-	}
-
-	diffs, err := compareVariantLinkages(reports, ra)
+	hasSkipped, hasUnknown, warnings, err := evaluateAllReportsCompleteness(reports, ra)
 	if err != nil {
 		return nil, err
 	}
-	differences = append(differences, diffs...)
 
-	interpDiffs, err := compareVariantInterpreters(reports, ra)
+	differences, depWarns, err := collectVariantDifferences(reports, ra)
 	if err != nil {
 		return nil, err
 	}
-	differences = append(differences, interpDiffs...)
-
-	depDiffs, depWarns, err := compareVariantDependencies(reports, ra)
-	if err != nil {
-		return nil, err
-	}
-	differences = append(differences, depDiffs...)
 	warnings = append(warnings, depWarns...)
-
-	verDiffs, err := compareVariantVersions(reports, ra)
-	if err != nil {
-		return nil, err
-	}
-	differences = append(differences, verDiffs...)
 
 	artifactReport.Differences = differences
 	artifactReport.Warnings = warnings
@@ -1485,15 +1955,10 @@ func CompareVariantABIsWithOptions(reports []*VariantABIReport, allowMixedABI bo
 		artifactReport.Consistent = false
 		artifactReport.Status = ComparisonInconsistent
 		if !allowMixedABI {
-			return artifactReport, fmt.Errorf("%w:\n  • %s", ErrABIMismatch, strings.Join(differences, "\n  • "))
+			return artifactReport, formatMismatchError(differences, ra)
 		}
-		artifactReport.Overridden = true
-		for _, d := range differences {
-			ovrMsg := fmt.Sprintf("[OVERRIDDEN] %s", d)
-			if err := ra.reserve(uint64(len(ovrMsg))); err != nil {
-				return nil, err
-			}
-			artifactReport.Warnings = append(artifactReport.Warnings, ovrMsg)
+		if err := applyOverriddenDifferences(artifactReport, differences, ra); err != nil {
+			return nil, err
 		}
 	case hasSkipped:
 		artifactReport.Status = ComparisonSkipped
@@ -1504,6 +1969,10 @@ func CompareVariantABIsWithOptions(reports []*VariantABIReport, allowMixedABI bo
 	default:
 		artifactReport.Status = ComparisonConsistent
 		artifactReport.Consistent = true
+	}
+
+	if err := ra.reserve(estimateABIReportPresentationBytes(artifactReport)); err != nil {
+		return nil, err
 	}
 
 	return artifactReport, nil
