@@ -121,4 +121,70 @@ func TestPrintABIReport(t *testing.T) {
 			require.Error(t, err, "expected error when failing at write %d", failAt)
 		}
 	})
+
+	t.Run("truncated dependency and version display (> 8 items)", func(t *testing.T) {
+		t.Parallel()
+		rep := &pack.ArtifactABIReport{
+			Status:     pack.ComparisonConsistent,
+			Consistent: true,
+			Variants: []*pack.VariantABIReport{
+				{
+					Level:          "v1",
+					Linkage:        pack.LinkageDynamic,
+					HasInterpreter: true,
+					Interpreter:    "/lib64/ld-linux-x86-64.so.2",
+					Dependencies: []string{
+						"lib1.so", "lib2.so", "lib3.so", "lib4.so", "lib5.so",
+						"lib6.so", "lib7.so", "lib8.so", "lib9.so", "lib10.so",
+					},
+					VersionRequirements: []pack.VersionRequirement{
+						{Library: "lib1.so", Version: "V1"},
+						{Library: "lib2.so", Version: "V2"},
+						{Library: "lib3.so", Version: "V3"},
+						{Library: "lib4.so", Version: "V4"},
+						{Library: "lib5.so", Version: "V5"},
+						{Library: "lib6.so", Version: "V6"},
+						{Library: "lib7.so", Version: "V7"},
+						{Library: "lib8.so", Version: "V8"},
+						{Library: "lib9.so", Version: "V9"},
+						{Library: "lib10.so", Version: "V10"},
+					},
+					Completeness: pack.MetadataComplete,
+				},
+			},
+		}
+		var buf bytes.Buffer
+		require.NoError(t, printABIReport(&buf, rep))
+		out := buf.String()
+		assert.Contains(t, out, "(+2 more)")
+	})
+}
+
+func TestCLI_SkipELFValidation_Warnings(t *testing.T) {
+	t.Parallel()
+
+	const expectedWarn = "[microfat] Warning: ELF architecture and declared ABI validation " +
+		"explicitly skipped via --skip-elf-validation"
+
+	t.Run("pgo pack with skip-elf-validation emits warning", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPgoPackCmd()
+		var errBuf bytes.Buffer
+		cmd.SetErr(&errBuf)
+		cmd.SetArgs([]string{"--skip-elf-validation"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, errBuf.String(), expectedWarn)
+	})
+
+	t.Run("pack with skip-elf-validation emits warning", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPackCmd()
+		var errBuf bytes.Buffer
+		cmd.SetErr(&errBuf)
+		cmd.SetArgs([]string{"--skip-elf-validation"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, errBuf.String(), expectedWarn)
+	})
 }
