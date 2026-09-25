@@ -107,7 +107,7 @@ func TestStubProfile_Conflicts(t *testing.T) {
 
 	fatOut := filepath.Join(testDir, "app.fat")
 
-	t.Run("DirectPack_StubFull_With_StubProfileMinimal_Fails", func(t *testing.T) {
+	t.Run("DirectPack_StubFull_With_StubProfileMinimal_WinsWithNotice", func(t *testing.T) {
 		cmd := exec.Command(cliPath,
 			"pack",
 			"--stub", fullStubPath,
@@ -116,11 +116,17 @@ func TestStubProfile_Conflicts(t *testing.T) {
 			"-o", fatOut,
 		)
 		out, err := cmd.CombinedOutput()
-		require.Error(t, err)
-		assert.Contains(t, string(out), "conflict")
+		require.NoError(t, err, "pack failed: %s", string(out))
+		assert.Contains(t, string(out), "automatic stub-profile selection was bypassed")
+
+		// Verify explicit full stub won: meta-commands should work
+		infoCmd := exec.Command(fatOut, "--microfat:info")
+		infoOut, infoErr := infoCmd.CombinedOutput()
+		require.NoError(t, infoErr, "info failed: %s", string(infoOut))
+		assert.Contains(t, string(infoOut), "Embedded Variants")
 	})
 
-	t.Run("DirectPack_StubMinimal_With_StubProfileFull_Fails", func(t *testing.T) {
+	t.Run("DirectPack_StubMinimal_With_StubProfileFull_WinsWithNotice", func(t *testing.T) {
 		cmd := exec.Command(cliPath,
 			"pack",
 			"--stub", minStubPath,
@@ -129,8 +135,14 @@ func TestStubProfile_Conflicts(t *testing.T) {
 			"-o", fatOut,
 		)
 		out, err := cmd.CombinedOutput()
-		require.Error(t, err)
-		assert.Contains(t, string(out), "conflict")
+		require.NoError(t, err, "pack failed: %s", string(out))
+		assert.Contains(t, string(out), "automatic stub-profile selection was bypassed")
+
+		// Verify explicit minimal stub won: meta-commands should be disabled
+		infoCmd := exec.Command(fatOut, "--microfat:info")
+		infoOut, infoErr := infoCmd.CombinedOutput()
+		require.Error(t, infoErr)
+		assert.Contains(t, string(infoOut), "meta-commands are disabled in minimal launcher stub profile")
 	})
 
 	t.Run("DirectPack_InvalidStubProfile_Fails", func(t *testing.T) {
@@ -249,7 +261,7 @@ variants:
 		assert.Contains(t, string(infoOut), "meta-commands are disabled in minimal launcher stub profile")
 	})
 
-	t.Run("PgoPack_ConflictBetweenManifestStubAndCLIProfile", func(t *testing.T) {
+	t.Run("PgoPack_ManifestStubWithCLIProfile_WinsWithNotice", func(t *testing.T) {
 		fatOut := filepath.Join(testDir, "pgo_conflict.fat")
 		manifestContent := `name: pgo-conflict
 package: ` + pkgDir + `
@@ -264,7 +276,13 @@ variants:
 
 		cmd := exec.Command(siblingCLI, "pgo-pack", "--manifest", manifestPath, "--stub-profile", "minimal", "-o", fatOut)
 		out, err := cmd.CombinedOutput()
-		require.Error(t, err)
-		assert.Contains(t, string(out), "conflict")
+		require.NoError(t, err, "pgo-pack failed: %s", string(out))
+		assert.Contains(t, string(out), "automatic stub-profile selection was bypassed")
+
+		// Manifest stub (full) wins over CLI profile: meta-commands should work
+		infoCmd := exec.Command(fatOut, "--microfat:info")
+		infoOut, infoErr := infoCmd.CombinedOutput()
+		require.NoError(t, infoErr, "info failed: %s", string(infoOut))
+		assert.Contains(t, string(infoOut), "Embedded Variants")
 	})
 }
