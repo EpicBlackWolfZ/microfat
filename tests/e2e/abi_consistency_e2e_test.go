@@ -6,11 +6,16 @@ import (
 	"bytes"
 	"debug/elf"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -44,6 +49,92 @@ func findHostDynamicELF(t *testing.T) string {
 	}
 	t.Skip("skipping dynamic ELF test: no dynamic 64-bit host ELF found")
 	return ""
+}
+
+const payloadSuccessMarker = "MICROFAT_DISCRIMINATING_PAYLOAD_SUCCESS"
+
+func findHostInterpreter(t *testing.T) string {
+	t.Helper()
+	hostELF := findHostDynamicELF(t)
+	f, err := elf.Open(hostELF)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	for _, prog := range f.Progs {
+		if prog.Type == elf.PT_INTERP {
+			buf := make([]byte, prog.Filesz)
+			_, rErr := prog.ReadAt(buf, 0)
+			require.NoError(t, rErr)
+			n := bytes.IndexByte(buf, 0)
+			if n < 0 {
+				n = len(buf)
+			}
+			interp := string(buf[:n])
+			if _, sErr := os.Stat(interp); sErr == nil {
+				return interp
+			}
+		}
+	}
+	t.Skip("skipping missing interpreter test: host interpreter not found on disk")
+	return ""
+}
+
+func classifyMissingInterpreterFailure(output string, runErr error, expectedMode string) error {
+	if runErr == nil {
+		return errors.New("expected execution to fail, but command exited successfully")
+	}
+	if strings.Contains(output, payloadSuccessMarker) {
+		return errors.New("payload success marker found in output despite reported error")
+	}
+
+	// Reject earlier-stage lifecycle, setup, extraction and permission failures
+	forbiddenPhrases := []string{
+		"permission denied",
+		"unable to initialize cache",
+		"materializing cache binary failed",
+		"decompressing payload to cache failed",
+		"checksum mismatch",
+		"integrity verification failed",
+		"unsupported microarchitecture level",
+		"memfd_create failed",
+		"sealing memfd failed",
+		"refusal to execute symlink",
+		"refusal to execute unsafe cache entry",
+	}
+	for _, phrase := range forbiddenPhrases {
+		if strings.Contains(strings.ToLower(output), phrase) {
+			return fmt.Errorf("classified as setup/security failure instead of missing interpreter: output contains %q", phrase)
+		}
+	}
+
+	// Must be an execution stage failure matching the expected execution mode
+	hasExecFailure := false
+	switch expectedMode {
+	case execModeMemfd:
+		if strings.Contains(output, `"stage":"execve_cache"`) || strings.Contains(output, "cache execve failed") {
+			hasExecFailure = false
+		} else if strings.Contains(output, `"stage":"execve_memfd"`) || strings.Contains(output, `"stage":"memfd_exec"`) ||
+			strings.Contains(output, "execve failed on /proc/self/fd/") || strings.Contains(output, "execve on /proc/self/fd/") {
+			hasExecFailure = true
+		}
+	case execModeCache:
+		if strings.Contains(output, `"stage":"execve_cache"`) || strings.Contains(output, `"stage":"cache_exec"`) ||
+			strings.Contains(output, "cache execve failed") {
+			hasExecFailure = true
+		}
+	default:
+		return fmt.Errorf("unknown expected mode: %q", expectedMode)
+	}
+
+	if !hasExecFailure {
+		return fmt.Errorf("failure occurred outside expected %s execution stage: %s", expectedMode, output)
+	}
+
+	// Must identify missing file / interpreter (ENOENT)
+	if !strings.Contains(output, "no such file or directory") && !strings.Contains(output, "ENOENT") {
+		return fmt.Errorf("execution error does not identify missing interpreter (ENOENT): %s", output)
+	}
+
+	return nil
 }
 
 func isStaticELF(t *testing.T, path string) bool {
@@ -411,29 +502,74 @@ func TestABI_RuntimeAcceptance_MissingInterpreter(t *testing.T) {
 	if err != nil {
 		t.Skip("skipping missing interpreter test: gcc not found in PATH")
 	}
+	hostInterp := findHostInterpreter(t)
 
 	dir := t.TempDir()
-	mainSource := "int main(void) { return 0; }\n"
+	interpLink := filepath.Join(dir, "ld-private.so")
+	require.NoError(t, os.Symlink(hostInterp, interpLink))
+
+	mainSource := `#include <stdio.h>
+int main(void) {
+    puts("` + payloadSuccessMarker + `");
+    return 0;
+}
+`
 	mainSourcePath := filepath.Join(dir, "main.c")
 	require.NoError(t, os.WriteFile(mainSourcePath, []byte(mainSource), privateFilePerm))
 
-	const fakeInterp = "/opt/microfat-nonexistent-interpreter.so.1"
 	payloadPath := filepath.Join(dir, "missing_interp_payload")
-	cmdApp := exec.Command(gccPath, mainSourcePath, "-Wl,--dynamic-linker="+fakeInterp, "-o", payloadPath)
+	cmdApp := exec.Command(gccPath, mainSourcePath, "-Wl,--dynamic-linker="+interpLink, "-o", payloadPath)
 	outApp, err := cmdApp.CombinedOutput()
 	require.NoError(t, err, "compiling missing interpreter payload failed: %s", string(outApp))
 
-	// Raw payload execution fails directly because kernel cannot find dynamic linker
-	rawCmd := exec.Command(payloadPath)
-	_, rawErr := rawCmd.CombinedOutput()
-	require.Error(t, rawErr, "raw execution with non-existent interpreter must fail")
+	// Verify compiled payload metadata
+	payloadELF, elfErr := elf.Open(payloadPath)
+	require.NoError(t, elfErr)
+	var foundInterp string
+	for _, prog := range payloadELF.Progs {
+		if prog.Type == elf.PT_INTERP {
+			buf := make([]byte, prog.Filesz)
+			_, rErr := prog.ReadAt(buf, 0)
+			require.NoError(t, rErr)
+			n := bytes.IndexByte(buf, 0)
+			if n < 0 {
+				n = len(buf)
+			}
+			foundInterp = string(buf[:n])
+		}
+	}
+	_ = payloadELF.Close()
+	require.Equal(t, interpLink, foundInterp, "payload must point to private interpreter symlink")
+
+	// Phase 1: Positive execution while symlink exists
+	rawPosOut, rawPosErr := exec.Command(payloadPath).CombinedOutput()
+	require.NoError(t, rawPosErr, "raw positive execution failed: %s", string(rawPosOut))
+	require.Contains(t, string(rawPosOut), payloadSuccessMarker)
 
 	minimalStub := filepath.Join(dir, "stub-minimal")
 	require.NoError(t, compileBinaryWithFlags(stubPackagePath, minimalStub, nil, "-tags=minimal", "-ldflags=-s -w"))
 
 	v1Label, _ := hostVariantLabels()
 
-	for _, sc := range []struct{ name, stub string }{{launcherFullProfile, stubPath}, {launcherMinimalProfile, minimalStub}} {
+	type stubConfig struct {
+		name string
+		stub string
+	}
+	stubs := []stubConfig{
+		{launcherFullProfile, stubPath},
+		{launcherMinimalProfile, minimalStub},
+	}
+	modes := []string{execModeMemfd, execModeCache}
+
+	type packedArtifact struct {
+		name   string
+		path   string
+		stub   string
+		caches map[string]string
+	}
+	var packedList []packedArtifact
+
+	for _, sc := range stubs {
 		fatBin := filepath.Join(dir, "fat-missing-interp-"+sc.name)
 		packCmd := exec.Command(cliPath, "pack",
 			"--arch", currentHostArch,
@@ -448,20 +584,160 @@ func TestABI_RuntimeAcceptance_MissingInterpreter(t *testing.T) {
 		verifyOut, vErr := verifyCmd.CombinedOutput()
 		require.NoError(t, vErr, "integrity verification must succeed: %s", string(verifyOut))
 
-		for _, mode := range []string{execModeMemfd, execModeCache} {
+		pa := packedArtifact{
+			name:   sc.name,
+			path:   fatBin,
+			stub:   sc.stub,
+			caches: make(map[string]string),
+		}
+
+		for _, mode := range modes {
 			privateCache := filepath.Join(dir, "cache-"+sc.name+"-"+mode)
 			require.NoError(t, os.MkdirAll(privateCache, privateDirPerm))
+			pa.caches[mode] = privateCache
 
+			// Run positive packaged control
 			runCmd := exec.Command(fatBin)
 			runCmd.Env = []string{
 				"PATH=" + os.Getenv("PATH"),
 				"XDG_CACHE_HOME=" + privateCache,
+				"MICROFAT_CACHE_DIR=" + privateCache,
 				"MICROFAT_EXEC_MODE=" + mode,
+				"MICROFAT_LOG=json",
 			}
-			_, runErr := runCmd.CombinedOutput()
-			require.Error(t, runErr, "dispatched execution with non-existent interpreter must fail (%s, %s)", sc.name, mode)
+			posOut, posErr := runCmd.CombinedOutput()
+			require.NoError(t, posErr, "positive packaged execution must succeed (%s, %s): %s", sc.name, mode, string(posOut))
+			require.Contains(t, string(posOut), payloadSuccessMarker)
+		}
+		packedList = append(packedList, pa)
+	}
+
+	// Phase 2: Negative execution after removing ONLY the private interpreter symlink
+	require.NoError(t, os.Remove(interpLink))
+	_, statErr := os.Lstat(interpLink)
+	require.True(t, os.IsNotExist(statErr), "private interpreter symlink must be removed")
+
+	// Verify all payload and packed executables STILL exist
+	_, pStat := os.Stat(payloadPath)
+	require.NoError(t, pStat, "payload file must still exist")
+	for _, pa := range packedList {
+		_, fStat := os.Stat(pa.path)
+		require.NoError(t, fStat, "fat binary %s must still exist", pa.name)
+	}
+
+	// Raw negative execution must fail because dynamic linker is missing (ENOENT)
+	rawNegCmd := exec.Command(payloadPath)
+	rawNegOut, rawNegErr := rawNegCmd.CombinedOutput()
+	require.Error(t, rawNegErr, "raw execution with missing interpreter must fail")
+	require.NotContains(t, string(rawNegOut), payloadSuccessMarker)
+	require.True(t, errors.Is(rawNegErr, syscall.ENOENT) || errors.Is(rawNegErr, os.ErrNotExist) ||
+		strings.Contains(rawNegErr.Error(), "no such file or directory"),
+		"raw error must indicate ENOENT / missing file: %v", rawNegErr)
+
+	// Packaged negative execution must fail at the execve stage with classified error
+	for _, pa := range packedList {
+		for _, mode := range modes {
+			negCmd := exec.Command(pa.path)
+			negCmd.Env = []string{
+				"PATH=" + os.Getenv("PATH"),
+				"XDG_CACHE_HOME=" + pa.caches[mode],
+				"MICROFAT_CACHE_DIR=" + pa.caches[mode],
+				"MICROFAT_EXEC_MODE=" + mode,
+				"MICROFAT_LOG=json",
+			}
+			negOut, negErr := negCmd.CombinedOutput()
+			require.Error(t, negErr, "dispatched execution with missing interpreter must fail (%s, %s)", pa.name, mode)
+			classErr := classifyMissingInterpreterFailure(string(negOut), negErr, mode)
+			require.NoError(t, classErr, "packaged failure must classify cleanly as missing interpreter (%s, %s): %s", pa.name, mode, string(negOut))
 		}
 	}
+
+	// Phase 3: Restored execution after recreating the private interpreter symlink
+	require.NoError(t, os.Symlink(hostInterp, interpLink))
+
+	rawRestOut, rawRestErr := exec.Command(payloadPath).CombinedOutput()
+	require.NoError(t, rawRestErr, "raw execution after interpreter restoration must succeed: %s", string(rawRestOut))
+	require.Contains(t, string(rawRestOut), payloadSuccessMarker)
+
+	for _, pa := range packedList {
+		for _, mode := range modes {
+			restCmd := exec.Command(pa.path)
+			restCmd.Env = []string{
+				"PATH=" + os.Getenv("PATH"),
+				"XDG_CACHE_HOME=" + pa.caches[mode],
+				"MICROFAT_CACHE_DIR=" + pa.caches[mode],
+				"MICROFAT_EXEC_MODE=" + mode,
+				"MICROFAT_LOG=json",
+			}
+			restOut, restErr := restCmd.CombinedOutput()
+			require.NoError(t, restErr, "restored packaged execution must succeed (%s, %s): %s", pa.name, mode, string(restOut))
+			require.Contains(t, string(restOut), payloadSuccessMarker)
+		}
+	}
+}
+
+func TestABI_MissingInterpreter_ClassifierMatrix(t *testing.T) {
+	t.Parallel()
+
+	dummyExitErr := errors.New("exit status 1")
+
+	t.Run("valid_memfd_exec_failure", func(t *testing.T) {
+		out := `[microfat] {"event":"error","stage":"memfd_exec","error":"execve on /proc/self/fd/3 failed: no such file or directory"}`
+		require.NoError(t, classifyMissingInterpreterFailure(out, dummyExitErr, execModeMemfd))
+	})
+
+	t.Run("valid_cache_exec_failure", func(t *testing.T) {
+		out := `[microfat] {"event":"error","stage":"cache_exec","error":"cache execve failed on /proc/self/fd/4: no such file or directory"}`
+		require.NoError(t, classifyMissingInterpreterFailure(out, dummyExitErr, execModeCache))
+	})
+
+	t.Run("successful_exit_rejected", func(t *testing.T) {
+		out := `success`
+		err := classifyMissingInterpreterFailure(out, nil, execModeMemfd)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expected execution to fail")
+	})
+
+	t.Run("success_marker_present_rejected", func(t *testing.T) {
+		out := `[microfat] {"stage":"memfd_exec","error":"no such file or directory"}` + payloadSuccessMarker
+		err := classifyMissingInterpreterFailure(out, dummyExitErr, execModeMemfd)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "payload success marker found")
+	})
+
+	t.Run("earlier_stage_permission_denied_rejected", func(t *testing.T) {
+		out := `[microfat] {"stage":"memfd_create","error":"memfd_create failed: permission denied"}`
+		err := classifyMissingInterpreterFailure(out, dummyExitErr, execModeMemfd)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "classified as setup/security failure")
+	})
+
+	t.Run("earlier_stage_cache_dir_init_rejected", func(t *testing.T) {
+		out := `[microfat] {"stage":"cache_dir_init","error":"unable to initialize cache: permission denied"}`
+		err := classifyMissingInterpreterFailure(out, dummyExitErr, execModeCache)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "classified as setup/security failure")
+	})
+
+	t.Run("earlier_stage_integrity_failure_rejected", func(t *testing.T) {
+		out := `[microfat] {"stage":"integrity","error":"integrity verification failed: checksum mismatch"}`
+		err := classifyMissingInterpreterFailure(out, dummyExitErr, execModeMemfd)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "classified as setup/security failure")
+	})
+
+	t.Run("wrong_execution_mode_rejected", func(t *testing.T) {
+		out := `[microfat] {"stage":"cache_exec","error":"cache execve failed on /proc/self/fd/4: no such file or directory"}`
+		err := classifyMissingInterpreterFailure(out, dummyExitErr, execModeMemfd)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failure occurred outside expected memfd execution stage")
+	})
+
+	t.Run("empty_stderr_arbitrary_exit_rejected", func(t *testing.T) {
+		err := classifyMissingInterpreterFailure("", dummyExitErr, execModeMemfd)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failure occurred outside expected memfd execution stage")
+	})
 }
 
 func TestABI_GenuineMismatchPackagingMatrix(t *testing.T) {
