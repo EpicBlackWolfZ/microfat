@@ -482,7 +482,7 @@ func newTrimCmd() *cobra.Command {
 }
 
 func validateEmptyStubFlags(cmd *cobra.Command, flags builder.BuildOptions) error {
-	if cmd.Flags().Changed("stub") && strings.TrimSpace(flags.StubPath) == "" {
+	if cmd.Flags().Changed("stub") && flags.StubPath == "" {
 		return errors.New("flag --stub cannot be empty")
 	}
 	if cmd.Flags().Changed("stub-profile") && strings.TrimSpace(flags.StubProfile) == "" {

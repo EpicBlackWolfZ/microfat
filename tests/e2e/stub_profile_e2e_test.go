@@ -35,6 +35,7 @@ func TestStubProfile_DirectPack_AutoDiscoveryAndExecution(t *testing.T) {
 		fatOut := filepath.Join(testDir, "app_minimal.fat")
 		cmd := exec.Command(siblingCLI,
 			"pack",
+			"--arch", currentHostArch,
 			"--stub-profile", "minimal",
 			"-v", currentHostLevel+"="+goldenVariantBins[currentHostLevel],
 			"-o", fatOut,
@@ -63,6 +64,7 @@ func TestStubProfile_DirectPack_AutoDiscoveryAndExecution(t *testing.T) {
 		fatOut := filepath.Join(testDir, "app_full.fat")
 		cmd := exec.Command(siblingCLI,
 			"pack",
+			"--arch", currentHostArch,
 			"--stub-profile", "full",
 			"-v", currentHostLevel+"="+goldenVariantBins[currentHostLevel],
 			"-o", fatOut,
@@ -85,6 +87,7 @@ func TestStubProfile_DirectPack_AutoDiscoveryAndExecution(t *testing.T) {
 		fatOut := filepath.Join(testDir, "app_default.fat")
 		cmd := exec.Command(siblingCLI,
 			"pack",
+			"--arch", currentHostArch,
 			"-v", currentHostLevel+"="+goldenVariantBins[currentHostLevel],
 			"-o", fatOut,
 		)
@@ -110,6 +113,7 @@ func TestStubProfile_Conflicts(t *testing.T) {
 	t.Run("DirectPack_StubFull_With_StubProfileMinimal_WinsWithNotice", func(t *testing.T) {
 		cmd := exec.Command(cliPath,
 			"pack",
+			"--arch", currentHostArch,
 			"--stub", fullStubPath,
 			"--stub-profile", "minimal",
 			"-v", currentHostLevel+"="+goldenVariantBins[currentHostLevel],
@@ -129,6 +133,7 @@ func TestStubProfile_Conflicts(t *testing.T) {
 	t.Run("DirectPack_StubMinimal_With_StubProfileFull_WinsWithNotice", func(t *testing.T) {
 		cmd := exec.Command(cliPath,
 			"pack",
+			"--arch", currentHostArch,
 			"--stub", minStubPath,
 			"--stub-profile", "full",
 			"-v", currentHostLevel+"="+goldenVariantBins[currentHostLevel],
@@ -148,6 +153,7 @@ func TestStubProfile_Conflicts(t *testing.T) {
 	t.Run("DirectPack_InvalidStubProfile_Fails", func(t *testing.T) {
 		cmd := exec.Command(cliPath,
 			"pack",
+			"--arch", currentHostArch,
 			"--stub-profile", "invalid_profile",
 			"-v", currentHostLevel+"="+goldenVariantBins[currentHostLevel],
 			"-o", fatOut,
@@ -175,6 +181,7 @@ func TestStubProfile_MissingCompanionAssets(t *testing.T) {
 
 	cmd := exec.Command(siblingCLI,
 		"pack",
+		"--arch", currentHostArch,
 		"--stub-profile", "minimal",
 		"-v", currentHostLevel+"="+goldenVariantBins[currentHostLevel],
 		"-o", fatOut,

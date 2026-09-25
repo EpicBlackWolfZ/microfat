@@ -31,21 +31,24 @@ import (
 )
 
 const (
-	flagJSON     = "--json"
-	flagLevel    = "--level"
-	flagCacheDir = "--cache-dir"
-	flagOutput   = "--output"
-	flagSkipELF  = "--skip-elf-validation"
-	flagManifest = "--manifest"
-	flagVerify   = "--verify"
-	flagStub     = "--stub"
-	flagName     = "--name"
+	flagJSON        = "--json"
+	flagLevel       = "--level"
+	flagCacheDir    = "--cache-dir"
+	flagOutput      = "--output"
+	flagSkipELF     = "--skip-elf-validation"
+	flagManifest    = "--manifest"
+	flagVerify      = "--verify"
+	flagStub        = "--stub"
+	flagStubProfile = "--stub-profile"
+	flagName        = "--name"
 
 	testBinaryMicrofat = "microfat"
 	testOSLinux        = "linux"
 	testArchAMD64      = "amd64"
 	testArchARM64      = "arm64"
 	subcmdDetect       = "detect"
+	testOutPath        = "out"
+	testVariantV1P     = "v1=p"
 )
 
 func TestMain(m *testing.M) {
@@ -813,8 +816,8 @@ variants:
 
 	packManifestCmd := newPackCmd()
 	packManifestCmd.SetArgs([]string{
-		"--manifest", manifestFile,
-		"--skip-elf-validation",
+		flagManifest, manifestFile,
+		flagSkipELF,
 	})
 	// This will fail on compile because it's a test environment without full source, but it validates flag parsing & manifest wiring
 	_ = packManifestCmd.Execute()
@@ -1720,31 +1723,68 @@ func TestValidateEmptyStubFlags(t *testing.T) {
 
 	// 1. pack --stub ""
 	packCmd := newPackCmd()
-	packCmd.SetArgs([]string{"--stub", "", "-o", "out", "-v", "v1=p"})
+	packCmd.SetArgs([]string{flagStub, "", "-o", testOutPath, "-v", testVariantV1P})
 	err := packCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub cannot be empty")
+
+	// pack --stub=
+	packCmdEq := newPackCmd()
+	packCmdEq.SetArgs([]string{"--stub=", "-o", testOutPath, "-v", testVariantV1P})
+	err = packCmdEq.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "flag --stub cannot be empty")
 
 	// 2. pack --stub-profile ""
 	packCmd2 := newPackCmd()
-	packCmd2.SetArgs([]string{"--stub-profile", "", "-o", "out", "-v", "v1=p"})
+	packCmd2.SetArgs([]string{flagStubProfile, "", "-o", testOutPath, "-v", testVariantV1P})
 	err = packCmd2.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub-profile cannot be empty")
+
+	// pack --stub-profile "   " (whitespace-only profile is rejected)
+	packCmdProfileWS := newPackCmd()
+	packCmdProfileWS.SetArgs([]string{flagStubProfile, "   ", "-o", testOutPath, "-v", testVariantV1P})
+	err = packCmdProfileWS.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "flag --stub-profile cannot be empty")
 
 	// 3. pgo-pack --stub ""
 	pgoCmd := newPgoPackCmd()
-	pgoCmd.SetArgs([]string{"--stub", "", "--manifest", "m.yaml"})
+	pgoCmd.SetArgs([]string{flagStub, "", flagManifest, "m.yaml"})
 	err = pgoCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub cannot be empty")
+
+	// pgo-pack --stub=
+	pgoCmdEq := newPgoPackCmd()
+	pgoCmdEq.SetArgs([]string{"--stub=", flagManifest, "m.yaml"})
+	err = pgoCmdEq.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "flag --stub cannot be empty")
 
 	// 4. pgo-pack --stub-profile ""
 	pgoCmd2 := newPgoPackCmd()
-	pgoCmd2.SetArgs([]string{"--stub-profile", "", "--manifest", "m.yaml"})
+	pgoCmd2.SetArgs([]string{flagStubProfile, "", flagManifest, "m.yaml"})
 	err = pgoCmd2.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "flag --stub-profile cannot be empty")
+
+	// pgo-pack --stub-profile "   "
+	pgoCmdProfileWS := newPgoPackCmd()
+	pgoCmdProfileWS.SetArgs([]string{flagStubProfile, "   ", flagManifest, "m.yaml"})
+	err = pgoCmdProfileWS.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub-profile cannot be empty")
+
+	// 5. Bare whitespace-only --stub " " is treated as data, not empty
+	packCmdWS := newPackCmd()
+	packCmdWS.SetArgs([]string{flagStub, " ", "-o", testOutPath, "-v", testVariantV1P})
+	err = packCmdWS.Execute()
+	require.Error(t, err)
+	// It must NOT fail with "flag --stub cannot be empty"; it must fail because the file " " was not found
+	assert.NotContains(t, err.Error(), "flag --stub cannot be empty")
+	assert.Contains(t, err.Error(), "launcher stub")
 }
 
 func TestTrimEmptyOutputPath(t *testing.T) {
