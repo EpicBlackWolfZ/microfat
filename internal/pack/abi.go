@@ -832,6 +832,7 @@ func parseVernauxChain(
 	order binary.ByteOrder,
 	verneedOff, availableBytes, currVernauxOff uint64,
 	vnCnt uint16,
+	parentVerneedOff uint64,
 	libName string,
 	strtab []byte,
 	strtabSize uint64,
@@ -844,8 +845,12 @@ func parseVernauxChain(
 		if err := acc.chargeVersionRecord(); err != nil {
 			return err
 		}
-		if currVernauxOff < verneedOff || currVernauxOff+vernauxEntrySize > verneedOff+availableBytes {
+		maxVernaux := (verneedOff + availableBytes) - uint64(vernauxEntrySize)
+		if availableBytes < uint64(vernauxEntrySize) || currVernauxOff < verneedOff || currVernauxOff > maxVernaux {
 			return fmt.Errorf("%w: Elf64_Vernaux entry %d offset out of bounds", ErrABIMetadata, auxIdx)
+		}
+		if currVernauxOff < parentVerneedOff+uint64(verneedEntrySize) && currVernauxOff+uint64(vernauxEntrySize) > parentVerneedOff {
+			return fmt.Errorf("%w: Elf64_Vernaux entry %d overlaps containing Elf64_Verneed parent record", ErrABIMetadata, auxIdx)
 		}
 		if visitedVernaux[currVernauxOff] {
 			return fmt.Errorf("%w: cycle detected in Elf64_Vernaux chain at offset 0x%x", ErrABIMetadata, currVernauxOff)
@@ -864,6 +869,9 @@ func parseVernauxChain(
 			return fmt.Errorf("%w: vna_name string at offset %d is not NUL-terminated", ErrABIMetadata, vnaName)
 		}
 		verLen := uint64(nameNul)
+		if verLen == 0 {
+			return fmt.Errorf("%w: vna_name string at offset %d is empty", ErrABIMetadata, vnaName)
+		}
 		if err := acc.chargeString(verLen); err != nil {
 			return err
 		}
@@ -888,6 +896,50 @@ func parseVernauxChain(
 		} else if vnaNext != 0 {
 			return fmt.Errorf("%w: contradictory termination of Elf64_Vernaux chain: vna_next != 0 on last entry", ErrABIMetadata)
 		}
+	}
+	return nil
+}
+
+func advanceVerneedOffset(
+	recordIdx, verneedNum uint64,
+	currVerneedOff uint64,
+	vnNext uint32,
+	verneedOff, availableBytes uint64,
+) (uint64, error) {
+	if recordIdx < verneedNum-1 {
+		if vnNext == 0 {
+			return 0, fmt.Errorf("%w: premature termination of Elf64_Verneed chain (expected %d records, stopped at %d)",
+				ErrABIMetadata, verneedNum, recordIdx+1)
+		}
+		nextOff, aErr := advanceELFRelativeOffset(currVerneedOff, vnNext, verneedOff, verneedOff+availableBytes, verneedEntrySize)
+		if aErr != nil {
+			return 0, fmt.Errorf("%w: Elf64_Verneed entry %d offset: %w", ErrABIMetadata, recordIdx+1, aErr)
+		}
+		return nextOff, nil
+	}
+	if vnNext != 0 {
+		return 0, fmt.Errorf("%w: contradictory termination of Elf64_Verneed chain: vn_next != 0 on last record", ErrABIMetadata)
+	}
+	return currVerneedOff, nil
+}
+
+func validateVerneedAuxOffset(
+	vnCnt uint16,
+	vnAux uint32,
+	recordIdx uint64,
+	currVerneedOff, verneedOff, availableBytes uint64,
+) error {
+	if vnCnt == 0 {
+		return nil
+	}
+	if uint64(vnAux) < uint64(verneedEntrySize) {
+		return fmt.Errorf("%w: Elf64_Verneed entry %d has invalid vn_aux %d overlapping parent record",
+			ErrABIMetadata, recordIdx, vnAux)
+	}
+	remBytes := (verneedOff + availableBytes) - currVerneedOff
+	if remBytes < uint64(vernauxEntrySize) || uint64(vnAux) > remBytes-uint64(vernauxEntrySize) {
+		return fmt.Errorf("%w: Elf64_Verneed entry %d auxiliary offset %d out of bounds",
+			ErrABIMetadata, recordIdx, vnAux)
 	}
 	return nil
 }
@@ -933,7 +985,8 @@ func parseVerneed(
 		if err := acc.chargeVersionRecord(); err != nil {
 			return err
 		}
-		if currVerneedOff < verneedOff || currVerneedOff+verneedEntrySize > verneedOff+availableBytes {
+		maxVerneed := (verneedOff + availableBytes) - uint64(verneedEntrySize)
+		if availableBytes < uint64(verneedEntrySize) || currVerneedOff < verneedOff || currVerneedOff > maxVerneed {
 			return fmt.Errorf("%w: Elf64_Verneed entry %d offset out of bounds", ErrABIMetadata, recordIdx)
 		}
 		if visitedVerneed[currVerneedOff] {
@@ -952,6 +1005,11 @@ func parseVerneed(
 		vnAux := order.Uint32(data[currVerneedOff+8 : currVerneedOff+12])
 		vnNext := order.Uint32(data[currVerneedOff+12 : currVerneedOff+16])
 
+		// Validate auxiliary offset structurally before decoding names when vnCnt > 0
+		if err := validateVerneedAuxOffset(vnCnt, vnAux, recordIdx, currVerneedOff, verneedOff, availableBytes); err != nil {
+			return err
+		}
+
 		if uint64(vnFile) >= strtabSize {
 			return fmt.Errorf("%w: vn_file string offset %d out of bounds", ErrABIMetadata, vnFile)
 		}
@@ -960,37 +1018,29 @@ func parseVerneed(
 			return fmt.Errorf("%w: vn_file string at offset %d is not NUL-terminated", ErrABIMetadata, vnFile)
 		}
 		libLen := uint64(fileNul)
+		if libLen == 0 {
+			return fmt.Errorf("%w: vn_file string at offset %d is empty", ErrABIMetadata, vnFile)
+		}
 		if err := acc.chargeString(libLen); err != nil {
 			return err
 		}
 		libName := string(strtab[vnFile : uint64(vnFile)+libLen])
 
 		if vnCnt > 0 {
-			if uint64(vnAux) < vernauxEntrySize && vnAux != 0 {
-				return fmt.Errorf("%w: invalid vn_aux offset %d", ErrABIMetadata, vnAux)
-			}
 			currVernauxOff := currVerneedOff + uint64(vnAux)
 			if err := parseVernauxChain(
 				data, order, verneedOff, availableBytes, currVernauxOff,
-				vnCnt, libName, strtab, strtabSize, acc, report,
+				vnCnt, currVerneedOff, libName, strtab, strtabSize, acc, report,
 			); err != nil {
 				return err
 			}
 		}
 
-		if recordIdx < verneedNum-1 {
-			if vnNext == 0 {
-				return fmt.Errorf("%w: premature termination of Elf64_Verneed chain (expected %d records, stopped at %d)",
-					ErrABIMetadata, verneedNum, recordIdx+1)
-			}
-			nextOff, aErr := advanceELFRelativeOffset(currVerneedOff, vnNext, verneedOff, verneedOff+availableBytes, verneedEntrySize)
-			if aErr != nil {
-				return fmt.Errorf("%w: Elf64_Verneed entry %d offset: %w", ErrABIMetadata, recordIdx+1, aErr)
-			}
-			currVerneedOff = nextOff
-		} else if vnNext != 0 {
-			return fmt.Errorf("%w: contradictory termination of Elf64_Verneed chain: vn_next != 0 on last record", ErrABIMetadata)
+		nextOff, err := advanceVerneedOffset(recordIdx, verneedNum, currVerneedOff, vnNext, verneedOff, availableBytes)
+		if err != nil {
+			return err
 		}
+		currVerneedOff = nextOff
 	}
 
 	if report.Completeness != MetadataUnsupported {

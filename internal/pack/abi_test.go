@@ -1896,14 +1896,14 @@ func TestInspectELFABI_AdditionalExhaustiveBranches(t *testing.T) {
 		// Version records limit
 		accRec := &inputAccounting{versionRecords: MaxVersionRecordsPerInput}
 		err := parseVernauxChain(
-			data, binary.LittleEndian, 100, 100, 100, 1, testLibc, strtab, uint64(len(strtab)), accRec, &VariantABIReport{},
+			data, binary.LittleEndian, 100, 100, 100, 1, 0, testLibc, strtab, uint64(len(strtab)), accRec, &VariantABIReport{},
 		)
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrABIResourceLimit))
 
 		// currVernauxOff out of bounds
 		err = parseVernauxChain(
-			data, binary.LittleEndian, 100, 50, 200, 1, testLibc, strtab, uint64(len(strtab)), &inputAccounting{}, &VariantABIReport{},
+			data, binary.LittleEndian, 100, 50, 200, 1, 0, testLibc, strtab, uint64(len(strtab)), &inputAccounting{}, &VariantABIReport{},
 		)
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrABIMetadata))
@@ -1911,7 +1911,7 @@ func TestInspectELFABI_AdditionalExhaustiveBranches(t *testing.T) {
 		// vna_name not NUL-terminated
 		strtabNoNul := []byte(testLibc + "\x00GLIBC_NO_NUL")
 		err = parseVernauxChain(
-			data, binary.LittleEndian, 100, 100, 100, 1, testLibc, strtabNoNul, uint64(len(strtabNoNul)), &inputAccounting{}, &VariantABIReport{},
+			data, binary.LittleEndian, 100, 100, 100, 1, 0, testLibc, strtabNoNul, uint64(len(strtabNoNul)), &inputAccounting{}, &VariantABIReport{},
 		)
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrABIMetadata))
@@ -1919,14 +1919,14 @@ func TestInspectELFABI_AdditionalExhaustiveBranches(t *testing.T) {
 		// String budget exceeded
 		accStr := &inputAccounting{retainedStringBytes: MaxABIStringBytesPerInput}
 		err = parseVernauxChain(
-			data, binary.LittleEndian, 100, 100, 100, 1, testLibc, strtab, uint64(len(strtab)), accStr, &VariantABIReport{},
+			data, binary.LittleEndian, 100, 100, 100, 1, 0, testLibc, strtab, uint64(len(strtab)), accStr, &VariantABIReport{},
 		)
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrABIResourceLimit))
 
 		// advanceELFRelativeOffset error when vn_cnt > 1
 		err = parseVernauxChain(
-			data, binary.LittleEndian, 100, 100, 100, 2, testLibc, strtab, uint64(len(strtab)), &inputAccounting{}, &VariantABIReport{},
+			data, binary.LittleEndian, 100, 100, 100, 2, 0, testLibc, strtab, uint64(len(strtab)), &inputAccounting{}, &VariantABIReport{},
 		)
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrABIMetadata))
@@ -1987,7 +1987,7 @@ func TestInspectELFABI_AdditionalExhaustiveBranches(t *testing.T) {
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrABIResourceLimit))
 
-		// Invalid vn_aux offset (< 16 and != 0)
+		// Invalid vn_aux offset (< 16 when vn_cnt > 0)
 		binary.LittleEndian.PutUint16(data[2:4], 1)  // vn_cnt = 1
 		binary.LittleEndian.PutUint32(data[8:12], 4) // vn_aux = 4 (< 16)
 		err = parseVerneed(data, loads, 1000, binary.LittleEndian, 0x1000, 1, strtab, &inputAccounting{}, &VariantABIReport{})
@@ -1995,6 +1995,7 @@ func TestInspectELFABI_AdditionalExhaustiveBranches(t *testing.T) {
 		assert.True(t, errors.Is(err, ErrABIMetadata))
 
 		// advanceELFRelativeOffset error when verneedNum > 1
+		binary.LittleEndian.PutUint16(data[2:4], 0)        // vn_cnt = 0 (legitimate zero count)
 		binary.LittleEndian.PutUint32(data[8:12], 0)       // vn_aux = 0
 		binary.LittleEndian.PutUint32(data[12:16], 999999) // vn_next invalid
 		err = parseVerneed(data, loads, 1000, binary.LittleEndian, 0x1000, 2, strtab, &inputAccounting{}, &VariantABIReport{})

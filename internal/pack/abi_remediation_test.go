@@ -460,3 +460,325 @@ func TestValidatePayloadABIs_ErrorBranches(t *testing.T) {
 		assert.Contains(t, err.Error(), "inspecting declared ABI for variant v1")
 	})
 }
+
+// buildTestELFWithVerneed constructs a minimal valid 64-bit LE ELF binary with PT_DYNAMIC,
+// DT_STRTAB, DT_STRSZ, DT_VERNEED, and DT_VERNEEDNUM pointing to the provided verneed and strtab bytes.
+func buildTestELFWithVerneed(verneedBytes, strtabBytes []byte) []byte {
+	eh := make([]byte, 64)
+	copy(eh[:4], []byte{0x7f, 'E', 'L', 'F'})
+	eh[4] = 2 // 64-bit
+	eh[5] = 1 // LE
+	eh[6] = 1 // EV_CURRENT
+	binary.LittleEndian.PutUint16(eh[16:18], uint16(elf.ET_DYN))
+	binary.LittleEndian.PutUint16(eh[18:20], uint16(elf.EM_X86_64))
+	binary.LittleEndian.PutUint32(eh[20:24], 1)
+	binary.LittleEndian.PutUint64(eh[32:40], 64) // e_phoff
+	binary.LittleEndian.PutUint16(eh[52:54], 64) // e_ehsize
+	binary.LittleEndian.PutUint16(eh[54:56], 56) // e_phentsize
+	binary.LittleEndian.PutUint16(eh[56:58], 2)  // e_phnum (LOAD, DYNAMIC)
+	binary.LittleEndian.PutUint16(eh[58:60], 64) // e_shentsize
+	binary.LittleEndian.PutUint16(eh[60:62], 0)  // e_shnum
+
+	phLoad := make([]byte, 56)
+	binary.LittleEndian.PutUint32(phLoad[0:4], uint32(elf.PT_LOAD))
+	binary.LittleEndian.PutUint32(phLoad[4:8], 7)
+	binary.LittleEndian.PutUint64(phLoad[8:16], 0)
+	binary.LittleEndian.PutUint64(phLoad[16:24], 0x400000)
+	binary.LittleEndian.PutUint64(phLoad[24:32], 0x400000)
+
+	phDyn := make([]byte, 56)
+	binary.LittleEndian.PutUint32(phDyn[0:4], uint32(elf.PT_DYNAMIC))
+	binary.LittleEndian.PutUint32(phDyn[4:8], 6)
+	dynOffset := uint64(64 + 56*2) // 176
+	dynVaddr := 0x400000 + dynOffset
+	binary.LittleEndian.PutUint64(phDyn[8:16], dynOffset)
+	binary.LittleEndian.PutUint64(phDyn[16:24], dynVaddr)
+	binary.LittleEndian.PutUint64(phDyn[24:32], dynVaddr)
+	const dynEntriesCount = 5 // STRTAB, STRSZ, VERNEED, VERNEEDNUM, NULL
+	dynSize := uint64(dynEntriesCount * 16)
+	binary.LittleEndian.PutUint64(phDyn[32:40], dynSize)
+	binary.LittleEndian.PutUint64(phDyn[40:48], dynSize)
+
+	verneedOffset := dynOffset + dynSize // 256
+	strtabOffset := verneedOffset + uint64(len(verneedBytes))
+	totalSize := strtabOffset + uint64(len(strtabBytes))
+
+	binary.LittleEndian.PutUint64(phLoad[32:40], totalSize)
+	binary.LittleEndian.PutUint64(phLoad[40:48], totalSize)
+
+	buf := new(bytes.Buffer)
+	buf.Write(eh)
+	buf.Write(phLoad)
+	buf.Write(phDyn)
+
+	writeDyn := func(tag, val uint64) {
+		var d [16]byte
+		binary.LittleEndian.PutUint64(d[0:8], tag)
+		binary.LittleEndian.PutUint64(d[8:16], val)
+		buf.Write(d[:])
+	}
+	writeDyn(uint64(elf.DT_STRTAB), 0x400000+strtabOffset)
+	writeDyn(uint64(elf.DT_STRSZ), uint64(len(strtabBytes)))
+	writeDyn(uint64(elf.DT_VERNEED), 0x400000+verneedOffset)
+	writeDyn(uint64(elf.DT_VERNEEDNUM), 1)
+	writeDyn(uint64(elf.DT_NULL), 0)
+
+	buf.Write(verneedBytes)
+	buf.Write(strtabBytes)
+
+	return buf.Bytes()
+}
+
+// TestABI_R3_AuxiliaryAndNameValidation exercises the ABI-1 regression matrix.
+func TestABI_R3_AuxiliaryAndNameValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("positive_count_zero_aux_offset_fails", func(t *testing.T) {
+		t.Parallel()
+		vn := make([]byte, 16)
+		binary.LittleEndian.PutUint16(vn[0:2], 1)  // vn_version = 1
+		binary.LittleEndian.PutUint16(vn[2:4], 1)  // vn_cnt = 1
+		binary.LittleEndian.PutUint32(vn[4:8], 1)  // vn_file = 1 (libA.so)
+		binary.LittleEndian.PutUint32(vn[8:12], 0) // vn_aux = 0 (parent overlap defect)
+		binary.LittleEndian.PutUint32(vn[12:16], 0)
+		strtab := []byte("\x00libA.so\x00")
+		elfData := buildTestELFWithVerneed(vn, strtab)
+		_, err := InspectELFABI(elfData)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrABIMetadata))
+		assert.Contains(t, err.Error(), "has invalid vn_aux 0 overlapping parent record")
+	})
+
+	t.Run("positive_count_offsets_1_to_15_fail", func(t *testing.T) {
+		t.Parallel()
+		for aux := uint32(1); aux < 16; aux++ {
+			vn := make([]byte, 32)
+			binary.LittleEndian.PutUint16(vn[0:2], 1)
+			binary.LittleEndian.PutUint16(vn[2:4], 1)
+			binary.LittleEndian.PutUint32(vn[4:8], 1)
+			binary.LittleEndian.PutUint32(vn[8:12], aux)
+			binary.LittleEndian.PutUint32(vn[12:16], 0)
+			strtab := []byte("\x00libA.so\x00")
+			elfData := buildTestELFWithVerneed(vn, strtab)
+			_, err := InspectELFABI(elfData)
+			require.Error(t, err, "offset %d must fail", aux)
+			assert.True(t, errors.Is(err, ErrABIMetadata))
+			assert.Contains(t, err.Error(), "overlapping parent record")
+		}
+	})
+
+	t.Run("distinct_adjacent_auxiliary_offset_16_succeeds", func(t *testing.T) {
+		t.Parallel()
+		vn := make([]byte, 32)
+		binary.LittleEndian.PutUint16(vn[0:2], 1)
+		binary.LittleEndian.PutUint16(vn[2:4], 1)
+		binary.LittleEndian.PutUint32(vn[4:8], 1)   // vn_file = 1 (libA.so)
+		binary.LittleEndian.PutUint32(vn[8:12], 16) // vn_aux = 16
+		binary.LittleEndian.PutUint32(vn[12:16], 0)
+		// Vernaux at 16:
+		binary.LittleEndian.PutUint32(vn[16:20], 0)
+		binary.LittleEndian.PutUint16(vn[20:22], 0)
+		binary.LittleEndian.PutUint16(vn[22:24], 0)
+		binary.LittleEndian.PutUint32(vn[24:28], 9) // vna_name = 9 (GLIBC_2.17)
+		binary.LittleEndian.PutUint32(vn[28:32], 0)
+		strtab := []byte("\x00libA.so\x00GLIBC_2.17\x00")
+		elfData := buildTestELFWithVerneed(vn, strtab)
+		rep, err := InspectELFABI(elfData)
+		require.NoError(t, err)
+		require.Len(t, rep.VersionRequirements, 1)
+		assert.Equal(t, "libA.so", rep.VersionRequirements[0].Library)
+		assert.Equal(t, "GLIBC_2.17", rep.VersionRequirements[0].Version)
+	})
+
+	t.Run("padded_noncontiguous_auxiliary_offset_32_succeeds", func(t *testing.T) {
+		t.Parallel()
+		vn := make([]byte, 48) // 16 verneed + 16 padding + 16 vernaux
+		binary.LittleEndian.PutUint16(vn[0:2], 1)
+		binary.LittleEndian.PutUint16(vn[2:4], 1)
+		binary.LittleEndian.PutUint32(vn[4:8], 1)
+		binary.LittleEndian.PutUint32(vn[8:12], 32) // vn_aux = 32
+		binary.LittleEndian.PutUint32(vn[12:16], 0)
+		// Vernaux at 32:
+		binary.LittleEndian.PutUint32(vn[32:36], 0)
+		binary.LittleEndian.PutUint16(vn[36:38], 0)
+		binary.LittleEndian.PutUint16(vn[38:40], 0)
+		binary.LittleEndian.PutUint32(vn[40:44], 9)
+		binary.LittleEndian.PutUint32(vn[44:48], 0)
+		strtab := []byte("\x00libA.so\x00GLIBC_2.17\x00")
+		elfData := buildTestELFWithVerneed(vn, strtab)
+		rep, err := InspectELFABI(elfData)
+		require.NoError(t, err)
+		require.Len(t, rep.VersionRequirements, 1)
+		assert.Equal(t, "GLIBC_2.17", rep.VersionRequirements[0].Version)
+	})
+
+	t.Run("out_of_range_auxiliary_offset_fails", func(t *testing.T) {
+		t.Parallel()
+		vn := make([]byte, 16)
+		binary.LittleEndian.PutUint16(vn[0:2], 1)
+		binary.LittleEndian.PutUint16(vn[2:4], 1)
+		binary.LittleEndian.PutUint32(vn[4:8], 1)
+		binary.LittleEndian.PutUint32(vn[8:12], 999999)
+		binary.LittleEndian.PutUint32(vn[12:16], 0)
+		strtab := []byte("\x00libA.so\x00")
+		elfData := buildTestELFWithVerneed(vn, strtab)
+		_, err := InspectELFABI(elfData)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrABIMetadata))
+	})
+
+	t.Run("later_auxiliary_hop_into_parent_fails", func(t *testing.T) {
+		t.Parallel()
+		vn := make([]byte, 32)
+		binary.LittleEndian.PutUint16(vn[0:2], 1)
+		binary.LittleEndian.PutUint16(vn[2:4], 2) // vn_cnt = 2
+		binary.LittleEndian.PutUint32(vn[4:8], 1)
+		binary.LittleEndian.PutUint32(vn[8:12], 16)
+		binary.LittleEndian.PutUint32(vn[12:16], 0)
+		// Vernaux at 16 has vna_next jumping back into parent: -16 (0xfffffff0)
+		binary.LittleEndian.PutUint32(vn[24:28], 9)
+		binary.LittleEndian.PutUint32(vn[28:32], 0xfffffff0)
+		strtab := []byte("\x00libA.so\x00GLIBC_2.17\x00")
+		elfData := buildTestELFWithVerneed(vn, strtab)
+		_, err := InspectELFABI(elfData)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrABIMetadata))
+		assert.Contains(t, err.Error(), "overlaps containing Elf64_Verneed parent record")
+	})
+
+	t.Run("empty_library_name_fails", func(t *testing.T) {
+		t.Parallel()
+		vn := make([]byte, 32)
+		binary.LittleEndian.PutUint16(vn[0:2], 1)
+		binary.LittleEndian.PutUint16(vn[2:4], 1)
+		binary.LittleEndian.PutUint32(vn[4:8], 0) // points to \x00 -> empty name!
+		binary.LittleEndian.PutUint32(vn[8:12], 16)
+		binary.LittleEndian.PutUint32(vn[12:16], 0)
+		binary.LittleEndian.PutUint32(vn[24:28], 1)
+		binary.LittleEndian.PutUint32(vn[28:32], 0)
+		strtab := []byte("\x00GLIBC_2.17\x00")
+		elfData := buildTestELFWithVerneed(vn, strtab)
+		_, err := InspectELFABI(elfData)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrABIMetadata))
+		assert.Contains(t, err.Error(), "vn_file string at offset 0 is empty")
+	})
+
+	t.Run("empty_version_name_fails", func(t *testing.T) {
+		t.Parallel()
+		vn := make([]byte, 32)
+		binary.LittleEndian.PutUint16(vn[0:2], 1)
+		binary.LittleEndian.PutUint16(vn[2:4], 1)
+		binary.LittleEndian.PutUint32(vn[4:8], 1) // valid libA.so
+		binary.LittleEndian.PutUint32(vn[8:12], 16)
+		binary.LittleEndian.PutUint32(vn[12:16], 0)
+		binary.LittleEndian.PutUint32(vn[24:28], 0) // points to \x00 -> empty version!
+		binary.LittleEndian.PutUint32(vn[28:32], 0)
+		strtab := []byte("\x00libA.so\x00")
+		elfData := buildTestELFWithVerneed(vn, strtab)
+		_, err := InspectELFABI(elfData)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrABIMetadata))
+		assert.Contains(t, err.Error(), "vna_name string at offset 0 is empty")
+	})
+
+	t.Run("legitimate_zero_aux_count_succeeds", func(t *testing.T) {
+		t.Parallel()
+		vn := make([]byte, 16)
+		binary.LittleEndian.PutUint16(vn[0:2], 1)
+		binary.LittleEndian.PutUint16(vn[2:4], 0) // vn_cnt = 0
+		binary.LittleEndian.PutUint32(vn[4:8], 1)
+		binary.LittleEndian.PutUint32(vn[8:12], 0) // vn_aux = 0 allowed when vn_cnt == 0
+		binary.LittleEndian.PutUint32(vn[12:16], 0)
+		strtab := []byte("\x00libA.so\x00")
+		elfData := buildTestELFWithVerneed(vn, strtab)
+		rep, err := InspectELFABI(elfData)
+		require.NoError(t, err)
+		assert.Empty(t, rep.VersionRequirements)
+	})
+
+	t.Run("mixed_abi_override_settings_both_reject_malformed_input", func(t *testing.T) {
+		t.Parallel()
+		vn := make([]byte, 16)
+		binary.LittleEndian.PutUint16(vn[0:2], 1)
+		binary.LittleEndian.PutUint16(vn[2:4], 1)
+		binary.LittleEndian.PutUint32(vn[4:8], 1)
+		binary.LittleEndian.PutUint32(vn[8:12], 0) // malformed overlap
+		binary.LittleEndian.PutUint32(vn[12:16], 0)
+		strtab := []byte("\x00libA.so\x00")
+		elfData := buildTestELFWithVerneed(vn, strtab)
+
+		tmpDir := t.TempDir()
+		badPath := filepath.Join(tmpDir, "bad.bin")
+		require.NoError(t, os.WriteFile(badPath, elfData, 0o755))
+
+		// Pack with AllowMixedABI = false
+		optsFalse := &Options{
+			Variants:      map[string]string{"v1": badPath},
+			AllowMixedABI: false,
+		}
+		errFalse := validatePayloadABIs(optsFalse, []string{"v1"})
+		require.Error(t, errFalse)
+		assert.True(t, errors.Is(errFalse, ErrABIMetadata))
+
+		// Pack with AllowMixedABI = true
+		optsTrue := &Options{
+			Variants:      map[string]string{"v1": badPath},
+			AllowMixedABI: true,
+		}
+		errTrue := validatePayloadABIs(optsTrue, []string{"v1"})
+		require.Error(t, errTrue)
+		assert.True(t, errors.Is(errTrue, ErrABIMetadata))
+		assert.Equal(t, errFalse.Error(), errTrue.Error(), "AllowMixedABI must not bypass malformed metadata validation")
+	})
+
+	t.Run("pack_canary_preservation_on_malformed_fixture", func(t *testing.T) {
+		t.Parallel()
+		vn := make([]byte, 16)
+		binary.LittleEndian.PutUint16(vn[0:2], 1)
+		binary.LittleEndian.PutUint16(vn[2:4], 1)
+		binary.LittleEndian.PutUint32(vn[4:8], 1)
+		binary.LittleEndian.PutUint32(vn[8:12], 0) // malformed overlap
+		binary.LittleEndian.PutUint32(vn[12:16], 0)
+		strtab := []byte("\x00libA.so\x00")
+		badElf := buildTestELFWithVerneed(vn, strtab)
+
+		tmpDir := t.TempDir()
+		badVariant := filepath.Join(tmpDir, "variant.bin")
+		require.NoError(t, os.WriteFile(badVariant, badElf, 0o755))
+
+		canaryPath := filepath.Join(tmpDir, "output.fat")
+		canaryContent := []byte("CANARY_DESTINATION_CONTENT_DO_NOT_OVERWRITE")
+		require.NoError(t, os.WriteFile(canaryPath, canaryContent, 0o644))
+		statBefore, err := os.Stat(canaryPath)
+		require.NoError(t, err)
+
+		opts := Options{
+			OutputPath: canaryPath,
+			Variants:   map[string]string{"v1": badVariant},
+			TargetOS:   "linux",
+			TargetArch: "amd64",
+			StubPath:   filepath.Join(tmpDir, "stub"),
+		}
+		require.NoError(t, os.WriteFile(opts.StubPath, []byte("stub_bytes"), 0o755))
+
+		_, pErr := Pack(opts)
+		require.Error(t, pErr)
+		assert.True(t, errors.Is(pErr, ErrABIMetadata))
+
+		statAfter, err := os.Stat(canaryPath)
+		require.NoError(t, err)
+		assert.True(t, os.SameFile(statBefore, statAfter), "canary inode must be preserved on failure")
+		assert.Equal(t, statBefore.Mode(), statAfter.Mode(), "canary file mode must be preserved")
+		afterBytes, err := os.ReadFile(canaryPath)
+		require.NoError(t, err)
+		assert.Equal(t, canaryContent, afterBytes, "canary file content must be unchanged")
+
+		absentDest := filepath.Join(tmpDir, "absent.fat")
+		opts.OutputPath = absentDest
+		_, pErr2 := Pack(opts)
+		require.Error(t, pErr2)
+		assert.True(t, errors.Is(pErr2, ErrABIMetadata))
+		assert.NoFileExists(t, absentDest, "absent destination file must not be created on validation failure")
+	})
+}
