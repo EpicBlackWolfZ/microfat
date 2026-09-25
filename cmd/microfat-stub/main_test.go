@@ -34,8 +34,6 @@ import (
 const (
 	testOSLinux          = "linux"
 	testPolicyForceLevel = "force_level"
-	testPathEnv          = "PATH=/bin"
-	testAppArg           = "app"
 	testForceLevelV3     = "MICROFAT_FORCE_LEVEL=v3"
 	testCompressionZstd  = "zstd"
 )

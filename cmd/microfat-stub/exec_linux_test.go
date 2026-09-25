@@ -287,6 +287,110 @@ func TestHandleCacheError_Branches(t *testing.T) {
 	)
 	require.Error(t, err2)
 	assert.ErrorIs(t, err2, format.ErrCacheInit)
+
+	// 3. With primaryErr != nil
+	primaryErr := fmt.Errorf("%w: memfd failed", format.ErrMemfdCreate)
+	err3 := handleCacheError(
+		format.ErrCacheInit,
+		format.StageCacheDirInit,
+		syscall.EACCES,
+		primaryErr,
+		format.ExecModeAuto,
+		hostInfo,
+		entry,
+		policyRes,
+		"cache directory creation failed",
+	)
+	require.Error(t, err3)
+	assert.ErrorIs(t, err3, format.ErrCacheInit)
+}
+
+func TestExecuteViaMemfdAndCache_ErrorHandling(t *testing.T) {
+	tempDir := t.TempDir()
+	entry, f := createTestVariantFile(t, tempDir, []byte("echo hi"))
+	defer f.Close()
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v1"}
+	policyRes := microarch.PolicyResult{SelectedVariant: "v1"}
+
+	// 1. executeViaMemfd failure with forced memfd vs auto mode
+	oldMemfd := memfdCreateFunc
+	memfdCreateFunc = func(name string, flags int) (int, error) {
+		return -1, syscall.EPERM
+	}
+	t.Cleanup(func() { memfdCreateFunc = oldMemfd })
+
+	t.Setenv(format.EnvExecMode, format.ExecModeAuto)
+	errAuto := executeViaMemfd(
+		f.Name(), f, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, time.Now(),
+	)
+	require.Error(t, errAuto)
+	assert.ErrorIs(t, errAuto, format.ErrMemfdCreate)
+
+	t.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+	errForced := executeViaMemfd(
+		f.Name(), f, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, time.Now(),
+	)
+	require.Error(t, errForced)
+	assert.ErrorIs(t, errForced, format.ErrMemfdCreate)
+	assert.Contains(t, errForced.Error(), "forced memfd mode")
+
+	// 2. executeViaCache with primary error and successful execve
+	oldExecve := execveFunc
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		return nil
+	}
+	t.Cleanup(func() { execveFunc = oldExecve })
+
+	primaryErr := fmt.Errorf("%w: memfd failed", format.ErrMemfdCreate)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(tempDir, "cache"))
+
+	errCacheSuccess := executeViaCache(
+		f.Name(), f, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, primaryErr, time.Now(),
+	)
+	require.NoError(t, errCacheSuccess)
+
+	// 3. executeViaCache with execve failure
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		return syscall.EACCES
+	}
+	errExecFail := executeViaCache(
+		f.Name(), f, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, primaryErr, time.Now(),
+	)
+	require.Error(t, errExecFail)
+	assert.ErrorIs(t, errExecFail, format.ErrExecve)
+
+	// 4. executeViaCache with invalid variant checksum
+	invalidEntry := &format.VariantEntry{
+		Level:  "v1",
+		SHA256: "invalid-sha",
+	}
+	errBadChecksum := executeViaCache(
+		f.Name(), f, invalidEntry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, primaryErr, time.Now(),
+	)
+	require.Error(t, errBadChecksum)
+	assert.ErrorIs(t, errBadChecksum, format.ErrCacheWrite)
+
+	// 5. executeViaCache with forbidden cache directories
+	t.Setenv("XDG_CACHE_HOME", "/dev/null/forbidden_primary")
+	t.Setenv("TMPDIR", "/dev/null/forbidden_secondary")
+	errNoCache := executeViaCache(
+		f.Name(), f, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, primaryErr, time.Now(),
+	)
+	require.Error(t, errNoCache)
+	assert.ErrorIs(t, errNoCache, format.ErrCacheInit)
 }
 
 func TestErrorTelemetryFormatting(t *testing.T) {
