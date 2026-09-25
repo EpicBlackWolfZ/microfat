@@ -538,7 +538,9 @@ func runManifestPack(cmd *cobra.Command, flags builder.BuildOptions) error {
 	for _, v := range res.Index.Variants {
 		fmt.Printf("  • %-6s [%s] -> uncompressed: %d B | compressed: %d B\n", v.Level, v.Compression, v.UncompressedSize, v.CompressedSize)
 	}
-	printABIReport(cmd.OutOrStdout(), res.ABIReport)
+	if err := printABIReport(cmd.OutOrStdout(), res.ABIReport); err != nil {
+		return fmt.Errorf("artifact published successfully to %s, but printing ABI report failed: %w", res.OutputPath, err)
+	}
 	return nil
 }
 
@@ -632,7 +634,9 @@ func runDirectPack(
 	for _, v := range idx.Variants {
 		fmt.Printf("  • %-6s [%s] -> uncompressed: %d B | compressed: %d B\n", v.Level, v.Compression, v.UncompressedSize, v.CompressedSize)
 	}
-	printABIReport(cmd.OutOrStdout(), artifactABIReport)
+	if err := printABIReport(cmd.OutOrStdout(), artifactABIReport); err != nil {
+		return fmt.Errorf("artifact published successfully to %s, but printing ABI report failed: %w", flags.OutputPath, err)
+	}
 	return nil
 }
 
@@ -703,7 +707,9 @@ then packages them into a self-dispatching microfat binary.`,
 				fmt.Printf("  • %-6s [%s] (pgo: %-20s) -> uncompressed: %d B | compressed: %d B\n",
 					v.Level, v.Compression, pgoFlag, v.UncompressedSize, v.CompressedSize)
 			}
-			printABIReport(cmd.OutOrStdout(), res.ABIReport)
+			if err := printABIReport(cmd.OutOrStdout(), res.ABIReport); err != nil {
+				return fmt.Errorf("artifact published successfully to %s, but printing ABI report failed: %w", res.OutputPath, err)
+			}
 			return nil
 		},
 	}
@@ -717,39 +723,67 @@ then packages them into a self-dispatching microfat binary.`,
 	return cmd
 }
 
-func printABIReport(out io.Writer, report *pack.ArtifactABIReport) {
+func printABIReport(out io.Writer, report *pack.ArtifactABIReport) error {
 	if report == nil || len(report.Variants) == 0 {
-		return
+		return nil
 	}
-	allSkipped := true
-	for _, v := range report.Variants {
-		if v.Completeness != pack.MetadataSkipped {
-			allSkipped = false
-			break
-		}
-	}
-	if allSkipped {
-		_, _ = fmt.Fprintln(out, "\nDeclared ABI Requirements: skipped (--skip-elf-validation)")
-		return
+	if report.Status == pack.ComparisonSkipped {
+		_, err := fmt.Fprintln(out, "\nDeclared ABI Requirements: skipped (--skip-elf-validation)")
+		return err
 	}
 
-	_, _ = fmt.Fprintln(out, "\nDeclared ABI Requirements:")
+	if _, err := fmt.Fprintln(out, "\nDeclared ABI Requirements:"); err != nil {
+		return err
+	}
 	for _, v := range report.Variants {
 		interpDesc := "none"
 		if v.HasInterpreter {
-			interpDesc = pack.SanitizeName(v.Interpreter)
+			interpDesc = pack.EscapeMetadata(v.Interpreter)
 		}
 		depDesc := "none"
 		if len(v.Dependencies) > 0 {
-			depDesc = strings.Join(v.Dependencies, ", ")
+			escapedDeps := make([]string, len(v.Dependencies))
+			for i, d := range v.Dependencies {
+				escapedDeps[i] = pack.EscapeMetadata(d)
+			}
+			depDesc = strings.Join(escapedDeps, ", ")
 		}
-		verCount := len(v.VersionRequirements)
-		_, _ = fmt.Fprintf(out, "  • %-6s [%s] -> interpreter: %s | deps: %s | versions: %d (%s)\n",
-			v.Level, v.Linkage, interpDesc, depDesc, verCount, v.Completeness)
+		verDesc := "none"
+		if len(v.VersionRequirements) > 0 {
+			var verParts []string
+			for _, vr := range v.VersionRequirements {
+				part := fmt.Sprintf("%s (%s", pack.EscapeMetadata(vr.Library), pack.EscapeMetadata(vr.Version))
+				if vr.Flags != 0 {
+					part += fmt.Sprintf(" [flags=0x%04x]", vr.Flags)
+				}
+				part += ")"
+				verParts = append(verParts, part)
+			}
+			verDesc = strings.Join(verParts, ", ")
+		}
+		if _, err := fmt.Fprintf(out, "  • %-6s [%s] -> interpreter: %s | deps: %s | versions: %s (%s)\n",
+			pack.EscapeMetadata(v.Level), v.Linkage, interpDesc, depDesc, verDesc, v.Completeness); err != nil {
+			return err
+		}
 	}
 	if report.Overridden {
-		_, _ = fmt.Fprintln(out, "  [!] Note: declared ABI differences were explicitly allowed via --allow-mixed-abi")
+		if _, err := fmt.Fprintln(out, "  [!] Note: declared ABI differences were explicitly allowed via --allow-mixed-abi"); err != nil {
+			return err
+		}
 	}
+	if report.Status == pack.ComparisonUnknown {
+		msg := "  [!] Note: symbol version metadata is partial or unsupported; " +
+			"complete compatibility could not be verified"
+		if _, err := fmt.Fprintln(out, msg); err != nil {
+			return err
+		}
+	}
+	if len(report.DeploymentDisclaimer) > 0 {
+		if _, err := fmt.Fprintf(out, "  [i] %s\n", report.DeploymentDisclaimer); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func formatVersionName(version int) string {
