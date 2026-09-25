@@ -25,7 +25,7 @@ func TestDoctorCmdExecution(t *testing.T) {
 		cmd := newDoctorCmd()
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
-		cmd.SetArgs([]string{"--cache-dir", validCacheDir})
+		cmd.SetArgs([]string{flagCacheDir, validCacheDir})
 
 		err := cmd.Execute()
 		if err != nil {
@@ -54,7 +54,7 @@ func TestDoctorCmdExecution(t *testing.T) {
 		cmd := newDoctorCmd()
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
-		cmd.SetArgs([]string{"--json", "--cache-dir", validCacheDir})
+		cmd.SetArgs([]string{"--json", flagCacheDir, validCacheDir})
 
 		err := cmd.Execute()
 		if err != nil {
@@ -84,7 +84,7 @@ func TestDoctorCmdExecution(t *testing.T) {
 		cmd := newDoctorCmd()
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
-		cmd.SetArgs([]string{"--strict", "--cache-dir", validCacheDir})
+		cmd.SetArgs([]string{"--strict", flagCacheDir, validCacheDir})
 
 		_ = cmd.Execute()
 	})
@@ -94,7 +94,7 @@ func TestDoctorCmdExecution(t *testing.T) {
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
 		invalidDir := "/dev/null/forbidden_cache_path"
-		cmd.SetArgs([]string{"--cache-dir", invalidDir, "--strict"})
+		cmd.SetArgs([]string{flagCacheDir, invalidDir, "--strict"})
 
 		err := cmd.Execute()
 		if err == nil {
@@ -639,6 +639,18 @@ func TestRunDoctorTruthTable(t *testing.T) {
 		memfdProbeSyscall = func(name string, flags int) (int, error) { return -1, syscall.EPERM }
 	}
 
+	mockMemfdFstatFailureWithSeals := func() {
+		memfdProbeSyscall = func(name string, flags int) (int, error) { return 42, nil }
+		memfdProbeFstat = func(fd int, stat *unix.Stat_t) error { return syscall.EBADF }
+		memfdProbeFcntl = func(fd uintptr, cmd int, arg int) (int, error) {
+			if cmd == unix.F_GET_SEALS {
+				return memfd.TargetSeals, nil
+			}
+			return 0, nil
+		}
+		memfdProbeClose = func(fd int) error { return nil }
+	}
+
 	tests := []struct {
 		name         string
 		cpuLevel     string
@@ -717,6 +729,24 @@ func TestRunDoctorTruthTable(t *testing.T) {
 			memfdMock:    mockMemfdSuccess,
 			cacheDir:     validCacheDir,
 			strict:       false,
+			expectReady:  false,
+			expectErrors: true,
+		},
+		{
+			name:         "regression: CPU OK, Memfd mode error + seals OK, Cache OK, Normal -> Ready with warning",
+			cpuLevel:     "v3",
+			memfdMock:    mockMemfdFstatFailureWithSeals,
+			cacheDir:     validCacheDir,
+			strict:       false,
+			expectReady:  true,
+			expectErrors: false,
+		},
+		{
+			name:         "regression: CPU OK, Memfd mode error + seals OK, Cache OK, Strict -> Fails",
+			cpuLevel:     "v3",
+			memfdMock:    mockMemfdFstatFailureWithSeals,
+			cacheDir:     validCacheDir,
+			strict:       true,
 			expectReady:  false,
 			expectErrors: true,
 		},
@@ -804,5 +834,92 @@ func TestPrintDoctorReport_WriterError(t *testing.T) {
 	err := printDoctorReport(ew, report)
 	if err == nil {
 		t.Errorf("expected printDoctorReport to fail when writer fails")
+	}
+}
+
+func TestPrintSections_ComprehensiveWriterErrors(t *testing.T) {
+	report := &DoctorReport{
+		Ready: false,
+		CPU: CPUReport{
+			OS:                    testOSLinux,
+			Arch:                  testArchAMD64,
+			Level:                 "v3",
+			Features:              []string{"avx2"},
+			AVX512DownclockNotice: "not present",
+		},
+		Memfd: MemfdReport{
+			Available:             false,
+			Passed:                false,
+			Phase:                 "fstat",
+			Status:                "Failed",
+			Kernel:                "Linux 6.8.0",
+			CreationStrategy:      "MFD_EXEC",
+			ErrnoName:             "EBADF",
+			ErrnoValue:            9,
+			CandidateExplanations: []string{"bad descriptor"},
+			Hint:                  "check kernel",
+		},
+		Cache: CacheReport{
+			Ready:                 false,
+			Passed:                false,
+			Phase:                 "write",
+			ResolvedPath:          "/tmp/cache",
+			Permissions:           "0700",
+			Writable:              false,
+			ErrnoName:             "EACCES",
+			ErrnoValue:            13,
+			CandidateExplanations: []string{"permission denied"},
+			Error:                 "write error",
+			Hint:                  "check permissions",
+		},
+		Cgroup: &CgroupReport{
+			Detected:         true,
+			Version:          2,
+			MemoryLimitBytes: 1024,
+			MemoryHighBytes:  512,
+			CPUQuota:         2.0,
+			GOMEMLIMITStr:    "1024B",
+			GOMAXPROCS:       2,
+		},
+		Toolchain: ToolchainReport{
+			Version: "v1.0.0",
+			Commit:  "abc",
+			Date:    "2026-09-25",
+		},
+		Warnings: []string{"warning 1"},
+		Errors:   []string{"error 1"},
+		Summary:  "Not ready",
+	}
+
+	for i := 0; i < 50; i++ {
+		ew := &errWriter{failAfter: i}
+		_ = printDoctorReport(ew, report)
+	}
+}
+
+func TestDoctorCmdFailingNonZeroExit(t *testing.T) {
+	cmd := newDoctorCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	invalidDir := "/dev/null/forbidden_cache_path"
+	cmd.SetArgs([]string{"--json", flagCacheDir, invalidDir, "--strict"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected doctor command to return error on failing prerequisites")
+	}
+
+	var report DoctorReport
+	if unmarshalErr := json.Unmarshal(buf.Bytes(), &report); unmarshalErr != nil {
+		t.Fatalf("failed to parse JSON from failing doctor run: %v\nOutput: %s", unmarshalErr, buf.String())
+	}
+	if report.Ready {
+		t.Errorf("expected report.Ready == false")
+	}
+	if report.Policy != "strict" {
+		t.Errorf("expected report.Policy == strict, got %s", report.Policy)
+	}
+	if report.Scope != "prerequisites" {
+		t.Errorf("expected report.Scope == prerequisites, got %s", report.Scope)
 	}
 }
