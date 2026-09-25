@@ -34,6 +34,26 @@ const (
 	testAliasAMD64v3       = "amd64_v3"
 )
 
+func TestValidatePayloadABIs_SkipELFValidationWithCallback(t *testing.T) {
+	t.Parallel()
+	var cbReport *ArtifactABIReport
+	opts := &Options{
+		TargetOS:          testOSLinux,
+		TargetArch:        testArchAMD64,
+		SkipELFValidation: true,
+		Variants:          map[string]string{"v1": "/path/to/v1", "v3": "/path/to/v3"},
+		ABIReportCallback: func(rep *ArtifactABIReport) {
+			cbReport = rep
+		},
+	}
+	err := validatePayloadABIs(opts, []string{"v1", "v3"})
+	require.NoError(t, err)
+	require.NotNil(t, cbReport)
+	assert.Equal(t, ComparisonSkipped, cbReport.Status)
+	assert.Equal(t, 2, len(cbReport.Variants))
+	assert.Equal(t, MetadataSkipped, cbReport.Variants[0].Completeness)
+}
+
 func TestPack_VariantValidatorError(t *testing.T) {
 	tempDir := t.TempDir()
 	stubPath := filepath.Join(tempDir, "microfat-stub")

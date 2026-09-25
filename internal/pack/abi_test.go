@@ -1024,8 +1024,8 @@ func TestPack_ABIConsistency_Integration(t *testing.T) {
 		StubPath:   stubPath,
 		OutputPath: outPath,
 		AppName:    "abi-test-app",
-		TargetOS:   "linux",
-		TargetArch: "amd64",
+		TargetOS:   testOSLinux,
+		TargetArch: testArchAMD64,
 		Variants:   map[string]string{"v1": v1Path, "v3": v3Path},
 	}
 

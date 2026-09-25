@@ -762,8 +762,8 @@ func TestABI_R3_AuxiliaryAndNameValidation(t *testing.T) {
 		opts := Options{
 			OutputPath: canaryPath,
 			Variants:   map[string]string{"v1": badVariant},
-			TargetOS:   "linux",
-			TargetArch: "amd64",
+			TargetOS:   testOSLinux,
+			TargetArch: testArchAMD64,
 			StubPath:   filepath.Join(tmpDir, "stub"),
 		}
 		require.NoError(t, os.WriteFile(opts.StubPath, []byte("stub_bytes"), 0o755))
@@ -1174,5 +1174,177 @@ func TestABI_R3_AmbiguousDependencyComparison(t *testing.T) {
 		assert.True(t, errors.Is(cErr, ErrABIMismatch))
 		assert.False(t, rep.Consistent)
 		assert.Equal(t, ComparisonInconsistent, rep.Status)
+	})
+}
+
+func TestABI_R3_CoverageAndBudgetBoundaries(t *testing.T) {
+	t.Parallel()
+
+	t.Run("bounded_dep_list_truncation", func(t *testing.T) {
+		t.Parallel()
+		ra := NewReportAccounting(1024)
+		b := newBoundedReportBuilder(ra)
+		deps := []string{"lib1.so", "lib2.so", "lib3.so", "lib4.so", "lib5.so", "lib6.so", "lib7.so", "lib8.so", "lib9.so", "lib10.so"}
+		err := b.writeBoundedDepList(deps, 4)
+		require.NoError(t, err)
+		s := b.string()
+		assert.Contains(t, s, "... (+6 more)")
+	})
+
+	t.Run("input_accounting_string_scan_bounds", func(t *testing.T) {
+		t.Parallel()
+		acc := &inputAccounting{maxStringScanBytes: 10}
+		acc.stringScanBytesRead = 10
+		assert.Equal(t, uint64(0), acc.remainingStringScanBudget())
+		assert.Error(t, acc.chargeStringScan(1))
+
+		acc.refundStringScan(20) // n > acc.stringScanBytesRead
+		assert.Equal(t, uint64(0), acc.stringScanBytesRead)
+	})
+
+	t.Run("scan_bounded_cstring_empty_scan_budget", func(t *testing.T) {
+		t.Parallel()
+		acc := &inputAccounting{maxStringScanBytes: 1}
+		acc.stringScanBytesRead = 1
+		_, err := scanBoundedCString([]byte("hello\x00"), 0, acc, "test", false)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrABIResourceLimit))
+	})
+
+	t.Run("report_builder_gradual_budget_exhaustion", func(t *testing.T) {
+		t.Parallel()
+		rBase := &VariantABIReport{
+			Level: "v1", Linkage: LinkageDynamic, HasInterpreter: true, Interpreter: "/lib64/ld-linux.so.2",
+			Dependencies:        []string{"libA.so", "libB.so"},
+			VersionRequirements: []VersionRequirement{{Library: "libA.so", Version: "V1"}},
+		}
+		rCurr := &VariantABIReport{
+			Level: "v2", Linkage: LinkageDynamic, HasInterpreter: true, Interpreter: "/lib64/ld-linux2.so.2",
+			Dependencies:        []string{"libA.so", "libC.so"},
+			VersionRequirements: []VersionRequirement{{Library: "libA.so", Version: "V2"}},
+		}
+		rIncomp := &VariantABIReport{
+			Level: "v3", Completeness: MetadataPartial,
+		}
+
+		for budget := uint64(0); budget <= 200; budget += 3 {
+			ra := NewReportAccounting(budget)
+			_, _ = formatDependencySetDiff(ra, rBase, rCurr, []string{"libC.so"}, []string{"libB.so"})
+
+			ra2 := NewReportAccounting(budget)
+			_, _ = formatDependencyOrderWarning(ra2, rBase, rCurr)
+
+			ra3 := NewReportAccounting(budget)
+			_, _ = formatInterpreterConfigDiff(ra3, rBase, &VariantABIReport{Level: "v4"})
+
+			ra4 := NewReportAccounting(budget)
+			_, _ = formatInterpreterPathDiff(ra4, rBase, rCurr)
+
+			ra5 := NewReportAccounting(budget)
+			_, _ = formatIncompleteMetadataWarning(ra5, rIncomp)
+
+			ra7 := NewReportAccounting(budget)
+			_, _ = compareVariantVersions([]*VariantABIReport{rBase, rCurr}, ra7)
+
+			ra8 := NewReportAccounting(budget)
+			_, _ = compareVariantInterpreters([]*VariantABIReport{rBase, rCurr}, ra8)
+
+			ra9 := NewReportAccounting(budget)
+			_, _ = compareVariantLinkages([]*VariantABIReport{{Level: "v1", Linkage: LinkageStatic}, {Level: "v2", Linkage: LinkageDynamic}}, ra9)
+
+			ra10 := NewReportAccounting(budget)
+			_ = applyOverriddenDifferences(&ArtifactABIReport{}, []string{"diff1", "diff2"}, ra10)
+		}
+	})
+
+	t.Run("verneed_relative_offset_zero", func(t *testing.T) {
+		t.Parallel()
+		_, err := advanceELFRelativeOffset(100, 0, 50, 200, 16)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "zero progress")
+	})
+
+	t.Run("verneed_advance_offset_contradictory_termination", func(t *testing.T) {
+		t.Parallel()
+		_, err := advanceVerneedOffset(0, 1, 100, 16, 50, 200)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "contradictory termination of Elf64_Verneed chain")
+	})
+
+	t.Run("estimate_presentation_bytes", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, uint64(0), estimateABIReportPresentationBytes(nil))
+
+		manyDeps := make([]string, 12)
+		for i := range manyDeps {
+			manyDeps[i] = fmt.Sprintf("lib%d.so", i)
+		}
+		manyVers := make([]VersionRequirement, 12)
+		for i := range manyVers {
+			manyVers[i] = VersionRequirement{Library: "libc.so", Version: fmt.Sprintf("V%d", i)}
+		}
+		rep := &ArtifactABIReport{
+			Variants: []*VariantABIReport{
+				nil,
+				{
+					Level:               "v1",
+					Dependencies:        manyDeps,
+					VersionRequirements: manyVers,
+				},
+			},
+			Warnings:    []string{"warn1"},
+			Differences: []string{"diff1"},
+		}
+		est := estimateABIReportPresentationBytes(rep)
+		assert.Greater(t, est, uint64(512))
+	})
+
+	t.Run("compare_variant_abis_presentation_budget_exhaustion", func(t *testing.T) {
+		t.Parallel()
+		limitsSmall := defaultABILimits
+		limitsSmall.MaxArtifactReportBytes = 100
+		_, errEmpty := CompareVariantABIsWithOptions(nil, false, limitsSmall)
+		require.Error(t, errEmpty)
+
+		_, errSingle := CompareVariantABIsWithOptions([]*VariantABIReport{{Level: "v1", Completeness: MetadataComplete}}, false, limitsSmall)
+		require.Error(t, errSingle)
+	})
+
+	t.Run("handle_single_report_warning_reservation_failure", func(t *testing.T) {
+		t.Parallel()
+		ra := NewReportAccounting(5)
+		rep := &VariantABIReport{Level: "v1", Warnings: []string{"this is a long warning"}}
+		_, err := handleSingleReport(rep, ra, &ArtifactABIReport{})
+		require.Error(t, err)
+	})
+
+	t.Run("evaluate_all_reports_warning_reservation_failure", func(t *testing.T) {
+		t.Parallel()
+		ra := NewReportAccounting(5)
+		reports := []*VariantABIReport{
+			{Level: "v1", Warnings: []string{"warning too long for budget"}},
+			{Level: "v2"},
+		}
+		_, _, _, err := evaluateAllReportsCompleteness(reports, ra)
+		require.Error(t, err)
+	})
+
+	t.Run("collect_variant_differences_budget_exhaustion", func(t *testing.T) {
+		t.Parallel()
+		r1 := &VariantABIReport{Level: "v1", Linkage: LinkageDynamic, HasInterpreter: true, Interpreter: "/lib64/ld1.so"}
+		r2 := &VariantABIReport{Level: "v2", Linkage: LinkageDynamic, HasInterpreter: true, Interpreter: "/lib64/ld2.so"}
+		ra := NewReportAccounting(2)
+		_, _, err := collectVariantDifferences([]*VariantABIReport{r1, r2}, ra)
+		require.Error(t, err)
+	})
+
+	t.Run("compare_variant_abis_overridden_differences_budget_exhaustion", func(t *testing.T) {
+		t.Parallel()
+		limits := defaultABILimits
+		limits.MaxArtifactReportBytes = 320
+		r1 := &VariantABIReport{Level: "v1", Linkage: LinkageStatic}
+		r2 := &VariantABIReport{Level: "v2", Linkage: LinkageDynamic}
+		_, err := CompareVariantABIsWithOptions([]*VariantABIReport{r1, r2}, true, limits)
+		require.Error(t, err)
 	})
 }

@@ -188,3 +188,59 @@ func TestCLI_SkipELFValidation_Warnings(t *testing.T) {
 		assert.Contains(t, errBuf.String(), expectedWarn)
 	})
 }
+
+func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
+	t.Parallel()
+
+	t.Run("invalid variant specification", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPackCmd()
+		cmd.SetArgs([]string{"-o", "out", "-v", "invalid"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid variant specification")
+	})
+
+	t.Run("duplicate variant specification", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPackCmd()
+		cmd.SetArgs([]string{"-o", "out", "-v", "v1=bin1", "-v", "v1=bin2"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate variant level")
+	})
+
+	t.Run("missing output flag", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPackCmd()
+		cmd.SetArgs([]string{"-v", "v1=bin1"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "required flag(s) \"output\" not set")
+	})
+
+	t.Run("missing variant flag", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPackCmd()
+		cmd.SetArgs([]string{"-o", "out"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "required flag(s) \"variant\" not set")
+	})
+
+	t.Run("manifest pack with missing file", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPackCmd()
+		cmd.SetArgs([]string{"--manifest", "nonexistent-manifest.yaml"})
+		err := cmd.Execute()
+		require.Error(t, err)
+	})
+
+	t.Run("pgo-pack with missing manifest", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPgoPackCmd()
+		cmd.SetArgs([]string{"--manifest", "nonexistent-manifest.yaml"})
+		err := cmd.Execute()
+		require.Error(t, err)
+	})
+}
