@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
@@ -192,10 +194,14 @@ func TestCLI_SkipELFValidation_Warnings(t *testing.T) {
 func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
 	t.Parallel()
 
+	tmpDir := t.TempDir()
+	stubPath := filepath.Join(tmpDir, "dummy-stub")
+	require.NoError(t, os.WriteFile(stubPath, []byte("stub"), 0o755))
+
 	t.Run("invalid variant specification", func(t *testing.T) {
 		t.Parallel()
 		cmd := newPackCmd()
-		cmd.SetArgs([]string{"-o", "out", "-v", "invalid"})
+		cmd.SetArgs([]string{"--stub", stubPath, "-o", "out", "-v", "invalid"})
 		err := cmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid variant specification")
@@ -204,7 +210,7 @@ func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
 	t.Run("duplicate variant specification", func(t *testing.T) {
 		t.Parallel()
 		cmd := newPackCmd()
-		cmd.SetArgs([]string{"-o", "out", "-v", "v1=bin1", "-v", "v1=bin2"})
+		cmd.SetArgs([]string{"--stub", stubPath, "-o", "out", "-v", "v1=bin1", "-v", "v1=bin2"})
 		err := cmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "duplicate variant level")
@@ -213,7 +219,7 @@ func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
 	t.Run("missing output flag", func(t *testing.T) {
 		t.Parallel()
 		cmd := newPackCmd()
-		cmd.SetArgs([]string{"-v", "v1=bin1"})
+		cmd.SetArgs([]string{"--stub", stubPath, "-v", "v1=bin1"})
 		err := cmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "required flag(s) \"output\" not set")
@@ -222,7 +228,7 @@ func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
 	t.Run("missing variant flag", func(t *testing.T) {
 		t.Parallel()
 		cmd := newPackCmd()
-		cmd.SetArgs([]string{"-o", "out"})
+		cmd.SetArgs([]string{"--stub", stubPath, "-o", "out"})
 		err := cmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "required flag(s) \"variant\" not set")
