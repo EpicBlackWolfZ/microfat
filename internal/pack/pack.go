@@ -695,19 +695,14 @@ func validatePayloadABIs(opts *Options, levels []string) error {
 	}
 
 	variantReports := make([]*VariantABIReport, 0, len(levels))
-	var totalMetadataBytes uint64
+	sharedAcc := NewArtifactMetadataAccounting(MaxArtifactMetadataBytes)
 	for _, lvl := range levels {
 		varData, err := readBoundedInput(opts.Variants[lvl], format.MaxPayloadSize)
 		if err != nil {
 			return fmt.Errorf("reading snapshotted variant %s: %w", lvl, err)
 		}
-		if uint64(len(varData)) > MaxArtifactMetadataBytes || totalMetadataBytes > MaxArtifactMetadataBytes-uint64(len(varData)) {
-			return fmt.Errorf("%w: aggregate artifact metadata bytes read (%d) exceeds limit of %d",
-				ErrABIResourceLimit, totalMetadataBytes+uint64(len(varData)), MaxArtifactMetadataBytes)
-		}
-		totalMetadataBytes += uint64(len(varData))
 
-		rep, err := InspectELFABI(varData)
+		rep, err := InspectELFABIWithAccounting(varData, sharedAcc)
 		if err != nil {
 			return fmt.Errorf("inspecting declared ABI for variant %s: %w", lvl, err)
 		}

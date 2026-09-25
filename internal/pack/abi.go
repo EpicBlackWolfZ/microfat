@@ -32,6 +32,88 @@ const (
 	versionReportSeparatorOverhead = 2
 )
 
+// ABILimits specifies configurable resource bounds for ABI metadata inspection and comparison.
+type ABILimits struct {
+	MaxProgramHeaders         uint16
+	MaxSectionHeaders         uint32
+	MaxInterpreterSize        uint64
+	MaxDynamicEntries         uint64
+	MaxABIStringBytesPerInput uint64
+	MaxVersionRecordsPerInput uint64
+	MaxMetadataBytesPerInput  uint64
+	MaxArtifactMetadataBytes  uint64
+	MaxArtifactReportBytes    uint64
+}
+
+var defaultABILimits = ABILimits{
+	MaxProgramHeaders:         MaxProgramHeaders,
+	MaxSectionHeaders:         MaxSectionHeaders,
+	MaxInterpreterSize:        MaxInterpreterSize,
+	MaxDynamicEntries:         MaxDynamicEntries,
+	MaxABIStringBytesPerInput: MaxABIStringBytesPerInput,
+	MaxVersionRecordsPerInput: MaxVersionRecordsPerInput,
+	MaxMetadataBytesPerInput:  MaxMetadataBytesPerInput,
+	MaxArtifactMetadataBytes:  MaxArtifactMetadataBytes,
+	MaxArtifactReportBytes:    MaxArtifactReportBytes,
+}
+
+// ArtifactMetadataAccounting tracks aggregate metadata read/scanned across all variant inputs in an artifact.
+type ArtifactMetadataAccounting struct {
+	maxBytes  uint64
+	usedBytes uint64
+}
+
+// NewArtifactMetadataAccounting constructs an aggregate metadata accounting tracker.
+func NewArtifactMetadataAccounting(maxBytes uint64) *ArtifactMetadataAccounting {
+	if maxBytes == 0 {
+		maxBytes = MaxArtifactMetadataBytes
+	}
+	return &ArtifactMetadataAccounting{maxBytes: maxBytes}
+}
+
+func (a *ArtifactMetadataAccounting) check(n uint64) error {
+	if a == nil {
+		return nil
+	}
+	if n > a.maxBytes || a.usedBytes > a.maxBytes-n {
+		return fmt.Errorf("%w: aggregate artifact metadata bytes read (%d + %d) exceeds budget limit %d",
+			ErrABIResourceLimit, a.usedBytes, n, a.maxBytes)
+	}
+	return nil
+}
+
+func (a *ArtifactMetadataAccounting) commit(n uint64) {
+	if a != nil {
+		a.usedBytes += n
+	}
+}
+
+// ReportAccounting tracks aggregate retained and generated report data across all variants in an artifact.
+type ReportAccounting struct {
+	maxBytes  uint64
+	usedBytes uint64
+}
+
+// NewReportAccounting constructs an aggregate report accounting tracker.
+func NewReportAccounting(maxBytes uint64) *ReportAccounting {
+	if maxBytes == 0 {
+		maxBytes = MaxArtifactReportBytes
+	}
+	return &ReportAccounting{maxBytes: maxBytes}
+}
+
+func (ra *ReportAccounting) reserve(n uint64) error {
+	if ra == nil {
+		return nil
+	}
+	if n > ra.maxBytes || ra.usedBytes > ra.maxBytes-n {
+		return fmt.Errorf("%w: report data (%d + %d) exceeds budget limit %d bytes",
+			ErrABIResourceLimit, ra.usedBytes, n, ra.maxBytes)
+	}
+	ra.usedBytes += n
+	return nil
+}
+
 // Error categories for ABI inspection and policy comparison.
 var (
 	ErrABIMetadata      = errors.New("invalid or malformed ELF ABI metadata")
@@ -109,50 +191,104 @@ type ArtifactABIReport struct {
 
 // inputAccounting tracks resource usage during inspection of a single ELF input.
 type inputAccounting struct {
+	shared              *ArtifactMetadataAccounting
+	maxMetadataBytes    uint64
+	maxStringBytes      uint64
+	maxVersionRecords   uint64
 	metadataBytesRead   uint64
 	retainedStringBytes uint64
 	versionRecords      uint64
 }
 
 func (acc *inputAccounting) chargeMetadata(n uint64) error {
-	if n > MaxMetadataBytesPerInput || acc.metadataBytesRead > MaxMetadataBytesPerInput-n {
+	limit := acc.maxMetadataBytes
+	if limit == 0 {
+		limit = MaxMetadataBytesPerInput
+	}
+	if n > limit || acc.metadataBytesRead > limit-n {
 		return fmt.Errorf("%w: metadata bytes read (%d + %d) exceeds per-input budget %d",
-			ErrABIResourceLimit, acc.metadataBytesRead, n, MaxMetadataBytesPerInput)
+			ErrABIResourceLimit, acc.metadataBytesRead, n, limit)
+	}
+	if acc.shared != nil {
+		if err := acc.shared.check(n); err != nil {
+			return err
+		}
 	}
 	acc.metadataBytesRead += n
+	if acc.shared != nil {
+		acc.shared.commit(n)
+	}
 	return nil
 }
 
 func (acc *inputAccounting) chargeString(n uint64) error {
-	if n > MaxABIStringBytesPerInput || acc.retainedStringBytes > MaxABIStringBytesPerInput-n {
+	limit := acc.maxStringBytes
+	if limit == 0 {
+		limit = MaxABIStringBytesPerInput
+	}
+	if n > limit || acc.retainedStringBytes > limit-n {
 		return fmt.Errorf("%w: decoded string bytes (%d + %d) exceeds per-input budget %d",
-			ErrABIResourceLimit, acc.retainedStringBytes, n, MaxABIStringBytesPerInput)
+			ErrABIResourceLimit, acc.retainedStringBytes, n, limit)
 	}
 	acc.retainedStringBytes += n
 	return nil
 }
 
 func (acc *inputAccounting) chargeVersionRecord() error {
-	if acc.versionRecords >= MaxVersionRecordsPerInput {
+	limit := acc.maxVersionRecords
+	if limit == 0 {
+		limit = MaxVersionRecordsPerInput
+	}
+	if acc.versionRecords >= limit {
 		return fmt.Errorf("%w: total version records (%d) exceeds per-input budget %d",
-			ErrABIResourceLimit, acc.versionRecords+1, MaxVersionRecordsPerInput)
+			ErrABIResourceLimit, acc.versionRecords+1, limit)
 	}
 	acc.versionRecords++
 	return nil
+}
+
+// EscapedMetadataLen returns the exact escaped length of s when rendered with EscapeMetadata,
+// and whether the string will be truncated at maxDisplayLen (4096).
+func EscapedMetadataLen(s string) (int, bool) {
+	const maxDisplayLen = 4096
+	const truncMarkerLen = 14 // len("...[truncated]")
+	truncated := false
+	if len(s) > maxDisplayLen {
+		s = s[:maxDisplayLen]
+		truncated = true
+	}
+	outputLen := 0
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			outputLen += 4
+			i++
+			continue
+		}
+		if r < 32 || r == 127 || (r >= 0x80 && r <= 0x9f) {
+			outputLen += 4
+		} else {
+			outputLen += size
+		}
+		i += size
+	}
+	if truncated {
+		outputLen += truncMarkerLen
+	}
+	return outputLen, truncated
 }
 
 // EscapeMetadata escapes untrusted metadata bytes for safe terminal / log display.
 // Control characters (including \r, \n, \t, ESC), DEL, C1 controls (0x80..0x9F),
 // and invalid UTF-8 sequences are escaped as \xNN, \n, \r, \t to prevent display injection.
 func EscapeMetadata(s string) string {
+	needed, truncated := EscapedMetadataLen(s)
 	const maxDisplayLen = 4096
-	var buf strings.Builder
-	buf.Grow(len(s))
-	truncated := false
 	if len(s) > maxDisplayLen {
 		s = s[:maxDisplayLen]
-		truncated = true
 	}
+	var buf strings.Builder
+	buf.Grow(needed)
 	for i := 0; i < len(s); {
 		r, size := utf8.DecodeRuneInString(s[i:])
 		if r == utf8.RuneError && size == 1 {
@@ -371,7 +507,12 @@ func translateVaddr(loads []loadSegment, fileSize uint64, vaddr uint64, size uin
 
 // InspectELFABI parses declared ABI metadata from raw ELF binary bytes.
 func InspectELFABI(data []byte) (*VariantABIReport, error) {
-	acc := &inputAccounting{}
+	return InspectELFABIWithAccounting(data, nil)
+}
+
+// InspectELFABIWithAccounting parses declared ABI metadata from raw ELF binary bytes, charging against a shared artifact account.
+func InspectELFABIWithAccounting(data []byte, shared *ArtifactMetadataAccounting) (*VariantABIReport, error) {
+	acc := &inputAccounting{shared: shared}
 	if err := preflightELFHeadersWithAccounting(acc, data); err != nil {
 		return nil, err
 	}
@@ -503,15 +644,27 @@ func scanDynamicEntries(data []byte, dynamicProg *loadSegment, numDyn uint64, or
 		case uint64(elf.DT_NEEDED):
 			tags.neededOffsets = append(tags.neededOffsets, dVal)
 		case uint64(elf.DT_STRTAB):
+			if tags.hasStrtab && tags.strtabVaddr != dVal {
+				return nil, fmt.Errorf("%w: conflicting duplicate DT_STRTAB entries (0x%x vs 0x%x)", ErrABIMetadata, tags.strtabVaddr, dVal)
+			}
 			tags.strtabVaddr = dVal
 			tags.hasStrtab = true
 		case uint64(elf.DT_STRSZ):
+			if tags.hasStrsz && tags.strtabSize != dVal {
+				return nil, fmt.Errorf("%w: conflicting duplicate DT_STRSZ entries (%d vs %d)", ErrABIMetadata, tags.strtabSize, dVal)
+			}
 			tags.strtabSize = dVal
 			tags.hasStrsz = true
 		case uint64(elf.DT_VERNEED):
+			if tags.hasVerneed && tags.verneedVaddr != dVal {
+				return nil, fmt.Errorf("%w: conflicting duplicate DT_VERNEED entries (0x%x vs 0x%x)", ErrABIMetadata, tags.verneedVaddr, dVal)
+			}
 			tags.verneedVaddr = dVal
 			tags.hasVerneed = true
 		case uint64(elf.DT_VERNEEDNUM):
+			if tags.hasVerneedNum && tags.verneedNum != dVal {
+				return nil, fmt.Errorf("%w: conflicting duplicate DT_VERNEEDNUM entries (%d vs %d)", ErrABIMetadata, tags.verneedNum, dVal)
+			}
 			tags.verneedNum = dVal
 			tags.hasVerneedNum = true
 		}
@@ -558,6 +711,47 @@ func parseNeededDependencies(
 	return deps, nil
 }
 
+func validateVersionTagPairing(tags *dynamicTags) error {
+	switch {
+	case !tags.hasVerneed && !tags.hasVerneedNum:
+		return nil
+	case tags.hasVerneed && !tags.hasVerneedNum:
+		return fmt.Errorf("%w: DT_VERNEED tag present without DT_VERNEEDNUM", ErrABIMetadata)
+	case !tags.hasVerneed && tags.hasVerneedNum:
+		return fmt.Errorf("%w: DT_VERNEEDNUM tag present without DT_VERNEED", ErrABIMetadata)
+	default:
+		return nil
+	}
+}
+
+func resolveDynamicStrtab(
+	data []byte,
+	loads []loadSegment,
+	fileSize uint64,
+	tags *dynamicTags,
+	acc *inputAccounting,
+) ([]byte, error) {
+	needsStrtab := len(tags.neededOffsets) > 0 || (tags.hasVerneed && tags.verneedNum > 0)
+	if !needsStrtab {
+		return nil, nil
+	}
+	if !tags.hasStrtab || !tags.hasStrsz {
+		return nil, fmt.Errorf("%w: dynamic dependencies or version requirements declared without DT_STRTAB or DT_STRSZ", ErrABIMetadata)
+	}
+	if tags.strtabSize > MaxABIStringBytesPerInput {
+		return nil, fmt.Errorf("%w: dynamic STRTAB size %d exceeds budget limit %d",
+			ErrABIResourceLimit, tags.strtabSize, MaxABIStringBytesPerInput)
+	}
+	if err := acc.chargeMetadata(tags.strtabSize); err != nil {
+		return nil, err
+	}
+	strtabOff, tErr := translateVaddr(loads, fileSize, tags.strtabVaddr, tags.strtabSize)
+	if tErr != nil {
+		return nil, fmt.Errorf("%w: translating DT_STRTAB address: %w", ErrABIMetadata, tErr)
+	}
+	return data[strtabOff : strtabOff+tags.strtabSize], nil
+}
+
 func parseDynamicMetadata(
 	data []byte,
 	dynamicProg *loadSegment,
@@ -584,23 +778,13 @@ func parseDynamicMetadata(
 		return err
 	}
 
-	var strtab []byte
-	if len(tags.neededOffsets) > 0 || tags.hasVerneed {
-		if !tags.hasStrtab || !tags.hasStrsz {
-			return fmt.Errorf("%w: dynamic dependencies or version requirements declared without DT_STRTAB or DT_STRSZ", ErrABIMetadata)
-		}
-		if tags.strtabSize > MaxABIStringBytesPerInput {
-			return fmt.Errorf("%w: dynamic STRTAB size %d exceeds budget limit %d",
-				ErrABIResourceLimit, tags.strtabSize, MaxABIStringBytesPerInput)
-		}
-		if err := acc.chargeMetadata(tags.strtabSize); err != nil {
-			return err
-		}
-		strtabOff, tErr := translateVaddr(loads, fileSize, tags.strtabVaddr, tags.strtabSize)
-		if tErr != nil {
-			return fmt.Errorf("%w: translating DT_STRTAB address: %w", ErrABIMetadata, tErr)
-		}
-		strtab = data[strtabOff : strtabOff+tags.strtabSize]
+	if err := validateVersionTagPairing(tags); err != nil {
+		return err
+	}
+
+	strtab, err := resolveDynamicStrtab(data, loads, fileSize, tags, acc)
+	if err != nil {
+		return err
 	}
 
 	deps, err := parseNeededDependencies(strtab, tags.strtabSize, tags.neededOffsets, acc)
@@ -609,7 +793,14 @@ func parseDynamicMetadata(
 	}
 	report.Dependencies = deps
 
-	if tags.hasVerneed && tags.hasVerneedNum && tags.verneedNum > 0 {
+	if tags.hasVerneed && tags.hasVerneedNum {
+		if tags.verneedNum == 0 {
+			report.VersionRequirements = []VersionRequirement{}
+			return nil
+		}
+		if !tags.hasStrtab || !tags.hasStrsz {
+			return fmt.Errorf("%w: dynamic version requirements declared without DT_STRTAB or DT_STRSZ", ErrABIMetadata)
+		}
 		return parseVerneed(data, loads, fileSize, order, tags.verneedVaddr, tags.verneedNum, strtab, acc, report)
 	}
 	return nil
@@ -694,6 +885,8 @@ func parseVernauxChain(
 				return fmt.Errorf("%w: Elf64_Vernaux entry %d offset: %w", ErrABIMetadata, auxIdx+1, err)
 			}
 			currVernauxOff = nextOff
+		} else if vnaNext != 0 {
+			return fmt.Errorf("%w: contradictory termination of Elf64_Vernaux chain: vna_next != 0 on last entry", ErrABIMetadata)
 		}
 	}
 	return nil
@@ -795,6 +988,8 @@ func parseVerneed(
 				return fmt.Errorf("%w: Elf64_Verneed entry %d offset: %w", ErrABIMetadata, recordIdx+1, aErr)
 			}
 			currVerneedOff = nextOff
+		} else if vnNext != 0 {
+			return fmt.Errorf("%w: contradictory termination of Elf64_Verneed chain: vn_next != 0 on last record", ErrABIMetadata)
 		}
 	}
 
@@ -863,22 +1058,26 @@ func versionRequirementsEqual(a, b []VersionRequirement) bool {
 }
 
 func validateReportBudget(reports []*VariantABIReport) error {
-	totalReportBytes := 0
+	ra := NewReportAccounting(MaxArtifactReportBytes)
+	return validateReportBudgetWithLimits(reports, ra, defaultABILimits)
+}
+
+func validateReportBudgetWithLimits(reports []*VariantABIReport, ra *ReportAccounting, limits ABILimits) error {
 	for _, r := range reports {
 		if r == nil {
 			return fmt.Errorf("%w: nil variant ABI report provided", ErrABIMetadata)
 		}
-		if len(r.Interpreter) > MaxInterpreterSize {
+		if uint64(len(r.Interpreter)) > limits.MaxInterpreterSize {
 			return fmt.Errorf("%w: variant %s interpreter path length %d exceeds budget %d",
-				ErrABIResourceLimit, r.Level, len(r.Interpreter), MaxInterpreterSize)
+				ErrABIResourceLimit, r.Level, len(r.Interpreter), limits.MaxInterpreterSize)
 		}
-		if len(r.Dependencies) > MaxDynamicEntries {
+		if uint64(len(r.Dependencies)) > limits.MaxDynamicEntries {
 			return fmt.Errorf("%w: variant %s dependency count %d exceeds budget %d",
-				ErrABIResourceLimit, r.Level, len(r.Dependencies), MaxDynamicEntries)
+				ErrABIResourceLimit, r.Level, len(r.Dependencies), limits.MaxDynamicEntries)
 		}
-		if len(r.VersionRequirements) > MaxVersionRecordsPerInput {
+		if uint64(len(r.VersionRequirements)) > limits.MaxVersionRecordsPerInput {
 			return fmt.Errorf("%w: variant %s version requirement count %d exceeds budget %d",
-				ErrABIResourceLimit, r.Level, len(r.VersionRequirements), MaxVersionRecordsPerInput)
+				ErrABIResourceLimit, r.Level, len(r.VersionRequirements), limits.MaxVersionRecordsPerInput)
 		}
 		var inputStringBytes uint64
 		inputStringBytes += uint64(len(r.Interpreter))
@@ -888,9 +1087,9 @@ func validateReportBudget(reports []*VariantABIReport) error {
 		for _, v := range r.VersionRequirements {
 			inputStringBytes += uint64(len(v.Library)) + uint64(len(v.Version))
 		}
-		if inputStringBytes > MaxABIStringBytesPerInput {
+		if inputStringBytes > limits.MaxABIStringBytesPerInput {
 			return fmt.Errorf("%w: variant %s decoded string bytes %d exceeds per-input budget %d",
-				ErrABIResourceLimit, r.Level, inputStringBytes, MaxABIStringBytesPerInput)
+				ErrABIResourceLimit, r.Level, inputStringBytes, limits.MaxABIStringBytesPerInput)
 		}
 
 		reportBytes := len(r.Level) + len(r.Path) + len(r.Class) + len(r.Type) +
@@ -904,16 +1103,33 @@ func validateReportBudget(reports []*VariantABIReport) error {
 		for _, w := range r.Warnings {
 			reportBytes += len(w)
 		}
-		totalReportBytes += reportBytes
-	}
-	if totalReportBytes > MaxArtifactReportBytes {
-		return fmt.Errorf("%w: aggregate retained decoded ABI report data (%d bytes) exceeds budget limit %d bytes",
-			ErrABIResourceLimit, totalReportBytes, MaxArtifactReportBytes)
+		if err := ra.reserve(uint64(reportBytes)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func compareDependencySets(baseline, current *VariantABIReport) (string, string) {
+func formatBoundedDepList(deps []string, maxItems int) string {
+	if len(deps) == 0 {
+		return "none"
+	}
+	n := len(deps)
+	if n > maxItems {
+		n = maxItems
+	}
+	escaped := make([]string, n)
+	for i := 0; i < n; i++ {
+		escaped[i] = EscapeMetadata(deps[i])
+	}
+	res := strings.Join(escaped, ", ")
+	if len(deps) > maxItems {
+		res += fmt.Sprintf(" ... (+%d more)", len(deps)-maxItems)
+	}
+	return "[" + res + "]"
+}
+
+func compareDependencySets(ra *ReportAccounting, baseline, current *VariantABIReport) (string, string, error) {
 	baseDeps := baseline.Dependencies
 	currDeps := current.Dependencies
 
@@ -926,73 +1142,45 @@ func compareDependencySets(baseline, current *VariantABIReport) (string, string)
 		currSet[d] = true
 	}
 
-	setMismatch := false
-	if len(baseSet) != len(currSet) {
-		setMismatch = true
-	} else {
-		for d := range baseSet {
-			if !currSet[d] {
-				setMismatch = true
-				break
-			}
+	var missingInCurr []string
+	for _, d := range baseDeps {
+		if !currSet[d] {
+			missingInCurr = append(missingInCurr, d)
+		}
+	}
+	var missingInBase []string
+	for _, d := range currDeps {
+		if !baseSet[d] {
+			missingInBase = append(missingInBase, d)
 		}
 	}
 
-	if setMismatch {
-		escapedBase := make([]string, len(baseDeps))
-		for i, d := range baseDeps {
-			escapedBase[i] = EscapeMetadata(d)
+	if len(missingInCurr) > 0 || len(missingInBase) > 0 {
+		const maxDisplayItems = 8
+		diff := fmt.Sprintf("differing declared dependencies between variant %s and %s: missing in %s: %s; missing in %s: %s",
+			EscapeMetadata(baseline.Level), EscapeMetadata(current.Level),
+			EscapeMetadata(current.Level), formatBoundedDepList(missingInCurr, maxDisplayItems),
+			EscapeMetadata(baseline.Level), formatBoundedDepList(missingInBase, maxDisplayItems))
+		if err := ra.reserve(uint64(len(diff))); err != nil {
+			return "", "", err
 		}
-		escapedCurr := make([]string, len(currDeps))
-		for i, d := range currDeps {
-			escapedCurr[i] = EscapeMetadata(d)
-		}
-		return fmt.Sprintf("differing declared dependencies: variant %s requires %v, variant %s requires %v",
-			EscapeMetadata(baseline.Level), escapedBase, EscapeMetadata(current.Level), escapedCurr), ""
+		return diff, "", nil
 	}
 
 	if len(baseDeps) == len(currDeps) {
 		for idx := range baseDeps {
 			if baseDeps[idx] != currDeps[idx] {
-				return "", fmt.Sprintf(
+				warn := fmt.Sprintf(
 					"declared dependency search order differs between variant %s and %s (may affect dynamic symbol resolution order)",
 					EscapeMetadata(baseline.Level), EscapeMetadata(current.Level))
+				if err := ra.reserve(uint64(len(warn))); err != nil {
+					return "", "", err
+				}
+				return "", warn, nil
 			}
 		}
 	}
-	return "", ""
-}
-
-func compareDynamicVariants(baseline, current *VariantABIReport) ([]string, []string) {
-	var diffs []string
-	var warns []string
-
-	if baseline.Interpreter != current.Interpreter {
-		diffs = append(diffs, fmt.Sprintf("differing interpreter pathnames: variant %s requires %q, variant %s requires %q",
-			EscapeMetadata(baseline.Level), EscapeMetadata(baseline.Interpreter),
-			EscapeMetadata(current.Level), EscapeMetadata(current.Interpreter)))
-	}
-
-	depDiff, depWarn := compareDependencySets(baseline, current)
-	if depDiff != "" {
-		diffs = append(diffs, depDiff)
-	}
-	if depWarn != "" {
-		warns = append(warns, depWarn)
-	}
-
-	baselineUnknown := baseline.Completeness == MetadataPartial || baseline.Completeness == MetadataUnsupported
-	currentUnknown := current.Completeness == MetadataPartial || current.Completeness == MetadataUnsupported
-
-	if !baselineUnknown && !currentUnknown {
-		if !versionRequirementsEqual(baseline.VersionRequirements, current.VersionRequirements) {
-			diffs = append(diffs, fmt.Sprintf("differing symbol version requirements: variant %s (%d requirements) vs variant %s (%d requirements)",
-				EscapeMetadata(baseline.Level), len(baseline.VersionRequirements),
-				EscapeMetadata(current.Level), len(current.VersionRequirements)))
-		}
-	}
-
-	return diffs, warns
+	return "", "", nil
 }
 
 func evaluateVariantCompleteness(rep *VariantABIReport) (isSkipped, isUnknown bool, warning string) {
@@ -1010,103 +1198,240 @@ func evaluateVariantCompleteness(rep *VariantABIReport) (isSkipped, isUnknown bo
 	}
 }
 
-func compareReportWithBaseline(baseline, current *VariantABIReport) (diffs, warns []string, isSkipped, isUnknown bool) {
-	isSkipped, isUnknown, warn := evaluateVariantCompleteness(current)
-	if warn != "" {
-		warns = append(warns, warn)
-	}
-	if len(current.Warnings) > 0 {
-		warns = append(warns, current.Warnings...)
-	}
-
-	isBaselineStatic := baseline.Linkage == LinkageStatic || baseline.Linkage == LinkageStaticPIE
-	isCurrentStatic := current.Linkage == LinkageStatic || current.Linkage == LinkageStaticPIE
-
-	if isBaselineStatic != isCurrentStatic {
-		diff := fmt.Sprintf("mixed static and dynamic payloads: variant %s is %s, variant %s is %s",
-			EscapeMetadata(baseline.Level), baseline.Linkage, EscapeMetadata(current.Level), current.Linkage)
-		diffs = append(diffs, diff)
-	}
-
-	if !isBaselineStatic && !isCurrentStatic {
-		dDiffs, dWarns := compareDynamicVariants(baseline, current)
-		diffs = append(diffs, dDiffs...)
-		warns = append(warns, dWarns...)
-	}
-	return diffs, warns, isSkipped, isUnknown
+func isVersionKnown(r *VariantABIReport) bool {
+	return r.Completeness != MetadataPartial &&
+		r.Completeness != MetadataUnsupported &&
+		r.Completeness != MetadataSkipped
 }
 
 // CompareVariantABIs evaluates declared ABI consistency across variant reports using the uniform ABI policy.
 func CompareVariantABIs(reports []*VariantABIReport, allowMixedABI bool) (*ArtifactABIReport, error) {
-	if err := validateReportBudget(reports); err != nil {
+	return CompareVariantABIsWithOptions(reports, allowMixedABI, defaultABILimits)
+}
+
+func handleSingleReport(r *VariantABIReport, ra *ReportAccounting, artifactReport *ArtifactABIReport) (*ArtifactABIReport, error) {
+	isSkipped, isUnknown, warn := evaluateVariantCompleteness(r)
+	switch {
+	case isSkipped:
+		artifactReport.Status = ComparisonSkipped
+		artifactReport.Consistent = false
+	case isUnknown:
+		artifactReport.Status = ComparisonUnknown
+		artifactReport.Consistent = false
+		if warn != "" {
+			if err := ra.reserve(uint64(len(warn))); err != nil {
+				return nil, err
+			}
+			artifactReport.Warnings = append(artifactReport.Warnings, warn)
+		}
+	default:
+		artifactReport.Status = ComparisonConsistent
+		artifactReport.Consistent = true
+	}
+	for _, w := range r.Warnings {
+		if err := ra.reserve(uint64(len(w))); err != nil {
+			return nil, err
+		}
+		artifactReport.Warnings = append(artifactReport.Warnings, w)
+	}
+	return artifactReport, nil
+}
+
+func compareVariantLinkages(reports []*VariantABIReport, ra *ReportAccounting) ([]string, error) {
+	var firstStatic *VariantABIReport
+	var firstDynamic *VariantABIReport
+	for _, r := range reports {
+		if r.Linkage == LinkageStatic || r.Linkage == LinkageStaticPIE {
+			if firstStatic == nil {
+				firstStatic = r
+			}
+		} else if r.Linkage == LinkageDynamic {
+			if firstDynamic == nil {
+				firstDynamic = r
+			}
+		}
+	}
+	if firstStatic != nil && firstDynamic != nil {
+		diff := fmt.Sprintf("mixed static and dynamic payloads: variant %s is %s, variant %s is %s",
+			EscapeMetadata(firstStatic.Level), firstStatic.Linkage,
+			EscapeMetadata(firstDynamic.Level), firstDynamic.Linkage)
+		if err := ra.reserve(uint64(len(diff))); err != nil {
+			return nil, err
+		}
+		return []string{diff}, nil
+	}
+	return nil, nil
+}
+
+func compareVariantInterpreters(reports []*VariantABIReport, ra *ReportAccounting) ([]string, error) {
+	var differences []string
+	var interpRef *VariantABIReport
+	for _, r := range reports {
+		if r.Linkage == LinkageDynamic || (r.Linkage == "" && (r.HasInterpreter || r.Interpreter != "")) {
+			if interpRef == nil {
+				interpRef = r
+				continue
+			}
+			hasInterp1 := interpRef.HasInterpreter || interpRef.Interpreter != ""
+			hasInterp2 := r.HasInterpreter || r.Interpreter != ""
+			if hasInterp1 != hasInterp2 {
+				diff := fmt.Sprintf("differing interpreter configuration: variant %s has interpreter (%q), variant %s does not",
+					EscapeMetadata(interpRef.Level), EscapeMetadata(interpRef.Interpreter), EscapeMetadata(r.Level))
+				if err := ra.reserve(uint64(len(diff))); err != nil {
+					return nil, err
+				}
+				differences = append(differences, diff)
+			} else if hasInterp1 && hasInterp2 && interpRef.Interpreter != r.Interpreter {
+				diff := fmt.Sprintf("differing interpreter pathnames: variant %s requires %q, variant %s requires %q",
+					EscapeMetadata(interpRef.Level), EscapeMetadata(interpRef.Interpreter),
+					EscapeMetadata(r.Level), EscapeMetadata(r.Interpreter))
+				if err := ra.reserve(uint64(len(diff))); err != nil {
+					return nil, err
+				}
+				differences = append(differences, diff)
+			}
+		}
+	}
+	return differences, nil
+}
+
+func compareVariantDependencies(reports []*VariantABIReport, ra *ReportAccounting) ([]string, []string, error) {
+	var differences []string
+	var warnings []string
+	var depRef *VariantABIReport
+	for _, r := range reports {
+		if r.Linkage == LinkageDynamic || (r.Linkage == "" && len(r.Dependencies) > 0) {
+			if depRef == nil {
+				depRef = r
+				continue
+			}
+			depDiff, depWarn, err := compareDependencySets(ra, depRef, r)
+			if err != nil {
+				return nil, nil, err
+			}
+			if depDiff != "" {
+				differences = append(differences, depDiff)
+			}
+			if depWarn != "" {
+				warnings = append(warnings, depWarn)
+			}
+		}
+	}
+	return differences, warnings, nil
+}
+
+func compareVariantVersions(reports []*VariantABIReport, ra *ReportAccounting) ([]string, error) {
+	var differences []string
+	var verRef *VariantABIReport
+	var normVerRef []VersionRequirement
+	for _, r := range reports {
+		if isVersionKnown(r) {
+			if verRef == nil {
+				verRef = r
+				normVerRef = normalizeVersionRequirements(r.VersionRequirements)
+				continue
+			}
+			normCurr := normalizeVersionRequirements(r.VersionRequirements)
+			if !versionRequirementsEqual(normVerRef, normCurr) {
+				diff := fmt.Sprintf("differing symbol version requirements: variant %s (%d requirements) vs variant %s (%d requirements)",
+					EscapeMetadata(verRef.Level), len(verRef.VersionRequirements),
+					EscapeMetadata(r.Level), len(r.VersionRequirements))
+				if err := ra.reserve(uint64(len(diff))); err != nil {
+					return nil, err
+				}
+				differences = append(differences, diff)
+			}
+		}
+	}
+	return differences, nil
+}
+
+// CompareVariantABIsWithOptions evaluates declared ABI consistency across variant reports with custom limits.
+func CompareVariantABIsWithOptions(reports []*VariantABIReport, allowMixedABI bool, limits ABILimits) (*ArtifactABIReport, error) {
+	ra := NewReportAccounting(limits.MaxArtifactReportBytes)
+	if err := validateReportBudgetWithLimits(reports, ra, limits); err != nil {
 		return nil, err
 	}
 
+	const deploymentDisclaimer = "Matching declared ABI requirements does not guarantee deployment host compatibility; " +
+		"the target system must provide the required dynamic linker and libraries."
+
 	artifactReport := &ArtifactABIReport{
-		Variants:   reports,
-		Consistent: true,
-		Status:     ComparisonConsistent,
-		DeploymentDisclaimer: "Matching declared ABI requirements does not guarantee deployment host compatibility; " +
-			"the target system must provide the required dynamic linker and libraries.",
+		Variants:             reports,
+		Consistent:           true,
+		Status:               ComparisonConsistent,
+		DeploymentDisclaimer: deploymentDisclaimer,
 	}
+	if err := ra.reserve(uint64(len(deploymentDisclaimer))); err != nil {
+		return nil, err
+	}
+
 	if len(reports) == 0 {
 		return artifactReport, nil
 	}
 	if len(reports) == 1 {
-		r := reports[0]
-		isSkipped, isUnknown, warn := evaluateVariantCompleteness(r)
-		switch {
-		case isSkipped:
-			artifactReport.Status = ComparisonSkipped
-			artifactReport.Consistent = false
-		case isUnknown:
-			artifactReport.Status = ComparisonUnknown
-			artifactReport.Consistent = true
-			artifactReport.Warnings = append(artifactReport.Warnings, warn)
-		default:
-			artifactReport.Status = ComparisonConsistent
-			artifactReport.Consistent = true
-		}
-		if len(r.Warnings) > 0 {
-			artifactReport.Warnings = append(artifactReport.Warnings, r.Warnings...)
-		}
-		return artifactReport, nil
+		return handleSingleReport(reports[0], ra, artifactReport)
 	}
 
-	baseline := reports[0]
 	var differences []string
 	var warnings []string
 	hasUnknown := false
+	hasSkipped := false
 
-	baseSkipped, baseUnknown, baseWarn := evaluateVariantCompleteness(baseline)
-	if baseSkipped {
-		artifactReport.Status = ComparisonSkipped
-		artifactReport.Consistent = false
-	} else if baseUnknown {
-		hasUnknown = true
-		warnings = append(warnings, baseWarn)
-	}
-	if len(baseline.Warnings) > 0 {
-		warnings = append(warnings, baseline.Warnings...)
-	}
-
-	for i := 1; i < len(reports); i++ {
-		cDiffs, cWarns, currSkipped, currUnknown := compareReportWithBaseline(baseline, reports[i])
-		if currSkipped {
-			artifactReport.Status = ComparisonSkipped
-			artifactReport.Consistent = false
+	// Evaluate completeness and warnings for all variants
+	for _, r := range reports {
+		isSkipped, isUnknown, warn := evaluateVariantCompleteness(r)
+		if isSkipped {
+			hasSkipped = true
 		}
-		if currUnknown {
+		if isUnknown {
 			hasUnknown = true
+			if warn != "" {
+				if err := ra.reserve(uint64(len(warn))); err != nil {
+					return nil, err
+				}
+				warnings = append(warnings, warn)
+			}
 		}
-		differences = append(differences, cDiffs...)
-		warnings = append(warnings, cWarns...)
+		for _, w := range r.Warnings {
+			if err := ra.reserve(uint64(len(w))); err != nil {
+				return nil, err
+			}
+			warnings = append(warnings, w)
+		}
 	}
+
+	diffs, err := compareVariantLinkages(reports, ra)
+	if err != nil {
+		return nil, err
+	}
+	differences = append(differences, diffs...)
+
+	interpDiffs, err := compareVariantInterpreters(reports, ra)
+	if err != nil {
+		return nil, err
+	}
+	differences = append(differences, interpDiffs...)
+
+	depDiffs, depWarns, err := compareVariantDependencies(reports, ra)
+	if err != nil {
+		return nil, err
+	}
+	differences = append(differences, depDiffs...)
+	warnings = append(warnings, depWarns...)
+
+	verDiffs, err := compareVariantVersions(reports, ra)
+	if err != nil {
+		return nil, err
+	}
+	differences = append(differences, verDiffs...)
 
 	artifactReport.Differences = differences
 	artifactReport.Warnings = warnings
 
-	if len(differences) > 0 {
+	// Aggregate outcome table (Section 5.3)
+	switch {
+	case len(differences) > 0:
 		artifactReport.Consistent = false
 		artifactReport.Status = ComparisonInconsistent
 		if !allowMixedABI {
@@ -1114,17 +1439,20 @@ func CompareVariantABIs(reports []*VariantABIReport, allowMixedABI bool) (*Artif
 		}
 		artifactReport.Overridden = true
 		for _, d := range differences {
-			artifactReport.Warnings = append(artifactReport.Warnings, fmt.Sprintf("[OVERRIDDEN] %s", d))
+			ovrMsg := fmt.Sprintf("[OVERRIDDEN] %s", d)
+			if err := ra.reserve(uint64(len(ovrMsg))); err != nil {
+				return nil, err
+			}
+			artifactReport.Warnings = append(artifactReport.Warnings, ovrMsg)
 		}
-		if hasUnknown {
-			artifactReport.Status = ComparisonUnknown
-		}
-	} else if artifactReport.Status != ComparisonSkipped {
-		if hasUnknown {
-			artifactReport.Status = ComparisonUnknown
-		} else {
-			artifactReport.Status = ComparisonConsistent
-		}
+	case hasSkipped:
+		artifactReport.Status = ComparisonSkipped
+		artifactReport.Consistent = false
+	case hasUnknown:
+		artifactReport.Status = ComparisonUnknown
+		artifactReport.Consistent = false
+	default:
+		artifactReport.Status = ComparisonConsistent
 		artifactReport.Consistent = true
 	}
 

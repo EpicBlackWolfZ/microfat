@@ -1374,7 +1374,7 @@ func TestValidateReportBudget_DefensiveValidation(t *testing.T) {
 	resUnsupp, err := CompareVariantABIs([]*VariantABIReport{{Level: "v1", Completeness: MetadataUnsupported}}, false)
 	require.NoError(t, err)
 	assert.Equal(t, ComparisonUnknown, resUnsupp.Status)
-	assert.True(t, resUnsupp.Consistent)
+	assert.False(t, resUnsupp.Consistent)
 	assert.NotEmpty(t, resUnsupp.Warnings)
 }
 
@@ -1488,12 +1488,12 @@ func TestCompareVariantABIs_FullDecisionMatrix(t *testing.T) {
 		}
 		res, err := CompareVariantABIs([]*VariantABIReport{r1, r2}, false)
 		require.NoError(t, err)
-		assert.True(t, res.Consistent)
+		assert.False(t, res.Consistent)
 		assert.Equal(t, ComparisonUnknown, res.Status)
 		assert.NotEmpty(t, res.Warnings)
 	})
 
-	// Row 4: Unknown versions plus known interpreter mismatch -> Reject by default, override preserves unknown status
+	// Row 4: Unknown versions plus known interpreter mismatch -> Reject by default, override preserves inconsistent status
 	t.Run("Unknown versions plus known interpreter mismatch", func(t *testing.T) {
 		t.Parallel()
 		r1 := &VariantABIReport{
@@ -1512,7 +1512,7 @@ func TestCompareVariantABIs_FullDecisionMatrix(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, res.Consistent)
 		assert.True(t, res.Overridden)
-		assert.Equal(t, ComparisonUnknown, res.Status)
+		assert.Equal(t, ComparisonInconsistent, res.Status)
 	})
 
 	// Row 5: Explicit ELF-validation skip -> Status ComparisonSkipped

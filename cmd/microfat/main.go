@@ -742,24 +742,41 @@ func printABIReport(out io.Writer, report *pack.ArtifactABIReport) error {
 		}
 		depDesc := "none"
 		if len(v.Dependencies) > 0 {
-			escapedDeps := make([]string, len(v.Dependencies))
-			for i, d := range v.Dependencies {
-				escapedDeps[i] = pack.EscapeMetadata(d)
+			const maxDisplayDeps = 8
+			n := len(v.Dependencies)
+			if n > maxDisplayDeps {
+				n = maxDisplayDeps
+			}
+			escapedDeps := make([]string, n)
+			for i := 0; i < n; i++ {
+				escapedDeps[i] = pack.EscapeMetadata(v.Dependencies[i])
 			}
 			depDesc = strings.Join(escapedDeps, ", ")
+			if len(v.Dependencies) > maxDisplayDeps {
+				depDesc += fmt.Sprintf(" ... (+%d more)", len(v.Dependencies)-maxDisplayDeps)
+			}
 		}
 		verDesc := "none"
 		if len(v.VersionRequirements) > 0 {
-			var verParts []string
-			for _, vr := range v.VersionRequirements {
+			const maxDisplayVers = 8
+			n := len(v.VersionRequirements)
+			if n > maxDisplayVers {
+				n = maxDisplayVers
+			}
+			verParts := make([]string, n)
+			for i := 0; i < n; i++ {
+				vr := v.VersionRequirements[i]
 				part := fmt.Sprintf("%s (%s", pack.EscapeMetadata(vr.Library), pack.EscapeMetadata(vr.Version))
 				if vr.Flags != 0 {
 					part += fmt.Sprintf(" [flags=0x%04x]", vr.Flags)
 				}
 				part += ")"
-				verParts = append(verParts, part)
+				verParts[i] = part
 			}
 			verDesc = strings.Join(verParts, ", ")
+			if len(v.VersionRequirements) > maxDisplayVers {
+				verDesc += fmt.Sprintf(" ... (+%d more)", len(v.VersionRequirements)-maxDisplayVers)
+			}
 		}
 		if _, err := fmt.Fprintf(out, "  • %-6s [%s] -> interpreter: %s | deps: %s | versions: %s (%s)\n",
 			pack.EscapeMetadata(v.Level), v.Linkage, interpDesc, depDesc, verDesc, v.Completeness); err != nil {

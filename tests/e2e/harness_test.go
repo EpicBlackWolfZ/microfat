@@ -44,6 +44,9 @@ const (
 	stubPackagePath       string      = "../../cmd/microfat-stub"
 	exitCodeUnknownError  int         = 1
 	trailerMagicSizeBytes int64       = 8
+	execModeMemfd                     = "memfd"
+	execModeCache                     = "cache"
+	inputPGOPackCommand               = "pgo-pack"
 )
 
 // BinaryTrailer represents parsed 56-byte trailer fields at EOF.
