@@ -1,6 +1,7 @@
 package e2e_test
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,9 +20,7 @@ func TestStubProfile_DirectPack_AutoDiscoveryAndExecution(t *testing.T) {
 
 	// Copy microfat CLI to binDir so sibling discovery can find companion stubs in binDir
 	siblingCLI := filepath.Join(binDir, "microfat")
-	cliBytes, err := os.ReadFile(cliPath)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(siblingCLI, cliBytes, 0o755))
+	copyFile(t, cliPath, siblingCLI)
 
 	// Compile full stub to binDir/microfat-stub
 	fullStubPath := filepath.Join(binDir, "microfat-stub")
@@ -172,22 +171,22 @@ func TestStubProfile_MissingCompanionAssets(t *testing.T) {
 	require.NoError(t, os.MkdirAll(isolatedBinDir, 0o755))
 
 	siblingCLI := filepath.Join(isolatedBinDir, "microfat")
-	cliBytes, err := os.ReadFile(cliPath)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(siblingCLI, cliBytes, 0o755))
+	copyFile(t, cliPath, siblingCLI)
 
 	// In isolatedBinDir, do NOT create microfat-stub-minimal
 	fatOut := filepath.Join(testDir, "app.fat")
 
-	cmd := exec.Command(siblingCLI,
-		"pack",
-		"--arch", currentHostArch,
-		"--stub-profile", "minimal",
-		"-v", currentHostLevel+"="+goldenVariantBins[currentHostLevel],
-		"-o", fatOut,
-	)
-	cmd.Env = []string{"PATH=/nonexistent_empty_path"}
-	out, err := cmd.CombinedOutput()
+	out, err := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+		cmd := exec.Command(siblingCLI,
+			"pack",
+			"--arch", currentHostArch,
+			"--stub-profile", "minimal",
+			"-v", currentHostLevel+"="+goldenVariantBins[currentHostLevel],
+			"-o", fatOut,
+		)
+		cmd.Env = []string{"PATH=/nonexistent_empty_path"}
+		return cmd
+	})
 	require.Error(t, err)
 	assert.Contains(t, string(out), "launcher stub \"microfat-stub-minimal\" for profile \"minimal\" not found")
 }
@@ -200,9 +199,7 @@ func TestStubProfile_ManifestPackAndPgoPack(t *testing.T) {
 	require.NoError(t, os.MkdirAll(binDir, 0o755))
 
 	siblingCLI := filepath.Join(binDir, "microfat")
-	cliBytes, err := os.ReadFile(cliPath)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(siblingCLI, cliBytes, 0o755))
+	copyFile(t, cliPath, siblingCLI)
 
 	fullStubPath := filepath.Join(binDir, "microfat-stub")
 	require.NoError(t, compileBinary(stubPackagePath, fullStubPath, nil))
@@ -292,4 +289,22 @@ variants:
 		require.NoError(t, infoErr, "info failed: %s", string(infoOut))
 		assert.Contains(t, string(infoOut), "Embedded Variants")
 	})
+}
+
+func runFixtureCommandCombinedOutput(newCommand func() *exec.Cmd) ([]byte, error) {
+	var (
+		cmd *exec.Cmd
+		buf bytes.Buffer
+	)
+	if err := retryFixtureBusy(func() error {
+		buf.Reset()
+		cmd = newCommand()
+		cmd.Stdout = &buf
+		cmd.Stderr = &buf
+		return cmd.Start()
+	}); err != nil {
+		return nil, err
+	}
+	err := cmd.Wait()
+	return buf.Bytes(), err
 }
