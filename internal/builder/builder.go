@@ -30,6 +30,7 @@ type BuildOptions struct {
 	ManifestPath      string
 	OutputPath        string
 	StubPath          string
+	StubProfile       string
 	Concurrency       int
 	KeepIntermediates bool
 	GoBinary          string
@@ -79,7 +80,15 @@ func BuildAndPack(ctx context.Context, m *Manifest, opts BuildOptions) (*BuildRe
 		finalOutput = filepath.Join(m.Dir, finalOutput)
 	}
 
-	stubPath, err := ResolveStubPath(opts.StubPath, m.Stub, m.Dir)
+	stubPath, err := ResolveStubWithOptions(ResolveStubOptions{
+		CLIStub:         opts.StubPath,
+		CLIProfile:      opts.StubProfile,
+		ManifestStub:    m.Stub,
+		ManifestProfile: m.StubProfile,
+		ManifestDir:     m.Dir,
+		TargetArch:      m.TargetArch,
+		WarnFunc:        opts.WarnFunc,
+	})
 	if err != nil {
 		return nil, err
 	}

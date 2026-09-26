@@ -152,3 +152,170 @@ func TestWhitespacePathExecution(t *testing.T) {
 		})
 	}
 }
+
+func TestStubPath_WhitespaceDataAndEmptyRejection(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	stubBytes, err := os.ReadFile(stubPath)
+	require.NoError(t, err)
+
+	// 1. Create a trusted readable stub with a bare whitespace-only basename: " "
+	bareStubPath := filepath.Join(workDir, " ")
+	require.NoError(t, os.WriteFile(bareStubPath, stubBytes, 0o755))
+
+	// 2. Create an absolute whitespace-ending stub path: "stub_ends_with_space "
+	absEndingWSPath := filepath.Join(workDir, "stub_ends_with_space ")
+	require.NoError(t, os.WriteFile(absEndingWSPath, stubBytes, 0o755))
+
+	// 3. Create a readable non-executable stub (mode 0644)
+	nonExecStubPath := filepath.Join(workDir, "stub_mode_0644")
+	require.NoError(t, os.WriteFile(nonExecStubPath, stubBytes, 0o644))
+
+	variantBin := goldenVariantBins[currentHostLevel]
+
+	// Subtest 1: --stub= rejection across direct pack
+	t.Run("DirectPack_StubEqualsEmpty_Rejected", func(t *testing.T) {
+		cmd := exec.Command(cliPath, "pack", "--stub=", "--arch", currentHostArch, "-v", currentHostLevel+"="+variantBin, "-o", "out.fat")
+		cmd.Dir = workDir
+		out, err := cmd.CombinedOutput()
+		require.Error(t, err)
+		assert.Contains(t, string(out), "flag --stub cannot be empty")
+	})
+
+	// Subtest 2: --stub "" (empty string argument) rejected
+	t.Run("DirectPack_StubEmptyString_Rejected", func(t *testing.T) {
+		cmd := exec.Command(cliPath, "pack", "--stub", "", "--arch", currentHostArch, "-v", currentHostLevel+"="+variantBin, "-o", "out.fat")
+		cmd.Dir = workDir
+		out, err := cmd.CombinedOutput()
+		require.Error(t, err)
+		assert.Contains(t, string(out), "flag --stub cannot be empty")
+	})
+
+	// Subtest 3: --stub " " (bare whitespace-only pathname) succeeds when file " " exists in working directory
+	t.Run("DirectPack_BareWhitespaceStub_SucceedsWhenFileExists", func(t *testing.T) {
+		fatOut := filepath.Join(workDir, "bare_ws.fat")
+		cmd := exec.Command(cliPath, "pack", "--stub", " ", "--arch", currentHostArch, "-v", currentHostLevel+"="+variantBin, "-o", fatOut)
+		cmd.Dir = workDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "pack with bare whitespace stub failed: %s", string(out))
+
+		// Verify binary integrity and execution
+		verifyFatIntegrity(t, fatOut)
+		runCmd := exec.Command(fatOut)
+		runOut, runErr := runCmd.CombinedOutput()
+		require.NoError(t, runErr, "exec failed: %s", string(runOut))
+		assert.Contains(t, string(runOut), "golden:variant=")
+	})
+
+	// Subtest 4: Missing whitespace-only stub fails without falling back to auto-discovery
+	t.Run("DirectPack_BareWhitespaceStub_FailsWhenMissingWithoutFallback", func(t *testing.T) {
+		emptyDir := t.TempDir()
+		fatOut := filepath.Join(emptyDir, "should_fail.fat")
+		cmd := exec.Command(cliPath, "pack", "--stub", " ", "--arch", currentHostArch, "-v", currentHostLevel+"="+variantBin, "-o", fatOut)
+		cmd.Dir = emptyDir
+		out, err := cmd.CombinedOutput()
+		require.Error(t, err, "pack must fail when whitespace stub file does not exist")
+		assert.NotContains(t, string(out), "flag --stub cannot be empty")
+		assert.NotContains(t, string(out), "Using auto-discovered launcher stub")
+		assert.Contains(t, string(out), "launcher stub")
+	})
+
+	// Subtest 5: Absolute whitespace-ending pathname succeeds
+	t.Run("DirectPack_AbsoluteWhitespaceEndingStub_Succeeds", func(t *testing.T) {
+		fatOut := filepath.Join(workDir, "abs_ws.fat")
+		cmd := exec.Command(cliPath, "pack",
+			"--stub", absEndingWSPath,
+			"--arch", currentHostArch,
+			"-v", currentHostLevel+"="+variantBin,
+			"-o", fatOut,
+		)
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "pack with whitespace-ending stub path failed: %s", string(out))
+		verifyFatIntegrity(t, fatOut)
+	})
+
+	// Subtest 6: Profile whitespace rejection
+	t.Run("DirectPack_WhitespaceProfile_Rejected", func(t *testing.T) {
+		cmd := exec.Command(cliPath, "pack",
+			"--stub-profile", "   ",
+			"--arch", currentHostArch,
+			"-v", currentHostLevel+"="+variantBin,
+			"-o", "out.fat",
+		)
+		cmd.Dir = workDir
+		out, err := cmd.CombinedOutput()
+		require.Error(t, err)
+		assert.Contains(t, string(out), "flag --stub-profile cannot be empty")
+	})
+
+	// Subtest 7: Readable non-executable stub (0644) succeeds as input data
+	t.Run("DirectPack_NonExecutableStub_SucceedsAsInputData", func(t *testing.T) {
+		fatOut := filepath.Join(workDir, "nonexec_stub.fat")
+		cmd := exec.Command(cliPath, "pack",
+			"--stub", nonExecStubPath,
+			"--arch", currentHostArch,
+			"-v", currentHostLevel+"="+variantBin,
+			"-o", fatOut,
+		)
+		cmd.Dir = workDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "pack with non-executable stub failed: %s", string(out))
+		verifyFatIntegrity(t, fatOut)
+	})
+
+	// Subtest 8 & 9: Manifest pack and pgo-pack with bare whitespace stub
+	pkgDir := filepath.Join(workDir, "src", "sample_ws")
+	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+	mainSource := `package main
+import "fmt"
+func main() { fmt.Println("WS_MANIFEST_OK") }
+`
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(mainSource), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplews\ngo 1.27.1\n"), 0o644))
+
+	manifestContent := `name: ws-manifest-app
+package: ` + pkgDir + `
+target_os: linux
+target_arch: ` + currentHostArch + `
+stub: " "
+variants:
+  - level: ` + currentHostLevel + `
+`
+	manifestPath := filepath.Join(workDir, "manifest_ws.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifestContent), 0o644))
+
+	t.Run("ManifestPack_BareWhitespaceStub_Succeeds", func(t *testing.T) {
+		fatOut := filepath.Join(workDir, "manifest_ws.fat")
+		cmd := exec.Command(cliPath, "pack", "--manifest", manifestPath, "-o", fatOut)
+		cmd.Dir = workDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "manifest pack with bare whitespace stub failed: %s", string(out))
+		verifyFatIntegrity(t, fatOut)
+	})
+
+	t.Run("ManifestPack_CLIStubEmpty_Rejected", func(t *testing.T) {
+		cmd := exec.Command(cliPath, "pack", "--manifest", manifestPath, "--stub=", "-o", "fail.fat")
+		cmd.Dir = workDir
+		out, err := cmd.CombinedOutput()
+		require.Error(t, err)
+		assert.Contains(t, string(out), "flag --stub cannot be empty")
+	})
+
+	t.Run("PgoPack_BareWhitespaceStub_Succeeds", func(t *testing.T) {
+		fatOut := filepath.Join(workDir, "pgo_ws.fat")
+		cmd := exec.Command(cliPath, "pgo-pack", "--manifest", manifestPath, "--stub", " ", "-o", fatOut)
+		cmd.Dir = workDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "pgo-pack with bare whitespace stub failed: %s", string(out))
+		verifyFatIntegrity(t, fatOut)
+	})
+
+	t.Run("PgoPack_CLIStubEmpty_Rejected", func(t *testing.T) {
+		cmd := exec.Command(cliPath, "pgo-pack", "--manifest", manifestPath, "--stub=", "-o", "fail.fat")
+		cmd.Dir = workDir
+		out, err := cmd.CombinedOutput()
+		require.Error(t, err)
+		assert.Contains(t, string(out), "flag --stub cannot be empty")
+	})
+}
