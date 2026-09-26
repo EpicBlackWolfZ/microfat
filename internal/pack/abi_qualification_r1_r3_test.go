@@ -288,28 +288,181 @@ func TestR1_PresentationAndErrorAccounting(t *testing.T) {
 			"differing symbol version requirements: variant v1 (1 requirements) vs variant v2 (2 requirements)",
 		}
 
-		// Calculate exact needed bytes
-		var needed uint64 = uint64(len(ErrABIMismatch.Error()))
-		for _, d := range diffs {
-			needed += uint64(len(d) + mismatchDiffBulletOverhead)
-		}
+		// Independent oracle: construct expected text directly without production separator or size helper
+		expected := ErrABIMismatch.Error() +
+			"\n  • " + diffs[0] +
+			"\n  • " + diffs[1]
+		exactBytes := uint64(len(expected))
 
 		// When budget is sufficient:
-		ra := NewReportAccounting(needed)
+		ra := NewReportAccounting(exactBytes)
 		err := formatMismatchError(diffs, ra)
 		require.Error(t, err)
-		assert.True(t, errors.Is(err, ErrABIMismatch))
-		assert.Equal(t, needed, ra.usedBytes, "ReportAccounting must be reserved exactly once with exact bytes")
-		assert.Contains(t, err.Error(), diffs[0])
-		assert.Contains(t, err.Error(), diffs[1])
+		assert.Equal(t, expected, err.Error(), "formatted error must match independent expected text")
+		assert.Equal(t, exactBytes, ra.usedBytes, "ReportAccounting must be reserved exactly once with exact bytes")
+		assert.True(t, errors.Is(err, ErrABIMismatch), "must unwrap to ErrABIMismatch")
+		assert.False(t, errors.Is(err, ErrABIResourceLimit), "must not wrap ErrABIResourceLimit on exact budget")
 
-		// When budget is insufficient:
-		raSmall := NewReportAccounting(needed - 1)
+		// When budget is one byte below actual size:
+		raSmall := NewReportAccounting(exactBytes - 1)
 		errSmall := formatMismatchError(diffs, raSmall)
 		require.Error(t, errSmall)
 		assert.True(t, errors.Is(errSmall, ErrABIMismatch), "must still unwrap to ErrABIMismatch")
 		assert.Contains(t, errSmall.Error(), "detailed output omitted")
 		assert.True(t, errors.Is(errSmall, ErrABIResourceLimit), "must wrap ErrABIResourceLimit")
+		assert.Equal(t, uint64(0), raSmall.usedBytes, "failed reservation must leave accounting usedBytes at 0")
+	})
+
+	t.Run("mismatch_error_separator_boundary_matrix", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("single_difference_exact_size", func(t *testing.T) {
+			t.Parallel()
+			diffs := []string{"variant v1 lacks libfoo.so"}
+			expected := ErrABIMismatch.Error() + "\n  • " + diffs[0]
+			exactBytes := uint64(len(expected))
+
+			ra := NewReportAccounting(exactBytes)
+			err := formatMismatchError(diffs, ra)
+			require.Error(t, err)
+			assert.Equal(t, expected, err.Error())
+			assert.Equal(t, exactBytes, ra.usedBytes)
+			assert.True(t, errors.Is(err, ErrABIMismatch))
+			assert.False(t, errors.Is(err, ErrABIResourceLimit))
+		})
+
+		t.Run("single_difference_one_byte_below", func(t *testing.T) {
+			t.Parallel()
+			diffs := []string{"variant v1 lacks libfoo.so"}
+			expected := ErrABIMismatch.Error() + "\n  • " + diffs[0]
+			exactBytes := uint64(len(expected))
+
+			ra := NewReportAccounting(exactBytes - 1)
+			err := formatMismatchError(diffs, ra)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrABIMismatch))
+			assert.True(t, errors.Is(err, ErrABIResourceLimit))
+			assert.Contains(t, err.Error(), "1 declared differences (detailed output omitted")
+			assert.Equal(t, uint64(0), ra.usedBytes)
+		})
+
+		t.Run("two_differences_exact_size", func(t *testing.T) {
+			t.Parallel()
+			diffs := []string{"diff alpha", "diff beta"}
+			expected := ErrABIMismatch.Error() + "\n  • " + diffs[0] + "\n  • " + diffs[1]
+			exactBytes := uint64(len(expected))
+
+			ra := NewReportAccounting(exactBytes)
+			err := formatMismatchError(diffs, ra)
+			require.Error(t, err)
+			assert.Equal(t, expected, err.Error())
+			assert.Equal(t, exactBytes, ra.usedBytes)
+		})
+
+		t.Run("multiple_differences_one_byte_below", func(t *testing.T) {
+			t.Parallel()
+			diffs := []string{"first difference", "second difference", "third difference"}
+			expected := ErrABIMismatch.Error() +
+				"\n  • " + diffs[0] +
+				"\n  • " + diffs[1] +
+				"\n  • " + diffs[2]
+			exactBytes := uint64(len(expected))
+
+			ra := NewReportAccounting(exactBytes - 1)
+			err := formatMismatchError(diffs, ra)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrABIMismatch))
+			assert.True(t, errors.Is(err, ErrABIResourceLimit))
+			assert.Contains(t, err.Error(), "3 declared differences (detailed output omitted")
+			assert.Equal(t, uint64(0), ra.usedBytes, "no partial reservation should occur")
+		})
+
+		t.Run("account_retained_data_delta", func(t *testing.T) {
+			t.Parallel()
+			diffs := []string{"distinct difference item"}
+			expected := ErrABIMismatch.Error() + "\n  • " + diffs[0]
+			exactBytes := uint64(len(expected))
+
+			const initialRetained = 64
+			ra := NewReportAccounting(initialRetained + exactBytes)
+			require.NoError(t, ra.reserve(initialRetained))
+			before := ra.usedBytes
+
+			err := formatMismatchError(diffs, ra)
+			require.Error(t, err)
+			assert.Equal(t, expected, err.Error())
+			assert.Equal(t, exactBytes, ra.usedBytes-before, "after - before must equal len(detailed text)")
+
+			raFail := NewReportAccounting(initialRetained + exactBytes - 1)
+			require.NoError(t, raFail.reserve(initialRetained))
+			beforeFail := raFail.usedBytes
+
+			errFail := formatMismatchError(diffs, raFail)
+			require.Error(t, errFail)
+			assert.True(t, errors.Is(errFail, ErrABIResourceLimit))
+			assert.Equal(t, beforeFail, raFail.usedBytes, "failed reservation must leave before unchanged")
+		})
+
+		t.Run("unicode_in_difference_byte_count", func(t *testing.T) {
+			t.Parallel()
+			// Unicode difference: rocket 🚀 (4 bytes), not equal ≠ (3 bytes), checkmark ✔ (3 bytes)
+			// Total runes = 37, total bytes = 43
+			diffs := []string{"variant 🚀 symbol GLIBC_2.34 ≠ requirement ✔"}
+			expected := ErrABIMismatch.Error() + "\n  • " + diffs[0]
+			exactBytes := uint64(len(expected))
+
+			ra := NewReportAccounting(exactBytes)
+			err := formatMismatchError(diffs, ra)
+			require.Error(t, err)
+			assert.Equal(t, expected, err.Error())
+			assert.Equal(t, exactBytes, ra.usedBytes)
+
+			raSmall := NewReportAccounting(exactBytes - 1)
+			errSmall := formatMismatchError(diffs, raSmall)
+			require.Error(t, errSmall)
+			assert.True(t, errors.Is(errSmall, ErrABIResourceLimit))
+		})
+
+		t.Run("very_small_nonzero_allowance_fallback", func(t *testing.T) {
+			t.Parallel()
+			const distinctiveMarker = "UNIQUE_DISTINCTIVE_DIFFERENCE_PAYLOAD_TOKEN_789"
+			diffs := []string{distinctiveMarker}
+
+			ra := NewReportAccounting(5)
+			err := formatMismatchError(diffs, ra)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrABIMismatch))
+			assert.True(t, errors.Is(err, ErrABIResourceLimit))
+			assert.Contains(t, err.Error(), "1 declared differences (detailed output omitted")
+			assert.NotContains(t, err.Error(), distinctiveMarker, "detailed list must be omitted on exhausted budget")
+		})
+
+		t.Run("production_comparator_genuine_mismatch", func(t *testing.T) {
+			t.Parallel()
+			rep1 := &VariantABIReport{
+				Level:        "v1",
+				Interpreter:  "/lib64/ld-linux-x86-64.so.2",
+				Linkage:      LinkageDynamic,
+				Dependencies: []string{"libc.so.6"},
+				Completeness: MetadataComplete,
+			}
+			rep2 := &VariantABIReport{
+				Level:        "v2",
+				Interpreter:  "/lib64/ld-linux-x86-64.so.2",
+				Linkage:      LinkageDynamic,
+				Dependencies: []string{"libc.so.6", "libm.so.6"},
+				Completeness: MetadataComplete,
+			}
+
+			_, errStrict := CompareVariantABIs([]*VariantABIReport{rep1, rep2}, false)
+			require.Error(t, errStrict)
+			assert.True(t, errors.Is(errStrict, ErrABIMismatch), "strict comparator must return ErrABIMismatch")
+
+			artPermissive, errPermissive := CompareVariantABIs([]*VariantABIReport{rep1, rep2}, true)
+			require.NoError(t, errPermissive)
+			assert.NotNil(t, artPermissive)
+			assert.True(t, artPermissive.Overridden, "permissive comparator must record policy difference")
+		})
 	})
 }
 

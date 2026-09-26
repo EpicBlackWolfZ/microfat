@@ -31,7 +31,7 @@ const (
 	verneedEntrySize               = 16
 	vernauxEntrySize               = 16
 	versionReportSeparatorOverhead = 2
-	mismatchDiffBulletOverhead     = 6
+	mismatchDiffSeparator          = "\n  • "
 	depPresentationOverhead        = 4
 	versionPresentationOverhead    = 24
 )
@@ -1892,7 +1892,7 @@ func (e *abiMismatchError) Unwrap() error {
 func formatMismatchError(differences []string, ra *ReportAccounting) error {
 	var needed uint64 = uint64(len(ErrABIMismatch.Error()))
 	for _, d := range differences {
-		needed += uint64(len(d) + mismatchDiffBulletOverhead)
+		needed += uint64(len(d)) + uint64(len(mismatchDiffSeparator))
 	}
 	if err := ra.reserve(needed); err != nil {
 		return fmt.Errorf("%w: %d declared differences (detailed output omitted: %w)",
@@ -1904,7 +1904,7 @@ func formatMismatchError(differences []string, ra *ReportAccounting) error {
 	}
 	sb.WriteString(ErrABIMismatch.Error())
 	for _, d := range differences {
-		sb.WriteString("\n  • ")
+		sb.WriteString(mismatchDiffSeparator)
 		sb.WriteString(d)
 	}
 	return &abiMismatchError{msg: sb.String()}
