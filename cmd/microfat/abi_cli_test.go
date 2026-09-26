@@ -201,7 +201,7 @@ func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
 	t.Run("invalid variant specification", func(t *testing.T) {
 		t.Parallel()
 		cmd := newPackCmd()
-		cmd.SetArgs([]string{"--stub", stubPath, "-o", "out", "-v", "invalid"})
+		cmd.SetArgs([]string{flagStub, stubPath, "-o", "out", "-v", "invalid"})
 		err := cmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid variant specification")
@@ -210,7 +210,7 @@ func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
 	t.Run("duplicate variant specification", func(t *testing.T) {
 		t.Parallel()
 		cmd := newPackCmd()
-		cmd.SetArgs([]string{"--stub", stubPath, "-o", "out", "-v", "v1=bin1", "-v", "v1=bin2"})
+		cmd.SetArgs([]string{flagStub, stubPath, "-o", "out", "-v", "v1=bin1", "-v", "v1=bin2"})
 		err := cmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "duplicate variant level")
@@ -219,7 +219,7 @@ func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
 	t.Run("missing output flag", func(t *testing.T) {
 		t.Parallel()
 		cmd := newPackCmd()
-		cmd.SetArgs([]string{"--stub", stubPath, "-v", "v1=bin1"})
+		cmd.SetArgs([]string{flagStub, stubPath, "-v", "v1=bin1"})
 		err := cmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "required flag(s) \"output\" not set")
@@ -228,7 +228,7 @@ func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
 	t.Run("missing variant flag", func(t *testing.T) {
 		t.Parallel()
 		cmd := newPackCmd()
-		cmd.SetArgs([]string{"--stub", stubPath, "-o", "out"})
+		cmd.SetArgs([]string{flagStub, stubPath, "-o", "out"})
 		err := cmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "required flag(s) \"variant\" not set")
@@ -237,7 +237,7 @@ func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
 	t.Run("manifest pack with missing file", func(t *testing.T) {
 		t.Parallel()
 		cmd := newPackCmd()
-		cmd.SetArgs([]string{"--manifest", "nonexistent-manifest.yaml"})
+		cmd.SetArgs([]string{flagManifest, "nonexistent-manifest.yaml"})
 		err := cmd.Execute()
 		require.Error(t, err)
 	})
