@@ -272,7 +272,8 @@ microfat pack --manifest pgo.yaml -o bin/myapp
 #### Flags
 | Flag | Shorthand | Type | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `--stub` | *(none)* | `string` | `""` | Path to launcher stub binary. If omitted, evaluates strict precedence: manifest `stub:`, sibling `microfat-stub`, then absolute PATH directories. |
+| `--stub` | *(none)* | `string` | `""` | Path to launcher stub binary. Takes precedence over automatic discovery; if omitted, evaluates strict precedence: manifest `stub:`, sibling companion stub, then absolute PATH directories matching `--stub-profile`. |
+| `--stub-profile` | *(none)* | `string` | `""` | Launcher stub profile: `full` (default, selects `microfat-stub`) or `minimal` (selects `microfat-stub-minimal`). |
 | `--output` | `-o` | `string` | `""` | Destination output path for the packaged fat executable. |
 | `--name` | *(none)* | `string` | `""` | Application name string embedded in manifest. |
 | `--os` | *(none)* | `string` | `"linux"` | Target operating system. |
@@ -323,6 +324,26 @@ variants:
       profile: latency
 ```
 
+#### Launcher Stub Profile Selection Contract
+
+`microfat` packages fat binaries using either the standard full launcher stub or the lightweight minimal launcher stub:
+
+- **`full` Profile (`microfat-stub`, default)**: Includes interactive runtime meta-commands (`--microfat-info`, `--microfat-optimize`,
+  `--microfat-trim`, etc.), container resource auto-tuning, zero-allocation binary table decoding, and in-RAM/cache dispatch.
+- **`minimal` Profile (`microfat-stub-minimal`)**: Compiled with `-tags minimal` with meta-command handlers stripped for lean deployments
+  (< 1.2 MB footprint). Retains container resource auto-tuning, zero-allocation binary table decoding, and in-RAM/cache dispatch, but
+  explicitly rejects interactive meta-commands (`--microfat:*`).
+
+**Resolution & Conflict Contract**:
+1. **Explicit `--stub <path>`**: Takes deliberate precedence over profile auto-discovery.
+2. **Explicit `--stub-profile <full|minimal>`**: Selects the companion stub binary name (`microfat-stub` or `microfat-stub-minimal`)
+   for auto-discovery in the sibling directory or `$PATH`.
+3. **Explicit Conflict Enforcement**: If an explicit stub path contradicts an explicitly requested profile (e.g. `--stub microfat-stub`
+   with `--stub-profile minimal`, or manifest `stub: microfat-stub` with `stub_profile: minimal`), `microfat` terminates execution
+   immediately with an explicit conflict error.
+4. **Non-Executing Candidate Inspection**: Companion candidate inspection verifies regular file status, executable permissions, ELF magic
+   bytes (`\x7fELF`), and machine architecture compatibility (`EM_X86_64` vs `EM_AARCH64`) without executing unverified binaries.
+
 ---
 
 ### `microfat pgo-pack`
@@ -366,7 +387,7 @@ variants:
 ```
 
 #### Flags
-Accepts all manifest and compiler flags matching `microfat pack` (`--manifest`, `-o`, `--stub`, `--concurrency`, `--profile`, `--compression`, `--dict`, `--keep-intermediates`, `--go-binary`, `--skip-elf-validation`).
+Accepts all manifest and compiler flags matching `microfat pack` (`--manifest`, `-o`, `--stub`, `--stub-profile`, `--concurrency`, `--profile`, `--compression`, `--dict`, `--keep-intermediates`, `--go-binary`, `--skip-elf-validation`).
 
 > [!NOTE]
 > **Authoritative Target Policy**: `GOOS`, `GOARCH`, `GOAMD64`, and `GOARM64` are reserved target variables. Ambient values for these variables are sanitized during compilation. Contradictory values declared in manifest `env` (at root or variant level) are rejected before compilation begins. In addition, every compiled Go artifact is validated via `debug/buildinfo` prior to packaging to ensure binary settings match declared variant levels.

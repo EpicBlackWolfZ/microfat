@@ -54,7 +54,7 @@ func main() { fmt.Println("dictionary payload") }
 					encoded, err := json.Marshal(manifest)
 					require.NoError(t, err)
 					require.NoError(t, os.WriteFile(path, encoded, 0o600))
-					args := []string{command, "--manifest", path, flagStub, stubPath}
+					args := []string{command, flagManifest, path, flagStub, stubPath}
 					if tc.flag != "" {
 						args = append(args, "--dict-size", tc.flag)
 					}
