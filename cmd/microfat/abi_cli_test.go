@@ -173,7 +173,7 @@ func TestCLI_SkipELFValidation_Warnings(t *testing.T) {
 		cmd := newPgoPackCmd()
 		var errBuf bytes.Buffer
 		cmd.SetErr(&errBuf)
-		cmd.SetArgs([]string{"--skip-elf-validation"})
+		cmd.SetArgs([]string{flagSkipELF})
 		err := cmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, errBuf.String(), expectedWarn)
@@ -248,5 +248,110 @@ func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
 		cmd.SetArgs([]string{"--manifest", "nonexistent-manifest.yaml"})
 		err := cmd.Execute()
 		require.Error(t, err)
+	})
+
+	t.Run("pack stdout failure on printABIReport", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		stubPath := filepath.Join(tmpDir, "dummy-stub")
+		require.NoError(t, os.WriteFile(stubPath, []byte("stub"), 0o755))
+		v1Path := filepath.Join(tmpDir, "v1")
+		require.NoError(t, os.WriteFile(v1Path, []byte("v1"), 0o755))
+		outPath := filepath.Join(tmpDir, "out.fat")
+
+		cmd := newPackCmd()
+		cmd.SetOut(&failWriter{failOnWrite: 1})
+		cmd.SetArgs([]string{
+			flagStub, stubPath,
+			"-o", outPath,
+			"-v", "v1=" + v1Path,
+			"--skip-elf-validation",
+		})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "artifact published successfully to")
+		assert.Contains(t, err.Error(), "but printing ABI report failed")
+	})
+
+	t.Run("manifest pack stdout failure on printABIReport", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		stubPath := filepath.Join(tmpDir, "dummy-stub")
+		fakeStub := make([]byte, 64)
+		copy(fakeStub, "\x7fELF\x02\x01\x01")
+		require.NoError(t, os.WriteFile(stubPath, fakeStub, 0o755))
+		pkgDir := filepath.Join(tmpDir, "samplepkg")
+		require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplepkg\ngo 1.27.1\n"), 0o644))
+
+		outPath := filepath.Join(tmpDir, "out.fat")
+		manifestPath := filepath.Join(tmpDir, "manifest.yaml")
+		manifestContent := "name: test-app\npackage: " + pkgDir + "\ntarget_os: linux\ntarget_arch: amd64\nskip_elf_validation: true\nstub: " +
+			stubPath + "\noutput: " + outPath + "\nvariants:\n  - level: v1\n    pgo: \"off\"\n"
+		require.NoError(t, os.WriteFile(manifestPath, []byte(manifestContent), 0o644))
+
+		cmd := newPackCmd()
+		cmd.SetOut(&failWriter{failOnWrite: 1})
+		cmd.SetArgs([]string{flagManifest, manifestPath, flagSkipELF})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "artifact published successfully to")
+		assert.Contains(t, err.Error(), "but printing ABI report failed")
+	})
+
+	t.Run("pgo-pack stdout failure on printABIReport", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		stubPath := filepath.Join(tmpDir, "dummy-stub")
+		fakeStub := make([]byte, 64)
+		copy(fakeStub, "\x7fELF\x02\x01\x01")
+		require.NoError(t, os.WriteFile(stubPath, fakeStub, 0o755))
+		pkgDir := filepath.Join(tmpDir, "samplepkg")
+		require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplepkg\ngo 1.27.1\n"), 0o644))
+
+		outPath := filepath.Join(tmpDir, "out.fat")
+		manifestPath := filepath.Join(tmpDir, "manifest.yaml")
+		manifestContent := "name: test-app\npackage: " + pkgDir + "\ntarget_os: linux\ntarget_arch: amd64\nskip_elf_validation: true\nstub: " +
+			stubPath + "\noutput: " + outPath + "\nvariants:\n  - level: v1\n    pgo: \"off\"\n"
+		require.NoError(t, os.WriteFile(manifestPath, []byte(manifestContent), 0o644))
+
+		cmd := newPgoPackCmd()
+		cmd.SetOut(&failWriter{failOnWrite: 1})
+		cmd.SetArgs([]string{flagManifest, manifestPath, flagSkipELF})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "artifact published successfully to")
+		assert.Contains(t, err.Error(), "but printing ABI report failed")
+	})
+
+	t.Run("pack WarnFunc without extra args on empty dict training", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		stubPath := filepath.Join(tmpDir, "dummy-stub")
+		fakeStub := make([]byte, 64)
+		copy(fakeStub, "\x7fELF\x02\x01\x01")
+		require.NoError(t, os.WriteFile(stubPath, fakeStub, 0o755))
+		v1Path := filepath.Join(tmpDir, "v1")
+		require.NoError(t, os.WriteFile(v1Path, []byte("v1_sample_bytes"), 0o755))
+		v2Path := filepath.Join(tmpDir, "v2")
+		require.NoError(t, os.WriteFile(v2Path, []byte("v2_sample_bytes"), 0o755))
+		outPath := filepath.Join(tmpDir, "out.fat")
+
+		var errBuf bytes.Buffer
+		cmd := newPackCmd()
+		cmd.SetErr(&errBuf)
+		cmd.SetArgs([]string{
+			flagStub, stubPath,
+			"-o", outPath,
+			"-v", "v1=" + v1Path,
+			"-v", "v2=" + v2Path,
+			flagProfile, "size",
+			flagSkipELF,
+		})
+		err := cmd.Execute()
+		require.NoError(t, err)
 	})
 }

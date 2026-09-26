@@ -3,6 +3,7 @@ package pack
 import (
 	"bytes"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
@@ -627,4 +628,93 @@ func TestR3_UncertaintySemantics(t *testing.T) {
 		assert.Contains(t, outBoth, "linkage is ambiguous (payload declares dynamic dependencies but has no PT_INTERP)")
 		assert.Contains(t, outBoth, "symbol version metadata is partial or unsupported")
 	})
+
+	t.Run("render and measure edge cases", func(t *testing.T) {
+		t.Parallel()
+
+		// Nil and empty reports
+		assert.NoError(t, RenderABIReport(nil, nil))
+		assert.NoError(t, RenderABIReport(nil, &ArtifactABIReport{}))
+		var buf bytes.Buffer
+		assert.NoError(t, RenderABIReport(&buf, nil))
+		assert.NoError(t, RenderABIReport(&buf, &ArtifactABIReport{}))
+
+		n, err := MeasureABIReportPresentation(nil)
+		require.NoError(t, err)
+		assert.Equal(t, uint64(0), n)
+
+		n, err = MeasureABIReportPresentation(&ArtifactABIReport{})
+		require.NoError(t, err)
+		assert.Equal(t, uint64(0), n)
+
+		// Discard writer
+		rep := &ArtifactABIReport{
+			Status: ComparisonConsistent,
+			Variants: []*VariantABIReport{
+				{
+					Level:          "v1",
+					Linkage:        LinkageDynamic,
+					HasInterpreter: true,
+					Interpreter:    "/lib64/ld-linux-x86-64.so.2",
+					Dependencies:   []string{"libc.so.6"},
+					VersionRequirements: []VersionRequirement{
+						{Library: testLibc, Version: testGlibc225},
+					},
+				},
+			},
+		}
+		assert.NoError(t, RenderABIReport(nil, rep))
+
+		// Writer errors covering writeLiteral, writeEscaped, writeEscapedToWriter
+		for i := 1; i <= 10; i++ {
+			fw := &qualificationFailWriter{failOnWrite: i}
+			_ = RenderABIReport(fw, rep)
+		}
+	})
+
+	t.Run("accounting and warning edge branches", func(t *testing.T) {
+		t.Parallel()
+
+		// Nil accounting
+		var nilAcct *ArtifactMetadataAccounting
+		assert.Equal(t, uint64(math.MaxUint64), nilAcct.remaining())
+		nilAcct.refund(100)
+		assert.NoError(t, nilAcct.check(100))
+		nilAcct.commit(100)
+
+		// Zero maxBytes default
+		zeroLimit := &ArtifactMetadataAccounting{maxBytes: 0, usedBytes: 10}
+		assert.Equal(t, uint64(MaxArtifactMetadataBytes-10), zeroLimit.remaining())
+
+		// Excess refund clamp
+		acct := &ArtifactMetadataAccounting{maxBytes: 100, usedBytes: 20}
+		acct.refund(50)
+		assert.Equal(t, uint64(0), acct.usedBytes)
+
+		// Pre-existing ambiguous linkage warning in single report
+		preWarnRep := &VariantABIReport{
+			Level:        "v1",
+			Linkage:      LinkageAmbiguous,
+			Completeness: MetadataComplete,
+			Warnings:     []string{"linkage is ambiguous already"},
+		}
+		ra := NewReportAccounting(defaultABILimits.MaxArtifactReportBytes)
+		singleRep, err := handleSingleReport(preWarnRep, ra, &ArtifactABIReport{Variants: []*VariantABIReport{preWarnRep}})
+		require.NoError(t, err)
+		assert.Equal(t, ComparisonUnknown, singleRep.Status)
+		assert.Len(t, singleRep.Warnings, 1)
+	})
+}
+
+type qualificationFailWriter struct {
+	failOnWrite int
+	writes      int
+}
+
+func (f *qualificationFailWriter) Write(p []byte) (int, error) {
+	f.writes++
+	if f.failOnWrite == 0 || f.writes >= f.failOnWrite {
+		return 0, errors.New("simulated writer error")
+	}
+	return len(p), nil
 }

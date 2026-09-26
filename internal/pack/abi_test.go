@@ -1000,7 +1000,7 @@ func TestPack_ABIConsistency_Integration(t *testing.T) {
 		interp:       testLdLinux,
 		dependencies: []string{testLibc},
 		verneeds: []syntheticVerneed{
-			{file: testLibc, versions: []syntheticVernaux{{name: "GLIBC_2.2.5"}}},
+			{file: testLibc, versions: []syntheticVernaux{{name: testGlibc225}}},
 		},
 	})
 	require.NoError(t, os.WriteFile(v1Path, v1Raw, 0o755))
