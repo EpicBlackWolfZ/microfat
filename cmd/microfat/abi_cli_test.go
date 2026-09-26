@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"debug/elf"
+	"encoding/binary"
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
@@ -354,4 +357,48 @@ func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
 		err := cmd.Execute()
 		require.NoError(t, err)
 	})
+}
+
+func TestCLI_DirectPack_StubProfileAndABIIntegration(t *testing.T) {
+	tmpDir := t.TempDir()
+	binDir := filepath.Join(tmpDir, "fakebin")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+
+	stubHeader := make([]byte, 64)
+	copy(stubHeader[0:4], []byte{0x7f, 'E', 'L', 'F'})
+	stubHeader[4] = byte(elf.ELFCLASS64)
+	stubHeader[5] = byte(elf.ELFDATA2LSB)
+	stubHeader[6] = byte(elf.EV_CURRENT)
+	stubHeader[16] = 2 // ET_EXEC
+	stubHeader[20] = byte(elf.EV_CURRENT)
+	if runtime.GOARCH == testArchARM64 {
+		binary.LittleEndian.PutUint16(stubHeader[18:20], uint16(elf.EM_AARCH64))
+	} else {
+		binary.LittleEndian.PutUint16(stubHeader[18:20], uint16(elf.EM_X86_64))
+	}
+	binary.LittleEndian.PutUint16(stubHeader[52:54], 64) // e_ehsize >= 64
+
+	fullStub := filepath.Join(binDir, "microfat-stub")
+	minStub := filepath.Join(binDir, "microfat-stub-minimal")
+	require.NoError(t, os.WriteFile(fullStub, stubHeader, 0o755))
+	require.NoError(t, os.WriteFile(minStub, stubHeader, 0o755))
+
+	v1Path := filepath.Join(tmpDir, "v1")
+	require.NoError(t, os.WriteFile(v1Path, []byte("v1_sample_data"), 0o755))
+	outPath := filepath.Join(tmpDir, "out.fat")
+
+	t.Setenv("PATH", binDir)
+
+	var errBuf bytes.Buffer
+	cmd := newPackCmd()
+	cmd.SetErr(&errBuf)
+	cmd.SetArgs([]string{
+		"-o", outPath,
+		"-v", "v1=" + v1Path,
+		flagStubProfile, "minimal",
+		flagSkipELF,
+	})
+	err := cmd.Execute()
+	require.NoError(t, err)
+	assert.Contains(t, errBuf.String(), "microfat-stub-minimal")
 }
