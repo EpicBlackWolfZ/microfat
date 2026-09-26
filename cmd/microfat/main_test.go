@@ -1828,8 +1828,8 @@ func TestPackStubWithStubProfileNotice(t *testing.T) {
 	var errBuf bytes.Buffer
 	packCmd.SetErr(&errBuf)
 	packCmd.SetArgs([]string{
-		"--stub", stubPath,
-		"--stub-profile", "minimal",
+		flagStub, stubPath,
+		flagStubProfile, "minimal",
 		"-o", fatOut,
 		"-v", "v1=" + v1Path,
 		flagSkipELF,
