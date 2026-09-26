@@ -32,11 +32,8 @@ import (
 )
 
 const (
-	testArchAMD64        = "amd64"
 	testOSLinux          = "linux"
 	testPolicyForceLevel = "force_level"
-	testPathEnv          = "PATH=/bin"
-	testAppArg           = "app"
 	testForceLevelV3     = "MICROFAT_FORCE_LEVEL=v3"
 	testCompressionZstd  = "zstd"
 )
@@ -1664,7 +1661,7 @@ func TestExecuteVariant_TelemetryJSONValidation(t *testing.T) {
 		t.Fatalf("unmarshaling DispatchTelemetry JSON failed: %v (raw: %s)", err, outStr)
 	}
 
-	if dt.Event != format.EventDispatch || dt.HostArch != "amd64" || dt.SelectedVariant != entry.Level {
+	if dt.Event != format.EventDispatch || dt.HostArch != testArchAMD64 || dt.SelectedVariant != entry.Level {
 		t.Errorf("DispatchTelemetry validation mismatch: %+v", dt)
 	}
 	if dt.TimestampUnixNano <= 0 || dt.DecompressionDurationUs <= 0 || dt.TotalLauncherUs <= 0 {
