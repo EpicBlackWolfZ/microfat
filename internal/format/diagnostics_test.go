@@ -34,7 +34,7 @@ func TestDiagnoseError(t *testing.T) {
 			name:         "memfd_create EACCES wrapped",
 			stage:        StageMemfdCreate,
 			err:          fmt.Errorf("memfd probe failed: %w", syscall.EACCES),
-			expectedHint: HintMemfdSeccomp,
+			expectedHint: HintMemfdEACCES,
 		},
 		{
 			name:         "memfd_create ENOSYS unsupported kernel",
@@ -136,7 +136,7 @@ func TestDiagnoseError(t *testing.T) {
 			name:         "memfd execve EPERM",
 			stage:        StageMemfdExec,
 			err:          syscall.EPERM,
-			expectedHint: HintExecNoExec,
+			expectedHint: HintExecEPERM,
 		},
 		{
 			name:         "cache execve ETXTBSY text file busy",
@@ -250,7 +250,7 @@ func TestDiagnoseError(t *testing.T) {
 			name:         "generic launcher_main ErrExecve with EPERM",
 			stage:        StageLauncherMain,
 			err:          fmt.Errorf("%w: %w", ErrExecve, syscall.EPERM),
-			expectedHint: HintExecNoExec,
+			expectedHint: HintExecEPERM,
 		},
 		{
 			name:         "generic launcher_main ErrExecve with ETXTBSY",
@@ -268,13 +268,13 @@ func TestDiagnoseError(t *testing.T) {
 			name:         "generic launcher_main ErrMemfdCreate with EPERM",
 			stage:        StageLauncherMain,
 			err:          fmt.Errorf("%w: %w", ErrMemfdCreate, syscall.EPERM),
-			expectedHint: HintMemfdSeccomp,
+			expectedHint: HintMemfdEPERM,
 		},
 		{
 			name:         "generic launcher_main ErrMemfdCreate with EACCES",
 			stage:        StageLauncherMain,
 			err:          fmt.Errorf("%w: %w", ErrMemfdCreate, syscall.EACCES),
-			expectedHint: HintMemfdSeccomp,
+			expectedHint: HintMemfdEACCES,
 		},
 		{
 			name:         "generic launcher_main ErrMemfdCreate with ENOSYS",
@@ -389,5 +389,132 @@ func TestDiagnoseError(t *testing.T) {
 				t.Errorf("DiagnoseError(%q, %v) = %q, expected %q", tc.stage, tc.err, actualHint, tc.expectedHint)
 			}
 		})
+	}
+}
+
+type customErr struct {
+	msg string
+}
+
+func (c *customErr) Error() string { return c.msg }
+
+type otherErr struct{}
+
+func (o *otherErr) Error() string { return "other" }
+
+func TestDispatchError(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("sentinel error")
+	att1Err := &customErr{msg: "att1 error"}
+	att2Err := errors.New("att2 error")
+
+	// 1. Summary field used
+	dispSummary := &DispatchError{
+		PrimarySentinel: sentinel,
+		Summary:         "custom summary",
+	}
+	if dispSummary.Error() != "custom summary" {
+		t.Errorf("expected summary, got: %s", dispSummary.Error())
+	}
+
+	// 2. Single attempt
+	dispSingle := &DispatchError{
+		PrimarySentinel: sentinel,
+		Attempts: []ExecutionAttempt{
+			{Error: "attempt failed"},
+		},
+	}
+	if dispSingle.Error() != "sentinel error: attempt failed" {
+		t.Errorf("expected single attempt format, got: %s", dispSingle.Error())
+	}
+
+	// 3. Multiple attempts
+	dispMulti := &DispatchError{
+		PrimarySentinel: sentinel,
+		RequestedMode:   "auto",
+		Attempts: []ExecutionAttempt{
+			{AttemptedMode: "memfd", Stage: "create", Error: "memfd failed", Err: att1Err},
+			{AttemptedMode: "cache", Stage: "write", Error: "cache failed", Err: att2Err},
+		},
+	}
+	expectedMulti := "sentinel error: dispatch failed in auto mode (attempts: [memfd/create: memfd failed]; [cache/write: cache failed])"
+	if dispMulti.Error() != expectedMulti {
+		t.Errorf("expected multi format %q, got %q", expectedMulti, dispMulti.Error())
+	}
+
+	// 4. Unwrap
+	if dispMulti.Unwrap() != sentinel {
+		t.Errorf("expected sentinel, got: %v", dispMulti.Unwrap())
+	}
+
+	// 5. Is
+	if !errors.Is(dispMulti, sentinel) {
+		t.Errorf("expected Is(sentinel) to be true")
+	}
+	if !errors.Is(dispMulti, att2Err) {
+		t.Errorf("expected Is(att2Err) to be true")
+	}
+	if errors.Is(dispMulti, errors.New("unrelated")) {
+		t.Errorf("expected Is(unrelated) to be false")
+	}
+
+	// 6. As
+	var targetCustom *customErr
+	if !errors.As(dispMulti, &targetCustom) || targetCustom.msg != "att1 error" {
+		t.Errorf("expected As to find att1Err custom type")
+	}
+
+	dispPrimaryCustom := &DispatchError{
+		PrimarySentinel: att1Err,
+	}
+	var targetPrimary *customErr
+	if !errors.As(dispPrimaryCustom, &targetPrimary) || targetPrimary.msg != "att1 error" {
+		t.Errorf("expected As to find PrimarySentinel custom type")
+	}
+
+	var targetOther *otherErr
+	if errors.As(dispMulti, &targetOther) {
+		t.Errorf("expected As(otherErr) to be false")
+	}
+}
+
+func TestExtractErrno(t *testing.T) {
+	t.Parallel()
+
+	if val, name := ExtractErrno(nil); val != 0 || name != "" {
+		t.Errorf("expected 0, \"\" for nil error, got %d, %s", val, name)
+	}
+
+	if val, name := ExtractErrno(errors.New("generic")); val != 0 || name != "" {
+		t.Errorf("expected 0, \"\" for generic error, got %d, %s", val, name)
+	}
+
+	errnos := []struct {
+		err  syscall.Errno
+		name string
+	}{
+		{syscall.EPERM, "EPERM"},
+		{syscall.ENOENT, "ENOENT"},
+		{syscall.EACCES, "EACCES"},
+		{syscall.EBADF, "EBADF"},
+		{syscall.ENOMEM, "ENOMEM"},
+		{syscall.EEXIST, "EEXIST"},
+		{syscall.EINVAL, "EINVAL"},
+		{syscall.ENFILE, "ENFILE"},
+		{syscall.EMFILE, "EMFILE"},
+		{syscall.ETXTBSY, "ETXTBSY"},
+		{syscall.ENOSPC, "ENOSPC"},
+		{syscall.EROFS, "EROFS"},
+		{syscall.ENOEXEC, "ENOEXEC"},
+		{syscall.ENOSYS, "ENOSYS"},
+		{syscall.Errno(9999), "ERRNO_9999"},
+	}
+
+	for _, tc := range errnos {
+		val, name := ExtractErrno(tc.err)
+		if val != int(tc.err) || name != tc.name {
+			t.Errorf("ExtractErrno(%v) = (%d, %s), expected (%d, %s)", tc.err, val, name, int(tc.err), tc.name)
+		}
 	}
 }

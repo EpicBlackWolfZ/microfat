@@ -26,12 +26,16 @@ const (
 
 // Standard diagnostic remediation hints for operator troubleshooting.
 const (
-	HintMemfdSeccomp = "memfd_create was blocked by host seccomp/security profile. " +
-		"Fallback to cache will be used. Set MICROFAT_EXEC_MODE=cache to skip memfd probe."
-	HintMemfdSeal = "memfd sealing (F_ADD_SEALS) failed or was restricted. " +
-		"Fallback to cache will be used. Set MICROFAT_EXEC_MODE=cache or adjust kernel sealing permissions."
-	HintMemfdKernelUnsupported = "memfd_create is unsupported on this Linux kernel (< 3.17). " +
-		"Set MICROFAT_EXEC_MODE=cache."
+	HintMemfdEPERM = "memfd_create failed with EPERM. " +
+		"Possible causes include host security policy, seccomp filters, or container profile restrictions. " +
+		"If disk cache execution is permitted, run with MICROFAT_EXEC_MODE=cache."
+	HintMemfdEACCES = "memfd_create failed with EACCES. " +
+		"Possible causes include permission restrictions or kernel memfd policy limits. " +
+		"If disk cache execution is permitted, run with MICROFAT_EXEC_MODE=cache."
+	HintMemfdSeal = "memfd sealing (F_ADD_SEALS) failed or was restricted by kernel security policy. " +
+		"If disk cache execution is permitted, run with MICROFAT_EXEC_MODE=cache, or adjust kernel sealing permissions."
+	HintMemfdKernelUnsupported = "memfd_create is unsupported on this Linux kernel or disabled (ENOSYS). " +
+		"If disk cache execution is permitted, run with MICROFAT_EXEC_MODE=cache."
 	HintFileDescriptorLimit = "File descriptor limit reached. " +
 		"Increase nofile limits (ulimit -n) or free open file descriptors."
 	HintReadOnlyFS = "Read-only filesystem detected. " +
@@ -40,8 +44,10 @@ const (
 		"Ensure $XDG_CACHE_HOME or $TMPDIR is writable, or mount a writable tmpfs."
 	HintDiskFull = "No space left on device. " +
 		"Free disk space in cache directory or set $MICROFAT_CACHE_DIR to a volume with available space."
-	HintExecNoExec = "execve failed with EACCES. " +
-		"Ensure the backing filesystem or tmpfs is not mounted with 'noexec'."
+	HintExecEACCES = "execve failed with EACCES. " +
+		"Possible causes include missing execute permissions, a 'noexec' filesystem mount, or security policy restrictions."
+	HintExecEPERM = "execve failed with EPERM. " +
+		"Possible causes include security policy (seccomp, LSM/AppArmor/SELinux), or container execution restrictions."
 	HintTextBusy = "Binary is currently open for writing by another process (ETXTBSY). " +
 		"Retrying or prewarming with --microfat:prewarm avoids concurrency contention."
 	HintExecFormat       = "Binary format is invalid or incompatible with host kernel/architecture."
@@ -51,6 +57,10 @@ const (
 		"Re-package the binary with 'microfat pack' or verify integrity with 'microfat verify'."
 	HintInsecureCacheDir = "Cache directory has insecure permissions, is a symlink, or is owned by another user. " +
 		"Use a private directory owned by your UID with mode 0700 or set MICROFAT_CACHE_DIR."
+
+	// Deprecated compatibility aliases:
+	HintMemfdSeccomp = HintMemfdEPERM
+	HintExecNoExec   = HintExecEACCES
 )
 
 // DiagnoseError inspects an execution failure and stage context, returning an actionable
@@ -104,8 +114,10 @@ func diagnoseDecompress(err error) string {
 
 func diagnoseMemfdCreate(err error) string {
 	switch {
-	case errors.Is(err, syscall.EPERM), errors.Is(err, syscall.EACCES):
-		return HintMemfdSeccomp
+	case errors.Is(err, syscall.EPERM):
+		return HintMemfdEPERM
+	case errors.Is(err, syscall.EACCES):
+		return HintMemfdEACCES
 	case errors.Is(err, syscall.ENOSYS):
 		return HintMemfdKernelUnsupported
 	case errors.Is(err, syscall.EMFILE), errors.Is(err, syscall.ENFILE):
@@ -147,8 +159,10 @@ func diagnoseCacheWrite(err error) string {
 
 func diagnoseExec(err error) string {
 	switch {
-	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
-		return HintExecNoExec
+	case errors.Is(err, syscall.EACCES):
+		return HintExecEACCES
+	case errors.Is(err, syscall.EPERM):
+		return HintExecEPERM
 	case errors.Is(err, syscall.ETXTBSY):
 		return HintTextBusy
 	case errors.Is(err, syscall.ENOEXEC):

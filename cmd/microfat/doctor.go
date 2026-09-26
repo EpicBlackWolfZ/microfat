@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
+	"github.com/EpicBlackWolfZ/microfat/internal/memfd"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/EpicBlackWolfZ/microfat/internal/version"
 	"github.com/spf13/cobra"
@@ -26,12 +28,16 @@ const (
 	glyphWarning = "[!]"
 	glyphFailure = "[✖]"
 	glyphInfo    = "[-]"
+
+	executionUnavailable = "unavailable"
 )
 
 var (
 	microarchDetectFunc          = microarch.Detect
 	isAVX512DownclockingRiskFunc = microarch.IsAVX512DownclockingRisk
 	createTempFileFunc           = os.CreateTemp
+	statCacheFunc                = os.Stat
+	readFileFunc                 = os.ReadFile
 )
 
 // DoctorOptions contains user-specified flags for the doctor command.
@@ -45,9 +51,12 @@ type DoctorOptions struct {
 // DoctorReport contains full diagnostic environment telemetry.
 type DoctorReport struct {
 	Ready     bool            `json:"ready"`
+	Policy    string          `json:"policy"`
+	Scope     string          `json:"scope"`
 	CPU       CPUReport       `json:"cpu"`
 	Memfd     MemfdReport     `json:"memfd"`
 	Cache     CacheReport     `json:"cache"`
+	Execution ExecutionReport `json:"execution"`
 	Cgroup    *CgroupReport   `json:"cgroup,omitempty"`
 	Toolchain ToolchainReport `json:"toolchain"`
 	Summary   string          `json:"summary"`
@@ -55,8 +64,16 @@ type DoctorReport struct {
 	Errors    []string        `json:"errors,omitempty"`
 }
 
+// ExecutionReport clarifies execution status vs prerequisite verification.
+type ExecutionReport struct {
+	Status string `json:"status"`
+	Reason string `json:"reason"`
+	Notice string `json:"notice"`
+}
+
 // CPUReport contains CPU microarchitecture level and vector capability details.
 type CPUReport struct {
+	Passed                bool                         `json:"passed"`
 	OS                    string                       `json:"os"`
 	Arch                  string                       `json:"arch"`
 	Level                 string                       `json:"level"`
@@ -68,22 +85,41 @@ type CPUReport struct {
 
 // MemfdReport contains in-memory anonymous file descriptor capability details.
 type MemfdReport struct {
-	Available bool   `json:"available"`
-	Status    string `json:"status"`
-	Kernel    string `json:"kernel,omitempty"`
-	Seccomp   string `json:"seccomp,omitempty"`
-	Error     string `json:"error,omitempty"`
-	Hint      string `json:"hint,omitempty"`
+	Available             bool                    `json:"available"`
+	Passed                bool                    `json:"passed"`
+	Phase                 string                  `json:"phase,omitempty"`
+	Operation             string                  `json:"operation,omitempty"`
+	Status                string                  `json:"status"`
+	Kernel                string                  `json:"kernel,omitempty"`
+	Seccomp               string                  `json:"seccomp,omitempty"`
+	CreationStrategy      string                  `json:"creation_strategy,omitempty"`
+	Mode                  *memfd.ModeObservation  `json:"mode,omitempty"`
+	Seals                 *memfd.SealsObservation `json:"seals,omitempty"`
+	Execution             string                  `json:"execution,omitempty"`
+	Error                 string                  `json:"error,omitempty"`
+	ErrorMessage          string                  `json:"error_message,omitempty"`
+	ErrnoName             string                  `json:"errno_name,omitempty"`
+	ErrnoValue            int                     `json:"errno_value,omitempty"`
+	CandidateExplanations []string                `json:"candidate_explanations,omitempty"`
+	Hint                  string                  `json:"hint,omitempty"`
+	Cause                 error                   `json:"-"`
 }
 
 // CacheReport contains disk cache directory status and write permission details.
 type CacheReport struct {
-	Ready        bool   `json:"ready"`
-	ResolvedPath string `json:"path"`
-	Permissions  string `json:"permissions"`
-	Writable     bool   `json:"writable"`
-	Error        string `json:"error,omitempty"`
-	Hint         string `json:"hint,omitempty"`
+	Ready                 bool     `json:"ready"`
+	Passed                bool     `json:"passed"`
+	Phase                 string   `json:"phase,omitempty"`
+	ResolvedPath          string   `json:"path"`
+	Permissions           string   `json:"permissions"`
+	Writable              bool     `json:"writable"`
+	Execution             string   `json:"execution,omitempty"`
+	Error                 string   `json:"error,omitempty"`
+	ErrorMessage          string   `json:"error_message,omitempty"`
+	ErrnoName             string   `json:"errno_name,omitempty"`
+	ErrnoValue            int      `json:"errno_value,omitempty"`
+	CandidateExplanations []string `json:"candidate_explanations,omitempty"`
+	Hint                  string   `json:"hint,omitempty"`
 }
 
 // CgroupReport contains Linux container resource limits and computed Go tuning parameters.
@@ -113,9 +149,12 @@ func newDoctorCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "doctor",
-		Short: "Verify host CPU, memfd_create, disk cache, and container cgroup environment readiness",
+		Short: "Verify host CPU, memfd_create, disk cache, and container cgroup environment prerequisites",
 		Long: `doctor inspects the local runtime environment to verify host CPU microarchitecture level,
-in-memory anonymous execution (memfd_create), disk cache fallback permissions, and container cgroup limits.`,
+in-memory anonymous execution (memfd_create) prerequisites, disk cache fallback prerequisites, and container cgroup limits.
+
+Doctor evaluates environment prerequisites. Runtime process execution is not tested during doctor probes.`,
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.Out == nil {
 				opts.Out = cmd.OutOrStdout()
@@ -131,7 +170,9 @@ in-memory anonymous execution (memfd_create), disk cache fallback permissions, a
 					return fmt.Errorf("writing newline: %w", err)
 				}
 			} else {
-				printDoctorReport(opts.Out, report)
+				if err := printDoctorReport(opts.Out, report); err != nil {
+					return fmt.Errorf("printing doctor report: %w", err)
+				}
 			}
 
 			if !report.Ready {
@@ -143,7 +184,12 @@ in-memory anonymous execution (memfd_create), disk cache fallback permissions, a
 
 	cmd.Flags().BoolVar(&opts.JSONOutput, "json", false, "Output diagnostic results in JSON format")
 	cmd.Flags().StringVar(&opts.CacheDir, "cache-dir", "", "Custom cache directory to verify")
-	cmd.Flags().BoolVar(&opts.Strict, "strict", false, "Strict verification (fails if in-memory memfd is unavailable)")
+	cmd.Flags().BoolVar(
+		&opts.Strict,
+		"strict",
+		false,
+		"Strict verification (requires both in-memory memfd_create and disk cache prerequisites to pass)",
+	)
 
 	return cmd
 }
@@ -153,6 +199,7 @@ func runDoctor(opts DoctorOptions) *DoctorReport {
 	downclockRisk := isAVX512DownclockingRiskFunc()
 
 	cpuRep := CPUReport{
+		Passed:              hostInfo.Level != "",
 		OS:                  hostInfo.OS,
 		Arch:                hostInfo.Arch,
 		Level:               hostInfo.Level,
@@ -181,82 +228,77 @@ func runDoctor(opts DoctorOptions) *DoctorReport {
 		BuiltBy: version.BuiltBy,
 	}
 
-	var warnings []string
-	var errs []string
-
-	if !memfdRep.Available {
-		if runtime.GOOS == "linux" {
-			warnings = append(warnings, fmt.Sprintf("In-memory memfd_create is unavailable: %s", memfdRep.Status))
-		}
-	}
-
+	var baseWarnings []string
 	if downclockRisk {
-		warnings = append(warnings, "Host CPU is subject to AVX-512 downclocking; consider MICROFAT_POLICY=safe_avx512")
+		baseWarnings = append(baseWarnings, "Host CPU is subject to AVX-512 downclocking; consider MICROFAT_POLICY=safe_avx512")
 	}
 
-	if !cacheRep.Ready {
-		if !memfdRep.Available {
-			errs = append(errs, fmt.Sprintf("Disk cache is unavailable (%s) and memfd_create is unavailable", cacheRep.Error))
-		} else {
-			warnings = append(warnings, fmt.Sprintf("Disk cache is unavailable: %s (fallback will fail if memfd is restricted)", cacheRep.Error))
-		}
-	}
-
-	if hostInfo.Level == "" {
-		errs = append(errs, fmt.Sprintf("Host CPU level could not be detected for OS %q, arch %q", hostInfo.OS, hostInfo.Arch))
-	}
-
-	var ready bool
+	policy := "normal"
 	if opts.Strict {
-		ready = memfdRep.Available && cacheRep.Ready && hostInfo.Level != ""
-		if !ready && len(errs) == 0 {
-			errs = append(errs, "Strict mode requirement failed: in-memory memfd_create and disk cache must both be available")
-		}
-	} else {
-		ready = (memfdRep.Available || cacheRep.Ready) && hostInfo.Level != ""
+		policy = "strict"
 	}
 
-	summary := "Environment is fully ready for high-performance Microfat dispatch!"
-	if !ready {
-		summary = "Environment is NOT ready for Microfat execution. Please resolve the errors above."
-	} else if len(warnings) > 0 {
-		summary = "Environment is ready with warnings for Microfat dispatch."
-	}
+	verdict := lifecycle.EvaluatePrerequisites(hostInfo.Level, memfdRep.Passed, cacheRep.Passed, opts.Strict, baseWarnings)
 
 	return &DoctorReport{
-		Ready:     ready,
-		CPU:       cpuRep,
-		Memfd:     memfdRep,
-		Cache:     cacheRep,
+		Ready:  verdict.Ready,
+		Policy: policy,
+		Scope:  "prerequisites",
+		CPU:    cpuRep,
+		Memfd:  memfdRep,
+		Cache:  cacheRep,
+		Execution: ExecutionReport{
+			Status: "not_tested",
+			Reason: "not_tested",
+			Notice: "Doctor inspects environment prerequisites; runtime process execution is not tested during doctor probes.",
+		},
 		Cgroup:    cgroupRep,
 		Toolchain: toolchainRep,
-		Summary:   summary,
-		Warnings:  warnings,
-		Errors:    errs,
+		Summary:   verdict.Summary,
+		Warnings:  verdict.Warnings,
+		Errors:    verdict.Errors,
 	}
 }
 
 func probeCache(customDir string) CacheReport {
+	const executionUntested = "unknown (prerequisite check only; payload execution was not tested)"
+
 	resolved, err := format.ResolveCacheDir(customDir)
 	if err != nil {
 		hint := format.DiagnoseError(format.StageCacheDirInit, err)
 		if hint == "" {
 			hint = "Ensure $XDG_CACHE_HOME, $TMPDIR, or custom cache path is writable."
 		}
+		errnoName, errnoVal, explanations := lifecycle.ResolveCandidateExplanations(err)
 		return CacheReport{
-			Ready: false,
-			Error: err.Error(),
-			Hint:  hint,
+			Ready:                 false,
+			Passed:                false,
+			Phase:                 "resolution",
+			Execution:             executionUnavailable,
+			Error:                 err.Error(),
+			ErrorMessage:          err.Error(),
+			ErrnoName:             errnoName,
+			ErrnoValue:            errnoVal,
+			CandidateExplanations: explanations,
+			Hint:                  hint,
 		}
 	}
 
-	info, err := os.Stat(resolved)
+	info, err := statCacheFunc(resolved)
 	if err != nil {
+		errnoName, errnoVal, explanations := lifecycle.ResolveCandidateExplanations(err)
 		return CacheReport{
-			Ready:        false,
-			ResolvedPath: resolved,
-			Error:        err.Error(),
-			Hint:         "Cache directory stat failed.",
+			Ready:                 false,
+			Passed:                false,
+			Phase:                 "stat",
+			Execution:             executionUnavailable,
+			ResolvedPath:          resolved,
+			Error:                 err.Error(),
+			ErrorMessage:          err.Error(),
+			ErrnoName:             errnoName,
+			ErrnoValue:            errnoVal,
+			CandidateExplanations: explanations,
+			Hint:                  "Cache directory stat failed.",
 		}
 	}
 
@@ -268,13 +310,21 @@ func probeCache(customDir string) CacheReport {
 		if hint == "" {
 			hint = "Unable to create files in cache directory. Check write permissions."
 		}
+		errnoName, errnoVal, explanations := lifecycle.ResolveCandidateExplanations(err)
 		return CacheReport{
-			Ready:        false,
-			ResolvedPath: resolved,
-			Permissions:  permStr,
-			Writable:     false,
-			Error:        err.Error(),
-			Hint:         hint,
+			Ready:                 false,
+			Passed:                false,
+			Phase:                 "create_temp",
+			Execution:             executionUnavailable,
+			ResolvedPath:          resolved,
+			Permissions:           permStr,
+			Writable:              false,
+			Error:                 err.Error(),
+			ErrorMessage:          err.Error(),
+			ErrnoName:             errnoName,
+			ErrnoValue:            errnoVal,
+			CandidateExplanations: explanations,
+			Hint:                  hint,
 		}
 	}
 
@@ -286,37 +336,65 @@ func probeCache(customDir string) CacheReport {
 
 	testPayload := []byte("microfat-doctor-probe-check")
 	if _, err := tmpFile.Write(testPayload); err != nil {
+		errnoName, errnoVal, explanations := lifecycle.ResolveCandidateExplanations(err)
 		return CacheReport{
-			Ready:        false,
-			ResolvedPath: resolved,
-			Permissions:  permStr,
-			Writable:     false,
-			Error:        fmt.Sprintf("writing test probe file: %v", err),
-			Hint:         "Write failed in cache directory.",
+			Ready:                 false,
+			Passed:                false,
+			Phase:                 "write",
+			Execution:             executionUnavailable,
+			ResolvedPath:          resolved,
+			Permissions:           permStr,
+			Writable:              false,
+			Error:                 fmt.Sprintf("writing test probe file: %v", err),
+			ErrorMessage:          err.Error(),
+			ErrnoName:             errnoName,
+			ErrnoValue:            errnoVal,
+			CandidateExplanations: explanations,
+			Hint:                  "Write failed in cache directory.",
 		}
 	}
 
 	if err := tmpFile.Sync(); err != nil {
+		errnoName, errnoVal, explanations := lifecycle.ResolveCandidateExplanations(err)
 		return CacheReport{
-			Ready:        false,
-			ResolvedPath: resolved,
-			Permissions:  permStr,
-			Writable:     false,
-			Error:        fmt.Sprintf("syncing test probe file: %v", err),
+			Ready:                 false,
+			Passed:                false,
+			Phase:                 "sync",
+			Execution:             executionUnavailable,
+			ResolvedPath:          resolved,
+			Permissions:           permStr,
+			Writable:              false,
+			Error:                 fmt.Sprintf("syncing test probe file: %v", err),
+			ErrorMessage:          err.Error(),
+			ErrnoName:             errnoName,
+			ErrnoValue:            errnoVal,
+			CandidateExplanations: explanations,
 		}
 	}
 
 	_ = tmpFile.Close()
 
 	// #nosec G304 -- reading temporary probe file created by test
-	readData, err := os.ReadFile(tmpPath)
+	readData, err := readFileFunc(tmpPath)
 	if err != nil || string(readData) != string(testPayload) {
+		errStr := "verifying written probe file data failed"
+		if err != nil {
+			errStr = fmt.Sprintf("verifying written probe file data failed: %v", err)
+		}
+		errnoName, errnoVal, explanations := lifecycle.ResolveCandidateExplanations(err)
 		return CacheReport{
-			Ready:        false,
-			ResolvedPath: resolved,
-			Permissions:  permStr,
-			Writable:     false,
-			Error:        "verifying written probe file data failed",
+			Ready:                 false,
+			Passed:                false,
+			Phase:                 "read",
+			Execution:             executionUnavailable,
+			ResolvedPath:          resolved,
+			Permissions:           permStr,
+			Writable:              false,
+			Error:                 errStr,
+			ErrorMessage:          errStr,
+			ErrnoName:             errnoName,
+			ErrnoValue:            errnoVal,
+			CandidateExplanations: explanations,
 		}
 	}
 
@@ -324,152 +402,216 @@ func probeCache(customDir string) CacheReport {
 
 	return CacheReport{
 		Ready:        true,
+		Passed:       true,
 		ResolvedPath: resolved,
 		Permissions:  permStr,
 		Writable:     true,
+		Execution:    executionUntested,
 	}
 }
 
-func printDoctorReport(w io.Writer, rep *DoctorReport) {
-	_, _ = fmt.Fprintln(w, "=== Microfat Host Environment Doctor ===")
-	_, _ = fmt.Fprintln(w)
-
-	printCPUSection(w, &rep.CPU)
-	printMemfdSection(w, &rep.Memfd)
-	printCacheSection(w, &rep.Cache)
-	printCgroupSection(w, rep.Cgroup)
-	printToolchainSection(w, &rep.Toolchain)
-	printIssuesAndSummary(w, rep)
+func appendLine(b *strings.Builder, a ...any) {
+	_, _ = fmt.Fprintln(b, a...)
 }
 
-func printCPUSection(w io.Writer, cpu *CPUReport) {
+func appendFormat(b *strings.Builder, f string, a ...any) {
+	_, _ = fmt.Fprintf(b, f, a...)
+}
+
+func printDoctorReport(w io.Writer, rep *DoctorReport) error {
+	var b strings.Builder
+	appendLine(&b, "=== Microfat Host Environment Doctor ===")
+	appendLine(&b)
+
+	printCPUSection(&b, &rep.CPU)
+	printMemfdSection(&b, &rep.Memfd)
+	printCacheSection(&b, &rep.Cache)
+	printCgroupSection(&b, rep.Cgroup)
+	printToolchainSection(&b, &rep.Toolchain)
+	printIssuesAndSummary(&b, rep)
+
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+func printCPUSection(b *strings.Builder, cpu *CPUReport) {
 	cpuGlyph := glyphSuccess
 	if cpu.Level == "" {
 		cpuGlyph = glyphFailure
 	} else if cpu.AVX512DownclockRisk {
 		cpuGlyph = glyphWarning
 	}
-	_, _ = fmt.Fprintf(w, "%s Host CPU Microarchitecture\n", cpuGlyph)
-	_, _ = fmt.Fprintf(w, "    • OS/Arch:        %s/%s\n", cpu.OS, cpu.Arch)
-	_, _ = fmt.Fprintf(w, "    • Detected Level: %s\n", cpu.Level)
+	appendFormat(b, "%s Host CPU Microarchitecture\n", cpuGlyph)
+	appendFormat(b, "    • OS/Arch:        %s/%s\n", cpu.OS, cpu.Arch)
+	appendFormat(b, "    • Detected Level: %s\n", cpu.Level)
 	if len(cpu.Features) > 0 {
-		_, _ = fmt.Fprintf(w, "    • Key Features:   %s\n", strings.Join(cpu.Features, ", "))
+		appendFormat(b, "    • Key Features:   %s\n", strings.Join(cpu.Features, ", "))
 	}
 	if cpu.AVX512DownclockNotice != "" {
-		_, _ = fmt.Fprintf(w, "    • AVX-512 Status: %s\n", cpu.AVX512DownclockNotice)
+		appendFormat(b, "    • AVX-512 Status: %s\n", cpu.AVX512DownclockNotice)
 	}
-	_, _ = fmt.Fprintln(w)
+	appendLine(b)
 }
 
-func printMemfdSection(w io.Writer, memfd *MemfdReport) {
+func printMemfdSection(b *strings.Builder, memfd *MemfdReport) {
 	memfdGlyph := glyphSuccess
-	if !memfd.Available {
+	if !memfd.Passed {
 		if runtime.GOOS == "linux" {
 			memfdGlyph = glyphWarning
 		} else {
 			memfdGlyph = glyphInfo
 		}
 	}
-	_, _ = fmt.Fprintf(w, "%s In-Memory Execution (memfd_create)\n", memfdGlyph)
+	appendFormat(b, "%s In-Memory Execution (memfd_create) Prerequisites\n", memfdGlyph)
 	if memfd.Kernel != "" {
-		_, _ = fmt.Fprintf(w, "    • Kernel Support: %s (%s)\n", memfd.Status, memfd.Kernel)
+		appendFormat(b, "    • Kernel Support:    %s (%s)\n", memfd.Status, memfd.Kernel)
 	} else {
-		_, _ = fmt.Fprintf(w, "    • Kernel Support: %s\n", memfd.Status)
+		appendFormat(b, "    • Kernel Support:    %s\n", memfd.Status)
+	}
+	if memfd.CreationStrategy != "" {
+		appendFormat(b, "    • Creation Strategy: %s\n", memfd.CreationStrategy)
+	}
+	if memfd.Mode != nil {
+		appendFormat(b, "    • Descriptor Mode:   %s (executable: %t)\n", memfd.Mode.ModeOctal, memfd.Mode.IsExecutable)
+	}
+	if memfd.Seals != nil {
+		if memfd.Seals.Supported {
+			appendFormat(b, "    • Mandatory Seals:   supported (matched: %t)\n", memfd.Seals.Matches)
+		} else {
+			appendFormat(b, "    • Mandatory Seals:   unsupported or blocked (%s)\n", memfd.Seals.Error)
+		}
 	}
 	if memfd.Seccomp != "" {
-		_, _ = fmt.Fprintf(w, "    • Seccomp Filter: %s\n", memfd.Seccomp)
+		appendFormat(b, "    • Seccomp Filter:    %s\n", memfd.Seccomp)
 	}
-	if memfd.Hint != "" && !memfd.Available {
-		_, _ = fmt.Fprintf(w, "    • Diagnostic:     %s\n", memfd.Hint)
+	if memfd.Execution != "" {
+		appendFormat(b, "    • Execution Test:    %s\n", memfd.Execution)
 	}
-	_, _ = fmt.Fprintln(w)
+	printMemfdFailureDetails(b, memfd)
+	appendLine(b)
 }
 
-func printCacheSection(w io.Writer, cache *CacheReport) {
+func printMemfdFailureDetails(b *strings.Builder, memfd *MemfdReport) {
+	if memfd.Phase != "" && !memfd.Passed {
+		appendFormat(b, "    • Failed Phase:      %s\n", memfd.Phase)
+	}
+	if memfd.Operation != "" && !memfd.Passed {
+		appendFormat(b, "    • Failed Operation:  %s\n", memfd.Operation)
+	}
+	if memfd.ErrnoName != "" {
+		appendFormat(b, "    • Errno:             %s (%d)\n", memfd.ErrnoName, memfd.ErrnoValue)
+	}
+	for _, exp := range memfd.CandidateExplanations {
+		appendFormat(b, "    • Possible Cause:    %s\n", exp)
+	}
+	if memfd.Hint != "" && !memfd.Passed {
+		appendFormat(b, "    • Diagnostic:        %s\n", memfd.Hint)
+	}
+}
+
+func printCacheSection(b *strings.Builder, cache *CacheReport) {
 	cacheGlyph := glyphSuccess
-	if !cache.Ready {
+	if !cache.Passed {
 		cacheGlyph = glyphFailure
 	}
-	_, _ = fmt.Fprintf(w, "%s Disk Cache Execution Fallback\n", cacheGlyph)
+	appendFormat(b, "%s Disk Cache Execution Fallback Prerequisites\n", cacheGlyph)
 	if cache.ResolvedPath != "" {
-		_, _ = fmt.Fprintf(w, "    • Resolved Path:  %s\n", cache.ResolvedPath)
+		appendFormat(b, "    • Resolved Path:     %s\n", cache.ResolvedPath)
 	}
 	if cache.Permissions != "" {
 		writableStr := "read/write OK"
 		if !cache.Writable {
 			writableStr = "unwritable"
 		}
-		_, _ = fmt.Fprintf(w, "    • Permissions:    %s (%s)\n", cache.Permissions, writableStr)
+		appendFormat(b, "    • Permissions:       %s (%s)\n", cache.Permissions, writableStr)
+	}
+	if cache.Execution != "" {
+		appendFormat(b, "    • Execution Test:    %s\n", cache.Execution)
+	}
+	if cache.Phase != "" && !cache.Passed {
+		appendFormat(b, "    • Failed Phase:      %s\n", cache.Phase)
+	}
+	if cache.ErrnoName != "" {
+		appendFormat(b, "    • Errno:             %s (%d)\n", cache.ErrnoName, cache.ErrnoValue)
+	}
+	for _, exp := range cache.CandidateExplanations {
+		appendFormat(b, "    • Possible Cause:    %s\n", exp)
 	}
 	if cache.Error != "" {
-		_, _ = fmt.Fprintf(w, "    • Error:          %s\n", cache.Error)
+		appendFormat(b, "    • Error:             %s\n", cache.Error)
 	}
 	if cache.Hint != "" {
-		_, _ = fmt.Fprintf(w, "    • Diagnostic:     %s\n", cache.Hint)
+		appendFormat(b, "    • Diagnostic:        %s\n", cache.Hint)
 	}
-	_, _ = fmt.Fprintln(w)
+	appendLine(b)
 }
 
-func printCgroupSection(w io.Writer, cg *CgroupReport) {
+func printCgroupSection(b *strings.Builder, cg *CgroupReport) {
 	if cg != nil && cg.Detected {
-		_, _ = fmt.Fprintf(w, "%s Container Resource Limits (cgroup v%d)\n", glyphSuccess, cg.Version)
+		appendFormat(b, "%s Container Resource Limits (cgroup v%d)\n", glyphSuccess, cg.Version)
 		if cg.MemoryLimitBytes > 0 {
-			_, _ = fmt.Fprintf(w, "    • Memory Limit:   %s\n", formatBytes(cg.MemoryLimitBytes))
+			appendFormat(b, "    • Memory Limit:   %s\n", formatBytes(cg.MemoryLimitBytes))
 		} else {
-			_, _ = fmt.Fprintf(w, "    • Memory Limit:   unlimited\n")
+			appendLine(b, "    • Memory Limit:   unlimited")
 		}
 		if cg.MemoryHighBytes > 0 {
-			_, _ = fmt.Fprintf(w, "    • Memory High:    %s\n", formatBytes(cg.MemoryHighBytes))
+			appendFormat(b, "    • Memory High:    %s\n", formatBytes(cg.MemoryHighBytes))
 		}
 		if cg.CPUQuota > 0 {
-			_, _ = fmt.Fprintf(w, "    • CFS CPU Quota:  %.2f cores\n", cg.CPUQuota)
+			appendFormat(b, "    • CFS CPU Quota:  %.2f cores\n", cg.CPUQuota)
 		} else {
-			_, _ = fmt.Fprintf(w, "    • CFS CPU Quota:  unlimited\n")
+			appendLine(b, "    • CFS CPU Quota:  unlimited")
 		}
 		if cg.GOMEMLIMITStr != "" {
 			constraintNote := ""
 			if cg.ConstrainingLimit != "" {
 				constraintNote = fmt.Sprintf(" [bounded by %s]", cg.ConstrainingLimit)
 			}
-			_, _ = fmt.Fprintf(w, "    • Auto GOMEMLIMIT: %s (~%s)%s\n", cg.GOMEMLIMITStr, formatBytes(cg.GOMEMLIMITBytes), constraintNote)
+			appendFormat(
+				b,
+				"    • Auto GOMEMLIMIT: %s (~%s)%s\n",
+				cg.GOMEMLIMITStr,
+				formatBytes(cg.GOMEMLIMITBytes),
+				constraintNote,
+			)
 		}
 		if cg.GOMAXPROCS > 0 {
-			_, _ = fmt.Fprintf(w, "    • Auto GOMAXPROCS: %d\n", cg.GOMAXPROCS)
+			appendFormat(b, "    • Auto GOMAXPROCS: %d\n", cg.GOMAXPROCS)
 		}
 	} else {
-		_, _ = fmt.Fprintf(w, "%s Container Resource Limits\n", glyphInfo)
-		_, _ = fmt.Fprintf(w, "    • Status:         No container cgroup limits detected (bare-metal / unconstrained host)\n")
+		appendFormat(b, "%s Container Resource Limits\n", glyphInfo)
+		appendLine(b, "    • Status:         No container cgroup limits detected (bare-metal / unconstrained host)")
 	}
-	_, _ = fmt.Fprintln(w)
+	appendLine(b)
 }
 
-func printToolchainSection(w io.Writer, tc *ToolchainReport) {
-	_, _ = fmt.Fprintf(w, "%s Toolchain & Version Metadata\n", glyphSuccess)
-	_, _ = fmt.Fprintf(w, "    • Version:        %s\n", tc.Version)
-	_, _ = fmt.Fprintf(w, "    • Commit:         %s\n", tc.Commit)
+func printToolchainSection(b *strings.Builder, tc *ToolchainReport) {
+	appendFormat(b, "%s Toolchain & Version Metadata\n", glyphSuccess)
+	appendFormat(b, "    • Version:        %s\n", tc.Version)
+	appendFormat(b, "    • Commit:         %s\n", tc.Commit)
 	if tc.Date != "" {
-		_, _ = fmt.Fprintf(w, "    • Build Date:     %s\n", tc.Date)
+		appendFormat(b, "    • Build Date:     %s\n", tc.Date)
 	}
-	_, _ = fmt.Fprintln(w)
+	appendLine(b)
 }
 
-func printIssuesAndSummary(w io.Writer, rep *DoctorReport) {
+func printIssuesAndSummary(b *strings.Builder, rep *DoctorReport) {
 	if len(rep.Warnings) > 0 {
-		_, _ = fmt.Fprintln(w, "Warnings:")
+		appendLine(b, "Warnings:")
 		for _, warn := range rep.Warnings {
-			_, _ = fmt.Fprintf(w, "  [!] %s\n", warn)
+			appendFormat(b, "  [!] %s\n", warn)
 		}
-		_, _ = fmt.Fprintln(w)
+		appendLine(b)
 	}
 	if len(rep.Errors) > 0 {
-		_, _ = fmt.Fprintln(w, "Errors:")
+		appendLine(b, "Errors:")
 		for _, errStr := range rep.Errors {
-			_, _ = fmt.Fprintf(w, "  [✖] %s\n", errStr)
+			appendFormat(b, "  [✖] %s\n", errStr)
 		}
-		_, _ = fmt.Fprintln(w)
+		appendLine(b)
 	}
 
-	_, _ = fmt.Fprintf(w, "Summary: %s\n", rep.Summary)
+	appendFormat(b, "Summary: %s\n", rep.Summary)
 }
 
 func formatBytes(bytes int64) string {

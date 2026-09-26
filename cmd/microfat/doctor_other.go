@@ -3,15 +3,17 @@
 package main
 
 import (
-	"fmt"
-	"runtime"
+	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
 )
 
 func probeMemfd() MemfdReport {
+	obs := lifecycle.CheckMemfdSupport(nil)
 	return MemfdReport{
-		Available: false,
-		Status:    fmt.Sprintf("N/A (%s host; microfat fat execution targets Linux ELF)", runtime.GOOS),
+		Available: obs.Available,
+		Passed:    obs.Passed,
+		Status:    obs.Status,
 		Seccomp:   "N/A",
+		Execution: "not_tested",
 	}
 }
 

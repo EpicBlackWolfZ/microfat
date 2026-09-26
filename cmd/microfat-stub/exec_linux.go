@@ -20,6 +20,7 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/memfd"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"golang.org/x/sys/unix"
 )
@@ -35,7 +36,7 @@ const (
 	// - F_SEAL_SHRINK & F_SEAL_GROW: prevents truncation or expansion of the memory region.
 	// - F_SEAL_SEAL: permanently locks the seal set, preventing any further seals or unsealing.
 	// This ensures payload integrity and memory safety against runtime tampering or write races.
-	memfdTargetSeals = unix.F_SEAL_WRITE | unix.F_SEAL_SHRINK | unix.F_SEAL_GROW | unix.F_SEAL_SEAL
+	memfdTargetSeals = memfd.TargetSeals
 )
 
 var (
@@ -451,7 +452,41 @@ func logErrorDiagnostics(
 	policyRes microarch.PolicyResult,
 	details string,
 ) {
+	requestedMode := os.Getenv(format.EnvExecMode)
+	if requestedMode == "" {
+		requestedMode = os.Getenv(format.EnvDispatchMode)
+	}
+	if requestedMode == "" {
+		requestedMode = format.ExecModeAuto
+	}
+	attemptedMode := format.ExecModeMemfd
+	if strings.HasPrefix(stage, "cache") {
+		attemptedMode = format.ExecModeCache
+	}
+	var attempts []format.ExecutionAttempt
+	var dispErr *format.DispatchError
+	if errors.As(err, &dispErr) {
+		attempts = dispErr.Attempts
+		if dispErr.RequestedMode != "" {
+			requestedMode = dispErr.RequestedMode
+		}
+	}
+	logErrorDiagnosticsWithAttempts(stage, err, hostInfo, entry, policyRes, requestedMode, attemptedMode, attempts, details)
+}
+
+func logErrorDiagnosticsWithAttempts(
+	stage string,
+	err error,
+	hostInfo microarch.Info,
+	entry *format.VariantEntry,
+	policyRes microarch.PolicyResult,
+	requestedMode string,
+	attemptedMode string,
+	attempts []format.ExecutionAttempt,
+	details string,
+) {
 	hint := format.DiagnoseError(stage, err)
+	errno, errnoName := format.ExtractErrno(err)
 
 	logOpt := os.Getenv(format.EnvLog)
 	if strings.EqualFold(logOpt, "json") {
@@ -463,7 +498,12 @@ func logErrorDiagnostics(
 			PolicyApplied:     policyRes.PolicyApplied,
 			PolicyReason:      policyRes.OverrideReason,
 			Stage:             stage,
+			RequestedMode:     requestedMode,
+			AttemptedMode:     attemptedMode,
 			Error:             err.Error(),
+			Errno:             errno,
+			ErrnoName:         errnoName,
+			Attempts:          attempts,
 			Details:           details,
 			Hint:              hint,
 		}
@@ -477,6 +517,65 @@ func logErrorDiagnostics(
 	debugOpt := os.Getenv(format.EnvDebug)
 	if (debugOpt == "1" || strings.EqualFold(debugOpt, "true")) && hint != "" {
 		fmt.Fprintf(os.Stderr, "[microfat:hint] %s\n", hint)
+	}
+}
+
+func buildCombinedDispatchError(
+	sentinel error,
+	requestedMode string,
+	primaryErr error,
+	cacheStage string,
+	cacheErr error,
+) *format.DispatchError {
+	memfdStage := format.StageMemfdCreate
+	switch {
+	case errors.Is(primaryErr, format.ErrExecve):
+		memfdStage = format.StageMemfdExec
+	case errors.Is(primaryErr, format.ErrMemfdSealingFailed):
+		memfdStage = format.StageMemfdSeal
+	case errors.Is(primaryErr, format.ErrMemfdExtract):
+		memfdStage = format.StageMemfdExtract
+	}
+
+	memfdErrno, memfdErrnoName := format.ExtractErrno(primaryErr)
+	cacheErrno, cacheErrnoName := format.ExtractErrno(cacheErr)
+
+	attempts := []format.ExecutionAttempt{
+		{
+			Stage:         memfdStage,
+			RequestedMode: requestedMode,
+			AttemptedMode: format.ExecModeMemfd,
+			Err:           primaryErr,
+			Error:         primaryErr.Error(),
+			Errno:         memfdErrno,
+			ErrnoName:     memfdErrnoName,
+		},
+		{
+			Stage:         cacheStage,
+			RequestedMode: requestedMode,
+			AttemptedMode: format.ExecModeCache,
+			Err:           cacheErr,
+			Error:         cacheErr.Error(),
+			Errno:         cacheErrno,
+			ErrnoName:     cacheErrnoName,
+		},
+	}
+
+	var fallbackDesc string
+	if cacheStage == format.StageCacheExec {
+		fallbackDesc = "cache fallback execve failed: "
+	}
+	summary := fmt.Sprintf(
+		"%v: launcher execution failed in %s mode: %s(primary memfd error: %v) "+
+			"[attempt 1: memfd/%s: %v] [attempt 2: cache/%s: %v]",
+		sentinel, requestedMode, fallbackDesc, primaryErr, memfdStage, primaryErr, cacheStage, cacheErr,
+	)
+
+	return &format.DispatchError{
+		PrimarySentinel: sentinel,
+		RequestedMode:   requestedMode,
+		Attempts:        attempts,
+		Summary:         summary,
 	}
 }
 
@@ -497,6 +596,14 @@ func executeViaMemfd(
 	policyRes microarch.PolicyResult,
 	startTime time.Time,
 ) error {
+	requestedMode := os.Getenv(format.EnvExecMode)
+	if requestedMode == "" {
+		requestedMode = os.Getenv(format.EnvDispatchMode)
+	}
+	if requestedMode == "" {
+		requestedMode = format.ExecModeAuto
+	}
+
 	if err := checkExtractionBudget(entry, idx); err != nil {
 		return err
 	}
@@ -508,7 +615,14 @@ func executeViaMemfd(
 
 	fd, err := createExecutableMemfd()
 	if err != nil {
-		logErrorDiagnostics(format.StageMemfdCreate, err, hostInfo, entry, policyRes, "falling back to disk cache")
+		details := "falling back to disk cache"
+		if strings.EqualFold(requestedMode, format.ExecModeMemfd) {
+			details = "forced memfd mode: no cache fallback will be attempted"
+		}
+		logErrorDiagnostics(format.StageMemfdCreate, err, hostInfo, entry, policyRes, details)
+		if strings.EqualFold(requestedMode, format.ExecModeMemfd) {
+			return fmt.Errorf("%w: memfd_create failed (forced memfd mode): %w", format.ErrMemfdCreate, err)
+		}
 		return fmt.Errorf("%w: memfd_create failed: %w", format.ErrMemfdCreate, err)
 	}
 
@@ -540,6 +654,32 @@ func executeViaMemfd(
 	return fmt.Errorf("%w: execve on %s failed: %w", format.ErrExecve, procPath, execErr)
 }
 
+func handleCacheError(
+	sentinel error,
+	stage string,
+	err error,
+	primaryErr error,
+	requestedMode string,
+	hostInfo microarch.Info,
+	entry *format.VariantEntry,
+	policyRes microarch.PolicyResult,
+	details string,
+) error {
+	if primaryErr != nil {
+		dispErr := buildCombinedDispatchError(sentinel, requestedMode, primaryErr, stage, err)
+		logErrorDiagnostics(stage, dispErr, hostInfo, entry, policyRes, details)
+		return dispErr
+	}
+	var errOut error
+	if stage == format.StageCacheExec {
+		errOut = fmt.Errorf("%w: cache execve failed (%s): %w", sentinel, details, err)
+	} else {
+		errOut = fmt.Errorf("%w: %w", sentinel, err)
+	}
+	logErrorDiagnostics(stage, errOut, hostInfo, entry, policyRes, details)
+	return errOut
+}
+
 func executeViaCache(
 	selfPath string,
 	selfFile *os.File,
@@ -552,6 +692,14 @@ func executeViaCache(
 	primaryErr error,
 	startTime time.Time,
 ) error {
+	requestedMode := os.Getenv(format.EnvExecMode)
+	if requestedMode == "" {
+		requestedMode = os.Getenv(format.EnvDispatchMode)
+	}
+	if requestedMode == "" {
+		requestedMode = format.ExecModeAuto
+	}
+
 	if selfPath == "" && selfFile != nil {
 		selfPath = selfFile.Name()
 	}
@@ -559,10 +707,10 @@ func executeViaCache(
 
 	dirFD, cacheDir, err := resolveCacheDirFunc("")
 	if err != nil {
-		errOut := fmt.Errorf("%w: launcher execution failed: unable to initialize cache: %w (primary memfd error: %v)",
-			format.ErrCacheInit, err, primaryErr)
-		logErrorDiagnostics(format.StageCacheDirInit, errOut, hostInfo, entry, policyRes, "cache directory creation failed")
-		return errOut
+		return handleCacheError(
+			format.ErrCacheInit, format.StageCacheDirInit, err,
+			primaryErr, requestedMode, hostInfo, entry, policyRes, "cache directory creation failed",
+		)
 	}
 	if dirFD < 0 {
 		return fmt.Errorf("%w: invalid cache directory descriptor", format.ErrCacheInit)
@@ -570,10 +718,11 @@ func executeViaCache(
 	defer func() { _ = unix.Close(dirFD) }()
 
 	if !format.ValidateChecksum(entry.SHA256) || entry.SHA256 == "" {
-		errOut := fmt.Errorf("%w: launcher execution failed: invalid variant sha256 checksum format %q",
-			format.ErrCacheWrite, entry.SHA256)
-		logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "invalid cache filename")
-		return errOut
+		rawErr := fmt.Errorf("invalid variant sha256 checksum format %q", entry.SHA256)
+		return handleCacheError(
+			format.ErrCacheWrite, format.StageCacheCreateTemp, rawErr,
+			primaryErr, requestedMode, hostInfo, entry, policyRes, "invalid cache filename",
+		)
 	}
 
 	cachedName := filepath.Clean(entry.SHA256)
@@ -587,10 +736,11 @@ func executeViaCache(
 		if cache.IsSymlinkErr(openErr) {
 			reason = "refusal to execute symlink"
 		}
-		errOut := fmt.Errorf("%w: %s at %s: %w (primary memfd error: %v)",
-			format.ErrCacheWrite, reason, cachedBinary, openErr, primaryErr)
-		logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "symlink detected in cache")
-		return errOut
+		rawErr := fmt.Errorf("%s at %s: %w", reason, cachedBinary, openErr)
+		return handleCacheError(
+			format.ErrCacheWrite, format.StageCacheCreateTemp, rawErr,
+			primaryErr, requestedMode, hostInfo, entry, policyRes, "symlink detected in cache",
+		)
 	}
 
 	if openErr != nil {
@@ -603,17 +753,15 @@ func executeViaCache(
 		})
 		if matErr != nil {
 			stage := format.StageCacheCreateTemp
+			sentinel := format.ErrCacheWrite
 			if errors.Is(matErr, format.ErrCacheExtract) || isPayloadCorruptionOrDecompressionError(matErr) {
 				stage = format.StageCacheExtract
-				errOut := fmt.Errorf("%w: extracting to cache fallback: %w (primary memfd error: %v)",
-					format.ErrCacheExtract, matErr, primaryErr)
-				logErrorDiagnostics(stage, errOut, hostInfo, entry, policyRes, "decompressing payload to cache failed")
-				return errOut
+				sentinel = format.ErrCacheExtract
 			}
-			errOut := fmt.Errorf("%w: launcher execution failed: %w (primary memfd error: %v)",
-				format.ErrCacheWrite, matErr, primaryErr)
-			logErrorDiagnostics(stage, errOut, hostInfo, entry, policyRes, "materializing cache binary failed")
-			return errOut
+			return handleCacheError(
+				sentinel, stage, matErr,
+				primaryErr, requestedMode, hostInfo, entry, policyRes, "materializing cache binary failed",
+			)
 		}
 		decompDuration = time.Since(decompStart)
 
@@ -621,10 +769,11 @@ func executeViaCache(
 		fd, openErr = openAndValidateCacheAtFD(dirFD, cachedName, entry)
 		if openErr != nil {
 			_ = unix.Unlinkat(dirFD, cachedName, 0)
-			errOut := fmt.Errorf("%w: opening verified cache file %s: %w (primary memfd error: %v)",
-				format.ErrCacheWrite, cachedBinary, openErr, primaryErr)
-			logErrorDiagnostics(format.StageCacheCreateTemp, errOut, hostInfo, entry, policyRes, "opening verified cache file failed")
-			return errOut
+			rawErr := fmt.Errorf("opening verified cache file %s: %w", cachedBinary, openErr)
+			return handleCacheError(
+				format.ErrCacheWrite, format.StageCacheCreateTemp, rawErr,
+				primaryErr, requestedMode, hostInfo, entry, policyRes, "opening verified cache file failed",
+			)
 		}
 	}
 
@@ -637,12 +786,10 @@ func executeViaCache(
 	if execErr == nil {
 		return nil
 	}
-	logErrorDiagnostics(format.StageCacheExec, execErr, hostInfo, entry, policyRes, "execve failed on cached binary "+procPath)
-	if primaryErr != nil {
-		return fmt.Errorf("%w: cache fallback execve failed (%s): %w (primary memfd error: %v)",
-			format.ErrExecve, procPath, execErr, primaryErr)
-	}
-	return fmt.Errorf("%w: cache execve failed (%s): %w", format.ErrExecve, procPath, execErr)
+	return handleCacheError(
+		format.ErrExecve, format.StageCacheExec, execErr,
+		primaryErr, requestedMode, hostInfo, entry, policyRes, procPath,
+	)
 }
 
 func createTempFileAt(dirFD int, dirPath string) (int, string, string, error) {

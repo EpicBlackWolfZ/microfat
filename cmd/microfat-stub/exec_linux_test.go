@@ -7,9 +7,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -64,7 +66,7 @@ func TestLauncherOriginalExeWhitespace(t *testing.T) {
 		UncompressedSize: 1000,
 		SHA256:           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 	}
-	hostInfo := microarch.Info{Arch: "amd64", Level: "v1"}
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v1"}
 	policyRes := microarch.PolicyResult{}
 
 	t.Run("BuildAutoTunedEnviron_WhitespacePreservation", func(t *testing.T) {
@@ -248,5 +250,327 @@ func TestLauncherOriginalExeWhitespace(t *testing.T) {
 				assert.True(t, strings.HasSuffix(gotHint, " "), "trailing space must survive execution dispatch")
 			})
 		}
+	})
+}
+
+func TestHandleCacheError_Branches(t *testing.T) {
+	t.Parallel()
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{SelectedVariant: "v3", PolicyApplied: "direct match"}
+	entry := &format.VariantEntry{Level: "v3"}
+
+	err1 := handleCacheError(
+		format.ErrExecve,
+		format.StageCacheExec,
+		errors.New("permission denied"),
+		nil,
+		format.ExecModeAuto,
+		hostInfo,
+		entry,
+		policyRes,
+		"/path/to/proc",
+	)
+	require.Error(t, err1)
+	assert.Contains(t, err1.Error(), "cache execve failed (/path/to/proc)")
+
+	err2 := handleCacheError(
+		format.ErrCacheInit,
+		format.StageCacheDirInit,
+		errors.New("operation not permitted"),
+		nil,
+		format.ExecModeAuto,
+		hostInfo,
+		entry,
+		policyRes,
+		"cache directory creation failed",
+	)
+	require.Error(t, err2)
+	assert.ErrorIs(t, err2, format.ErrCacheInit)
+
+	// 3. With primaryErr != nil
+	primaryErr := fmt.Errorf("%w: memfd failed", format.ErrMemfdCreate)
+	err3 := handleCacheError(
+		format.ErrCacheInit,
+		format.StageCacheDirInit,
+		syscall.EACCES,
+		primaryErr,
+		format.ExecModeAuto,
+		hostInfo,
+		entry,
+		policyRes,
+		"cache directory creation failed",
+	)
+	require.Error(t, err3)
+	assert.ErrorIs(t, err3, format.ErrCacheInit)
+}
+
+func TestExecuteViaMemfdAndCache_ErrorHandling(t *testing.T) {
+	tempDir := t.TempDir()
+	entry, f := createTestVariantFile(t, tempDir, []byte("echo hi"))
+	defer f.Close()
+
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v1"}
+	policyRes := microarch.PolicyResult{SelectedVariant: "v1"}
+
+	// 1. executeViaMemfd failure with forced memfd vs auto mode
+	oldMemfd := memfdCreateFunc
+	memfdCreateFunc = func(name string, flags int) (int, error) {
+		return -1, syscall.EPERM
+	}
+	t.Cleanup(func() { memfdCreateFunc = oldMemfd })
+
+	t.Setenv(format.EnvExecMode, format.ExecModeAuto)
+	errAuto := executeViaMemfd(
+		f.Name(), f, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, time.Now(),
+	)
+	require.Error(t, errAuto)
+	assert.ErrorIs(t, errAuto, format.ErrMemfdCreate)
+
+	t.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+	errForced := executeViaMemfd(
+		f.Name(), f, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, time.Now(),
+	)
+	require.Error(t, errForced)
+	assert.ErrorIs(t, errForced, format.ErrMemfdCreate)
+	assert.Contains(t, errForced.Error(), "forced memfd mode")
+
+	// 2. executeViaCache with primary error and successful execve
+	oldExecve := execveFunc
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		return nil
+	}
+	t.Cleanup(func() { execveFunc = oldExecve })
+
+	primaryErr := fmt.Errorf("%w: memfd failed", format.ErrMemfdCreate)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(tempDir, "cache"))
+
+	errCacheSuccess := executeViaCache(
+		f.Name(), f, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, primaryErr, time.Now(),
+	)
+	require.NoError(t, errCacheSuccess)
+
+	// 3. executeViaCache with execve failure
+	execveFunc = func(argv0 string, argv []string, envv []string) error {
+		return syscall.EACCES
+	}
+	errExecFail := executeViaCache(
+		f.Name(), f, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, primaryErr, time.Now(),
+	)
+	require.Error(t, errExecFail)
+	assert.ErrorIs(t, errExecFail, format.ErrExecve)
+
+	// 4. executeViaCache with invalid variant checksum
+	invalidEntry := &format.VariantEntry{
+		Level:  "v1",
+		SHA256: "invalid-sha",
+	}
+	errBadChecksum := executeViaCache(
+		f.Name(), f, invalidEntry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, primaryErr, time.Now(),
+	)
+	require.Error(t, errBadChecksum)
+	assert.ErrorIs(t, errBadChecksum, format.ErrCacheWrite)
+
+	// 5. executeViaCache with forbidden cache directories
+	t.Setenv("XDG_CACHE_HOME", "/dev/null/forbidden_primary")
+	t.Setenv("TMPDIR", "/dev/null/forbidden_secondary")
+	errNoCache := executeViaCache(
+		f.Name(), f, entry, nil,
+		[]string{testAppArg}, []string{testPathEnv},
+		hostInfo, policyRes, primaryErr, time.Now(),
+	)
+	require.Error(t, errNoCache)
+	assert.ErrorIs(t, errNoCache, format.ErrCacheInit)
+}
+
+func TestErrorTelemetryFormatting(t *testing.T) {
+	t.Parallel()
+
+	tel := format.ErrorTelemetry{
+		Event:             format.EventError,
+		TimestampUnixNano: 123456789,
+		HostArch:          testArchAMD64,
+		HostLevel:         "v3",
+		SelectedVariant:   "v3",
+		PolicyApplied:     "safe_avx512",
+		PolicyReason:      "downclock_risk",
+		RequestedMode:     "auto",
+		AttemptedMode:     "memfd",
+		Stage:             format.StageMemfdCreate,
+		Error:             "operation not permitted",
+		Errno:             1,
+		ErrnoName:         "EPERM",
+		Attempts: []format.ExecutionAttempt{
+			{
+				Stage:         format.StageMemfdCreate,
+				RequestedMode: "auto",
+				AttemptedMode: "memfd",
+				Error:         "operation not permitted",
+				Errno:         1,
+				ErrnoName:     "EPERM",
+			},
+			{
+				Stage:         format.StageCacheDirInit,
+				RequestedMode: "auto",
+				AttemptedMode: "cache",
+				Error:         "permission denied",
+				Errno:         13,
+				ErrnoName:     "EACCES",
+			},
+		},
+		Details: "falling back to cache",
+		Hint:    format.HintMemfdEPERM,
+	}
+
+	raw := formatErrorTelemetryJSON(tel)
+	require.NotEmpty(t, raw)
+	assert.Contains(t, raw, `"requested_mode":"auto"`)
+	assert.Contains(t, raw, `"attempted_mode":"memfd"`)
+	assert.Contains(t, raw, `"errno":1`)
+	assert.Contains(t, raw, `"errno_name":"EPERM"`)
+	assert.Contains(t, raw, `"attempts":[`)
+	assert.Contains(t, raw, `"stage":"memfd_create"`)
+	assert.Contains(t, raw, `"stage":"cache_dir_init"`)
+}
+
+func TestCombinedDispatchError(t *testing.T) {
+	t.Parallel()
+
+	primaryErr := fmt.Errorf("%w: memfd_create failed: %w", format.ErrMemfdCreate, syscall.EPERM)
+	cacheErr := fmt.Errorf("%w: cache dir init failed: %w", format.ErrCacheInit, syscall.EACCES)
+
+	dispErr := buildCombinedDispatchError(format.ErrCacheInit, format.ExecModeAuto, primaryErr, format.StageCacheDirInit, cacheErr)
+	require.NotNil(t, dispErr)
+
+	// Check Is and Unwrap
+	assert.True(t, errors.Is(dispErr, format.ErrCacheInit))
+	assert.Equal(t, format.ErrCacheInit, errors.Unwrap(dispErr))
+
+	// Check As
+	var target *format.DispatchError
+	assert.True(t, errors.As(dispErr, &target))
+	assert.Equal(t, format.ExecModeAuto, target.RequestedMode)
+	require.Len(t, target.Attempts, 2)
+	assert.Equal(t, format.ExecModeMemfd, target.Attempts[0].AttemptedMode)
+	assert.Equal(t, format.ExecModeCache, target.Attempts[1].AttemptedMode)
+	assert.Equal(t, 1, target.Attempts[0].Errno)
+	assert.Equal(t, "EPERM", target.Attempts[0].ErrnoName)
+	assert.Equal(t, 13, target.Attempts[1].Errno)
+	assert.Equal(t, "EACCES", target.Attempts[1].ErrnoName)
+
+	// Check error string contains both attempts and primary memfd error
+	errStr := dispErr.Error()
+	assert.Contains(t, errStr, "primary memfd error")
+	assert.Contains(t, errStr, "attempt 1: memfd")
+	assert.Contains(t, errStr, "attempt 2: cache")
+
+	// Check empty summary fallback
+	emptyDispErr := &format.DispatchError{PrimarySentinel: format.ErrExecve}
+	assert.Contains(t, emptyDispErr.Error(), format.ErrExecve.Error())
+	assert.Contains(t, emptyDispErr.Error(), "dispatch failed")
+
+	// Check all switch branches in buildCombinedDispatchError:
+	// 1. ErrExecve -> StageMemfdExec
+	dExec := buildCombinedDispatchError(
+		format.ErrExecve, format.ExecModeAuto,
+		fmt.Errorf("%w: failed", format.ErrExecve),
+		format.StageCacheExec, cacheErr,
+	)
+	assert.Equal(t, format.StageMemfdExec, dExec.Attempts[0].Stage)
+
+	// 2. ErrMemfdSealingFailed -> StageMemfdSeal
+	dSeal := buildCombinedDispatchError(
+		format.ErrMemfdSealingFailed, format.ExecModeAuto,
+		fmt.Errorf("%w: failed", format.ErrMemfdSealingFailed),
+		format.StageCacheDirInit, cacheErr,
+	)
+	assert.Equal(t, format.StageMemfdSeal, dSeal.Attempts[0].Stage)
+
+	// 3. ErrMemfdExtract -> StageMemfdExtract
+	dExt := buildCombinedDispatchError(
+		format.ErrMemfdExtract, format.ExecModeAuto,
+		fmt.Errorf("%w: failed", format.ErrMemfdExtract),
+		format.StageCacheDirInit, cacheErr,
+	)
+	assert.Equal(t, format.StageMemfdExtract, dExt.Attempts[0].Stage)
+}
+
+func TestExtractErrno(t *testing.T) {
+	t.Parallel()
+
+	num, name := format.ExtractErrno(syscall.ENOENT)
+	assert.Equal(t, 2, num)
+	assert.Equal(t, "ENOENT", name)
+
+	num, name = format.ExtractErrno(fmt.Errorf("wrapped: %w", syscall.EACCES))
+	assert.Equal(t, 13, num)
+	assert.Equal(t, "EACCES", name)
+
+	num, name = format.ExtractErrno(errors.New("generic error without errno"))
+	assert.Equal(t, 0, num)
+	assert.Empty(t, name)
+
+	num, name = format.ExtractErrno(nil)
+	assert.Equal(t, 0, num)
+	assert.Empty(t, name)
+}
+
+func TestLogErrorDiagnosticsBranches(t *testing.T) {
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	policyRes := microarch.PolicyResult{SelectedVariant: "v3", PolicyApplied: "direct match"}
+	entry := &format.VariantEntry{Level: "v3"}
+
+	t.Run("JSON_Logging", func(t *testing.T) {
+		t.Setenv(format.EnvLog, "json")
+
+		// With entry and attempts
+		dispErr := buildCombinedDispatchError(
+			format.ErrCacheInit, format.ExecModeAuto,
+			fmt.Errorf("%w: %w", format.ErrMemfdCreate, syscall.EPERM),
+			format.StageCacheDirInit,
+			fmt.Errorf("%w: %w", format.ErrCacheInit, syscall.EACCES),
+		)
+		logErrorDiagnostics(
+			format.StageCacheDirInit,
+			dispErr,
+			hostInfo,
+			entry,
+			policyRes,
+			"details message",
+		)
+
+		// Without entry and with non-dispatch error
+		logErrorDiagnostics(
+			format.StageMemfdCreate,
+			fmt.Errorf("%w: %w", format.ErrMemfdCreate, syscall.EPERM),
+			hostInfo,
+			nil,
+			policyRes,
+			"",
+		)
+	})
+
+	t.Run("Debug_Logging", func(t *testing.T) {
+		t.Setenv(format.EnvDebug, "1")
+		t.Setenv(format.EnvLog, "")
+
+		logErrorDiagnostics(
+			format.StageMemfdCreate,
+			fmt.Errorf("%w: %w", format.ErrMemfdCreate, syscall.EPERM),
+			hostInfo,
+			entry,
+			policyRes,
+			"",
+		)
 	})
 }
