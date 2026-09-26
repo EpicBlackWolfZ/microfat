@@ -34,6 +34,8 @@ type BuildOptions struct {
 	KeepIntermediates bool
 	GoBinary          string
 	SkipELFValidation bool
+	AllowMixedABI     bool
+	ABIReportCallback func(report *pack.ArtifactABIReport)
 	Profile           string
 	Compression       string
 	CompressionLevel  string
@@ -48,6 +50,7 @@ type BuildOptions struct {
 // BuildResult contains metadata about the compiled and packaged fat binary.
 type BuildResult struct {
 	Index             *format.Index
+	ABIReport         *pack.ArtifactABIReport
 	OutputPath        string
 	IntermediatesDir  string
 	CompiledVariants  map[string]string // level -> temporary binary path
@@ -144,6 +147,15 @@ func BuildAndPack(ctx context.Context, m *Manifest, opts BuildOptions) (*BuildRe
 		return nil, err
 	}
 
+	var artifactABIReport *pack.ArtifactABIReport
+	userCB := opts.ABIReportCallback
+	opts.ABIReportCallback = func(report *pack.ArtifactABIReport) {
+		artifactABIReport = report
+		if userCB != nil {
+			userCB(report)
+		}
+	}
+
 	packOpts := assemblePackOptions(m, stubPath, finalOutput, appName, compiledMap, opts)
 
 	idx, err := pack.Pack(packOpts)
@@ -153,6 +165,7 @@ func BuildAndPack(ctx context.Context, m *Manifest, opts BuildOptions) (*BuildRe
 
 	return &BuildResult{
 		Index:             idx,
+		ABIReport:         artifactABIReport,
 		OutputPath:        finalOutput,
 		IntermediatesDir:  tmpDir,
 		CompiledVariants:  compiledMap,
@@ -418,6 +431,8 @@ func assemblePackOptions(
 	}
 	packOpts.Variants = compiledMap
 	packOpts.SkipELFValidation = opts.SkipELFValidation
+	packOpts.AllowMixedABI = opts.AllowMixedABI
+	packOpts.ABIReportCallback = opts.ABIReportCallback
 	if opts.FormatVersion != 0 {
 		packOpts.FormatVersion = opts.FormatVersion
 	}

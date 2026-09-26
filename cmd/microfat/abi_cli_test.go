@@ -1,0 +1,357 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type failWriter struct {
+	failOnWrite int
+	writes      int
+}
+
+func (f *failWriter) Write(p []byte) (int, error) {
+	f.writes++
+	if f.failOnWrite == 0 || f.writes >= f.failOnWrite {
+		return 0, errors.New("simulated writer error")
+	}
+	return len(p), nil
+}
+
+func TestPrintABIReport(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil or empty report", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		require.NoError(t, printABIReport(&buf, nil))
+		assert.Empty(t, buf.String())
+
+		require.NoError(t, printABIReport(&buf, &pack.ArtifactABIReport{}))
+		assert.Empty(t, buf.String())
+	})
+
+	t.Run("skipped validation", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		rep := &pack.ArtifactABIReport{
+			Status:   pack.ComparisonSkipped,
+			Variants: []*pack.VariantABIReport{{Level: "v1"}},
+		}
+		require.NoError(t, printABIReport(&buf, rep))
+		assert.Contains(t, buf.String(), "skipped (--skip-elf-validation)")
+
+		// Writer error
+		fw := &failWriter{failOnWrite: 1}
+		require.Error(t, printABIReport(fw, rep))
+	})
+
+	t.Run("full report with all features", func(t *testing.T) {
+		t.Parallel()
+		rep := &pack.ArtifactABIReport{
+			Status:     pack.ComparisonUnknown,
+			Overridden: true,
+			Variants: []*pack.VariantABIReport{
+				{
+					Level:          "v1",
+					Linkage:        pack.LinkageDynamic,
+					HasInterpreter: true,
+					Interpreter:    "/lib64/ld-linux-x86-64.so.2",
+					Dependencies:   []string{"libc.so.6", "libm.so.6"},
+					VersionRequirements: []pack.VersionRequirement{
+						{Library: "libc.so.6", Version: "GLIBC_2.2.5", Flags: 0},
+						{Library: "libm.so.6", Version: "GLIBC_2.14", Flags: 1},
+					},
+					Completeness: pack.MetadataComplete,
+				},
+				{
+					Level:          "v2",
+					Linkage:        pack.LinkageStatic,
+					HasInterpreter: false,
+					Dependencies:   nil,
+					Completeness:   pack.MetadataAbsent,
+				},
+			},
+			DeploymentDisclaimer: "Target deployment baseline note",
+		}
+
+		var buf bytes.Buffer
+		require.NoError(t, printABIReport(&buf, rep))
+		out := buf.String()
+
+		assert.Contains(t, out, "Declared ABI Requirements:")
+		assert.Contains(t, out, "/lib64/ld-linux-x86-64.so.2")
+		assert.Contains(t, out, "libc.so.6, libm.so.6")
+		assert.Contains(t, out, "libc.so.6 (GLIBC_2.2.5)")
+		assert.Contains(t, out, "libm.so.6 (GLIBC_2.14 [flags=0x0001])")
+		assert.Contains(t, out, "--allow-mixed-abi")
+		assert.Contains(t, out, "symbol version metadata is partial or unsupported")
+		assert.Contains(t, out, "Target deployment baseline note")
+	})
+
+	t.Run("writer errors in full report", func(t *testing.T) {
+		t.Parallel()
+		rep := &pack.ArtifactABIReport{
+			Status:     pack.ComparisonUnknown,
+			Overridden: true,
+			Variants: []*pack.VariantABIReport{
+				{
+					Level:          "v1",
+					Linkage:        pack.LinkageDynamic,
+					HasInterpreter: true,
+					Interpreter:    "/lib64/ld-linux-x86-64.so.2",
+					Dependencies:   []string{"libc.so.6"},
+					VersionRequirements: []pack.VersionRequirement{
+						{Library: "libc.so.6", Version: "GLIBC_2.2.5"},
+					},
+					Completeness: pack.MetadataComplete,
+				},
+			},
+			DeploymentDisclaimer: "Disclaimer",
+		}
+
+		for failAt := 1; failAt <= 5; failAt++ {
+			fw := &failWriter{failOnWrite: failAt}
+			err := printABIReport(fw, rep)
+			require.Error(t, err, "expected error when failing at write %d", failAt)
+		}
+	})
+
+	t.Run("truncated dependency and version display (> 8 items)", func(t *testing.T) {
+		t.Parallel()
+		rep := &pack.ArtifactABIReport{
+			Status:     pack.ComparisonConsistent,
+			Consistent: true,
+			Variants: []*pack.VariantABIReport{
+				{
+					Level:          "v1",
+					Linkage:        pack.LinkageDynamic,
+					HasInterpreter: true,
+					Interpreter:    "/lib64/ld-linux-x86-64.so.2",
+					Dependencies: []string{
+						"lib1.so", "lib2.so", "lib3.so", "lib4.so", "lib5.so",
+						"lib6.so", "lib7.so", "lib8.so", "lib9.so", "lib10.so",
+					},
+					VersionRequirements: []pack.VersionRequirement{
+						{Library: "lib1.so", Version: "V1"},
+						{Library: "lib2.so", Version: "V2"},
+						{Library: "lib3.so", Version: "V3"},
+						{Library: "lib4.so", Version: "V4"},
+						{Library: "lib5.so", Version: "V5"},
+						{Library: "lib6.so", Version: "V6"},
+						{Library: "lib7.so", Version: "V7"},
+						{Library: "lib8.so", Version: "V8"},
+						{Library: "lib9.so", Version: "V9"},
+						{Library: "lib10.so", Version: "V10"},
+					},
+					Completeness: pack.MetadataComplete,
+				},
+			},
+		}
+		var buf bytes.Buffer
+		require.NoError(t, printABIReport(&buf, rep))
+		out := buf.String()
+		assert.Contains(t, out, "(+2 more)")
+	})
+}
+
+func TestCLI_SkipELFValidation_Warnings(t *testing.T) {
+	t.Parallel()
+
+	const expectedWarn = "[microfat] Warning: ELF architecture and declared ABI validation " +
+		"explicitly skipped via --skip-elf-validation"
+
+	t.Run("pgo pack with skip-elf-validation emits warning", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPgoPackCmd()
+		var errBuf bytes.Buffer
+		cmd.SetErr(&errBuf)
+		cmd.SetArgs([]string{flagSkipELF})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, errBuf.String(), expectedWarn)
+	})
+
+	t.Run("pack with skip-elf-validation emits warning", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPackCmd()
+		var errBuf bytes.Buffer
+		cmd.SetErr(&errBuf)
+		cmd.SetArgs([]string{"--skip-elf-validation"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, errBuf.String(), expectedWarn)
+	})
+}
+
+func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	stubPath := filepath.Join(tmpDir, "dummy-stub")
+	require.NoError(t, os.WriteFile(stubPath, []byte("stub"), 0o755))
+
+	t.Run("invalid variant specification", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPackCmd()
+		cmd.SetArgs([]string{flagStub, stubPath, "-o", "out", "-v", "invalid"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid variant specification")
+	})
+
+	t.Run("duplicate variant specification", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPackCmd()
+		cmd.SetArgs([]string{flagStub, stubPath, "-o", "out", "-v", "v1=bin1", "-v", "v1=bin2"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate variant level")
+	})
+
+	t.Run("missing output flag", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPackCmd()
+		cmd.SetArgs([]string{flagStub, stubPath, "-v", "v1=bin1"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "required flag(s) \"output\" not set")
+	})
+
+	t.Run("missing variant flag", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPackCmd()
+		cmd.SetArgs([]string{flagStub, stubPath, "-o", "out"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "required flag(s) \"variant\" not set")
+	})
+
+	t.Run("manifest pack with missing file", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPackCmd()
+		cmd.SetArgs([]string{flagManifest, "nonexistent-manifest.yaml"})
+		err := cmd.Execute()
+		require.Error(t, err)
+	})
+
+	t.Run("pgo-pack with missing manifest", func(t *testing.T) {
+		t.Parallel()
+		cmd := newPgoPackCmd()
+		cmd.SetArgs([]string{"--manifest", "nonexistent-manifest.yaml"})
+		err := cmd.Execute()
+		require.Error(t, err)
+	})
+
+	t.Run("pack stdout failure on printABIReport", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		stubPath := filepath.Join(tmpDir, "dummy-stub")
+		require.NoError(t, os.WriteFile(stubPath, []byte("stub"), 0o755))
+		v1Path := filepath.Join(tmpDir, "v1")
+		require.NoError(t, os.WriteFile(v1Path, []byte("v1"), 0o755))
+		outPath := filepath.Join(tmpDir, "out.fat")
+
+		cmd := newPackCmd()
+		cmd.SetOut(&failWriter{failOnWrite: 1})
+		cmd.SetArgs([]string{
+			flagStub, stubPath,
+			"-o", outPath,
+			"-v", "v1=" + v1Path,
+			"--skip-elf-validation",
+		})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "artifact published successfully to")
+		assert.Contains(t, err.Error(), "but printing ABI report failed")
+	})
+
+	t.Run("manifest pack stdout failure on printABIReport", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		stubPath := filepath.Join(tmpDir, "dummy-stub")
+		fakeStub := make([]byte, 64)
+		copy(fakeStub, "\x7fELF\x02\x01\x01")
+		require.NoError(t, os.WriteFile(stubPath, fakeStub, 0o755))
+		pkgDir := filepath.Join(tmpDir, "samplepkg")
+		require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplepkg\ngo 1.27.1\n"), 0o644))
+
+		outPath := filepath.Join(tmpDir, "out.fat")
+		manifestPath := filepath.Join(tmpDir, "manifest.yaml")
+		manifestContent := "name: test-app\npackage: " + pkgDir + "\ntarget_os: linux\ntarget_arch: amd64\nskip_elf_validation: true\nstub: " +
+			stubPath + "\noutput: " + outPath + "\nvariants:\n  - level: v1\n    pgo: \"off\"\n"
+		require.NoError(t, os.WriteFile(manifestPath, []byte(manifestContent), 0o644))
+
+		cmd := newPackCmd()
+		cmd.SetOut(&failWriter{failOnWrite: 1})
+		cmd.SetArgs([]string{flagManifest, manifestPath, flagSkipELF})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "artifact published successfully to")
+		assert.Contains(t, err.Error(), "but printing ABI report failed")
+	})
+
+	t.Run("pgo-pack stdout failure on printABIReport", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		stubPath := filepath.Join(tmpDir, "dummy-stub")
+		fakeStub := make([]byte, 64)
+		copy(fakeStub, "\x7fELF\x02\x01\x01")
+		require.NoError(t, os.WriteFile(stubPath, fakeStub, 0o755))
+		pkgDir := filepath.Join(tmpDir, "samplepkg")
+		require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplepkg\ngo 1.27.1\n"), 0o644))
+
+		outPath := filepath.Join(tmpDir, "out.fat")
+		manifestPath := filepath.Join(tmpDir, "manifest.yaml")
+		manifestContent := "name: test-app\npackage: " + pkgDir + "\ntarget_os: linux\ntarget_arch: amd64\nskip_elf_validation: true\nstub: " +
+			stubPath + "\noutput: " + outPath + "\nvariants:\n  - level: v1\n    pgo: \"off\"\n"
+		require.NoError(t, os.WriteFile(manifestPath, []byte(manifestContent), 0o644))
+
+		cmd := newPgoPackCmd()
+		cmd.SetOut(&failWriter{failOnWrite: 1})
+		cmd.SetArgs([]string{flagManifest, manifestPath, flagSkipELF})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "artifact published successfully to")
+		assert.Contains(t, err.Error(), "but printing ABI report failed")
+	})
+
+	t.Run("pack WarnFunc without extra args on empty dict training", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		stubPath := filepath.Join(tmpDir, "dummy-stub")
+		fakeStub := make([]byte, 64)
+		copy(fakeStub, "\x7fELF\x02\x01\x01")
+		require.NoError(t, os.WriteFile(stubPath, fakeStub, 0o755))
+		v1Path := filepath.Join(tmpDir, "v1")
+		require.NoError(t, os.WriteFile(v1Path, []byte("v1_sample_bytes"), 0o755))
+		v2Path := filepath.Join(tmpDir, "v2")
+		require.NoError(t, os.WriteFile(v2Path, []byte("v2_sample_bytes"), 0o755))
+		outPath := filepath.Join(tmpDir, "out.fat")
+
+		var errBuf bytes.Buffer
+		cmd := newPackCmd()
+		cmd.SetErr(&errBuf)
+		cmd.SetArgs([]string{
+			flagStub, stubPath,
+			"-o", outPath,
+			"-v", "v1=" + v1Path,
+			"-v", "v2=" + v2Path,
+			flagProfile, "size",
+			flagSkipELF,
+		})
+		err := cmd.Execute()
+		require.NoError(t, err)
+	})
+}

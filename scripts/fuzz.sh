@@ -20,4 +20,5 @@ cgroup FuzzResolveTuningPlan
 microarch FuzzVariantLevelParsing
 pack FuzzValidateELFBinary
 pack FuzzVerifyBinary
+pack FuzzInspectELFABI
 TARGETS
