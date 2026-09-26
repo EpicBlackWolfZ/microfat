@@ -41,11 +41,59 @@ func formatErrorTelemetryJSON(e format.ErrorTelemetry) string {
 		sb.WriteString(format.EscapeJSONString(e.PolicyReason))
 		sb.WriteString(`"`)
 	}
+	if e.RequestedMode != "" {
+		sb.WriteString(`,"requested_mode":"`)
+		sb.WriteString(format.EscapeJSONString(e.RequestedMode))
+		sb.WriteString(`"`)
+	}
+	if e.AttemptedMode != "" {
+		sb.WriteString(`,"attempted_mode":"`)
+		sb.WriteString(format.EscapeJSONString(e.AttemptedMode))
+		sb.WriteString(`"`)
+	}
 	sb.WriteString(`,"stage":"`)
 	sb.WriteString(format.EscapeJSONString(e.Stage))
 	sb.WriteString(`","error":"`)
 	sb.WriteString(format.EscapeJSONString(e.Error))
 	sb.WriteString(`"`)
+
+	if e.Errno != 0 {
+		sb.WriteString(`,"errno":`)
+		sb.WriteString(strconv.Itoa(e.Errno))
+	}
+	if e.ErrnoName != "" {
+		sb.WriteString(`,"errno_name":"`)
+		sb.WriteString(format.EscapeJSONString(e.ErrnoName))
+		sb.WriteString(`"`)
+	}
+	if len(e.Attempts) > 0 {
+		sb.WriteString(`,"attempts":[`)
+		for i, a := range e.Attempts {
+			if i > 0 {
+				sb.WriteString(`,`)
+			}
+			sb.WriteString(`{"stage":"`)
+			sb.WriteString(format.EscapeJSONString(a.Stage))
+			sb.WriteString(`","requested_mode":"`)
+			sb.WriteString(format.EscapeJSONString(a.RequestedMode))
+			sb.WriteString(`","attempted_mode":"`)
+			sb.WriteString(format.EscapeJSONString(a.AttemptedMode))
+			sb.WriteString(`","error":"`)
+			sb.WriteString(format.EscapeJSONString(a.Error))
+			sb.WriteString(`"`)
+			if a.Errno != 0 {
+				sb.WriteString(`,"errno":`)
+				sb.WriteString(strconv.Itoa(a.Errno))
+			}
+			if a.ErrnoName != "" {
+				sb.WriteString(`,"errno_name":"`)
+				sb.WriteString(format.EscapeJSONString(a.ErrnoName))
+				sb.WriteString(`"`)
+			}
+			sb.WriteString(`}`)
+		}
+		sb.WriteString(`]`)
+	}
 
 	if e.Details != "" {
 		sb.WriteString(`,"details":"`)

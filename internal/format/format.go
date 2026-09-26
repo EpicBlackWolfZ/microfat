@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 )
@@ -107,6 +108,7 @@ const (
 	EnvOriginalExe = "MICROFAT_ORIGINAL_EXE"
 
 	// Execution modes.
+	ExecModeAuto  = "auto"
 	ExecModeMemfd = "memfd"
 	ExecModeCache = "cache"
 
@@ -201,19 +203,138 @@ type DispatchTelemetry struct {
 	TotalLauncherUs         int64   `json:"total_launcher_us"`
 }
 
+// ExecutionAttempt records the details of an individual dispatch attempt.
+type ExecutionAttempt struct {
+	Stage         string `json:"stage"`
+	RequestedMode string `json:"requested_mode"`
+	AttemptedMode string `json:"attempted_mode"`
+	Err           error  `json:"-"`
+	Error         string `json:"error"`
+	Errno         int    `json:"errno,omitempty"`
+	ErrnoName     string `json:"errno_name,omitempty"`
+}
+
+// DispatchError records the ordered execution attempts that failed during dispatch.
+type DispatchError struct {
+	PrimarySentinel error
+	RequestedMode   string
+	Attempts        []ExecutionAttempt
+	Summary         string
+}
+
+func (e *DispatchError) Error() string {
+	if e.Summary != "" {
+		return e.Summary
+	}
+	if len(e.Attempts) == 1 {
+		return fmt.Sprintf("%v: %s", e.PrimarySentinel, e.Attempts[0].Error)
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("%v: dispatch failed in %s mode (attempts: ", e.PrimarySentinel, e.RequestedMode))
+	for i, att := range e.Attempts {
+		if i > 0 {
+			b.WriteString("; ")
+		}
+		b.WriteString(fmt.Sprintf("[%s/%s: %s]", att.AttemptedMode, att.Stage, att.Error))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+func (e *DispatchError) Unwrap() error {
+	return e.PrimarySentinel
+}
+
+func (e *DispatchError) Is(target error) bool {
+	if errors.Is(e.PrimarySentinel, target) {
+		return true
+	}
+	for _, att := range e.Attempts {
+		if errors.Is(att.Err, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *DispatchError) As(target any) bool {
+	if errors.As(e.PrimarySentinel, target) {
+		return true
+	}
+	for _, att := range e.Attempts {
+		if errors.As(att.Err, target) {
+			return true
+		}
+	}
+	return false
+}
+
+// ExtractErrno inspects an error for a syscall.Errno and returns its numeric value and symbol name.
+func ExtractErrno(err error) (int, string) {
+	if err == nil {
+		return 0, ""
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		name := errnoName(errno)
+		return int(errno), name
+	}
+	return 0, ""
+}
+
+func errnoName(errno syscall.Errno) string {
+	switch errno {
+	case syscall.EPERM:
+		return "EPERM"
+	case syscall.ENOENT:
+		return "ENOENT"
+	case syscall.EACCES:
+		return "EACCES"
+	case syscall.EBADF:
+		return "EBADF"
+	case syscall.ENOMEM:
+		return "ENOMEM"
+	case syscall.EEXIST:
+		return "EEXIST"
+	case syscall.EINVAL:
+		return "EINVAL"
+	case syscall.ENFILE:
+		return "ENFILE"
+	case syscall.EMFILE:
+		return "EMFILE"
+	case syscall.ETXTBSY:
+		return "ETXTBSY"
+	case syscall.ENOSPC:
+		return "ENOSPC"
+	case syscall.EROFS:
+		return "EROFS"
+	case syscall.ENOEXEC:
+		return "ENOEXEC"
+	case syscall.ENOSYS:
+		return "ENOSYS"
+	default:
+		return fmt.Sprintf("ERRNO_%d", int(errno))
+	}
+}
+
 // ErrorTelemetry records structured error events during launcher initialization or dispatch.
 type ErrorTelemetry struct {
-	Event             string `json:"event"`
-	TimestampUnixNano int64  `json:"timestamp_unix_nano"`
-	HostArch          string `json:"host_arch,omitempty"`
-	HostLevel         string `json:"host_level,omitempty"`
-	SelectedVariant   string `json:"selected_variant,omitempty"`
-	PolicyApplied     string `json:"policy_applied,omitempty"`
-	PolicyReason      string `json:"policy_reason,omitempty"`
-	Stage             string `json:"stage"`
-	Error             string `json:"error"`
-	Details           string `json:"details,omitempty"`
-	Hint              string `json:"hint,omitempty"`
+	Event             string             `json:"event"`
+	TimestampUnixNano int64              `json:"timestamp_unix_nano"`
+	HostArch          string             `json:"host_arch,omitempty"`
+	HostLevel         string             `json:"host_level,omitempty"`
+	SelectedVariant   string             `json:"selected_variant,omitempty"`
+	PolicyApplied     string             `json:"policy_applied,omitempty"`
+	PolicyReason      string             `json:"policy_reason,omitempty"`
+	Stage             string             `json:"stage"`
+	RequestedMode     string             `json:"requested_mode,omitempty"`
+	AttemptedMode     string             `json:"attempted_mode,omitempty"`
+	Error             string             `json:"error"`
+	Errno             int                `json:"errno,omitempty"`
+	ErrnoName         string             `json:"errno_name,omitempty"`
+	Attempts          []ExecutionAttempt `json:"attempts,omitempty"`
+	Details           string             `json:"details,omitempty"`
+	Hint              string             `json:"hint,omitempty"`
 }
 
 // Prewarm and verify status constants.

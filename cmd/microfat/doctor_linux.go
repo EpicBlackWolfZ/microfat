@@ -5,21 +5,27 @@ package main
 import (
 	"fmt"
 	"os"
-	"syscall"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
+	"github.com/EpicBlackWolfZ/microfat/internal/memfd"
 	"golang.org/x/sys/unix"
 )
 
 var (
 	memfdProbeSyscall    = unix.MemfdCreate
+	memfdProbeFstat      = unix.Fstat
+	memfdProbeFcntl      = unix.FcntlInt
+	memfdProbeClose      = unix.Close
 	unameSyscall         = unix.Uname
 	readCgroupLimitsFunc = cgroup.ReadLimits
 )
 
 func probeMemfd() MemfdReport {
 	var rep MemfdReport
+	rep.Execution = "unknown (prerequisite check only; prerequisite checks passed, payload execution was not tested)"
+
 	var uts unix.Utsname
 	if err := unameSyscall(&uts); err == nil {
 		rep.Kernel = fmt.Sprintf("Linux %s", unix.ByteSliceToString(uts.Release[:]))
@@ -27,37 +33,32 @@ func probeMemfd() MemfdReport {
 		rep.Kernel = "Linux (unknown release)"
 	}
 
-	fd, err := memfdProbeSyscall("microfat_doctor_probe", unix.MFD_CLOEXEC)
-	if err != nil {
-		rep.Available = false
-		rep.Error = err.Error()
-		rep.Hint = format.DiagnoseError(format.StageMemfdCreate, err)
-		if rep.Hint == "" {
-			rep.Hint = "memfd_create failed. Fallback to cache will be used. Set MICROFAT_EXEC_MODE=cache to skip memfd probe."
-		}
-		if errno, ok := err.(syscall.Errno); ok {
-			switch errno {
-			case unix.EPERM, unix.EACCES:
-				rep.Status = "Blocked by host seccomp/security profile"
-				rep.Seccomp = "Restricted (EPERM/EACCES)"
-			case unix.ENOSYS:
-				rep.Status = "Unsupported by Linux kernel (< 3.17)"
-				rep.Seccomp = "N/A (ENOSYS)"
-			default:
-				rep.Status = fmt.Sprintf("Failed (%v)", err)
-				rep.Seccomp = "Unknown"
-			}
-		} else {
-			rep.Status = fmt.Sprintf("Failed (%v)", err)
-			rep.Seccomp = "Unknown"
-		}
-		return rep
+	adapter := memfd.SyscallAdapter{
+		MemfdCreate: memfdProbeSyscall,
+		Fstat:       memfdProbeFstat,
+		FcntlInt:    memfdProbeFcntl,
+		Close:       memfdProbeClose,
 	}
 
-	_ = unix.Close(fd)
-	rep.Available = true
-	rep.Status = "Available"
-	rep.Seccomp = "Permitted"
+	obs := lifecycle.CheckMemfdSupport(&adapter)
+	rep.Available = obs.Available
+	rep.Passed = obs.Passed
+	rep.Phase = obs.Phase
+	rep.Operation = obs.Operation
+	rep.CreationStrategy = obs.CreationStrategy
+	rep.Mode = obs.Mode
+	rep.Seals = obs.Seals
+	rep.Error = obs.Error
+	rep.ErrorMessage = obs.ErrorMessage
+	rep.ErrnoName = obs.ErrnoName
+	rep.ErrnoValue = obs.ErrnoValue
+	rep.CandidateExplanations = obs.CandidateExplanations
+	rep.Status = obs.Status
+	rep.Execution = "not_tested"
+	rep.Hint = obs.Hint
+	rep.Cause = obs.Cause
+	rep.Seccomp = "Unknown (not independently tested)"
+
 	return rep
 }
 

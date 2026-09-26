@@ -38,6 +38,7 @@ const (
 	flagVerify   = "--verify"
 	flagStub     = "--stub"
 	flagName     = "--name"
+	flagStrict   = "--strict"
 
 	testBinaryMicrofat = "microfat"
 	testOSLinux        = "linux"
@@ -288,7 +289,7 @@ func TestVerifyCorruptedOutput(t *testing.T) {
 	}
 
 	verifyJSONCmd := newVerifyCmd()
-	verifyJSONCmd.SetArgs([]string{"--json", fatPath})
+	verifyJSONCmd.SetArgs([]string{flagJSON, fatPath})
 	require.Error(t, verifyJSONCmd.Execute())
 }
 
