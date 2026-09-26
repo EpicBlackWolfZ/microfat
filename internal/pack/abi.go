@@ -92,6 +92,31 @@ func (a *ArtifactMetadataAccounting) commit(n uint64) {
 	}
 }
 
+func (a *ArtifactMetadataAccounting) remaining() uint64 {
+	if a == nil {
+		return math.MaxUint64
+	}
+	limit := a.maxBytes
+	if limit == 0 {
+		limit = MaxArtifactMetadataBytes
+	}
+	if a.usedBytes >= limit {
+		return 0
+	}
+	return limit - a.usedBytes
+}
+
+func (a *ArtifactMetadataAccounting) refund(n uint64) {
+	if a == nil {
+		return
+	}
+	if n > a.usedBytes {
+		a.usedBytes = 0
+	} else {
+		a.usedBytes -= n
+	}
+}
+
 // ReportAccounting tracks aggregate retained and generated report data across all variants in an artifact.
 type ReportAccounting struct {
 	maxBytes  uint64
@@ -234,6 +259,17 @@ func (acc *inputAccounting) chargeMetadata(n uint64) error {
 	return nil
 }
 
+func (acc *inputAccounting) remainingMetadataBudget() uint64 {
+	limit := acc.maxMetadataBytes
+	if limit == 0 {
+		limit = MaxMetadataBytesPerInput
+	}
+	if acc.metadataBytesRead >= limit {
+		return 0
+	}
+	return limit - acc.metadataBytesRead
+}
+
 func (acc *inputAccounting) checkStringScan(n uint64) error {
 	limit := acc.maxStringScanBytes
 	if limit == 0 {
@@ -250,12 +286,23 @@ func (acc *inputAccounting) checkStringScan(n uint64) error {
 	return nil
 }
 
-func (acc *inputAccounting) chargeStringScan(n uint64) error {
+func (acc *inputAccounting) checkAndChargeStringScan(n uint64) error {
 	if err := acc.checkStringScan(n); err != nil {
 		return err
 	}
+	if err := acc.checkMetadata(n); err != nil {
+		return err
+	}
 	acc.stringScanBytesRead += n
+	acc.metadataBytesRead += n
+	if acc.shared != nil {
+		acc.shared.commit(n)
+	}
 	return nil
+}
+
+func (acc *inputAccounting) chargeStringScan(n uint64) error {
+	return acc.checkAndChargeStringScan(n)
 }
 
 func (acc *inputAccounting) remainingStringScanBudget() uint64 {
@@ -273,12 +320,24 @@ func (acc *inputAccounting) remainingStringScanBudget() uint64 {
 	return limit - acc.stringScanBytesRead
 }
 
-func (acc *inputAccounting) refundStringScan(n uint64) {
+func (acc *inputAccounting) refundAllStringScan(n uint64) {
 	if n > acc.stringScanBytesRead {
 		acc.stringScanBytesRead = 0
 	} else {
 		acc.stringScanBytesRead -= n
 	}
+	if n > acc.metadataBytesRead {
+		acc.metadataBytesRead = 0
+	} else {
+		acc.metadataBytesRead -= n
+	}
+	if acc.shared != nil {
+		acc.shared.refund(n)
+	}
+}
+
+func (acc *inputAccounting) refundStringScan(n uint64) {
+	acc.refundAllStringScan(n)
 }
 
 func (acc *inputAccounting) chargeString(n uint64) error {
@@ -496,12 +555,17 @@ func scanBoundedCString(
 	for curr < strtabSize {
 		availInTable := strtabSize - curr
 		wantScan := min(uint64(stringScanChunkSize), availInTable)
-		remBudget := acc.remainingStringScanBudget()
-		toCharge := min(wantScan, remBudget)
-		if toCharge == 0 {
-			return "", acc.chargeStringScan(1)
+		remScan := acc.remainingStringScanBudget()
+		remLocal := acc.remainingMetadataBudget()
+		var remShared uint64 = math.MaxUint64
+		if acc.shared != nil {
+			remShared = acc.shared.remaining()
 		}
-		if err := acc.chargeStringScan(toCharge); err != nil {
+		toCharge := min(wantScan, remScan, remLocal, remShared)
+		if toCharge == 0 {
+			return "", acc.checkAndChargeStringScan(1)
+		}
+		if err := acc.checkAndChargeStringScan(toCharge); err != nil {
 			return "", err
 		}
 
@@ -510,7 +574,7 @@ func scanBoundedCString(
 			nulFound = true
 			bytesScanned := uint64(idx + 1)
 			if toCharge > bytesScanned {
-				acc.refundStringScan(toCharge - bytesScanned)
+				acc.refundAllStringScan(toCharge - bytesScanned)
 			}
 			strLen = scanned + uint64(idx)
 			break
@@ -519,7 +583,7 @@ func scanBoundedCString(
 		scanned += toCharge
 		curr += toCharge
 		if toCharge < wantScan {
-			return "", acc.chargeStringScan(1)
+			return "", acc.checkAndChargeStringScan(1)
 		}
 	}
 
@@ -1491,15 +1555,37 @@ func compareDependencySets(ra *ReportAccounting, baseline, current *VariantABIRe
 	return "", "", nil
 }
 
-func evaluateVariantCompleteness(rep *VariantABIReport) (isSkipped, isUnknown bool) {
+func evaluateVariantUncertainty(rep *VariantABIReport) (isSkipped, isUnknown bool) {
+	if rep == nil {
+		return false, false
+	}
 	switch rep.Completeness {
 	case MetadataSkipped:
 		return true, false
 	case MetadataPartial, MetadataUnsupported:
 		return false, true
-	default:
-		return false, false
 	}
+	if rep.Linkage == LinkageAmbiguous {
+		return false, true
+	}
+	return false, false
+}
+
+func formatAmbiguousLinkageWarning(ra *ReportAccounting, rep *VariantABIReport) (string, error) {
+	b := newBoundedReportBuilder(ra)
+	if err := b.writeString("variant "); err != nil {
+		return "", err
+	}
+	if err := b.writeEscaped(rep.Level); err != nil {
+		return "", err
+	}
+	if err := b.writeString(
+		" has ambiguous linkage (dynamic dependencies declared without PT_INTERP); " +
+			"complete compatibility cannot be verified",
+	); err != nil {
+		return "", err
+	}
+	return b.string(), nil
 }
 
 func formatIncompleteMetadataWarning(ra *ReportAccounting, rep *VariantABIReport) (string, error) {
@@ -1534,7 +1620,7 @@ func CompareVariantABIs(reports []*VariantABIReport, allowMixedABI bool) (*Artif
 }
 
 func handleSingleReport(r *VariantABIReport, ra *ReportAccounting, artifactReport *ArtifactABIReport) (*ArtifactABIReport, error) {
-	isSkipped, isUnknown := evaluateVariantCompleteness(r)
+	isSkipped, isUnknown := evaluateVariantUncertainty(r)
 	switch {
 	case isSkipped:
 		artifactReport.Status = ComparisonSkipped
@@ -1542,11 +1628,29 @@ func handleSingleReport(r *VariantABIReport, ra *ReportAccounting, artifactRepor
 	case isUnknown:
 		artifactReport.Status = ComparisonUnknown
 		artifactReport.Consistent = false
-		warn, err := formatIncompleteMetadataWarning(ra, r)
-		if err != nil {
-			return nil, err
+		if r.Completeness == MetadataPartial || r.Completeness == MetadataUnsupported {
+			warn, err := formatIncompleteMetadataWarning(ra, r)
+			if err != nil {
+				return nil, err
+			}
+			artifactReport.Warnings = append(artifactReport.Warnings, warn)
 		}
-		artifactReport.Warnings = append(artifactReport.Warnings, warn)
+		if r.Linkage == LinkageAmbiguous {
+			hasLinkageWarn := false
+			for _, w := range r.Warnings {
+				if strings.Contains(w, "PT_INTERP") || strings.Contains(w, "ambiguous") {
+					hasLinkageWarn = true
+					break
+				}
+			}
+			if !hasLinkageWarn {
+				warn, err := formatAmbiguousLinkageWarning(ra, r)
+				if err != nil {
+					return nil, err
+				}
+				artifactReport.Warnings = append(artifactReport.Warnings, warn)
+			}
+		}
 	default:
 		artifactReport.Status = ComparisonConsistent
 		artifactReport.Consistent = true
@@ -1773,6 +1877,18 @@ func compareVariantVersions(reports []*VariantABIReport, ra *ReportAccounting) (
 	return differences, nil
 }
 
+type abiMismatchError struct {
+	msg string
+}
+
+func (e *abiMismatchError) Error() string {
+	return e.msg
+}
+
+func (e *abiMismatchError) Unwrap() error {
+	return ErrABIMismatch
+}
+
 func formatMismatchError(differences []string, ra *ReportAccounting) error {
 	var needed uint64 = uint64(len(ErrABIMismatch.Error()))
 	for _, d := range differences {
@@ -1782,48 +1898,16 @@ func formatMismatchError(differences []string, ra *ReportAccounting) error {
 		return fmt.Errorf("%w: %d declared differences (detailed output omitted: %w)",
 			ErrABIMismatch, len(differences), err)
 	}
-	b := newBoundedReportBuilder(ra)
-	_ = b.writeString(ErrABIMismatch.Error())
+	var sb strings.Builder
+	if needed <= math.MaxInt {
+		sb.Grow(int(needed))
+	}
+	sb.WriteString(ErrABIMismatch.Error())
 	for _, d := range differences {
-		_ = b.writeString("\n  • ")
-		_ = b.writeString(d)
+		sb.WriteString("\n  • ")
+		sb.WriteString(d)
 	}
-	return fmt.Errorf("%w:\n  • %s", ErrABIMismatch, strings.Join(differences, "\n  • "))
-}
-
-func estimateABIReportPresentationBytes(report *ArtifactABIReport) uint64 {
-	if report == nil {
-		return 0
-	}
-	var total uint64 = 512
-	for _, v := range report.Variants {
-		if v == nil {
-			continue
-		}
-		total += 256
-		total += uint64(len(v.Level) + len(v.Linkage) + len(v.Interpreter) + len(v.Completeness))
-		for i, d := range v.Dependencies {
-			if i >= 8 {
-				total += 32
-				break
-			}
-			total += uint64(len(d) + depPresentationOverhead)
-		}
-		for i, vr := range v.VersionRequirements {
-			if i >= 8 {
-				total += 32
-				break
-			}
-			total += uint64(len(vr.Library) + len(vr.Version) + versionPresentationOverhead)
-		}
-	}
-	for _, w := range report.Warnings {
-		total += uint64(len(w) + 16)
-	}
-	for _, d := range report.Differences {
-		total += uint64(len(d) + 16)
-	}
-	return total
+	return &abiMismatchError{msg: sb.String()}
 }
 
 func evaluateAllReportsCompleteness(
@@ -1831,20 +1915,35 @@ func evaluateAllReportsCompleteness(
 	ra *ReportAccounting,
 ) (hasSkipped, hasUnknown bool, warnings []string, err error) {
 	for _, r := range reports {
-		isSkipped, isUnknownVar := evaluateVariantCompleteness(r)
+		isSkipped, isUnknownVar := evaluateVariantUncertainty(r)
 		if isSkipped {
 			hasSkipped = true
 		}
 		if isUnknownVar {
 			hasUnknown = true
-			warn, wErr := formatIncompleteMetadataWarning(ra, r)
-			if wErr != nil {
-				return false, false, nil, wErr
+			if r.Completeness == MetadataPartial || r.Completeness == MetadataUnsupported {
+				warn, wErr := formatIncompleteMetadataWarning(ra, r)
+				if wErr != nil {
+					return false, false, nil, wErr
+				}
+				warnings = append(warnings, warn)
 			}
-			warnings = append(warnings, warn)
-		}
-		if r.Linkage == LinkageAmbiguous {
-			hasUnknown = true
+			if r.Linkage == LinkageAmbiguous {
+				hasLinkageWarn := false
+				for _, w := range r.Warnings {
+					if strings.Contains(w, "PT_INTERP") || strings.Contains(w, "ambiguous") {
+						hasLinkageWarn = true
+						break
+					}
+				}
+				if !hasLinkageWarn {
+					warn, wErr := formatAmbiguousLinkageWarning(ra, r)
+					if wErr != nil {
+						return false, false, nil, wErr
+					}
+					warnings = append(warnings, warn)
+				}
+			}
 		}
 		for _, w := range r.Warnings {
 			if rErr := ra.reserve(uint64(len(w))); rErr != nil {
@@ -1928,7 +2027,11 @@ func CompareVariantABIsWithOptions(reports []*VariantABIReport, allowMixedABI bo
 	}
 
 	if len(reports) == 0 {
-		if err := ra.reserve(estimateABIReportPresentationBytes(artifactReport)); err != nil {
+		presBytes, err := MeasureABIReportPresentation(artifactReport)
+		if err != nil {
+			return nil, err
+		}
+		if err := ra.reserve(presBytes); err != nil {
 			return nil, err
 		}
 		return artifactReport, nil
@@ -1938,7 +2041,11 @@ func CompareVariantABIsWithOptions(reports []*VariantABIReport, allowMixedABI bo
 		if err != nil {
 			return nil, err
 		}
-		if err := ra.reserve(estimateABIReportPresentationBytes(rep)); err != nil {
+		presBytes, err := MeasureABIReportPresentation(rep)
+		if err != nil {
+			return nil, err
+		}
+		if err := ra.reserve(presBytes); err != nil {
 			return nil, err
 		}
 		return rep, nil
@@ -1980,7 +2087,11 @@ func CompareVariantABIsWithOptions(reports []*VariantABIReport, allowMixedABI bo
 		artifactReport.Consistent = true
 	}
 
-	if err := ra.reserve(estimateABIReportPresentationBytes(artifactReport)); err != nil {
+	presBytes, err := MeasureABIReportPresentation(artifactReport)
+	if err != nil {
+		return nil, err
+	}
+	if err := ra.reserve(presBytes); err != nil {
 		return nil, err
 	}
 

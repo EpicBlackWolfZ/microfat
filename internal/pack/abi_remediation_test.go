@@ -26,7 +26,7 @@ func TestCompareVariantABIs_R3_Permutations(t *testing.T) {
 		Level:          "v1",
 		Linkage:        LinkageDynamic,
 		HasInterpreter: true,
-		Interpreter:    "/lib64/ld-linux-x86-64.so.2",
+		Interpreter:    testLdLinux,
 		Dependencies:   []string{testLibc},
 		Completeness:   MetadataUnsupported,
 	}
@@ -34,7 +34,7 @@ func TestCompareVariantABIs_R3_Permutations(t *testing.T) {
 		Level:          "v2",
 		Linkage:        LinkageDynamic,
 		HasInterpreter: true,
-		Interpreter:    "/lib64/ld-linux-x86-64.so.2",
+		Interpreter:    testLdLinux,
 		Dependencies:   []string{testLibc},
 		Completeness:   MetadataComplete,
 		VersionRequirements: []VersionRequirement{
@@ -45,7 +45,7 @@ func TestCompareVariantABIs_R3_Permutations(t *testing.T) {
 		Level:          "v3",
 		Linkage:        LinkageDynamic,
 		HasInterpreter: true,
-		Interpreter:    "/lib64/ld-linux-x86-64.so.2",
+		Interpreter:    testLdLinux,
 		Dependencies:   []string{testLibc},
 		Completeness:   MetadataComplete,
 		VersionRequirements: []VersionRequirement{
@@ -395,13 +395,13 @@ func TestCompareVariantABIs_AccountingAndInterpreterBranches(t *testing.T) {
 			Level:               "v1",
 			Linkage:             LinkageDynamic,
 			Completeness:        MetadataComplete,
-			VersionRequirements: []VersionRequirement{{Library: "libc.so.6", Version: "GLIBC_2.17"}},
+			VersionRequirements: []VersionRequirement{{Library: testLibc, Version: "GLIBC_2.17"}},
 		}
 		v2 := &VariantABIReport{
 			Level:               "v2",
 			Linkage:             LinkageDynamic,
 			Completeness:        MetadataComplete,
-			VersionRequirements: []VersionRequirement{{Library: "libc.so.6", Version: "GLIBC_2.34"}},
+			VersionRequirements: []VersionRequirement{{Library: testLibc, Version: "GLIBC_2.34"}},
 		}
 		ra := NewReportAccounting(5)
 		_, err := compareVariantVersions([]*VariantABIReport{v1, v2}, ra)
@@ -811,18 +811,25 @@ func TestABI_R3_RecordWorkAndLimits(t *testing.T) {
 		strtab := []byte("\x00libc.so.6\x00GLIBC_2.2.5\x00")
 		loads := []loadSegment{{off: 0, vaddr: 0x1000, filesz: 1000, memsz: 1000}}
 
-		// Allowance 16: parent succeeds (16 bytes), but auxiliary fails (16 + 16 = 32 > 16)
+		// Allowance 16: parent record succeeds (16 bytes), string scan fails when local metadata budget is exhausted
 		acc16 := &inputAccounting{maxMetadataBytes: 16}
 		err16 := parseVerneed(vnData, loads, 1000, binary.LittleEndian, 0x1000, 1, strtab, acc16, &VariantABIReport{})
 		require.Error(t, err16)
 		assert.True(t, errors.Is(err16, ErrABIResourceLimit))
-		assert.Equal(t, uint64(16), acc16.metadataBytesRead, "must have charged exactly 16 bytes for parent before auxiliary failure")
+		assert.Equal(t, uint64(16), acc16.metadataBytesRead, "must have charged exactly 16 bytes for parent before string scan exhaustion")
 
-		// Allowance 32: both parent (16) and auxiliary (16) succeed
-		acc32 := &inputAccounting{maxMetadataBytes: 32}
-		err32 := parseVerneed(vnData, loads, 1000, binary.LittleEndian, 0x1000, 1, strtab, acc32, &VariantABIReport{})
-		require.NoError(t, err32)
-		assert.Equal(t, uint64(32), acc32.metadataBytesRead, "must have charged 32 bytes for parent and auxiliary")
+		// Allowance 26: parent record (16) + vn_file string (10) succeed, auxiliary record (16) fails
+		acc26 := &inputAccounting{maxMetadataBytes: 26}
+		err26 := parseVerneed(vnData, loads, 1000, binary.LittleEndian, 0x1000, 1, strtab, acc26, &VariantABIReport{})
+		require.Error(t, err26)
+		assert.True(t, errors.Is(err26, ErrABIResourceLimit))
+		assert.Equal(t, uint64(26), acc26.metadataBytesRead)
+
+		// Allowance 54: both parent record (16), vn_file (10), auxiliary record (16), and vna_name (12) succeed
+		acc54 := &inputAccounting{maxMetadataBytes: 54}
+		err54 := parseVerneed(vnData, loads, 1000, binary.LittleEndian, 0x1000, 1, strtab, acc54, &VariantABIReport{})
+		require.NoError(t, err54)
+		assert.Equal(t, uint64(54), acc54.metadataBytesRead, "must have charged 54 bytes for parent, auxiliary, and strings")
 	})
 
 	t.Run("multiple_parents_and_auxiliaries_shared_and_local_charged", func(t *testing.T) {
@@ -865,9 +872,12 @@ func TestABI_R3_RecordWorkAndLimits(t *testing.T) {
 		err := parseVerneed(vnData, loads, 1000, binary.LittleEndian, 0x1000, 2, strtab, acc, &VariantABIReport{})
 		require.NoError(t, err)
 		const expectedRecordBytes = 96
+		const expectedStringScanBytes = 68 // 2 parent vn_file (20) + 4 aux vna_name (48)
+		const expectedTotalMetadataBytes = expectedRecordBytes + expectedStringScanBytes
 		const expectedVersionRecords = 6
-		assert.Equal(t, uint64(expectedRecordBytes), acc.metadataBytesRead)
-		assert.Equal(t, uint64(expectedRecordBytes), shared.usedBytes)
+		assert.Equal(t, uint64(expectedTotalMetadataBytes), acc.metadataBytesRead)
+		assert.Equal(t, uint64(expectedTotalMetadataBytes), shared.usedBytes)
+		assert.Equal(t, uint64(expectedStringScanBytes), acc.stringScanBytesRead)
 		assert.Equal(t, uint64(expectedVersionRecords), acc.versionRecords)
 	})
 
@@ -1271,9 +1281,11 @@ func TestABI_R3_CoverageAndBudgetBoundaries(t *testing.T) {
 		assert.Contains(t, err.Error(), "contradictory termination of Elf64_Verneed chain")
 	})
 
-	t.Run("estimate_presentation_bytes", func(t *testing.T) {
+	t.Run("measure_presentation_bytes", func(t *testing.T) {
 		t.Parallel()
-		assert.Equal(t, uint64(0), estimateABIReportPresentationBytes(nil))
+		zeroBytes, err := MeasureABIReportPresentation(nil)
+		require.NoError(t, err)
+		assert.Equal(t, uint64(0), zeroBytes)
 
 		manyDeps := make([]string, 12)
 		for i := range manyDeps {
@@ -1295,8 +1307,13 @@ func TestABI_R3_CoverageAndBudgetBoundaries(t *testing.T) {
 			Warnings:    []string{"warn1"},
 			Differences: []string{"diff1"},
 		}
-		est := estimateABIReportPresentationBytes(rep)
-		assert.Greater(t, est, uint64(512))
+		est, err := MeasureABIReportPresentation(rep)
+		require.NoError(t, err)
+		assert.Greater(t, est, uint64(0))
+
+		var buf bytes.Buffer
+		require.NoError(t, RenderABIReport(&buf, rep))
+		assert.Equal(t, est, uint64(buf.Len()))
 	})
 
 	t.Run("compare_variant_abis_presentation_budget_exhaustion", func(t *testing.T) {
