@@ -25,6 +25,8 @@ var (
 	ErrInvalidVariantLevel = errors.New("invalid variant level for target architecture")
 	ErrProfileNotFound     = errors.New("specified PGO profile file not found")
 	ErrStubNotFound        = errors.New("microfat launcher stub binary not found")
+	ErrStubProfileConflict = errors.New("conflict between stub path and stub profile")
+	ErrInvalidStubProfile  = errors.New("invalid stub profile")
 	ErrInvalidTargetEnv    = errors.New("invalid target environment")
 )
 
@@ -44,6 +46,7 @@ type Manifest struct {
 	Package     string             `json:"package,omitempty" yaml:"package,omitempty"`
 	Output      string             `json:"output,omitempty" yaml:"output,omitempty"`
 	Stub        string             `json:"stub,omitempty" yaml:"stub,omitempty"`
+	StubProfile string             `json:"stub_profile,omitempty" yaml:"stub_profile,omitempty"`
 	TargetOS    string             `json:"target_os,omitempty" yaml:"target_os,omitempty"`
 	TargetArch  string             `json:"target_arch,omitempty" yaml:"target_arch,omitempty"`
 	DefaultPGO  string             `json:"default_pgo,omitempty" yaml:"default_pgo,omitempty"`
@@ -144,6 +147,16 @@ func ValidateManifest(m *Manifest) error {
 
 	if err := validateCompressionConfig(m.Compression, "manifest root"); err != nil {
 		return err
+	}
+
+	if m.StubProfile != "" {
+		p := strings.ToLower(strings.TrimSpace(m.StubProfile))
+		switch p {
+		case StubProfileFull, StubProfileMinimal:
+			m.StubProfile = p
+		default:
+			return fmt.Errorf("%w: %q (expected %q or %q)", ErrInvalidStubProfile, m.StubProfile, StubProfileFull, StubProfileMinimal)
+		}
 	}
 
 	seenLevels := make(map[string]struct{}, len(m.Variants))

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"debug/elf"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/builder"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
@@ -29,22 +31,25 @@ import (
 )
 
 const (
-	flagJSON     = "--json"
-	flagLevel    = "--level"
-	flagCacheDir = "--cache-dir"
-	flagOutput   = "--output"
-	flagSkipELF  = "--skip-elf-validation"
-	flagManifest = "--manifest"
-	flagVerify   = "--verify"
-	flagStub     = "--stub"
-	flagName     = "--name"
-	flagStrict   = "--strict"
+	flagJSON        = "--json"
+	flagLevel       = "--level"
+	flagCacheDir    = "--cache-dir"
+	flagOutput      = "--output"
+	flagSkipELF     = "--skip-elf-validation"
+	flagManifest    = "--manifest"
+	flagVerify      = "--verify"
+	flagStub        = "--stub"
+	flagStubProfile = "--stub-profile"
+	flagName        = "--name"
+	flagStrict      = "--strict"
 
 	testBinaryMicrofat = "microfat"
 	testOSLinux        = "linux"
 	testArchAMD64      = "amd64"
 	testArchARM64      = "arm64"
 	subcmdDetect       = "detect"
+	testOutPath        = "out"
+	testVariantV1P     = "v1=p"
 )
 
 func TestMain(m *testing.M) {
@@ -812,8 +817,8 @@ variants:
 
 	packManifestCmd := newPackCmd()
 	packManifestCmd.SetArgs([]string{
-		"--manifest", manifestFile,
-		"--skip-elf-validation",
+		flagManifest, manifestFile,
+		flagSkipELF,
 	})
 	// This will fail on compile because it's a test environment without full source, but it validates flag parsing & manifest wiring
 	_ = packManifestCmd.Execute()
@@ -1186,33 +1191,68 @@ func TestInspect_FormatV1DeprecationWarning(t *testing.T) {
 }
 
 func TestStubAutoDiscovery(t *testing.T) {
+	var baseLevel string
+	switch runtime.GOARCH {
+	case testArchAMD64:
+		baseLevel = "v1"
+	case testArchARM64:
+		baseLevel = "v8.0"
+	default:
+		t.Skipf("stub-discovery fixture supports amd64 and arm64, got %s", runtime.GOARCH)
+	}
+
 	tempDir := t.TempDir()
-	v1Path := filepath.Join(tempDir, "v1")
-	_ = os.WriteFile(v1Path, []byte("PAYLOAD_V1"), 0o755)
+	payloadPath := filepath.Join(tempDir, "base_payload")
+	require.NoError(t, os.WriteFile(payloadPath, []byte("PAYLOAD_BASE"), 0o755))
 	fatPath := filepath.Join(tempDir, "app.fat")
 
+	// Isolate adjacent-stub discovery from any stale binary beside the test executable.
+	if installDir, err := builder.ResolveInstallationDirectory(); err == nil && installDir != "" {
+		staleStub := filepath.Join(installDir, "microfat-stub")
+		if _, err := os.Stat(staleStub); err == nil {
+			backup := staleStub + ".test-isolate"
+			require.NoError(t, os.Rename(staleStub, backup))
+			t.Cleanup(func() { _ = os.Rename(backup, staleStub) })
+		}
+	}
+
 	// 1. Without any stub in PATH or adjacent dir, pack without --stub should fail
-	origPath := os.Getenv("PATH")
-	t.Setenv("PATH", t.TempDir()) // empty PATH
+	emptyPath := t.TempDir()
+	t.Setenv("PATH", emptyPath) // isolated empty PATH
 
 	packCmd := newPackCmd()
 	packCmd.SetArgs([]string{
 		flagOutput, fatPath,
 		flagName, "autodiscover-app",
-		"-v", "v1=" + v1Path,
+		"--arch", runtime.GOARCH,
+		"-v", baseLevel + "=" + payloadPath,
 		flagSkipELF,
 	})
-	if err := packCmd.Execute(); err == nil {
-		t.Fatalf("expected pack without stub to fail when no stub is discoverable")
-	}
+	err := packCmd.Execute()
+	require.Error(t, err, "expected pack without stub to fail when no stub is discoverable")
+	require.ErrorContains(t, err, "launcher stub resolution failed", "failure must be caused by stub discovery, not an invalid tier or flag")
+	require.ErrorIs(t, err, builder.ErrStubNotFound)
 
-	// 2. Put microfat-stub into a directory on PATH
+	// 2. Put valid 64-byte microfat-stub into a directory on PATH
 	binDir := filepath.Join(tempDir, "fakebin")
-	_ = os.MkdirAll(binDir, 0o755)
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
 	fakeStub := filepath.Join(binDir, "microfat-stub")
-	_ = os.WriteFile(fakeStub, []byte("FAKE_STUB_ELF"), 0o755)
+	stubHeader := make([]byte, 64)
+	copy(stubHeader[0:4], []byte{0x7f, 'E', 'L', 'F'})
+	stubHeader[4] = byte(elf.ELFCLASS64)
+	stubHeader[5] = byte(elf.ELFDATA2LSB)
+	stubHeader[6] = byte(elf.EV_CURRENT)
+	stubHeader[16] = 2 // ET_EXEC
+	stubHeader[20] = byte(elf.EV_CURRENT)
+	if runtime.GOARCH == testArchARM64 {
+		binary.LittleEndian.PutUint16(stubHeader[18:20], uint16(elf.EM_AARCH64))
+	} else {
+		binary.LittleEndian.PutUint16(stubHeader[18:20], uint16(elf.EM_X86_64))
+	}
+	binary.LittleEndian.PutUint16(stubHeader[52:54], 64) // e_ehsize >= 64
+	require.NoError(t, os.WriteFile(fakeStub, stubHeader, 0o755))
 
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+origPath)
+	t.Setenv("PATH", binDir)
 
 	var stderrBuf bytes.Buffer
 	packDiscoverCmd := newPackCmd()
@@ -1220,15 +1260,61 @@ func TestStubAutoDiscovery(t *testing.T) {
 	packDiscoverCmd.SetArgs([]string{
 		flagOutput, fatPath,
 		flagName, "autodiscover-app",
-		"-v", "v1=" + v1Path,
+		"--arch", runtime.GOARCH,
+		"-v", baseLevel + "=" + payloadPath,
 		flagSkipELF,
 	})
-	if err := packDiscoverCmd.Execute(); err != nil {
-		t.Fatalf("expected pack with auto-discovered stub to succeed, got: %v", err)
-	}
-	if !strings.Contains(stderrBuf.String(), "Using auto-discovered launcher stub") {
-		t.Errorf("expected auto-discovery notice in stderr, got: %q", stderrBuf.String())
-	}
+	require.NoError(t, packDiscoverCmd.Execute(), "expected pack with auto-discovered stub to succeed")
+	assert.Contains(t, stderrBuf.String(), "Using auto-discovered launcher stub")
+}
+
+func TestPackStubFlags_EmptyRejected(t *testing.T) {
+	tempDir := t.TempDir()
+	v1Path := filepath.Join(tempDir, "v1")
+	_ = os.WriteFile(v1Path, []byte("PAYLOAD_V1"), 0o755)
+	fatPath := filepath.Join(tempDir, "app.fat")
+
+	// Pack with empty --stub
+	cmd1 := newPackCmd()
+	cmd1.SetArgs([]string{
+		"--stub=",
+		flagOutput, fatPath,
+		"-v", "v1=" + v1Path,
+	})
+	err := cmd1.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub cannot be empty")
+
+	// Pack with empty --stub-profile
+	cmd2 := newPackCmd()
+	cmd2.SetArgs([]string{
+		"--stub-profile=",
+		flagOutput, fatPath,
+		"-v", "v1=" + v1Path,
+	})
+	err = cmd2.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub-profile cannot be empty")
+
+	// PGO-pack with empty --stub
+	cmd3 := newPgoPackCmd()
+	cmd3.SetArgs([]string{
+		"--stub=",
+		"-m", filepath.Join(tempDir, "dummy.yaml"),
+	})
+	err = cmd3.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub cannot be empty")
+
+	// PGO-pack with empty --stub-profile
+	cmd4 := newPgoPackCmd()
+	cmd4.SetArgs([]string{
+		"--stub-profile=",
+		"-m", filepath.Join(tempDir, "dummy.yaml"),
+	})
+	err = cmd4.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub-profile cannot be empty")
 }
 
 func TestInspectAndInfo_SubprocessStreams(t *testing.T) {
@@ -1648,4 +1734,189 @@ func TestTrim_MetadataPolicyAndBreakHardlinks(t *testing.T) {
 	trimStrict.SetArgs([]string{"--metadata-policy", "strict", "-o", freshStrict, fatPath})
 	require.NoError(t, trimStrict.Execute())
 	require.FileExists(t, freshStrict)
+}
+
+func TestValidateEmptyStubFlags(t *testing.T) {
+	t.Parallel()
+
+	// 1. pack --stub ""
+	packCmd := newPackCmd()
+	packCmd.SetArgs([]string{flagStub, "", "-o", testOutPath, "-v", testVariantV1P})
+	err := packCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub cannot be empty")
+
+	// pack --stub=
+	packCmdEq := newPackCmd()
+	packCmdEq.SetArgs([]string{"--stub=", "-o", testOutPath, "-v", testVariantV1P})
+	err = packCmdEq.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub cannot be empty")
+
+	// 2. pack --stub-profile ""
+	packCmd2 := newPackCmd()
+	packCmd2.SetArgs([]string{flagStubProfile, "", "-o", testOutPath, "-v", testVariantV1P})
+	err = packCmd2.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub-profile cannot be empty")
+
+	// pack --stub-profile "   " (whitespace-only profile is rejected)
+	packCmdProfileWS := newPackCmd()
+	packCmdProfileWS.SetArgs([]string{flagStubProfile, "   ", "-o", testOutPath, "-v", testVariantV1P})
+	err = packCmdProfileWS.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub-profile cannot be empty")
+
+	// 3. pgo-pack --stub ""
+	pgoCmd := newPgoPackCmd()
+	pgoCmd.SetArgs([]string{flagStub, "", flagManifest, "m.yaml"})
+	err = pgoCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub cannot be empty")
+
+	// pgo-pack --stub=
+	pgoCmdEq := newPgoPackCmd()
+	pgoCmdEq.SetArgs([]string{"--stub=", flagManifest, "m.yaml"})
+	err = pgoCmdEq.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub cannot be empty")
+
+	// 4. pgo-pack --stub-profile ""
+	pgoCmd2 := newPgoPackCmd()
+	pgoCmd2.SetArgs([]string{flagStubProfile, "", flagManifest, "m.yaml"})
+	err = pgoCmd2.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub-profile cannot be empty")
+
+	// pgo-pack --stub-profile "   "
+	pgoCmdProfileWS := newPgoPackCmd()
+	pgoCmdProfileWS.SetArgs([]string{flagStubProfile, "   ", flagManifest, "m.yaml"})
+	err = pgoCmdProfileWS.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "flag --stub-profile cannot be empty")
+
+	// 5. Bare whitespace-only --stub " " is treated as data, not empty
+	packCmdWS := newPackCmd()
+	packCmdWS.SetArgs([]string{flagStub, " ", "-o", testOutPath, "-v", testVariantV1P})
+	err = packCmdWS.Execute()
+	require.Error(t, err)
+	// It must NOT fail with "flag --stub cannot be empty"; it must fail because the file " " was not found
+	assert.NotContains(t, err.Error(), "flag --stub cannot be empty")
+	assert.Contains(t, err.Error(), "launcher stub")
+}
+
+func TestTrimEmptyOutputPath(t *testing.T) {
+	t.Parallel()
+
+	trimCmd := newTrimCmd()
+	trimCmd.SetArgs([]string{"-o", "  ", "some_file"})
+	err := trimCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "destination output path cannot be empty")
+}
+
+func TestPackStubWithStubProfileNotice(t *testing.T) {
+	tempDir := t.TempDir()
+	stubPath := filepath.Join(tempDir, "microfat-stub")
+	_ = os.WriteFile(stubPath, []byte("\x7fELFfake_stub"), 0o755)
+
+	v1Path := filepath.Join(tempDir, "v1_bin")
+	_ = os.WriteFile(v1Path, []byte("v1_bin"), 0o755)
+
+	fatOut := filepath.Join(tempDir, "out.fat")
+	packCmd := newPackCmd()
+	var errBuf bytes.Buffer
+	packCmd.SetErr(&errBuf)
+	packCmd.SetArgs([]string{
+		flagStub, stubPath,
+		flagStubProfile, "minimal",
+		"-o", fatOut,
+		"-v", "v1=" + v1Path,
+		flagSkipELF,
+	})
+	_ = packCmd.Execute()
+	assert.Contains(t, errBuf.String(), "automatic stub-profile selection was bypassed")
+}
+
+func TestParseRawVariants(t *testing.T) {
+	t.Parallel()
+
+	// Valid cases
+	v, err := parseRawVariants([]string{"v1=path1", "v2=path2"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"v1": "path1", "v2": "path2"}, v)
+
+	// Missing equal sign
+	_, err = parseRawVariants([]string{"v1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid variant specification")
+
+	// Empty level
+	_, err = parseRawVariants([]string{"=path"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid variant specification")
+
+	// Empty path
+	_, err = parseRawVariants([]string{"v1="})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid variant specification")
+
+	// Duplicate variant level
+	_, err = parseRawVariants([]string{"v1=path1", "v1=path2"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate variant level")
+}
+
+func TestPackCmd_InvalidVariantSpec(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	stubPath := filepath.Join(tempDir, "microfat-stub")
+	require.NoError(t, os.WriteFile(stubPath, []byte("\x7fELFfake_stub"), 0o755))
+
+	packCmd := newPackCmd()
+	packCmd.SetArgs([]string{
+		"--stub", stubPath,
+		"-o", filepath.Join(tempDir, "out.fat"),
+		"-v", "invalid_variant_spec",
+	})
+	err := packCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid variant specification")
+}
+
+func TestCmdWarnFunc(t *testing.T) {
+	t.Parallel()
+
+	cmd := newPackCmd()
+	var errBuf bytes.Buffer
+	cmd.SetErr(&errBuf)
+
+	warn := cmdWarnFunc(cmd)
+
+	// 0 args
+	warn("plain warning message")
+	assert.Contains(t, errBuf.String(), "plain warning message\n")
+
+	// with args
+	errBuf.Reset()
+	warn("formatted warning: %s %d", "arg", 123)
+	assert.Contains(t, errBuf.String(), "formatted warning: arg 123\n")
+}
+
+func TestManifestBuildOptions_CustomWarnFunc(t *testing.T) {
+	t.Parallel()
+
+	cmd := newPackCmd()
+	var called bool
+	customWarn := func(format string, args ...any) {
+		called = true
+	}
+
+	opts := manifestBuildOptions(cmd, builder.BuildOptions{
+		WarnFunc: customWarn,
+	})
+	require.NotNil(t, opts.WarnFunc)
+	opts.WarnFunc("test")
+	assert.True(t, called)
 }

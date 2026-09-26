@@ -148,7 +148,7 @@ microfat pack -v v1=bin/app_v1 -v v3=bin/app_v3 -o dist/app
 5. **Explanatory Error**: Halts execution with clear instructions listing all resolution tiers.
 
 > [!IMPORTANT]
-> **Minimal Stub Selection**: `microfat-stub-minimal` is **never** silently selected by auto-discovery. To package with the minimal stub, you must pass `--stub /path/to/microfat-stub-minimal` explicitly.
+> **Minimal Stub Selection**: `microfat-stub-minimal` is never silently selected by default full-profile discovery. To package with the minimal stub, specify `--stub-profile minimal` (or `stub_profile: minimal` in the manifest), or pass `--stub /path/to/microfat-stub-minimal` explicitly.
 > **Security Boundaries**: Implicit repository-relative paths (`bin/microfat-stub`, `../bin/microfat-stub`) are prohibited to prevent arbitrary stub injection.
 
 ### Preserve packed bytes during packaging and installation
