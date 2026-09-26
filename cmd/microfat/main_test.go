@@ -1191,30 +1191,51 @@ func TestInspect_FormatV1DeprecationWarning(t *testing.T) {
 }
 
 func TestStubAutoDiscovery(t *testing.T) {
+	var baseLevel string
+	switch runtime.GOARCH {
+	case testArchAMD64:
+		baseLevel = "v1"
+	case testArchARM64:
+		baseLevel = "v8.0"
+	default:
+		t.Skipf("stub-discovery fixture supports amd64 and arm64, got %s", runtime.GOARCH)
+	}
+
 	tempDir := t.TempDir()
-	v1Path := filepath.Join(tempDir, "v1")
-	_ = os.WriteFile(v1Path, []byte("PAYLOAD_V1"), 0o755)
+	payloadPath := filepath.Join(tempDir, "base_payload")
+	require.NoError(t, os.WriteFile(payloadPath, []byte("PAYLOAD_BASE"), 0o755))
 	fatPath := filepath.Join(tempDir, "app.fat")
 
+	// Isolate adjacent-stub discovery from any stale binary beside the test executable.
+	if installDir, err := builder.ResolveInstallationDirectory(); err == nil && installDir != "" {
+		staleStub := filepath.Join(installDir, "microfat-stub")
+		if _, err := os.Stat(staleStub); err == nil {
+			backup := staleStub + ".test-isolate"
+			require.NoError(t, os.Rename(staleStub, backup))
+			t.Cleanup(func() { _ = os.Rename(backup, staleStub) })
+		}
+	}
+
 	// 1. Without any stub in PATH or adjacent dir, pack without --stub should fail
-	origPath := os.Getenv("PATH")
-	t.Setenv("PATH", t.TempDir()) // empty PATH
+	emptyPath := t.TempDir()
+	t.Setenv("PATH", emptyPath) // isolated empty PATH
 
 	packCmd := newPackCmd()
 	packCmd.SetArgs([]string{
 		flagOutput, fatPath,
 		flagName, "autodiscover-app",
 		"--arch", runtime.GOARCH,
-		"-v", "v1=" + v1Path,
+		"-v", baseLevel + "=" + payloadPath,
 		flagSkipELF,
 	})
-	if err := packCmd.Execute(); err == nil {
-		t.Fatalf("expected pack without stub to fail when no stub is discoverable")
-	}
+	err := packCmd.Execute()
+	require.Error(t, err, "expected pack without stub to fail when no stub is discoverable")
+	require.ErrorContains(t, err, "launcher stub resolution failed", "failure must be caused by stub discovery, not an invalid tier or flag")
+	require.ErrorIs(t, err, builder.ErrStubNotFound)
 
 	// 2. Put valid 64-byte microfat-stub into a directory on PATH
 	binDir := filepath.Join(tempDir, "fakebin")
-	_ = os.MkdirAll(binDir, 0o755)
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
 	fakeStub := filepath.Join(binDir, "microfat-stub")
 	stubHeader := make([]byte, 64)
 	copy(stubHeader[0:4], []byte{0x7f, 'E', 'L', 'F'})
@@ -1223,15 +1244,15 @@ func TestStubAutoDiscovery(t *testing.T) {
 	stubHeader[6] = byte(elf.EV_CURRENT)
 	stubHeader[16] = 2 // ET_EXEC
 	stubHeader[20] = byte(elf.EV_CURRENT)
-	if runtime.GOARCH == "arm64" {
+	if runtime.GOARCH == testArchARM64 {
 		binary.LittleEndian.PutUint16(stubHeader[18:20], uint16(elf.EM_AARCH64))
 	} else {
 		binary.LittleEndian.PutUint16(stubHeader[18:20], uint16(elf.EM_X86_64))
 	}
 	binary.LittleEndian.PutUint16(stubHeader[52:54], 64) // e_ehsize >= 64
-	_ = os.WriteFile(fakeStub, stubHeader, 0o755)
+	require.NoError(t, os.WriteFile(fakeStub, stubHeader, 0o755))
 
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+origPath)
+	t.Setenv("PATH", binDir)
 
 	var stderrBuf bytes.Buffer
 	packDiscoverCmd := newPackCmd()
@@ -1240,15 +1261,11 @@ func TestStubAutoDiscovery(t *testing.T) {
 		flagOutput, fatPath,
 		flagName, "autodiscover-app",
 		"--arch", runtime.GOARCH,
-		"-v", "v1=" + v1Path,
+		"-v", baseLevel + "=" + payloadPath,
 		flagSkipELF,
 	})
-	if err := packDiscoverCmd.Execute(); err != nil {
-		t.Fatalf("expected pack with auto-discovered stub to succeed, got: %v", err)
-	}
-	if !strings.Contains(stderrBuf.String(), "Using auto-discovered launcher stub") {
-		t.Errorf("expected auto-discovery notice in stderr, got: %q", stderrBuf.String())
-	}
+	require.NoError(t, packDiscoverCmd.Execute(), "expected pack with auto-discovered stub to succeed")
+	assert.Contains(t, stderrBuf.String(), "Using auto-discovered launcher stub")
 }
 
 func TestPackStubFlags_EmptyRejected(t *testing.T) {
