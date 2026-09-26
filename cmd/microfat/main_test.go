@@ -1191,6 +1191,67 @@ func TestInspect_FormatV1DeprecationWarning(t *testing.T) {
 }
 
 func TestStubAutoDiscovery(t *testing.T) {
+	if runtime.GOARCH != testArchAMD64 && runtime.GOARCH != testArchARM64 {
+		t.Skipf("stub-discovery fixture supports amd64 and arm64, got %s", runtime.GOARCH)
+	}
+
+	tempRoot := t.TempDir()
+	runnerDir := filepath.Join(tempRoot, "runner")
+	workDir := filepath.Join(tempRoot, "work")
+	emptyPathDir := filepath.Join(tempRoot, "empty_path")
+	cacheDir := filepath.Join(tempRoot, "cache")
+	homeDir := filepath.Join(tempRoot, "home")
+
+	require.NoError(t, os.MkdirAll(runnerDir, 0o755))
+	require.NoError(t, os.MkdirAll(workDir, 0o755))
+	require.NoError(t, os.MkdirAll(emptyPathDir, 0o755))
+	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
+	require.NoError(t, os.MkdirAll(homeDir, 0o755))
+
+	exePath, err := os.Executable()
+	require.NoError(t, err, "resolving test executable")
+	realExePath, err := filepath.EvalSymlinks(exePath)
+	if err != nil {
+		realExePath = exePath
+	}
+
+	runnerExe := filepath.Join(runnerDir, "microfat_test_runner")
+	copyExecutableFile(t, realExePath, runnerExe)
+
+	childEnv := buildChildEnv(map[string]string{
+		"PATH":                            emptyPathDir,
+		"HOME":                            homeDir,
+		"XDG_CACHE_HOME":                  cacheDir,
+		envStubDiscoveryWorker:            "1",
+		envStubDiscoveryExpectedRunnerDir: runnerDir,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, runnerExe, "-test.run=^TestStubAutoDiscoveryHelper$", "-test.count=1", "-test.v")
+	cmd.Dir = workDir
+	cmd.Env = childEnv
+
+	var combinedBuf bytes.Buffer
+	cmd.Stdout = &combinedBuf
+	cmd.Stderr = &combinedBuf
+
+	runErr := cmd.Run()
+	outputStr := combinedBuf.String()
+	if runErr != nil {
+		t.Fatalf("stub discovery helper execution failed: %v\nOutput:\n%s", runErr, outputStr)
+	}
+
+	require.Contains(t, outputStr, stubDiscoveryCompletionMarker, "helper did not emit completion marker\nOutput:\n%s", outputStr)
+	require.Contains(t, outputStr, "PASS: TestStubAutoDiscoveryHelper", "helper subtest did not pass\nOutput:\n%s", outputStr)
+}
+
+func TestStubAutoDiscoveryHelper(t *testing.T) {
+	if os.Getenv(envStubDiscoveryWorker) != "1" {
+		return // Not running as designated helper; return immediately
+	}
+
 	var baseLevel string
 	switch runtime.GOARCH {
 	case testArchAMD64:
@@ -1201,24 +1262,31 @@ func TestStubAutoDiscovery(t *testing.T) {
 		t.Skipf("stub-discovery fixture supports amd64 and arm64, got %s", runtime.GOARCH)
 	}
 
+	installDir, err := builder.ResolveInstallationDirectory()
+	require.NoError(t, err, "helper failed to resolve installation directory")
+
+	expectedRunnerDir := os.Getenv(envStubDiscoveryExpectedRunnerDir)
+	if expectedRunnerDir != "" {
+		evalInstall, err1 := filepath.EvalSymlinks(installDir)
+		evalExpected, err2 := filepath.EvalSymlinks(expectedRunnerDir)
+		if err1 == nil && err2 == nil {
+			require.Equal(t, evalExpected, evalInstall, "installation directory must match private runner directory")
+		} else {
+			require.Equal(t, filepath.Clean(expectedRunnerDir), filepath.Clean(installDir))
+		}
+	}
+
+	_, statErr := os.Stat(filepath.Join(installDir, "microfat-stub"))
+	require.True(t, os.IsNotExist(statErr), "private runner directory must not contain a companion microfat-stub")
+
 	tempDir := t.TempDir()
 	payloadPath := filepath.Join(tempDir, "base_payload")
 	require.NoError(t, os.WriteFile(payloadPath, []byte("PAYLOAD_BASE"), 0o755))
 	fatPath := filepath.Join(tempDir, "app.fat")
 
-	// Isolate adjacent-stub discovery from any stale binary beside the test executable.
-	if installDir, err := builder.ResolveInstallationDirectory(); err == nil && installDir != "" {
-		staleStub := filepath.Join(installDir, "microfat-stub")
-		if _, err := os.Stat(staleStub); err == nil {
-			backup := staleStub + ".test-isolate"
-			require.NoError(t, os.Rename(staleStub, backup))
-			t.Cleanup(func() { _ = os.Rename(backup, staleStub) })
-		}
-	}
-
 	// 1. Without any stub in PATH or adjacent dir, pack without --stub should fail
 	emptyPath := t.TempDir()
-	t.Setenv("PATH", emptyPath) // isolated empty PATH
+	t.Setenv("PATH", emptyPath)
 
 	packCmd := newPackCmd()
 	packCmd.SetArgs([]string{
@@ -1228,10 +1296,12 @@ func TestStubAutoDiscovery(t *testing.T) {
 		"-v", baseLevel + "=" + payloadPath,
 		flagSkipELF,
 	})
-	err := packCmd.Execute()
+	err = packCmd.Execute()
 	require.Error(t, err, "expected pack without stub to fail when no stub is discoverable")
 	require.ErrorContains(t, err, "launcher stub resolution failed", "failure must be caused by stub discovery, not an invalid tier or flag")
 	require.ErrorIs(t, err, builder.ErrStubNotFound)
+	_, statFat := os.Stat(fatPath)
+	require.True(t, os.IsNotExist(statFat), "fat binary must not be created on discovery failure")
 
 	// 2. Put valid 64-byte microfat-stub into a directory on PATH
 	binDir := filepath.Join(tempDir, "fakebin")
@@ -1266,6 +1336,195 @@ func TestStubAutoDiscovery(t *testing.T) {
 	})
 	require.NoError(t, packDiscoverCmd.Execute(), "expected pack with auto-discovered stub to succeed")
 	assert.Contains(t, stderrBuf.String(), "Using auto-discovered launcher stub")
+
+	fatInfo, err := os.Stat(fatPath)
+	require.NoError(t, err, "fat binary must exist after successful pack")
+	require.Greater(t, fatInfo.Size(), int64(0), "fat binary must not be empty")
+	f, err := os.Open(fatPath)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	idx, err := format.ReadTrailerAndIndex(f, fatInfo.Size())
+	require.NoError(t, err, "fat binary index must be readable")
+	require.Equal(t, format.FormatVersion2, idx.Version)
+
+	fmt.Println(stubDiscoveryCompletionMarker)
+}
+
+const (
+	envStubDiscoveryWorker            = "MICROFAT_TEST_STUB_DISCOVERY_WORKER"
+	envStubDiscoveryExpectedRunnerDir = "MICROFAT_TEST_STUB_DISCOVERY_RUNNER_DIR"
+	stubDiscoveryCompletionMarker     = "=== STUB_AUTODISCOVERY_COMPLETED_SUCCESSFULLY ==="
+)
+
+func copyExecutableFile(t *testing.T, src, dst string) {
+	t.Helper()
+	in, err := os.Open(src)
+	require.NoError(t, err, "opening source executable for copy: %s", src)
+	defer func() { _ = in.Close() }()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	require.NoError(t, err, "creating destination executable: %s", dst)
+
+	_, err = io.Copy(out, in)
+	require.NoError(t, err, "copying executable bytes from %s to %s", src, dst)
+
+	require.NoError(t, out.Sync(), "syncing executable file: %s", dst)
+	require.NoError(t, out.Close(), "closing executable file: %s", dst)
+
+	st, err := os.Stat(dst)
+	require.NoError(t, err, "stat destination executable: %s", dst)
+	require.True(t, st.Mode().IsRegular(), "destination must be a regular file: %s", dst)
+}
+
+func buildChildEnv(overrides map[string]string) []string {
+	envMap := make(map[string]string)
+	for _, envEntry := range os.Environ() {
+		parts := strings.SplitN(envEntry, "=", 2)
+		if len(parts) == 2 {
+			k := parts[0]
+			if strings.HasPrefix(k, "MICROFAT_") {
+				continue
+			}
+			envMap[k] = parts[1]
+		}
+	}
+	for k, v := range overrides {
+		envMap[k] = v
+	}
+	res := make([]string, 0, len(envMap))
+	for k, v := range envMap {
+		res = append(res, k+"="+v)
+	}
+	return res
+}
+
+type fileSnapshot struct {
+	content []byte
+	mode    os.FileMode
+	modTime time.Time
+	dev     uint64
+	ino     uint64
+}
+
+func snapshotFile(t *testing.T, path string) fileSnapshot {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err, "reading file for snapshot: %s", path)
+	st, err := os.Lstat(path)
+	require.NoError(t, err, "lstat file for snapshot: %s", path)
+	snap := fileSnapshot{
+		content: data,
+		mode:    st.Mode(),
+		modTime: st.ModTime(),
+	}
+	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
+		snap.dev = sys.Dev
+		snap.ino = sys.Ino
+	}
+	return snap
+}
+
+func assertSnapshotUnchanged(t *testing.T, path string, before fileSnapshot) {
+	t.Helper()
+	require.FileExists(t, path)
+	after := snapshotFile(t, path)
+	assert.Equal(t, before.content, after.content, "file content changed: %s", path)
+	assert.Equal(t, before.mode, after.mode, "file mode changed: %s", path)
+	assert.Equal(t, before.modTime, after.modTime, "file modTime changed: %s", path)
+	if before.ino != 0 && after.ino != 0 {
+		assert.Equal(t, before.dev, after.dev, "file device changed: %s", path)
+		assert.Equal(t, before.ino, after.ino, "file inode changed: %s", path)
+	}
+}
+
+func TestStubAutoDiscovery_PreservesCallerSiblings(t *testing.T) {
+	if runtime.GOARCH != testArchAMD64 && runtime.GOARCH != testArchARM64 {
+		t.Skipf("stub-discovery fixture supports amd64 and arm64, got %s", runtime.GOARCH)
+	}
+
+	exePath, err := os.Executable()
+	require.NoError(t, err, "resolving test executable")
+	realExePath, err := filepath.EvalSymlinks(exePath)
+	if err != nil {
+		realExePath = exePath
+	}
+
+	t.Run("stub_and_backup_collision", func(t *testing.T) {
+		tempDir := t.TempDir()
+		callerDir := filepath.Join(tempDir, "simulated_caller")
+		require.NoError(t, os.MkdirAll(callerDir, 0o755))
+
+		callerExe := filepath.Join(callerDir, "microfat_caller_test")
+		copyExecutableFile(t, realExePath, callerExe)
+
+		stubPath := filepath.Join(callerDir, "microfat-stub")
+		backupPath := filepath.Join(callerDir, "microfat-stub.test-isolate")
+
+		stubContent := []byte("ORIGINAL_CALLER_STUB_BYTES_A1B2C3D4E5F6")
+		backupContent := []byte("PREEXISTING_BACKUP_BYTES_Z9Y8X7W6V5U4")
+		require.NoError(t, os.WriteFile(stubPath, stubContent, 0o755))
+		require.NoError(t, os.WriteFile(backupPath, backupContent, 0o644))
+
+		stubBefore := snapshotFile(t, stubPath)
+		backupBefore := snapshotFile(t, backupPath)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, callerExe, "-test.run=^TestStubAutoDiscovery$", "-test.count=1", "-test.v")
+		cmd.Dir = callerDir
+		cmd.Env = buildChildEnv(nil)
+
+		out, runErr := cmd.CombinedOutput()
+		if runErr != nil {
+			t.Fatalf("TestStubAutoDiscovery failed in simulated caller directory: %v\nOutput:\n%s", runErr, string(out))
+		}
+		require.Contains(t, string(out), "PASS: TestStubAutoDiscovery", "parent test must pass")
+
+		assertSnapshotUnchanged(t, stubPath, stubBefore)
+		assertSnapshotUnchanged(t, backupPath, backupBefore)
+
+		entries, err := os.ReadDir(callerDir)
+		require.NoError(t, err)
+		entryNames := make([]string, 0, len(entries))
+		for _, e := range entries {
+			entryNames = append(entryNames, e.Name())
+		}
+		assert.ElementsMatch(t, []string{"microfat_caller_test", "microfat-stub", "microfat-stub.test-isolate"}, entryNames,
+			"no extra backup or temporary files should be created in the caller directory")
+	})
+
+	t.Run("stub_present_backup_absent", func(t *testing.T) {
+		tempDir := t.TempDir()
+		callerDir := filepath.Join(tempDir, "simulated_caller_no_backup")
+		require.NoError(t, os.MkdirAll(callerDir, 0o755))
+
+		callerExe := filepath.Join(callerDir, "microfat_caller_test")
+		copyExecutableFile(t, realExePath, callerExe)
+
+		stubPath := filepath.Join(callerDir, "microfat-stub")
+		backupPath := filepath.Join(callerDir, "microfat-stub.test-isolate")
+
+		stubContent := []byte("ORIGINAL_CALLER_STUB_ONLY_G7H8I9J0")
+		require.NoError(t, os.WriteFile(stubPath, stubContent, 0o755))
+		stubBefore := snapshotFile(t, stubPath)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, callerExe, "-test.run=^TestStubAutoDiscovery$", "-test.count=1", "-test.v")
+		cmd.Dir = callerDir
+		cmd.Env = buildChildEnv(nil)
+
+		out, runErr := cmd.CombinedOutput()
+		if runErr != nil {
+			t.Fatalf("TestStubAutoDiscovery failed in simulated caller directory: %v\nOutput:\n%s", runErr, string(out))
+		}
+		require.Contains(t, string(out), "PASS: TestStubAutoDiscovery", "parent test must pass")
+
+		assertSnapshotUnchanged(t, stubPath, stubBefore)
+		assert.NoFileExists(t, backupPath, "backup file must not be created when none existed")
+	})
 }
 
 func TestPackStubFlags_EmptyRejected(t *testing.T) {
