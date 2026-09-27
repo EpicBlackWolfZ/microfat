@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -59,6 +60,9 @@ func TestInstallationChild(t *testing.T) {
 		}
 		return nil
 	})
+	if errors.Is(err, ErrChanged) {
+		return
+	}
 	require.NoError(t, err)
 }
 
@@ -136,6 +140,9 @@ func TestIndependentInstallersSerialize(t *testing.T) {
 	require.NoError(t, first.command.Wait())
 	require.NoError(t, second.command.Wait())
 	active := readActive(t, paths)
+	entries, err := os.ReadDir(filepath.Join(paths.Store, generationDir))
+	require.NoError(t, err)
+	assert.Len(t, entries, 2, "a stale concurrent installer must not overwrite a newly selected release")
 	assert.Contains(t, []string{"0.3.1", "0.3.2"}, active.Version)
 	for _, name := range Products() {
 		out, err := exec.CommandContext(t.Context(), filepath.Join(paths.Bin, name)).Output()

@@ -6,6 +6,7 @@ package install
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -107,10 +108,13 @@ func (g Generation) Validate() error {
 // Snapshot binds an operation to the installation observed before acquisition.
 // Its private fields prevent callers from manufacturing an ownership decision.
 type Snapshot struct {
-	paths     Paths
-	owner     *Owner
-	binInfo   os.FileInfo
-	storeInfo os.FileInfo
+	paths         Paths
+	owner         *Owner
+	binInfo       os.FileInfo
+	storeInfo     os.FileInfo
+	currentTarget string
+	current       *Generation
+	currentError  error
 }
 
 func (s Snapshot) Owner() *Owner {
@@ -119,6 +123,17 @@ func (s Snapshot) Owner() *Owner {
 	}
 	copyOwner := *s.owner
 	return &copyOwner
+}
+
+// Current reports the selected generation metadata observed with this snapshot.
+// Apply revalidates the selection under the lock before making changes.
+func (s Snapshot) Current() (*Generation, error) {
+	if s.current == nil {
+		return nil, s.currentError
+	}
+	generation := *s.current
+	generation.Files = maps.Clone(generation.Files)
+	return &generation, s.currentError
 }
 
 type Result struct {

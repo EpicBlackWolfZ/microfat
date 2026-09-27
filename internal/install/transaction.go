@@ -46,7 +46,25 @@ func Inspect(paths Paths) (Snapshot, error) {
 	if errors.Is(err, os.ErrNotExist) {
 		err = validateUnclaimed(root)
 	}
+	if err == nil && snapshot.owner != nil {
+		snapshot.currentTarget, err = selectedTarget(root)
+		if err == nil && snapshot.currentTarget != "" {
+			generation, currentErr := activeGeneration(root)
+			snapshot.currentError = currentErr
+			if currentErr == nil {
+				snapshot.current = &generation
+			}
+		}
+	}
 	return snapshot, err
+}
+
+func selectedTarget(root *os.Root) (string, error) {
+	target, err := root.Readlink(currentLink)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	return target, err
 }
 
 func validateUnclaimed(root *os.Root) error {
@@ -142,6 +160,13 @@ func openOperation(ctx context.Context, snapshot Snapshot) (*operation, error) {
 	}
 	if err == nil {
 		err = op.checkOwner(snapshot.owner)
+	}
+	if err == nil {
+		target, targetErr := selectedTarget(op.store)
+		err = targetErr
+		if targetErr == nil && target != snapshot.currentTarget {
+			err = ErrChanged
+		}
 	}
 	if err != nil {
 		op.close()
