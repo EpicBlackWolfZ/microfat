@@ -533,102 +533,14 @@ func newPackCmd() *cobra.Command {
 			if err := validateEmptyStubFlags(cmd, flags); err != nil {
 				return err
 			}
-
+			if flags.SkipELFValidation {
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(),
+					"[microfat] Warning: ELF architecture and declared ABI validation explicitly skipped via --skip-elf-validation")
+			}
 			if flags.ManifestPath != "" {
-				m, err := builder.LoadManifest(flags.ManifestPath)
-				if err != nil {
-					return err
-				}
-				opts := manifestBuildOptions(cmd, flags)
-				fmt.Printf("Compiling and packaging PGO matrix for '%s' (%s/%s)...\n", m.AppName, m.TargetOS, m.TargetArch)
-				res, err := builder.BuildAndPack(cmd.Context(), m, opts)
-				if err != nil {
-					return fmt.Errorf("packaging error: %w", err)
-				}
-				fmt.Printf("Successfully packaged %d variants into '%s':\n", len(res.Index.Variants), res.OutputPath)
-				for _, v := range res.Index.Variants {
-					fmt.Printf("  • %-6s [%s] -> uncompressed: %d B | compressed: %d B\n", v.Level, v.Compression, v.UncompressedSize, v.CompressedSize)
-				}
-				return nil
+				return runManifestPack(cmd, flags)
 			}
-
-			warnFunc := cmdWarnFunc(cmd)
-
-			actualStubPath, err := builder.ResolveStubWithOptions(builder.ResolveStubOptions{
-				CLIStub:    flags.StubPath,
-				CLIProfile: flags.StubProfile,
-				TargetArch: targetArch,
-				WarnFunc:   warnFunc,
-			})
-			if err != nil {
-				return fmt.Errorf("launcher stub resolution failed: %w (provide --stub flag or specify --manifest)", err)
-			}
-			if flags.StubPath == "" {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Using auto-discovered launcher stub: %s\n", actualStubPath)
-			}
-			if flags.OutputPath == "" {
-				return errors.New("required flag(s) \"output\" not set (or specify --manifest)")
-			}
-			if len(rawVariants) == 0 {
-				return errors.New("required flag(s) \"variant\" not set (or specify --manifest)")
-			}
-
-			variants, err := parseRawVariants(rawVariants)
-			if err != nil {
-				return err
-			}
-
-			opts := pack.DefaultOptions()
-			opts.StubPath = actualStubPath
-			opts.OutputPath = flags.OutputPath
-			opts.AppName = appName
-			if targetOS != "" {
-				opts.TargetOS = targetOS
-			}
-			if targetArch != "" {
-				opts.TargetArch = targetArch
-			}
-			opts.Variants = variants
-			opts.SkipELFValidation = flags.SkipELFValidation
-			if flags.Profile != "" {
-				opts.Profile = flags.Profile
-			}
-			if flags.Compression != "" {
-				opts.Compression = flags.Compression
-			}
-			if flags.CompressionLevel != "" {
-				opts.CompressionLevel = flags.CompressionLevel
-			}
-			if flags.EnableDict {
-				opts.EnableDict = flags.EnableDict
-			}
-			if flags.DictSize > 0 {
-				opts.DictSize = flags.DictSize
-			}
-			if flags.FormatVersion != 0 {
-				opts.FormatVersion = flags.FormatVersion
-			}
-			opts.WarnFunc = func(format string, args ...any) {
-				var msg string
-				if len(args) == 0 {
-					msg = format
-				} else {
-					msg = fmt.Sprintf(format, args...)
-				}
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "[microfat:warn] %s\n", msg)
-			}
-
-			fmt.Printf("Packaging fat binary '%s'...\n", flags.OutputPath)
-			idx, err := pack.Pack(opts)
-			if err != nil {
-				return fmt.Errorf("packaging error: %w", err)
-			}
-
-			fmt.Printf("Successfully packaged %d variants into '%s':\n", len(idx.Variants), flags.OutputPath)
-			for _, v := range idx.Variants {
-				fmt.Printf("  • %-6s [%s] -> uncompressed: %d B | compressed: %d B\n", v.Level, v.Compression, v.UncompressedSize, v.CompressedSize)
-			}
-			return nil
+			return runDirectPack(cmd, flags, appName, targetOS, targetArch, rawVariants)
 		},
 	}
 
@@ -653,6 +565,119 @@ func explicitDictionarySize(cmd *cobra.Command, size int) int {
 		return size
 	}
 	return 0
+}
+
+func runManifestPack(cmd *cobra.Command, flags builder.BuildOptions) error {
+	m, err := builder.LoadManifest(flags.ManifestPath)
+	if err != nil {
+		return err
+	}
+	opts := manifestBuildOptions(cmd, flags)
+	fmt.Printf("Compiling and packaging PGO matrix for '%s' (%s/%s)...\n", m.AppName, m.TargetOS, m.TargetArch)
+	res, err := builder.BuildAndPack(cmd.Context(), m, opts)
+	if err != nil {
+		return fmt.Errorf("packaging error: %w", err)
+	}
+	fmt.Printf("Successfully packaged %d variants into '%s':\n", len(res.Index.Variants), res.OutputPath)
+	for _, v := range res.Index.Variants {
+		fmt.Printf("  • %-6s [%s] -> uncompressed: %d B | compressed: %d B\n", v.Level, v.Compression, v.UncompressedSize, v.CompressedSize)
+	}
+	if err := printABIReport(cmd.OutOrStdout(), res.ABIReport); err != nil {
+		return fmt.Errorf("artifact published successfully to %s, but printing ABI report failed: %w", res.OutputPath, err)
+	}
+	return nil
+}
+
+func runDirectPack(
+	cmd *cobra.Command,
+	flags builder.BuildOptions,
+	appName, targetOS, targetArch string,
+	rawVariants []string,
+) error {
+	actualStubPath, err := builder.ResolveStubWithOptions(builder.ResolveStubOptions{
+		CLIStub:    flags.StubPath,
+		CLIProfile: flags.StubProfile,
+		TargetArch: targetArch,
+		WarnFunc:   cmdWarnFunc(cmd),
+	})
+	if err != nil {
+		return fmt.Errorf("launcher stub resolution failed: %w (provide --stub flag or specify --manifest)", err)
+	}
+	if flags.StubPath == "" {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+			"Using auto-discovered launcher stub: %s\n", actualStubPath)
+	}
+	if flags.OutputPath == "" {
+		return errors.New("required flag(s) \"output\" not set (or specify --manifest)")
+	}
+	if len(rawVariants) == 0 {
+		return errors.New("required flag(s) \"variant\" not set (or specify --manifest)")
+	}
+
+	variants, err := parseRawVariants(rawVariants)
+	if err != nil {
+		return err
+	}
+
+	opts := pack.DefaultOptions()
+	opts.StubPath = actualStubPath
+	opts.OutputPath = flags.OutputPath
+	opts.AppName = appName
+	if targetOS != "" {
+		opts.TargetOS = targetOS
+	}
+	if targetArch != "" {
+		opts.TargetArch = targetArch
+	}
+	opts.Variants = variants
+	opts.SkipELFValidation = flags.SkipELFValidation
+	opts.AllowMixedABI = flags.AllowMixedABI
+	var artifactABIReport *pack.ArtifactABIReport
+	opts.ABIReportCallback = func(report *pack.ArtifactABIReport) {
+		artifactABIReport = report
+	}
+	if flags.Profile != "" {
+		opts.Profile = flags.Profile
+	}
+	if flags.Compression != "" {
+		opts.Compression = flags.Compression
+	}
+	if flags.CompressionLevel != "" {
+		opts.CompressionLevel = flags.CompressionLevel
+	}
+	if flags.EnableDict {
+		opts.EnableDict = flags.EnableDict
+	}
+	if flags.DictSize > 0 {
+		opts.DictSize = flags.DictSize
+	}
+	if flags.FormatVersion != 0 {
+		opts.FormatVersion = flags.FormatVersion
+	}
+	opts.WarnFunc = func(format string, args ...any) {
+		var msg string
+		if len(args) == 0 {
+			msg = format
+		} else {
+			msg = fmt.Sprintf(format, args...)
+		}
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "[microfat:warn] %s\n", msg)
+	}
+
+	fmt.Printf("Packaging fat binary '%s'...\n", flags.OutputPath)
+	idx, err := pack.Pack(opts)
+	if err != nil {
+		return fmt.Errorf("packaging error: %w", err)
+	}
+
+	fmt.Printf("Successfully packaged %d variants into '%s':\n", len(idx.Variants), flags.OutputPath)
+	for _, v := range idx.Variants {
+		fmt.Printf("  • %-6s [%s] -> uncompressed: %d B | compressed: %d B\n", v.Level, v.Compression, v.UncompressedSize, v.CompressedSize)
+	}
+	if err := printABIReport(cmd.OutOrStdout(), artifactABIReport); err != nil {
+		return fmt.Errorf("artifact published successfully to %s, but printing ABI report failed: %w", flags.OutputPath, err)
+	}
+	return nil
 }
 
 // Copy flag values before applying per-invocation streams and manifest defaults.
@@ -680,6 +705,8 @@ func bindManifestBuildFlags(cmd *cobra.Command, flags *builder.BuildOptions) {
 	cmd.Flags().IntVar(&flags.FormatVersion, "format-version", format.FormatVersionCurrent,
 		"Binary format specification version (1 for JSON, 2 for binary table)")
 	cmd.Flags().BoolVar(&flags.SkipELFValidation, "skip-elf-validation", false, "Skip ELF architecture and executable structure validation")
+	cmd.Flags().BoolVar(&flags.AllowMixedABI, "allow-mixed-abi", false,
+		"Allow packaging variants with differing declared ABI requirements (interpreters, dependencies, symbol versions)")
 	cmd.Flags().BoolVar(&flags.KeepIntermediates, "keep-intermediates", false, "Keep intermediate compiled variant ELF binaries")
 	cmd.Flags().StringVar(&flags.GoBinary, "go-binary", "", "Path to Go toolchain binary (defaults to $GO or 'go')")
 }
@@ -697,7 +724,10 @@ then packages them into a self-dispatching microfat binary.`,
 			if err := validateEmptyStubFlags(cmd, flags); err != nil {
 				return err
 			}
-
+			if flags.SkipELFValidation {
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(),
+					"[microfat] Warning: ELF architecture and declared ABI validation explicitly skipped via --skip-elf-validation")
+			}
 			if flags.ManifestPath == "" && len(args) > 0 {
 				flags.ManifestPath = args[0]
 			}
@@ -724,6 +754,9 @@ then packages them into a self-dispatching microfat binary.`,
 				fmt.Printf("  • %-6s [%s] (pgo: %-20s) -> uncompressed: %d B | compressed: %d B\n",
 					v.Level, v.Compression, pgoFlag, v.UncompressedSize, v.CompressedSize)
 			}
+			if err := printABIReport(cmd.OutOrStdout(), res.ABIReport); err != nil {
+				return fmt.Errorf("artifact published successfully to %s, but printing ABI report failed: %w", res.OutputPath, err)
+			}
 			return nil
 		},
 	}
@@ -735,6 +768,10 @@ then packages them into a self-dispatching microfat binary.`,
 
 	bindManifestBuildFlags(cmd, &flags)
 	return cmd
+}
+
+func printABIReport(out io.Writer, report *pack.ArtifactABIReport) error {
+	return pack.RenderABIReport(out, report)
 }
 
 func formatVersionName(version int) string {

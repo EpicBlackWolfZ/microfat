@@ -40,6 +40,7 @@ const (
 	flagVerify      = "--verify"
 	flagStub        = "--stub"
 	flagStubProfile = "--stub-profile"
+	flagProfile     = "--profile"
 	flagName        = "--name"
 	flagStrict      = "--strict"
 
@@ -780,13 +781,13 @@ func TestPackCmd_CompressionFlags(t *testing.T) {
 	packCmd := newPackCmd()
 	packCmd.SetArgs([]string{
 		flagStub, stubPath,
-		"--output", fatPath,
-		"--profile", "latency",
+		flagOutput, fatPath,
+		flagProfile, "latency",
 		"--compression", "lz4",
 		"--compression-level", "fastest",
 		"-v", "v1=" + v1Path,
 		"-v", "v3=" + v3Path,
-		"--skip-elf-validation",
+		flagSkipELF,
 	})
 	if err := packCmd.Execute(); err != nil {
 		t.Fatalf("pack with lz4 flags failed: %v", err)

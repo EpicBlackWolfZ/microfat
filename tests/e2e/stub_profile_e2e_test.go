@@ -291,6 +291,269 @@ variants:
 	})
 }
 
+func TestStubProfile_ABICombinedIntegration(t *testing.T) {
+	t.Parallel()
+
+	testDir := t.TempDir()
+	binDir := filepath.Join(testDir, "bin")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+
+	siblingCLI := filepath.Join(binDir, "microfat")
+	copyFile(t, cliPath, siblingCLI)
+
+	fullStubPath := filepath.Join(binDir, "microfat-stub")
+	require.NoError(t, compileBinary(stubPackagePath, fullStubPath, nil))
+
+	minStubPath := filepath.Join(binDir, "microfat-stub-minimal")
+	require.NoError(t, compileBinaryWithFlags(stubPackagePath, minStubPath, nil, "-tags=minimal", "-ldflags=-s -w"))
+
+	// Create test Go package for manifest and PGO mixed-ABI tests
+	pkgDir := filepath.Join(testDir, "src", "mixedapp")
+	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module mixedapp\ngo 1.27.1\n"), 0o644))
+	mainSrc := []byte("package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"MIXED_OK\") }\n")
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), mainSrc, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "cgo.go"), []byte("//go:build cgo_variant\npackage main\nimport \"C\"\n"), 0o644))
+
+	v1Label, v2Label := hostVariantLabels()
+
+	t.Run("DirectPack_AutoDiscovery_MinimalAndFull_InspectsAndReportsABI", func(t *testing.T) {
+		// 1. Minimal profile direct pack
+		fatMin := filepath.Join(testDir, "direct_min.fat")
+		outMin, errMin := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(siblingCLI,
+				"pack",
+				"--arch", currentHostArch,
+				"--stub-profile", "minimal",
+				"-v", currentHostLevel+"="+goldenVariantBins[currentHostLevel],
+				"-o", fatMin,
+			)
+		})
+		require.NoError(t, errMin, "direct pack minimal failed: %s", string(outMin))
+		assert.Contains(t, string(outMin), "microfat-stub-minimal")
+		assert.Contains(t, string(outMin), "Declared ABI Requirements:")
+		verifyFatIntegrity(t, fatMin)
+
+		infoOutMin, infoErrMin := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(fatMin, "--microfat:info")
+		})
+		require.Error(t, infoErrMin)
+		assert.Contains(t, string(infoOutMin), "meta-commands are disabled in minimal launcher stub profile")
+
+		runOutMin, runErrMin := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(fatMin)
+		})
+		require.NoError(t, runErrMin)
+		assert.Contains(t, string(runOutMin), "golden:variant=")
+
+		// 2. Full profile direct pack
+		fatFull := filepath.Join(testDir, "direct_full.fat")
+		outFull, errFull := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(siblingCLI,
+				"pack",
+				"--arch", currentHostArch,
+				"--stub-profile", "full",
+				"-v", currentHostLevel+"="+goldenVariantBins[currentHostLevel],
+				"-o", fatFull,
+			)
+		})
+		require.NoError(t, errFull, "direct pack full failed: %s", string(outFull))
+		assert.Contains(t, string(outFull), "microfat-stub")
+		assert.Contains(t, string(outFull), "Declared ABI Requirements:")
+		verifyFatIntegrity(t, fatFull)
+
+		infoOutFull, infoErrFull := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(fatFull, "--microfat:info")
+		})
+		require.NoError(t, infoErrFull, "info full failed: %s", string(infoOutFull))
+		assert.Contains(t, string(infoOutFull), "=== Microfat Binary Info ===")
+	})
+
+	t.Run("PackManifest_ProfileAndMixedABIPolicy", func(t *testing.T) {
+		manifestPath := filepath.Join(testDir, "manifest_mixed_min.yaml")
+		manifestContent := "name: mixed-app\npackage: " + pkgDir + "\ntarget_os: linux\ntarget_arch: " +
+			currentHostArch + "\nstub_profile: minimal\nvariants:\n  - level: " + v1Label +
+			"\n    env:\n      CGO_ENABLED: \"0\"\n  - level: " + v2Label +
+			"\n    flags:\n      - \"-tags=cgo_variant\"\n    env:\n      CGO_ENABLED: \"1\"\n"
+		require.NoError(t, os.WriteFile(manifestPath, []byte(manifestContent), 0o644))
+
+		canaryFile := filepath.Join(testDir, "pack_manifest_canary.fat")
+		const canary = "CANARY_PACK_MANIFEST_PRESERVED"
+		require.NoError(t, os.WriteFile(canaryFile, []byte(canary), 0o644))
+
+		// Default: reject mixed ABI and preserve destination
+		outReject, errReject := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(siblingCLI, "pack", "--manifest", manifestPath, "-o", canaryFile)
+		})
+		require.Error(t, errReject, "manifest pack must reject mixed ABI by default: %s", string(outReject))
+		assert.Contains(t, string(outReject), "declared ABI requirements mismatch")
+
+		canaryBytes, err := os.ReadFile(canaryFile)
+		require.NoError(t, err)
+		assert.Equal(t, canary, string(canaryBytes))
+
+		// Override: succeed with --allow-mixed-abi, using minimal profile
+		outAllow, errAllow := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(siblingCLI, "pack", "--manifest", manifestPath, "-o", canaryFile, "--allow-mixed-abi")
+		})
+		require.NoError(t, errAllow, "manifest pack with --allow-mixed-abi failed: %s", string(outAllow))
+		assert.Contains(t, string(outAllow), "[OVERRIDDEN]")
+		verifyFatIntegrity(t, canaryFile)
+
+		infoOut, infoErr := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(canaryFile, "--microfat:info")
+		})
+		require.Error(t, infoErr)
+		assert.Contains(t, string(infoOut), "meta-commands are disabled in minimal launcher stub profile")
+
+		runOut, runErr := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(canaryFile)
+		})
+		require.NoError(t, runErr, "run failed: %s", string(runOut))
+		assert.Contains(t, string(runOut), "MIXED_OK")
+	})
+
+	t.Run("PgoPack_ProfilePrecedenceAndMixedABIPolicy", func(t *testing.T) {
+		manifestPath := filepath.Join(testDir, "manifest_pgo_mixed.yaml")
+		manifestContent := "name: pgo-mixed-app\npackage: " + pkgDir + "\ntarget_os: linux\ntarget_arch: " +
+			currentHostArch + "\nstub_profile: full\nvariants:\n  - level: " + v1Label +
+			"\n    env:\n      CGO_ENABLED: \"0\"\n  - level: " + v2Label +
+			"\n    flags:\n      - \"-tags=cgo_variant\"\n    env:\n      CGO_ENABLED: \"1\"\n"
+		require.NoError(t, os.WriteFile(manifestPath, []byte(manifestContent), 0o644))
+
+		canaryFile := filepath.Join(testDir, "pgo_canary.fat")
+		const canary = "CANARY_PGO_PRESERVED"
+		require.NoError(t, os.WriteFile(canaryFile, []byte(canary), 0o644))
+
+		// Default: reject mixed ABI
+		outReject, errReject := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(siblingCLI, "pgo-pack", "--manifest", manifestPath, "--stub-profile", "minimal", "-o", canaryFile)
+		})
+		require.Error(t, errReject, "pgo-pack must reject mixed ABI by default: %s", string(outReject))
+		assert.Contains(t, string(outReject), "declared ABI requirements mismatch")
+
+		canaryBytes, err := os.ReadFile(canaryFile)
+		require.NoError(t, err)
+		assert.Equal(t, canary, string(canaryBytes))
+
+		outAllow, errAllow := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(siblingCLI,
+				"pgo-pack", "--manifest", manifestPath,
+				"--stub-profile", "minimal",
+				"-o", canaryFile,
+				"--allow-mixed-abi")
+		})
+		require.NoError(t, errAllow, "pgo-pack with --allow-mixed-abi failed: %s", string(outAllow))
+		assert.Contains(t, string(outAllow), "[OVERRIDDEN]")
+		verifyFatIntegrity(t, canaryFile)
+
+		infoOut, infoErr := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(canaryFile, "--microfat:info")
+		})
+		require.Error(t, infoErr)
+		assert.Contains(t, string(infoOut), "meta-commands are disabled in minimal launcher stub profile")
+
+		runOut, runErr := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(canaryFile)
+		})
+		require.NoError(t, runErr, "run failed: %s", string(runOut))
+		assert.Contains(t, string(runOut), "MIXED_OK")
+	})
+
+	t.Run("ExplicitStubWithProfile_BypassNoticeAndABIPreserved", func(t *testing.T) {
+		fatOut := filepath.Join(testDir, "explicit_bypass.fat")
+		out, err := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(cliPath,
+				"pack",
+				"--arch", currentHostArch,
+				"--stub", fullStubPath,
+				"--stub-profile", "minimal",
+				"-v", currentHostLevel+"="+goldenVariantBins[currentHostLevel],
+				"-o", fatOut,
+			)
+		})
+		require.NoError(t, err, "pack failed: %s", string(out))
+		assert.Contains(t, string(out), "automatic stub-profile selection was bypassed")
+		assert.Contains(t, string(out), "Declared ABI Requirements:")
+		verifyFatIntegrity(t, fatOut)
+
+		// Full stub was used despite minimal profile flag: meta-commands work
+		infoOut, infoErr := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(fatOut, "--microfat:info")
+		})
+		require.NoError(t, infoErr, "info failed: %s", string(infoOut))
+		assert.Contains(t, string(infoOut), "=== Microfat Binary Info ===")
+	})
+
+	t.Run("AllowMixedABI_DoesNotWaiveMalformedELF", func(t *testing.T) {
+		corruptPath := filepath.Join(testDir, "corrupt_variant")
+		require.NoError(t, os.WriteFile(corruptPath, []byte("NOT_A_VALID_ELF_BINARY"), 0o755))
+		fatOut := filepath.Join(testDir, "corrupt.fat")
+
+		out, err := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(cliPath,
+				"pack",
+				"--arch", currentHostArch,
+				"--stub", fullStubPath,
+				"-v", currentHostLevel+"="+corruptPath,
+				"-o", fatOut,
+				"--allow-mixed-abi",
+			)
+		})
+		require.Error(t, err, "--allow-mixed-abi must not waive malformed ELF errors")
+		assert.NotContains(t, string(out), "[OVERRIDDEN]")
+		assert.Contains(t, string(out), "ELF")
+	})
+
+	t.Run("SkipELFValidation_WarnsAndPreservesStubProfileAndMissingStubRejection", func(t *testing.T) {
+		// 1. Skip validation emits warning, reports skipped, but still respects stub profile
+		fatSkip := filepath.Join(testDir, "skip_valid.fat")
+		out, err := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(siblingCLI,
+				"pack",
+				"--arch", currentHostArch,
+				"--skip-elf-validation",
+				"--stub-profile", "minimal",
+				"-v", currentHostLevel+"="+goldenVariantBins[currentHostLevel],
+				"-o", fatSkip,
+			)
+		})
+		require.NoError(t, err, "pack with skip validation failed: %s", string(out))
+		assert.Contains(t, string(out),
+			"[microfat] Warning: ELF architecture and declared ABI validation explicitly skipped via --skip-elf-validation")
+		assert.Contains(t, string(out), "Declared ABI Requirements: skipped (--skip-elf-validation)")
+		assert.Contains(t, string(out), "microfat-stub-minimal")
+		verifyFatIntegrity(t, fatSkip)
+
+		infoOut, infoErr := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			return exec.Command(fatSkip, "--microfat:info")
+		})
+		require.Error(t, infoErr)
+		assert.Contains(t, string(infoOut), "meta-commands are disabled in minimal launcher stub profile")
+
+		// 2. Skip validation must NOT turn missing stub discovery into success
+		isolatedDir := filepath.Join(testDir, "isolated_bin")
+		require.NoError(t, os.MkdirAll(isolatedDir, 0o755))
+		isolatedCLI := filepath.Join(isolatedDir, "microfat")
+		copyFile(t, cliPath, isolatedCLI)
+
+		outMissing, errMissing := runFixtureCommandCombinedOutput(func() *exec.Cmd {
+			cmd := exec.Command(isolatedCLI,
+				"pack",
+				"--arch", currentHostArch,
+				"--skip-elf-validation",
+				"--stub-profile", "minimal",
+				"-v", currentHostLevel+"="+goldenVariantBins[currentHostLevel],
+				"-o", filepath.Join(testDir, "missing.fat"),
+			)
+			cmd.Env = []string{"PATH=/nonexistent_empty_path"}
+			return cmd
+		})
+		require.Error(t, errMissing, "missing stub must still fail even with --skip-elf-validation")
+		assert.Contains(t, string(outMissing), "launcher stub \"microfat-stub-minimal\" for profile \"minimal\" not found")
+	})
+}
+
 func runFixtureCommandCombinedOutput(newCommand func() *exec.Cmd) ([]byte, error) {
 	var (
 		cmd *exec.Cmd

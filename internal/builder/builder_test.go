@@ -434,16 +434,22 @@ func main() {
 	}
 
 	var stdoutBuf bytes.Buffer
+	var receivedReport *pack.ArtifactABIReport
 	res, err := builder.BuildAndPack(context.Background(), m, builder.BuildOptions{
 		Concurrency:       2,
 		KeepIntermediates: true,
 		SkipELFValidation: false,
 		Stdout:            &stdoutBuf,
+		ABIReportCallback: func(report *pack.ArtifactABIReport) {
+			receivedReport = report
+		},
 	})
 	require.NoError(t, err, "BuildAndPack failed")
 	if res == nil {
 		t.Fatalf("expected non-nil BuildResult")
 	}
+	require.NotNil(t, receivedReport, "expected ABIReportCallback to be invoked")
+	require.Equal(t, res.ABIReport, receivedReport)
 	if res.OutputPath != outFile {
 		t.Errorf("expected OutputPath %s, got %s", outFile, res.OutputPath)
 	}
