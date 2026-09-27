@@ -12,7 +12,6 @@ import (
 	"io"
 	"os"
 	"path"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -158,12 +157,15 @@ func validateProduct(root *os.Root, name, arch string) error {
 		(typeValue != elf.ET_EXEC && typeValue != elf.ET_DYN) {
 		return errors.New("ELF executable architecture does not match selected release")
 	}
-	if name != "microfat" {
-		return nil
-	}
 	info, err := file.Stat()
 	if err != nil {
 		return err
+	}
+	if name != "microfat" {
+		if format.IsFatBinary(file, info.Size()) {
+			return errors.New("companion launcher must be a native stub, not a fat executable")
+		}
+		return nil
 	}
 	index, err := format.ReadTrailerAndIndex(file, info.Size())
 	if err != nil {
@@ -177,8 +179,11 @@ func validateProduct(root *os.Root, name, arch string) error {
 
 // Staging creates private acquisition space without relying on an executable cache.
 func Staging(parent string) (string, error) {
-	if parent != "" && !filepath.IsAbs(parent) {
-		return "", errors.New("staging directory must be absolute")
+	if parent == "" {
+		parent = os.TempDir()
+	}
+	if err := install.ValidateStagingParent(parent); err != nil {
+		return "", err
 	}
 	return os.MkdirTemp(parent, "microfat-install-*")
 }

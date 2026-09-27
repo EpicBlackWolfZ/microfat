@@ -35,15 +35,7 @@ func Generate(ctx context.Context, archive, format string, meta Metadata, conver
 	if format != FormatCycloneDX && format != FormatSPDX {
 		return nil, fmt.Errorf("unsupported SBOM format %q", format)
 	}
-	identity, err := releasecheck.ParseReleaseArchiveName(archive)
-	if err != nil {
-		return nil, err
-	}
-	contract, err := releasecheck.NewReleaseContract(identity.Version)
-	if err != nil {
-		return nil, err
-	}
-	facts, err := releasecheck.ValidateArchive(archive, identity.Arch, contract)
+	facts, err := releasecheck.ValidateArtifact(archive)
 	if err != nil {
 		return nil, err
 	}

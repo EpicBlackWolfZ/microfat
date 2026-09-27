@@ -13,6 +13,7 @@ const (
 	ReleaseProjectName = "microfat"
 	ReleaseFullStub    = "microfat-stub"
 	ReleaseMinStub     = "microfat-stub-minimal"
+	ReleaseInstaller   = "microfat-install"
 
 	// Architectures
 	ArchAMD64 = "amd64"
@@ -89,7 +90,8 @@ type GoReleaserMetadata struct {
 type ReleaseContract struct {
 	Version              string
 	ExpectedArchives     map[string]string   // arch -> archive filename
-	ExpectedPayloadNames map[string]bool     // all 6 expected product payload names
+	ExpectedHelpers      map[string]string   // arch -> native installer asset, from v0.3.0
+	ExpectedPayloadNames map[string]bool     // exact versioned product and SBOM inventory
 	RequiredExecutables  []string            // root executables in each archive
 	ExpectedTiers        map[string][]string // arch -> list of variant levels
 }
@@ -113,6 +115,14 @@ func NewReleaseContract(version string) (*ReleaseContract, error) {
 		arm64Archive + ".spdx.json":      true,
 		arm64Archive + ".cyclonedx.json": true,
 	}
+	helpers := map[string]string{}
+	if UsesInstallerHelper(v) {
+		for _, arch := range []string{ArchAMD64, ArchARM64} {
+			name := fmt.Sprintf("%s_%s_linux_%s", ReleaseInstaller, v, arch)
+			helpers[arch] = name
+			payloads[name], payloads[name+".spdx.json"], payloads[name+".cyclonedx.json"] = true, true, true
+		}
+	}
 
 	return &ReleaseContract{
 		Version: v,
@@ -121,6 +131,7 @@ func NewReleaseContract(version string) (*ReleaseContract, error) {
 			ArchARM64: arm64Archive,
 		},
 		ExpectedPayloadNames: payloads,
+		ExpectedHelpers:      helpers,
 		RequiredExecutables: []string{
 			ReleaseProjectName,
 			ReleaseFullStub,

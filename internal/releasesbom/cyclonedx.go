@@ -47,11 +47,11 @@ func CycloneDX(facts *releasecheck.ArchiveFacts, inv *releasecheck.ArchiveInvent
 	if facts == nil || inv == nil {
 		return nil, fmt.Errorf("missing archive facts or build-info inventory")
 	}
-	identity, err := releasecheck.ParseReleaseArchiveName(facts.ArchiveName)
+	identity, err := releasecheck.ParseReleaseArtifactName(facts.ArchiveName)
 	if err != nil {
 		return nil, err
 	}
-	license, err := archiveLicense(facts.ExtractedDir)
+	license, err := artifactLicense(facts)
 	if err != nil {
 		return nil, err
 	}
@@ -68,6 +68,15 @@ func CycloneDX(facts *releasecheck.ArchiveFacts, inv *releasecheck.ArchiveInvent
 	bom.Components = &components
 	bom.Dependencies = &b.dependencies
 	return json.MarshalIndent(bom, "", "  ")
+}
+
+func artifactLicense(facts *releasecheck.ArchiveFacts) (cdx.Licenses, error) {
+	if facts.Kind == releasecheck.NativeHelper {
+		// The raw executable has no attached license file. Declare the project's
+		// license without claiming it was extracted from the executable bytes.
+		return cdx.Licenses{{License: &cdx.License{ID: "Apache-2.0", Acknowledgement: cdx.LicenseAcknowledgementDeclared}}}, nil
+	}
+	return archiveLicense(facts.ExtractedDir)
 }
 
 func archiveLicense(dir string) (cdx.Licenses, error) {
@@ -97,7 +106,7 @@ func metadata(meta Metadata, root cdx.Component) *cdx.Metadata {
 	return &cdx.Metadata{Timestamp: meta.Created.UTC().Format(time.RFC3339), Component: &root,
 		Tools: &cdx.ToolsChoice{Components: &tools},
 		Properties: properties("microfat:generator:commit", meta.Commit,
-			"microfat:inventory:source", "verified archive bytes and Go build information"),
+			"microfat:inventory:source", "verified release artifact bytes and Go build information"),
 	}
 }
 
@@ -105,6 +114,9 @@ func (b *cdxBuilder) root() (cdx.Component, error) {
 	root := product(archiveRef, cdx.ComponentTypeFile, b.facts.ArchiveName, b.version, b.facts.ArchiveSHA256)
 	root.Properties = properties("microfat:target_arch", b.facts.TargetArch,
 		"microfat:release_version", b.version, "microfat:component_type", "file")
+	if b.facts.Kind == releasecheck.NativeHelper {
+		*root.Properties = append(*root.Properties, cdx.Property{Name: "microfat:artifact_kind", Value: string(releasecheck.NativeHelper)})
+	}
 	root.Licenses = &b.license
 	children := []cdx.Component{}
 	for _, name := range sortedKeys(b.facts.Executables) {

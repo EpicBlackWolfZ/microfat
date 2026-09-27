@@ -9,11 +9,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/EpicBlackWolfZ/microfat/internal/install"
 )
 
 const verifierTimeout = time.Minute
@@ -56,18 +57,11 @@ func (v Cosign) Verify(ctx context.Context, version, checksums, bundle string) e
 	if err != nil {
 		return err
 	}
-	if !filepath.IsAbs(v.Path) {
-		return errors.New("verifier requires an absolute executable path and independent digest")
+	if err := install.ValidateVerifierExecutable(v.Path); err != nil {
+		return fmt.Errorf("unsafe verifier: %w", err)
 	}
 	if err := VerifyDigest(v.Path, v.SHA256, maxDownloadBytes); err != nil {
 		return fmt.Errorf("untrusted verifier: %w", err)
-	}
-	info, err := os.Lstat(v.Path)
-	if err != nil {
-		return err
-	}
-	if info.Mode().Perm()&0o111 == 0 {
-		return errors.New("pinned verifier is not executable")
 	}
 	ctx, cancel := context.WithTimeout(ctx, verifierTimeout)
 	defer cancel()

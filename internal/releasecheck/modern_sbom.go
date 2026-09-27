@@ -84,12 +84,20 @@ func validateModernCatalog(c *sbom.Catalog, facts *ArchiveFacts, inv *ArchiveInv
 }
 
 func checkModernArchive(root cdx.Component, facts *ArchiveFacts) (string, error) {
-	identity, err := ParseReleaseArchiveName(facts.ArchiveName)
+	identity, err := ParseReleaseArtifactName(facts.ArchiveName)
 	if err != nil {
 		return "", err
 	}
 	if root.Type != cdx.ComponentTypeFile || root.Name != facts.ArchiveName || root.Version != identity.Version {
 		return "", fmt.Errorf("modern SBOM archive identity mismatch")
+	}
+	if identity.Kind == NativeHelper {
+		if facts.Kind != NativeHelper {
+			return "", fmt.Errorf("native installer facts require an explicit artifact kind")
+		}
+		if err := checkModernProperties(root, map[string]string{"microfat:artifact_kind": string(NativeHelper)}); err != nil {
+			return "", err
+		}
 	}
 	if err := checkModernProperties(root, map[string]string{"microfat:target_arch": facts.TargetArch,
 		"microfat:release_version": identity.Version, "microfat:component_type": "file"}); err != nil {
@@ -102,6 +110,9 @@ func checkModernArchive(root cdx.Component, facts *ArchiveFacts) (string, error)
 }
 
 func checkModernLicenses(c *sbom.Catalog, facts *ArchiveFacts) error {
+	if facts.Kind == NativeHelper {
+		return checkNativeHelperLicenses(c)
+	}
 	// #nosec G304 -- facts.ExtractedDir is the private verified archive staging directory.
 	data, err := os.ReadFile(filepath.Join(facts.ExtractedDir, "LICENSE"))
 	if err != nil {
@@ -122,6 +133,22 @@ func checkModernLicenses(c *sbom.Catalog, facts *ArchiveFacts) error {
 		}
 		if hex.EncodeToString(digest[:]) == apacheLicenseSHA && license.ID != "Apache-2.0" {
 			return fmt.Errorf("known Apache-2.0 archive license identity is missing")
+		}
+	}
+	return nil
+}
+
+func checkNativeHelperLicenses(c *sbom.Catalog) error {
+	for _, component := range c.Components {
+		if component.Type == cdx.ComponentTypeLibrary {
+			continue
+		}
+		if component.Licenses == nil || len(*component.Licenses) != 1 {
+			return fmt.Errorf("installer license is missing")
+		}
+		license := (*component.Licenses)[0].License
+		if license == nil || license.ID != "Apache-2.0" || license.Text != nil {
+			return fmt.Errorf("installer license must declare Apache-2.0 without invented extracted text")
 		}
 	}
 	return nil
@@ -272,10 +299,16 @@ func checkModernContainment(c *sbom.Catalog, bins map[string]cdx.Component, fact
 	for name := range facts.Executables {
 		expected[c.Root] = append(expected[c.Root], bins[name].BOMRef)
 	}
-	cli := bins[ReleaseProjectName].BOMRef
-	expected[cli] = []string{}
-	for tier := range facts.EmbeddedVariants {
-		expected[cli] = append(expected[cli], bins["variant:"+tier].BOMRef)
+	if facts.Kind == NativeHelper {
+		if len(facts.Executables) != 1 || facts.Executables[ReleaseInstaller] == nil || len(facts.EmbeddedVariants) != 0 {
+			return fmt.Errorf("native installer inventory must contain exactly one native helper")
+		}
+	} else {
+		cli := bins[ReleaseProjectName].BOMRef
+		expected[cli] = []string{}
+		for tier := range facts.EmbeddedVariants {
+			expected[cli] = append(expected[cli], bins["variant:"+tier].BOMRef)
+		}
 	}
 	if len(expected) != len(c.Contains) {
 		return fmt.Errorf("archive containment graph differs")

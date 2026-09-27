@@ -9,18 +9,20 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/install"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 const fixtureSymlink = "symlink"
+const fixtureHardlink = "hardlink"
 
 func TestArchiveSafety(t *testing.T) {
 	t.Parallel()
 	for _, scenario := range []string{"valid-amd64", "valid-arm64", "duplicate", "traversal", "absolute", "backslash",
-		fixtureSymlink, "hardlink",
-		"directory", "fifo", "nonexecutable", "missing-product", "wrong-arch", "bad-elf", "bad-index", "bad-gzip"} {
+		fixtureSymlink, fixtureHardlink,
+		"directory", "fifo", "nonexecutable", "missing-product", "wrong-arch", "bad-elf", "bad-index", "bad-gzip", "fat-stub"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			arch := "amd64"
@@ -40,8 +42,8 @@ func TestArchiveSafety(t *testing.T) {
 					header.Name = "/escaped"
 				case "backslash":
 					header.Name = "dir\\escaped"
-				case fixtureSymlink, "hardlink", "directory", "fifo":
-					header.Typeflag = map[string]byte{fixtureSymlink: tar.TypeSymlink, "hardlink": tar.TypeLink,
+				case fixtureSymlink, fixtureHardlink, "directory", "fifo":
+					header.Typeflag = map[string]byte{fixtureSymlink: tar.TypeSymlink, fixtureHardlink: tar.TypeLink,
 						"directory": tar.TypeDir, "fifo": tar.TypeFifo}[scenario]
 					header.Linkname = "../outside"
 					header.Size = 0
@@ -54,6 +56,9 @@ func TestArchiveSafety(t *testing.T) {
 					data = elfFixture("arm64")
 				case "bad-elf":
 					data[0] = 0
+				case "fat-stub":
+					data = append(data, []byte(format.MagicString)...)
+					header.Size = int64(len(data))
 				}
 				return header, data
 			})

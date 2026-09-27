@@ -132,6 +132,14 @@ publisher identity and exact artifact bytes externally **before first execution*
 The [release verification contract](docs/release-verification.md) specifies exact publisher/version
 matching, verifier bootstrap, historical identities and offline/transparency behavior.
 
+The v0.3.0 installer authenticates its pinned verifier and native helper before execution, then
+authenticates the selected product archive before extraction. It requires explicit ownership of
+the generation store and never adopts manual or package-manager files through a force flag.
+Activation uses one pointer; old generations are retained for delayed readers. Managed companion
+discovery validates the physical generation rather than resolving a moving public link, including
+when two generations share payload bytes. Local metadata and environment hints remain consistency
+evidence, not publisher signatures or protection from malicious same-UID/root writers.
+
 ## 8. Threat model and enforcement map
 
 The protected assets are the selected executable bytes, predictable parsing/extraction, cache
@@ -163,6 +171,8 @@ listed boundaries; they are not a claim of protection against the out-of-scope a
 | Mandatory sealed memfd and explicit-mode failure | [execution](cmd/microfat-stub/exec_linux.go) | [sealing/fallback fault tests](cmd/microfat-stub/chaos_test.go), [executable memfd policy](cmd/microfat-stub/memfd_policy_linux_test.go) |
 | Validated cache directory/entry descriptors; read-only verification | [cache descriptor operations](internal/format/cache_unix.go), [cache management](internal/cache/cache_unix.go) | [cache security](tests/e2e/cache_security_test.go), [FIFO entries](tests/e2e/cache_fifo_test.go), [read-only checks](tests/e2e/cache_readonly_test.go) |
 | Consistency-checked executable location hints | [origin resolution](internal/builder/origin.go) | [origin regressions](internal/builder/origin_test.go), [stub discovery](internal/builder/stub_test.go) |
+| Authenticate verifier/helper and product archive before execution/extraction | [bootstrap](scripts/install.sh), [acquisition](internal/installrelease/client.go) | [bootstrap tampering](cmd/microfat-install/bootstrap_test.go), [real signature rejection](tests/e2e/release_signature_test.go) |
+| Owned generation activation and retained-reader discovery | [installation transactions](internal/install/transaction.go), [generation validation](internal/install/discovery.go) | [process interruption](internal/install/process_test.go), [paused native/memfd/cache upgrade](tests/e2e/managed_generation_test.go) |
 | Resource estimates with explicit unknown/unavailable observations | [cgroup observations](internal/cgroup/cgroup.go), [memory arithmetic](internal/cgroup/memory.go) | [unresolved/root cgroups](internal/cgroup/cgroup_test.go), [overflow and retained storage](internal/cgroup/memory_test.go) |
 | Safe transformation lifecycle: create-only publishing, serialization, hardlink defense, and privilege rejection | [transformation lifecycle](internal/lifecycle/transaction.go) | [lifecycle tests](tests/e2e/lifecycle_test.go), [transaction unit tests](internal/lifecycle/transaction_test.go) |
 

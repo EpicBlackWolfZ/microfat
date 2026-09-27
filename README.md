@@ -53,43 +53,17 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 
 ### 1. Installation
 
-#### Pre-compiled Universal Fat Archives (Recommended)
-Download the universal fat archive for your architecture (`microfat_<version>_linux_amd64.tar.gz` or `microfat_<version>_linux_arm64.tar.gz`) from the [GitHub Releases](https://github.com/EpicBlackWolfZ/microfat/releases) page. Each archive bundles the self-dispatching `microfat` CLI binary alongside both launcher stubs (`microfat-stub` and `microfat-stub-minimal`).
+#### Verified Linux installer and release archives
 
-```bash
-set -euo pipefail
+The v0.3.0 installer installs the CLI and both companions coherently into user-owned generation storage.
+It authenticates a pinned verifier and native helper before downloading and verifying the selected release.
+The first public bootstrap requires the signed v0.3.0 helper assets to be published; source builds and
+unsigned snapshots do not satisfy that prerequisite.
 
-VERSION="0.2.4"
-ARCH="amd64" # or "arm64"
-WORK_DIR=$(mktemp -d)
-trap 'rm -rf "$WORK_DIR"' EXIT
-
-ARCHIVE_NAME="microfat_${VERSION}_linux_${ARCH}.tar.gz"
-RELEASE_URL="https://github.com/EpicBlackWolfZ/microfat/releases/download/v${VERSION}"
-
-# 1. Download archive, checksums, and signature bundle using fail-on-error behavior
-curl --fail -sSL -o "$WORK_DIR/$ARCHIVE_NAME" "$RELEASE_URL/$ARCHIVE_NAME"
-curl --fail -sSL -o "$WORK_DIR/checksums.txt" "$RELEASE_URL/checksums.txt"
-curl --fail -sSL -o "$WORK_DIR/checksums.txt.sig" "$RELEASE_URL/checksums.txt.sig"
-
-# 2. Verify keyless Cosign signature against official release identity
-cosign verify-blob \
-  --bundle "$WORK_DIR/checksums.txt.sig" \
-  --certificate-identity "https://github.com/EpicBlackWolfZ/microfat/.github/workflows/release.yml@refs/tags/v${VERSION}" \
-  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  "$WORK_DIR/checksums.txt"
-
-# 3. Verify SHA-256 archive checksum (exact filename match only)
-ENTRY=$(awk -v target="$ARCHIVE_NAME" '$2 == target || $2 == "*"target { print $1, $2 }' "$WORK_DIR/checksums.txt")
-[ -n "$ENTRY" ] && [ "$(printf '%s\n' "$ENTRY" | wc -l)" -eq 1 ]
-(cd "$WORK_DIR" && printf '%s\n' "$ENTRY" | sha256sum --check --status)
-
-# 4. Extract and install solely the 3 executables to /usr/local/bin
-tar -xzf "$WORK_DIR/$ARCHIVE_NAME" -C "$WORK_DIR"
-sudo install -m 0755 "$WORK_DIR/microfat" /usr/local/bin/microfat
-sudo install -m 0755 "$WORK_DIR/microfat-stub" /usr/local/bin/microfat-stub
-sudo install -m 0755 "$WORK_DIR/microfat-stub-minimal" /usr/local/bin/microfat-stub-minimal
-```
+See [installation and recovery](docs/installation.md) for trusted source-helper use, pinned/latest versions,
+custom destinations, manual-install migration and uninstall. See the [release verification contract](docs/release-verification.md)
+before executing any downloaded program. The [release artifact guide](docs/release-artifacts.md) describes
+the two architecture archives, each containing the CLI plus both launcher stubs.
 
 #### Via Go Toolchain
 ```bash

@@ -25,7 +25,7 @@ func validateReadInfo(info os.FileInfo, directory bool, uid int) error {
 // disappeared. Recognition conveys no authority and never permits a write.
 func IsGenerationPath(name string) bool {
 	dir := filepath.Dir(name)
-	return filepath.Base(filepath.Dir(dir)) == generationDir
+	return filepath.Base(filepath.Dir(dir)) == generationDir && idPattern.MatchString(filepath.Base(dir))
 }
 
 // ValidateDiscovery validates a physical generation path without consulting the

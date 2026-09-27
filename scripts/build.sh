@@ -29,4 +29,5 @@ else
 fi
 "${GO}" build -ldflags="${LDFLAGS}" -o "${BIN_DIR}/microfat-stub${SUFFIX}" ./cmd/microfat-stub
 "${GO}" build -tags minimal -ldflags="${LDFLAGS}" -o "${BIN_DIR}/microfat-stub-minimal${SUFFIX}" ./cmd/microfat-stub
-printf 'Built %s CLI and full/minimal launchers in %s\n' "${ARCH}" "${BIN_DIR}"
+CGO_ENABLED=0 "${GO}" build -ldflags="${LDFLAGS}" -o "${BIN_DIR}/microfat-install${SUFFIX}" ./cmd/microfat-install
+printf 'Built %s CLI, full/minimal launchers and native installer helper in %s\n' "${ARCH}" "${BIN_DIR}"

@@ -39,6 +39,38 @@ func validateAncestors(name string) error {
 	}
 }
 
+// ValidateStagingParent applies the same ancestor ownership policy to executable
+// download staging. A private child alone is insufficient if another UID can
+// rename it from a writable non-sticky parent before verifier/helper execution.
+func ValidateStagingParent(name string) error {
+	if !filepath.IsAbs(name) || filepath.Clean(name) != name {
+		return errors.New("staging parent must be a clean absolute directory")
+	}
+	return validateAncestors(name)
+}
+
+// ValidateVerifierExecutable prevents a different UID from replacing a pinned
+// executable between its digest check and execution. It does not authenticate bytes.
+func ValidateVerifierExecutable(name string) error {
+	if !filepath.IsAbs(name) || filepath.Clean(name) != name {
+		return errors.New("verifier must have a clean absolute executable path")
+	}
+	if err := validateAncestors(filepath.Dir(name)); err != nil {
+		return err
+	}
+	info, err := os.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if err := validateInfo(info, false, false); err != nil {
+		return err
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		return errors.New("pinned verifier is not executable")
+	}
+	return nil
+}
+
 func rootInfo(name string) (os.FileInfo, error) {
 	info, err := os.Lstat(name)
 	if errors.Is(err, os.ErrNotExist) {

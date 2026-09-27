@@ -4,6 +4,30 @@ version: 2
 project_name: microfat
 
 builds:
+  - id: microfat-installer
+    main: ./cmd/microfat-install
+    binary: "microfat-install_{{ .Version }}_linux_{{ .Arch }}"
+    no_unique_dist_dir: true
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    goamd64:
+      - v1
+    goarm64:
+      - v8.0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.Version={{.Version}}
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.Commit={{.Commit}}
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.Date={{.Date}}
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.BuiltBy=goreleaser
+      - -X github.com/EpicBlackWolfZ/microfat/internal/version.Vendor=EpicBlackWolfZ
   - id: microfat-amd64
     main: ./cmd/microfat
     binary: microfat
@@ -181,6 +205,12 @@ builds:
       - -X github.com/EpicBlackWolfZ/microfat/internal/version.Vendor=EpicBlackWolfZ
 
 archives:
+  - id: microfat-installer
+    ids:
+      - microfat-installer
+    name_template: "{{ .Binary }}"
+    formats:
+      - binary
   - id: microfat-linux-amd64
     name_template: "microfat_{{ .Version }}_linux_amd64"
     formats:
@@ -216,6 +246,34 @@ archives:
       - docs/*
 
 sboms:
+  - id: installer-spdx
+    cmd: go
+    args:
+      - run
+      - '-ldflags=-X github.com/EpicBlackWolfZ/microfat/internal/version.Version={{ .Version }} -X github.com/EpicBlackWolfZ/microfat/internal/version.Commit={{ .FullCommit }}'
+      - github.com/EpicBlackWolfZ/microfat/internal/cmd/release-sbom
+      - $artifact
+      - --output
+      - spdx-json=$document
+    artifacts: binary
+    ids:
+      - microfat-installer
+    documents:
+      - "${artifact}.spdx.json"
+  - id: installer-cyclonedx
+    cmd: go
+    args:
+      - run
+      - '-ldflags=-X github.com/EpicBlackWolfZ/microfat/internal/version.Version={{ .Version }} -X github.com/EpicBlackWolfZ/microfat/internal/version.Commit={{ .FullCommit }}'
+      - github.com/EpicBlackWolfZ/microfat/internal/cmd/release-sbom
+      - $artifact
+      - --output
+      - cyclonedx-json=$document
+    artifacts: binary
+    ids:
+      - microfat-installer
+    documents:
+      - "${artifact}.cyclonedx.json"
   - id: spdx
     cmd: go
     args:
@@ -261,7 +319,7 @@ checksum:
   name_template: "checksums.txt"
 
 snapshot:
-  version_template: "{{ incpatch .Version }}-SNAPSHOT-{{ .ShortCommit }}"
+  version_template: "0.3.0-SNAPSHOT-{{ .ShortCommit }}"
 
 changelog:
   sort: asc

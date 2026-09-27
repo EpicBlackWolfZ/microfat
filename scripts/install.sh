@@ -12,7 +12,7 @@ microfat_bootstrap() (
     readonly issuer='https://token.actions.githubusercontent.com'
     readonly metadata_limit=1048576
     readonly executable_limit=268435456
-    local arch cosign='' pin='' staging_parent='' stage='' arg checksum_line expected='' actual asset
+    local arch cosign='' pin='' staging_parent='' stage='' arg checksum_line expected='' actual asset verifier_info owner mode links parent
     local -a forwarded=()
 
     fail() { printf 'microfat bootstrap: %s\n' "$*" >&2; exit 1; }
@@ -25,6 +25,27 @@ microfat_bootstrap() (
         local value
         value=$(sha256sum < "$1")
         printf '%s' "${value%% *}"
+    }
+    safe_staging_parent() {
+        local parent=$1 info owner mode
+        [[ ${parent} == /* ]] || fail 'staging parent must be absolute'
+        case "${parent}" in
+            */../*|*/..|*/./*|*/.|*//*) fail 'staging parent must be a clean absolute directory' ;;
+        esac
+        while :; do
+            [[ -d ${parent} && ! -L ${parent} ]] || fail "unsafe staging ancestor: ${parent}"
+            info=$(stat -c '%u %a' -- "${parent}")
+            IFS=' ' read -r owner mode <<< "${info}"
+            [[ ${owner} == "${EUID}" || ${owner} == 0 ]] || fail "untrusted staging ancestor owner: ${parent}"
+            if (( (8#${mode} & 0022) != 0 )); then
+                if [[ ${owner} != 0 ]] || (( (8#${mode} & 01000) == 0 )); then
+                    fail "writable staging ancestor: ${parent}"
+                fi
+            fi
+            [[ ${parent} != / ]] || break
+            parent=${parent%/*}
+            if [[ -z ${parent} ]]; then parent=/; fi
+        done
     }
 
     while (( $# > 0 )); do
@@ -60,7 +81,7 @@ microfat_bootstrap() (
         esac
     done
 
-    for arg in uname curl mktemp sha256sum chmod rm; do
+    for arg in uname curl mktemp sha256sum chmod rm stat; do
         command -v "${arg}" >/dev/null 2>&1 || fail "required tool not found: ${arg}"
     done
     arg=$(uname -s)
@@ -82,10 +103,11 @@ microfat_bootstrap() (
     # Pins are taken from sigstore/cosign-installer action.yml at the reviewed
     # immutable revision 6f9f17788090df1f26f669e9d70d6ae9567deba6.
     if [[ -n ${staging_parent} ]]; then
-        [[ ${staging_parent} == /* ]] || fail '--staging-dir must be absolute'
+        safe_staging_parent "${staging_parent}"
         stage=$(mktemp -d "${staging_parent}/microfat-bootstrap.XXXXXXXXXX")
         forwarded+=(--staging-dir "${staging_parent}")
     else
+        safe_staging_parent "${TMPDIR:-/tmp}"
         stage=$(mktemp -d)
     fi
     trap 'rm -rf -- "${stage}"' EXIT
@@ -100,6 +122,12 @@ microfat_bootstrap() (
         [[ ${actual} == "${pin}" ]] || fail 'Cosign checksum mismatch; verifier was not executed'
         chmod 700 "${cosign}"
     else
+        parent=${cosign%/*}
+        safe_staging_parent "${parent:-/}"
+        verifier_info=$(stat -c '%u %a %h' -- "${cosign}")
+        IFS=' ' read -r owner mode links <<< "${verifier_info}"
+        [[ ${owner} == "${EUID}" || ${owner} == 0 ]] || fail 'untrusted verifier owner'
+        (( (8#${mode} & 06022) == 0 && links == 1 )) || fail 'unsafe verifier permissions or hardlinks'
         actual=$(digest "${cosign}")
         [[ ${actual} == "${pin}" ]] || fail 'Cosign checksum mismatch; verifier was not executed'
         [[ -x ${cosign} ]] || fail 'independently supplied verifier is not executable'

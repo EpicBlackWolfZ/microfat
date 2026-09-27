@@ -53,6 +53,7 @@ type ExecutableFacts struct {
 
 // ArchiveFacts contains verified facts extracted from a release archive.
 type ArchiveFacts struct {
+	Kind             ArtifactKind // empty means a historical product archive
 	ArchiveName      string
 	ArchiveSHA256    string
 	TargetArch       string

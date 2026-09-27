@@ -369,6 +369,12 @@ func (op *operation) cleanupStaging() error {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
+		if strings.HasPrefix(name, ".current-") && idPattern.MatchString(strings.TrimPrefix(name, ".current-")) {
+			if err := op.removeInterruptedActivation(name); err != nil {
+				return err
+			}
+			continue
+		}
 		prefix, directory := ".stage-", true
 		if strings.HasPrefix(name, ".owner-") {
 			prefix, directory = ".owner-", false
@@ -388,6 +394,25 @@ func (op *operation) cleanupStaging() error {
 		}
 	}
 	return nil
+}
+
+func (op *operation) removeInterruptedActivation(name string) error {
+	info, err := op.store.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink == 0 || fileUID(info) != os.Geteuid() {
+		return ErrOwnership
+	}
+	target, err := op.store.Readlink(name)
+	if err != nil {
+		return err
+	}
+	id := strings.TrimPrefix(target, generationDir+string(filepath.Separator))
+	if !idPattern.MatchString(id) || target != filepath.Join(generationDir, id) {
+		return ErrOwnership
+	}
+	return op.store.Remove(name)
 }
 
 func sameRelease(a, b Generation) bool {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/install"
 	"github.com/EpicBlackWolfZ/microfat/internal/installrelease"
+	"github.com/EpicBlackWolfZ/microfat/internal/version"
 )
 
 const failureCode = 1
@@ -22,7 +23,9 @@ const usageCode = 2
 
 type options struct {
 	version, bin, store, staging, cosign, pin string
+	releaseDir                                string
 	system, repair, downgrade, uninstall      bool
+	helperVersion                             bool
 }
 
 type releaseClient interface {
@@ -56,10 +59,12 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	flags.StringVar(&opts.staging, "staging-dir", "", "Private download staging parent directory")
 	flags.StringVar(&opts.cosign, "cosign", "", "Absolute independently authenticated Cosign executable")
 	flags.StringVar(&opts.pin, "cosign-sha256", "", "Independent SHA-256 pin for that verifier")
+	flags.StringVar(&opts.releaseDir, "release-dir", "", "Locally downloaded signed release assets (requires --version)")
 	flags.BoolVar(&opts.system, "system", false, "Explicit system installation (requires root and explicit bin/store directories)")
 	flags.BoolVar(&opts.repair, "repair", false, "Explicitly repair a corrupt installer-owned generation")
 	flags.BoolVar(&opts.downgrade, "allow-downgrade", false, "Allow an explicitly selected older stable release")
 	flags.BoolVar(&opts.uninstall, "uninstall", false, "Remove owned entrypoint links; retain generations and user data")
+	flags.BoolVar(&opts.helperVersion, "helper-version", false, "Print the helper's build identity and exit")
 	if err := flags.Parse(args); err != nil {
 		return opts, err
 	}
@@ -71,6 +76,9 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	}
 	if opts.downgrade && opts.version == "" {
 		return opts, errors.New("--allow-downgrade requires --version")
+	}
+	if opts.releaseDir != "" && (opts.version == "" || opts.uninstall) {
+		return opts, errors.New("--release-dir requires --version and cannot be combined with --uninstall")
 	}
 	return opts, nil
 }
@@ -131,6 +139,10 @@ func resolvePaths(opts options, env environment) (install.Paths, error) {
 }
 
 func execute(ctx context.Context, opts options, env environment, stdout io.Writer) error {
+	if opts.helperVersion {
+		_, err := fmt.Fprintln(stdout, "microfat-install", version.Info())
+		return err
+	}
 	paths, err := resolvePaths(opts, env)
 	if err != nil {
 		return err
@@ -147,6 +159,12 @@ func execute(ctx context.Context, opts options, env environment, stdout io.Write
 	}
 	if opts.cosign == "" || opts.pin == "" {
 		return errors.New("use the verified bootstrap or supply --cosign and --cosign-sha256")
+	}
+	if opts.releaseDir != "" {
+		env.client, err = installrelease.NewLocalClient(opts.releaseDir)
+		if err != nil {
+			return err
+		}
 	}
 	version, err := env.client.Resolve(ctx, opts.version)
 	if err != nil {
@@ -177,7 +195,10 @@ func execute(ctx context.Context, opts options, env environment, stdout io.Write
 	}
 	_, err = fmt.Fprintf(stdout, "%s microfat v%s (%s).\nEntrypoints: %s\nGeneration store: %s\nEnsure the entrypoint directory is in PATH.\n",
 		action, result.Generation.Version, result.Generation.Arch, paths.Bin, paths.Store)
-	return err
+	if err != nil {
+		return fmt.Errorf("v%s is active, but writing installation confirmation failed: %w", result.Generation.Version, err)
+	}
+	return nil
 }
 
 func checkVersion(snapshot install.Snapshot, version string, opts options) error {

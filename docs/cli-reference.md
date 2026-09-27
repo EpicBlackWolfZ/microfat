@@ -6,6 +6,12 @@
 
 This document provides an exhaustive reference for the `microfat` developer and CI CLI toolkit, as well as the runtime launcher stub (`microfat-stub`) meta-commands, flags, exit codes, and environment variable controls.
 
+The separate v0.3.0 `microfat-install` bootstrap helper is documented in the
+[installation guide](installation.md). It selects a product with `--version`, reports its own build
+with `--helper-version`, supports explicit roots/system mode, repair, downgrade and uninstall, and
+authenticates locally staged signed releases with `--release-dir`. It is not a `microfat update`
+subcommand or a fourth installed public binary.
+
 ---
 
 ## 1. Overview & Tooling Architecture

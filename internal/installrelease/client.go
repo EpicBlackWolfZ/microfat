@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
 	"github.com/EpicBlackWolfZ/microfat/internal/install"
 	"github.com/EpicBlackWolfZ/microfat/internal/releasechecksums"
 )
@@ -68,10 +69,22 @@ func Identity(version string) string {
 	return "https://github.com/" + Repository + "/.github/workflows/release.yml@refs/tags/v" + version
 }
 
-type Client struct{ http *http.Client }
+type Client struct {
+	http      *http.Client
+	directory string
+}
 
 func NewClient() *Client {
 	return &Client{http: &http.Client{Timeout: requestTimeout, CheckRedirect: checkRedirect}}
+}
+
+// NewLocalClient consumes operator-downloaded assets, including an unpublished
+// signed draft. The same exact tag signature and checksum policy remains mandatory.
+func NewLocalClient(directory string) (*Client, error) {
+	if !filepath.IsAbs(directory) || filepath.Clean(directory) != directory {
+		return nil, errors.New("release directory must be a clean absolute path")
+	}
+	return &Client{directory: directory}, nil
 }
 
 func allowedURL(location *url.URL) bool {
@@ -124,6 +137,9 @@ func (c *Client) Resolve(ctx context.Context, version string) (string, error) {
 	if version != "" {
 		return ParseVersion(version)
 	}
+	if c.directory != "" {
+		return "", errors.New("offline release assets require an explicit version")
+	}
 	var data strings.Builder
 	if err := c.get(ctx, apiURL, maxMetadataBytes, &data); err != nil {
 		return "", err
@@ -147,7 +163,33 @@ func (c *Client) download(ctx context.Context, address, destination string, limi
 	if err != nil {
 		return err
 	}
+	if c.directory != "" {
+		return errors.Join(copyLocal(ctx, filepath.Join(c.directory, filepath.Base(address)), limit, file), file.Close())
+	}
 	return errors.Join(c.get(ctx, address, limit, file), file.Close())
+}
+
+func copyLocal(ctx context.Context, path string, limit int64, destination io.Writer) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() > limit {
+		return errors.New("invalid local release artifact type or size")
+	}
+	file, err := inputfile.Open(path)
+	if err != nil {
+		return err
+	}
+	count, copyErr := io.Copy(destination, io.LimitReader(file, limit+1))
+	closeErr := file.Close()
+	if count > limit {
+		return errors.New("local release artifact exceeds size limit")
+	}
+	return errors.Join(copyErr, closeErr, ctx.Err())
 }
 
 type Verifier interface {

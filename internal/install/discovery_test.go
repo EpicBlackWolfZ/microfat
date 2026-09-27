@@ -32,6 +32,7 @@ func TestDiscoveryRetainsPhysicalGeneration(t *testing.T) {
 	managed, err = ValidateDiscovery("/manual/bin/microfat", "/manual/bin/microfat")
 	require.NoError(t, err)
 	assert.False(t, managed)
+	assert.False(t, IsGenerationPath("/manual/generations/project/microfat"), "ordinary directories are not managed layouts")
 }
 
 func TestDiscoveryRejectsDamagedGeneration(t *testing.T) {

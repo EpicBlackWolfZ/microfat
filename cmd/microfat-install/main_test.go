@@ -186,7 +186,13 @@ func TestHelperFailures(t *testing.T) {
 				ctx, cancel = context.WithCancel(ctx)
 				cancel()
 			}
-			require.Error(t, execute(ctx, opts, env, output))
+			err := execute(ctx, opts, env, output)
+			require.Error(t, err)
+			if scenario == "output" {
+				require.ErrorContains(t, err, "is active, but writing installation confirmation failed")
+				require.FileExists(t, filepath.Join(opts.store, "current", "microfat"))
+				require.ErrorContains(t, execute(ctx, opts, env, output), "is active, but writing installation confirmation failed")
+			}
 			if scenario == "corrupt-metadata" {
 				opts.repair = true
 				require.Error(t, execute(ctx, opts, env, io.Discard), "repair must pin the target")
@@ -210,6 +216,11 @@ func TestRunAndOptions(t *testing.T) {
 		assert.NotEmpty(t, stderr.String())
 	}
 	assert.Zero(t, run(t.Context(), []string{"--help"}, environment{}, io.Discard, io.Discard))
+	assert.Zero(t, run(t.Context(), []string{"--helper-version"}, environment{}, io.Discard, io.Discard))
+	assert.Equal(t, failureCode, run(t.Context(), []string{"--helper-version"}, environment{}, failingWriter{}, io.Discard))
+	for _, args := range [][]string{{"--release-dir", "/candidate"}, {"--release-dir", "/candidate", "--uninstall"}} {
+		assert.Equal(t, usageCode, run(t.Context(), args, environment{}, io.Discard, io.Discard))
+	}
 	env, opts, _ := fixtureEnvironment(t)
 	args := []string{"--bin-dir", opts.bin, "--store-dir", opts.store, "--cosign", opts.cosign, "--cosign-sha256", opts.pin}
 	if opts.system {

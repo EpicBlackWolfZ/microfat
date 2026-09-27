@@ -43,6 +43,26 @@ func TestRequiredDraftAssets(t *testing.T) {
 	}
 }
 
+func TestInstallerAssetsRequiredForNewRelease(t *testing.T) {
+	t.Parallel()
+	release := Release{Draft: true, TagName: "v0.3.0", Assets: releaseAssets()}
+	for index := range release.Assets {
+		release.Assets[index].Name = strings.ReplaceAll(release.Assets[index].Name, "0.2.5", "0.3.0")
+	}
+	require.Error(t, ValidateAssets(release), "two product archives alone cannot qualify v0.3.0")
+	for _, arch := range []string{"amd64", "arm64"} {
+		for _, suffix := range []string{"", ".spdx.json", ".cyclonedx.json"} {
+			release.Assets = append(release.Assets, Asset{Name: "microfat-install_0.3.0_linux_" + arch + suffix, Size: 1})
+		}
+	}
+	require.NoError(t, ValidateAssets(release))
+	for index := range release.Assets {
+		changed := release
+		changed.Assets = slices.Delete(slices.Clone(release.Assets), index, index+1)
+		require.Error(t, ValidateAssets(changed))
+	}
+}
+
 type publicationFixture struct {
 	t             *testing.T
 	root, archive string

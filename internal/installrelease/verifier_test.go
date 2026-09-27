@@ -28,7 +28,7 @@ func pinnedScript(t *testing.T, body string) Cosign {
 func TestVerifierPinBeforeExecution(t *testing.T) {
 	t.Parallel()
 	for _, scenario := range []string{"valid", "wrong-hash", "bad-hash", "relative", "missing", fixtureSymlink,
-		"not-executable", "exit", "overflow", "timeout"} {
+		"not-executable", "writable-file", "writable-parent", fixtureHardlink, "exit", "overflow", "timeout"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			marker := filepath.Join(t.TempDir(), "ran")
@@ -49,6 +49,12 @@ func TestVerifierPinBeforeExecution(t *testing.T) {
 				verifier.Path = link
 			case "not-executable":
 				require.NoError(t, os.Chmod(verifier.Path, 0o600))
+			case "writable-file":
+				require.NoError(t, os.Chmod(verifier.Path, 0o777))
+			case "writable-parent":
+				require.NoError(t, os.Chmod(filepath.Dir(verifier.Path), 0o777))
+			case fixtureHardlink:
+				require.NoError(t, os.Link(verifier.Path, verifier.Path+"-alias"))
 			case "exit":
 				verifier = pinnedScript(t, "exit 1")
 			case "overflow":

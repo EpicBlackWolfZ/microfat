@@ -18,13 +18,14 @@ import (
 func TestBootstrapTrustBoundary(t *testing.T) {
 	t.Parallel()
 	for _, scenario := range []string{"success", "arm64", "verifier-tamper", "downloaded-verifier-tamper", "helper-tamper",
-		"signature", "missing-checksum", "duplicate-checksum", "invalid-checksum", "download-failure", "unsupported", "relative-stage"} {
+		"signature", "missing-checksum", "duplicate-checksum", "invalid-checksum", "download-failure", "unsupported",
+		"relative-stage", "writable-stage", "symlink-stage", "writable-verifier", "hardlink-verifier"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
 			bin := filepath.Join(root, "base-tools")
 			require.NoError(t, os.Mkdir(bin, 0o755))
-			for _, name := range []string{"mktemp", "sha256sum", "chmod", "rm"} {
+			for _, name := range []string{"mktemp", "sha256sum", "chmod", "rm", "stat"} {
 				target, err := exec.LookPath(name)
 				require.NoError(t, err)
 				require.NoError(t, os.Symlink(target, filepath.Join(bin, name)))
@@ -62,6 +63,12 @@ esac
 				"[[ ${TEST_SCENARIO} != signature ]]\n"
 			helper := "#!/bin/bash\nprintf '%s\\n' \"$@\" > \"${TEST_ROOT}/installed\"\n"
 			write("verifier", verifier)
+			if scenario == "writable-verifier" {
+				require.NoError(t, os.Chmod(filepath.Join(root, "verifier"), 0o777))
+			}
+			if scenario == "hardlink-verifier" {
+				require.NoError(t, os.Link(filepath.Join(root, "verifier"), filepath.Join(root, "verifier-alias")))
+			}
 			write("helper", helper)
 			write("signature", "fixture")
 			arch := "amd64"
@@ -89,6 +96,13 @@ esac
 				pin = strings.Repeat("0", 64)
 			}
 			stage := root
+			if scenario == "writable-stage" {
+				require.NoError(t, os.Chmod(root, 0o777))
+			}
+			if scenario == "symlink-stage" {
+				stage = filepath.Join(root, "link")
+				require.NoError(t, os.Symlink(root, stage))
+			}
 			if scenario == "relative-stage" {
 				stage = "relative"
 			}
@@ -120,7 +134,7 @@ esac
 				_, err = os.Stat(filepath.Join(root, "installed"))
 				require.ErrorIs(t, err, os.ErrNotExist, "untrusted helper must not execute")
 			}
-			if strings.Contains(scenario, "verifier-tamper") {
+			if strings.Contains(scenario, "verifier-tamper") || scenario == "writable-verifier" || scenario == "hardlink-verifier" {
 				_, err = os.Stat(filepath.Join(root, "verified"))
 				require.ErrorIs(t, err, os.ErrNotExist, "untrusted verifier must not execute")
 			}
