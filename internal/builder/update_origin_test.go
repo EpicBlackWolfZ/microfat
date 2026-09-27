@@ -35,6 +35,31 @@ func TestResolveUpdateNativeIdentity(t *testing.T) {
 	actual, err = ResolveInstallationExecutable()
 	require.NoError(t, err)
 	assert.Equal(t, physical, actual)
+	for _, scenario := range []string{"disappeared", "redirected"} {
+		t.Run(scenario, func(t *testing.T) {
+			calls := 0
+			readlinkProcSelfExe = func() (string, error) {
+				calls++
+				return physical, nil
+			}
+			evalSymlinksFunc = func(path string) (string, error) {
+				if path == physical && calls == 2 {
+					if scenario == "disappeared" {
+						return "", os.ErrNotExist
+					}
+					return filepath.Join(t.TempDir(), "microfat"), nil
+				}
+				return filepath.EvalSymlinks(path)
+			}
+			resolved, err := ResolveInstallationExecutable()
+			require.ErrorIs(t, err, install.ErrChanged)
+			assert.Empty(t, resolved, "a changed native source must not become an update destination")
+			if scenario == "disappeared" {
+				assert.ErrorIs(t, err, os.ErrNotExist)
+			}
+		})
+	}
+	evalSymlinksFunc = filepath.EvalSymlinks
 	substitute := filepath.Join(t.TempDir(), "microfat")
 	require.NoError(t, os.WriteFile(substitute, []byte("different inode"), 0o755))
 	readlinkProcSelfExe = func() (string, error) { return substitute, nil }

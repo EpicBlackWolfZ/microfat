@@ -293,3 +293,17 @@ func TestUpdateReadonlyStorePreservesSelection(t *testing.T) {
 	assert.False(t, result.Activated)
 	assert.Equal(t, old.Generation.ID, readActive(t, paths).ID)
 }
+
+func TestUpdateCannotReadEntrypointDirectory(t *testing.T) {
+	t.Parallel()
+	ordinaryUser(t)
+	paths := pathsFor(t)
+	old := applyFixture(t, paths, "0.3.0")
+	physical := installedCLI(t, paths)
+	require.NoError(t, os.Remove(filepath.Join(paths.Store, lockFile)))
+	changeMode(t, paths.Bin, 0)
+	_, err := ReadInstallation(physical)
+	require.ErrorIs(t, err, os.ErrPermission)
+	assert.NoFileExists(t, filepath.Join(paths.Store, lockFile))
+	assert.Equal(t, old.Generation.ID, readActive(t, paths).ID)
+}
