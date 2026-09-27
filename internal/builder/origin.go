@@ -14,6 +14,7 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
+	"github.com/EpicBlackWolfZ/microfat/internal/install"
 )
 
 var (
@@ -77,6 +78,9 @@ func resolveNativeInstallationDirectory() (string, error) {
 	realPath, err := evalSymlinksFunc(exePath)
 	if err != nil {
 		realPath = exePath
+	}
+	if _, err := install.ValidateDiscovery(exePath, realPath); err != nil {
+		return "", err
 	}
 	return filepath.Dir(realPath), nil
 }
@@ -192,11 +196,14 @@ func ResolveInstallationDirectory() (string, error) {
 }
 
 func resolveDispatchedInstallationDirectory() (string, error) {
+	origExe := os.Getenv(format.EnvOriginalExe)
 	variant, actualSize, actualDigest, err := validateDispatchedPayloadEnvironment()
 	if err != nil {
+		if install.IsGenerationPath(origExe) {
+			return "", fmt.Errorf("%w: %w", install.ErrDiscovery, err)
+		}
 		return "", err
 	}
-	origExe := os.Getenv(format.EnvOriginalExe)
 	return verifyOriginalExecutableAndIndex(origExe, variant, actualSize, actualDigest)
 }
 
@@ -239,7 +246,7 @@ func validateDispatchedPayloadEnvironment() (string, int64, string, error) {
 	return variant, actualSize, actualDigest, nil
 }
 
-func verifyOriginalExecutableAndIndex(origExe, variant string, actualSize int64, actualDigest string) (string, error) {
+func verifyOriginalExecutableAndIndex(origExe, variant string, actualSize int64, actualDigest string) (dir string, resultErr error) {
 	if origExe == "" {
 		return "", errors.New("missing original executable path hint")
 	}
@@ -249,8 +256,20 @@ func verifyOriginalExecutableAndIndex(origExe, variant string, actualSize int64,
 
 	physicalOrigExe, err := evalSymlinksFunc(origExe)
 	if err != nil {
+		if install.IsGenerationPath(origExe) {
+			return "", fmt.Errorf("%w: %w", install.ErrDiscovery, err)
+		}
 		return "", fmt.Errorf("resolving symlinks for %q: %w", origExe, err)
 	}
+	managed, err := install.ValidateDiscovery(origExe, physicalOrigExe)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if managed && resultErr != nil {
+			resultErr = fmt.Errorf("%w: %w", install.ErrDiscovery, resultErr)
+		}
+	}()
 
 	fileStat, err := os.Stat(physicalOrigExe)
 	if err != nil {

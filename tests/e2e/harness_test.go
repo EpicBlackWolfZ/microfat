@@ -28,6 +28,8 @@ import (
 )
 
 const (
+	envBaselineAMD64                  = "GOAMD64=v1"
+	execModeNative                    = "native"
 	archAMD64                         = "amd64"
 	archARM64                         = "arm64"
 	envDebugTrue                      = "MICROFAT_DEBUG=1"
@@ -126,7 +128,7 @@ func runSetupAndExecute(m *testing.M) int {
 
 	// 3. Compile microfat-stub
 	stubPath = filepath.Join(e2eRootDir, "microfat-stub")
-	stubEnv := []string{"GOAMD64=v1", "GOARM64=v8.0"}
+	stubEnv := []string{envBaselineAMD64, "GOARM64=v8.0"}
 	if err := compileBinary(stubPackagePath, stubPath, stubEnv); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to compile microfat-stub: %v\n", err)
 		return 1
@@ -169,6 +171,8 @@ func runSetupAndExecute(m *testing.M) int {
 		envKV := []string{}
 		if currentHostArch == archAMD64 {
 			envKV = append(envKV, "GOAMD64="+lvl)
+		} else if currentHostArch == archARM64 {
+			envKV = append(envKV, "GOARM64="+lvl)
 		}
 		ldflags := fmt.Sprintf("-ldflags=-s -w -X main.Variant=%s", lvl)
 		if err := compileBinaryWithFlags(goldenAppPkg, binPath, envKV, ldflags); err != nil {
@@ -223,6 +227,7 @@ func packBinaryWithDict(cli, stub, name, outPath string, variants map[string]str
 func packBinaryCustom(cli, stub, name, outPath string, variants map[string]string, enableDict bool) error {
 	args := []string{
 		"pack",
+		"--arch", currentHostArch,
 		"--stub", stub,
 		"--name", name,
 		"-o", outPath,

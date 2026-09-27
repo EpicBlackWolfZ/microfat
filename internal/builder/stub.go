@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
+	"github.com/EpicBlackWolfZ/microfat/internal/install"
 )
 
 const (
@@ -180,11 +181,19 @@ func resolveExplicitStub(stubPath, baseDir, sourceDesc string) (string, error) {
 	return clean, nil
 }
 
-func findSiblingStub(stubName, targetArch string) (string, error) {
+func findSiblingStub(stubName, targetArch string) (resolved string, resultErr error) {
 	installDir, err := ResolveInstallationDirectory()
+	if errors.Is(err, install.ErrDiscovery) {
+		return "", err
+	}
 	if err != nil || installDir == "" {
 		return "", ErrStubNotFound
 	}
+	defer func() {
+		if resultErr != nil && install.IsGenerationPath(filepath.Join(installDir, "microfat")) {
+			resultErr = fmt.Errorf("%w: %w", install.ErrDiscovery, resultErr)
+		}
+	}()
 	candidate := filepath.Join(installDir, stubName)
 	realCandidate, err := filepath.EvalSymlinks(candidate)
 	if err != nil {
@@ -273,6 +282,8 @@ func validateStubOptions(opts ResolveStubOptions) error {
 func discoverCompanionStub(companionName, targetArch, effectiveProfile string) (string, error) {
 	if siblingStub, err := findSiblingStub(companionName, targetArch); err == nil {
 		return siblingStub, nil
+	} else if errors.Is(err, install.ErrDiscovery) {
+		return "", err
 	}
 	if pathStub, err := findStubInPATH(companionName, targetArch); err == nil {
 		return pathStub, nil

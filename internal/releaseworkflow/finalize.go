@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/EpicBlackWolfZ/microfat/internal/releasecheck"
 )
 
 const releaseCommand = "release"
@@ -44,11 +46,12 @@ func ValidateAssets(release Release) error {
 	}
 	required := []string{"checksums.txt", "checksums.txt.sig"}
 	version := strings.TrimPrefix(release.TagName, "v")
-	for _, arch := range []string{"amd64", "arm64"} {
-		archive := fmt.Sprintf("microfat_%s_linux_%s.tar.gz", version, arch)
-		for _, suffix := range []string{"", ".spdx.json", ".cyclonedx.json"} {
-			required = append(required, archive+suffix)
-		}
+	contract, err := releasecheck.NewReleaseContract(version)
+	if err != nil {
+		return err
+	}
+	for name := range contract.ExpectedPayloadNames {
+		required = append(required, name)
 	}
 	for _, name := range required {
 		if !names[name] {

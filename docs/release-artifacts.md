@@ -4,9 +4,12 @@ This guide explains the artifact distribution model for `microfat` releases and 
 
 ---
 
-## 1. Distribution Model: Universal Fat Binaries Only
+## 1. Distribution Model: Fat Product Archives and a Native Installer Helper
 
-Starting in `v0.2.3`, `microfat` eliminates artifact fragmentation by distributing **only self-contained universal fat archives**. Individual per-microarchitecture CLI binaries (`_v1`, `_v2`, `_v3`, `_v4`, `_v8.0`, `_v8.2`, `_v9.0`) and standalone stub tarballs are no longer published as separate downloads.
+Starting in `v0.2.3`, the CLI and its companions are distributed in self-contained universal fat archives.
+Individual per-microarchitecture CLI binaries and standalone stub tarballs are not separate downloads.
+From `v0.3.0`, two additional baseline native helper assets bootstrap verified installation without Go.
+They are not installed beside the three public products.
 
 ### Available Release Archives
 
@@ -14,8 +17,10 @@ Starting in `v0.2.3`, `microfat` eliminates artifact fragmentation by distributi
 | :--- | :--- | :--- |
 | `microfat_<version>_linux_amd64.tar.gz` | Linux x86-64 (`x86_64`) | `microfat`, `microfat-stub`, `microfat-stub-minimal` |
 | `microfat_<version>_linux_arm64.tar.gz` | Linux AArch64 (`aarch64`) | `microfat`, `microfat-stub`, `microfat-stub-minimal` |
+| `microfat-install_<version>_linux_amd64` | Linux x86-64 baseline v1 | Static native installation helper (from v0.3.0) |
+| `microfat-install_<version>_linux_arm64` | Linux AArch64 baseline v8.0 | Static native installation helper (from v0.3.0) |
 
-Each archive is accompanied by:
+Each product archive and native helper is accompanied by:
 
 - A SHA-256 checksum in `checksums.txt` signed with Cosign (`checksums.txt.sig`).
 - From **v0.2.5**, Software Bill of Materials (SBOM) in **SPDX 3.0.1 JSON-LD** (`.spdx.json`)
@@ -29,6 +34,13 @@ The Go generator reads the archive, all three executable files and every embedde
 It records their SHA-256 hashes, architecture, variant tier, build settings, source revision
 when present, and each binary's linked Go module versions, replacements and module sums.
 Different dependency versions in different variants remain separate components.
+
+Native helper SBOMs use the explicit `native-installer` artifact kind and contain one native
+executable with its actual linked Go dependencies. They declare the project Apache-2.0 license
+without pretending license text was extracted from a raw ELF. Baseline ISA, Linux architecture,
+CGO-disabled build settings, expected main package and absence of an ELF interpreter are checked.
+The historical inventory remains six signed payloads; v0.3.0 requires twelve (four artifacts and
+their eight SBOMs), without accepting arbitrary extra checksum entries.
 
 CycloneDX expresses archive/executable/variant containment through nested components and
 linked modules through dependency edges. The pinned cdxgen **cdx-convert v13.1.0** tool receives
@@ -89,48 +101,16 @@ Extracting `microfat_<version>_linux_<arch>.tar.gz` provides:
 ## 3. Usage & Decision Guide
 
 ### Scenario A: Installing the `microfat` CLI
-Always download the versioned archive into an unprivileged temporary directory, verify the cryptographic signature and checksum, and install solely the three binaries:
 
-First establish a trusted Cosign verifier. The [verification contract](release-verification.md)
-defines the exact issuer/version/identity checks, independent verifier pins, historical releases,
-offline trust material and what a successful signature proves. The commands below assume that
-bootstrap has already been completed; no downloaded microfat executable is used to authenticate itself.
+Use the [verified installer](installation.md) to authenticate the release and publish all three products
+as one owned generation. The first bootstrap needs published v0.3.0 helper assets; the guide also covers
+a trusted source helper and independently provisioned verifier. Historical v0.2.3 through v0.2.5 remain
+installable without changing their immutable archives.
 
-```bash
-set -euo pipefail
-
-VERSION="0.2.4"
-ARCH="amd64" # or "arm64"
-WORK_DIR=$(mktemp -d)
-trap 'rm -rf "$WORK_DIR"' EXIT
-
-ARCHIVE_NAME="microfat_${VERSION}_linux_${ARCH}.tar.gz"
-RELEASE_URL="https://github.com/EpicBlackWolfZ/microfat/releases/download/v${VERSION}"
-
-# 1. Download archive, checksums, and signature bundle using fail-on-error behavior
-curl --fail -sSL -o "$WORK_DIR/$ARCHIVE_NAME" "$RELEASE_URL/$ARCHIVE_NAME"
-curl --fail -sSL -o "$WORK_DIR/checksums.txt" "$RELEASE_URL/checksums.txt"
-curl --fail -sSL -o "$WORK_DIR/checksums.txt.sig" "$RELEASE_URL/checksums.txt.sig"
-
-# 2. Verify keyless Cosign signature against official release identity
-cosign verify-blob \
-  --bundle "$WORK_DIR/checksums.txt.sig" \
-  --certificate-identity "https://github.com/EpicBlackWolfZ/microfat/.github/workflows/release.yml@refs/tags/v${VERSION}" \
-  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  "$WORK_DIR/checksums.txt"
-
-# 3. Verify SHA-256 archive checksum (exact filename match only)
-ENTRY=$(awk -v target="$ARCHIVE_NAME" '$2 == target || $2 == "*"target { print $1, $2 }' "$WORK_DIR/checksums.txt")
-[ -n "$ENTRY" ] && [ "$(printf '%s\n' "$ENTRY" | wc -l)" -eq 1 ]
-(cd "$WORK_DIR" && printf '%s\n' "$ENTRY" | sha256sum --check --status)
-
-# 4. Extract and install solely the 3 executables to /usr/local/bin
-tar -xzf "$WORK_DIR/$ARCHIVE_NAME" -C "$WORK_DIR"
-sudo install -m 0755 "$WORK_DIR/microfat" /usr/local/bin/microfat
-sudo install -m 0755 "$WORK_DIR/microfat-stub" /usr/local/bin/microfat-stub
-sudo install -m 0755 "$WORK_DIR/microfat-stub-minimal" /usr/local/bin/microfat-stub-minimal
-```
-You do not need to choose a microarchitecture level; `microfat` detects and optimizes itself at launch.
+The [verification contract](release-verification.md) defines the exact tag identity, independent verifier
+pins and authentication before extraction. No downloaded product authenticates itself. User paths are
+the default; system mode requires explicit roots and privileges. Existing manual/package-manager files
+are never silently overwritten.
 
 ### Scenario B: Packaging Your Application (`microfat pack`)
 When `microfat` and `microfat-stub` reside in the same directory (or on `$PATH`), `microfat pack` automatically discovers the launcher stub:

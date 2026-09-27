@@ -15,19 +15,19 @@ import (
 func TestDocumentedAssetResolution(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	native := filepath.Join(dir, "native")
+	native := filepath.Join(dir, execModeNative)
 	require.NoError(t, compileBinary("../../runtimeinit/testdata/assets_app", native, nil))
 	fat := filepath.Join(dir, "fat")
 	require.NoError(t, packBinary(cliPath, stubPath, "assets", fat, map[string]string{currentHostLevel: native}))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("deployment assets"), privateFilePerm))
 	explicit := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(explicit, "config.yaml"), []byte("explicit assets"), privateFilePerm))
-	for _, mode := range []string{"native", "memfd", "cache"} {
+	for _, mode := range []string{execModeNative, "memfd", "cache"} {
 		for _, symlink := range []bool{false, true} {
 			for _, assetDir := range []string{"", explicit} {
 				t.Run(mode+"/"+filepath.Base(assetDir)+"/symlink="+strconv.FormatBool(symlink), func(t *testing.T) {
 					path := fat
-					if mode == "native" {
+					if mode == execModeNative {
 						path = native
 					}
 					if symlink {

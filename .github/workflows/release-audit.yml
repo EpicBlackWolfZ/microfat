@@ -46,7 +46,7 @@ jobs:
           go run ./internal/cmd/release-audit metadata "$RELEASE_TAG" \
             .work/audit/release.json .work/audit/source.txt >> "$GITHUB_OUTPUT"
           gh release download "$RELEASE_TAG" --repo EpicBlackWolfZ/microfat \
-            --dir .work/audit/dist --pattern 'microfat_*' --pattern 'checksums.txt*'
+            --dir .work/audit/dist --pattern 'microfat_*' --pattern 'microfat-install_*' --pattern 'checksums.txt*'
       - name: Authenticate and exercise downloaded CLI and launchers
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}

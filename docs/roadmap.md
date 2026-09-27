@@ -98,9 +98,10 @@ attestations and historical asset replacement are outside this milestone.
 | Codecov reporting while retaining the authoritative exact coverage gate | [#262](https://github.com/EpicBlackWolfZ/microfat/issues/262) |
 
 These issues are closed and their implementations are merged. ABI metadata consistency does not
-prove that a target system provides a compatible loader or libc. Profile selection does not implement
-the installer: the [installation contract](design/installation-discovery-contract.md) is still a
-proposed design for the remaining distribution work.
+prove that a target system provides a compatible loader or libc. The #203 implementation now supplies
+the [installation contract](design/installation-discovery-contract.md), authenticated bootstrap,
+generation transactions and native qualification jobs. Its first public bootstrap still requires
+published signed helper assets; implementation and snapshot validation do not establish release availability.
 
 ### Remaining scope
 
@@ -110,7 +111,7 @@ to preserve and extend.
 
 | Scope | Issue | Dependency and completion boundary |
 | --- | --- | --- |
-| Verified user installer | [#203](https://github.com/EpicBlackWolfZ/microfat/issues/203) | Establish authenticated bootstrap, coherent installation transaction, ownership metadata, recovery, uninstall and generation-bound companion discovery together. Existing trust and image-identity prerequisites are merged. |
+| Verified user installer | [#203](https://github.com/EpicBlackWolfZ/microfat/issues/203) | Implementation covers bootstrap, transactions, ownership, repair/uninstall and physical-generation discovery. Retain the issue's acceptance boundary through review and native signed-draft qualification; the first helper release is not available merely because a snapshot passes. |
 | Explicit update checks and self-update | [#204](https://github.com/EpicBlackWolfZ/microfat/issues/204) | Consume #203's transaction and ownership contract. Ordinary commands stay offline with respect to update discovery; package-managed installations remain externally managed. |
 | Official Linux Homebrew tap | [#205](https://github.com/EpicBlackWolfZ/microfat/issues/205) | Consume #203's layout/ownership contract and finalized verified release assets. Cover Linux amd64/arm64, byte preservation, real prefix/link discovery and release-ordered tap publication. |
 | Mount and executable-hint qualification | [#157](https://github.com/EpicBlackWolfZ/microfat/issues/157) | Exercise full/minimal and memfd/cache across bind mounts, read-only roots, symlinks, namespaces/chroot and replacement/unlink. Coordinate the installed layout with #203; SBOM work remains in v0.2.5. |
@@ -134,7 +135,8 @@ The installer defaults to a user directory; system-wide writes are explicit. Hom
 own upgrades and removal. Native macOS, new binary formats, speculative compression research and
 dedicated-hardware certification are outside this milestone.
 
-Exit: installation/update failure leaves a coherent usable prior release. Ownership and running-image
+Exit: a failure before activation preserves the prior release; a failure after activation reports the
+new coherent selected generation accurately. Ownership and running-image
 identity are checked before replacement. CLI/full/minimal stubs remain discoverable through supported
 links and execution modes without mixing generations. Native and emulator qualification records include
 environment limits and skips. CPU-policy precedence, cache integrity and the documented trust boundary

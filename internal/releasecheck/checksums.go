@@ -1,24 +1,15 @@
 package releasecheck
 
 import (
-	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
-)
 
-const (
-	expectedChecksumMatches = 4
-)
-
-var (
-	// Strict GNU checksum grammar line: 64 hex characters, space + marker (' ' or '*'), followed by filename
-	checksumLineRegex = regexp.MustCompile(`^([0-9a-fA-F]{64})[ \t]([ *])([^\r\n]+)$`)
+	"github.com/EpicBlackWolfZ/microfat/internal/releasechecksums"
 )
 
 // ValidateChecksums parses and verifies distDir/checksums.txt against the ReleaseContract.
@@ -56,59 +47,7 @@ func parseChecksumsFile(checksumsPath string) (map[string]string, error) {
 	}
 	defer func() { _ = f.Close() }()
 
-	parsedChecksums := make(map[string]string)
-	scanner := bufio.NewScanner(f)
-	lineNum := 0
-
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		name, hash, err := parseChecksumLine(line, lineNum)
-		if err != nil {
-			return nil, err
-		}
-
-		if _, exists := parsedChecksums[name]; exists {
-			return nil, fmt.Errorf("line %d: duplicate checksum entry for artifact: %q", lineNum, name)
-		}
-		parsedChecksums[name] = hash
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scanning checksums.txt: %w", err)
-	}
-	return parsedChecksums, nil
-}
-
-func parseChecksumLine(line string, lineNum int) (string, string, error) {
-	matches := checksumLineRegex.FindStringSubmatch(line)
-	if len(matches) != expectedChecksumMatches {
-		return "", "", fmt.Errorf("line %d: invalid checksum line format: %q", lineNum, line)
-	}
-
-	hash := strings.ToLower(matches[1])
-	if _, err := hex.DecodeString(hash); err != nil {
-		return "", "", fmt.Errorf("line %d: invalid hex hash: %s", lineNum, hash)
-	}
-
-	rawName := matches[3]
-	if strings.TrimSpace(rawName) != rawName {
-		return "", "", fmt.Errorf("line %d: filename contains whitespace padding: %q", lineNum, rawName)
-	}
-
-	cleanName := filepath.Clean(rawName)
-	if cleanName != rawName || strings.HasPrefix(rawName, "/") || strings.HasPrefix(rawName, "\\") ||
-		strings.Contains(rawName, "/") || strings.Contains(rawName, "\\") ||
-		strings.Contains(rawName, "\x00") || rawName == "." || rawName == ".." ||
-		filepath.Base(rawName) != rawName {
-		return "", "", fmt.Errorf("line %d: illegal filename with path elements: %q", lineNum, rawName)
-	}
-
-	return cleanName, hash, nil
+	return releasechecksums.Parse(f)
 }
 
 func verifyChecksumCompleteness(parsed map[string]string, contract *ReleaseContract) error {

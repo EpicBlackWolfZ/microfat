@@ -67,6 +67,7 @@ func TestGoReleaserConfiguration(t *testing.T) {
 	}
 
 	expectedBuildIDs := []string{
+		"microfat-installer",
 		"microfat-amd64",
 		"microfat-arm64-v8.0",
 		"microfat-arm64-v8.2",
@@ -323,6 +324,9 @@ func verifyReleaseChecksums(t *testing.T, distDir string, hasSBOMTool, releaseTe
 			contract.ExpectedArchives[releasecheck.ArchAMD64]: true,
 			contract.ExpectedArchives[releasecheck.ArchARM64]: true,
 		}
+		for _, helper := range contract.ExpectedHelpers {
+			contract.ExpectedPayloadNames[helper] = true
+		}
 	}
 
 	if _, err := releasecheck.ValidateChecksums(distDir, contract); err != nil {
@@ -372,6 +376,24 @@ func verifyReleaseSBOMs(t *testing.T, distDir string, hasSBOMTool, releaseTestsR
 		cdxPath := archivePath + ".cyclonedx.json"
 		if err := releasecheck.ValidateCycloneDX(cdxPath, facts, inv); err != nil {
 			t.Errorf("validating CycloneDX SBOM %s: %v", filepath.Base(cdxPath), err)
+		}
+	}
+	for _, helper := range contract.ExpectedHelpers {
+		path := filepath.Join(distDir, helper)
+		facts, err := releasecheck.ValidateArtifact(path)
+		require.NoError(t, err)
+		inv, err := releasecheck.ExtractArchiveInventory(facts)
+		require.NoError(t, err)
+		require.NoError(t, releasecheck.ValidateSPDX(path+".spdx.json", facts, inv))
+		require.NoError(t, releasecheck.ValidateCycloneDX(path+".cyclonedx.json", facts, inv))
+		if facts.TargetArch == runtime.GOARCH {
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			executable := filepath.Join(t.TempDir(), releasecheck.ReleaseInstaller)
+			require.NoError(t, os.WriteFile(executable, data, testExecPerms))
+			output, err := exec.Command(executable, "--helper-version").CombinedOutput()
+			require.NoError(t, err, "%s", output)
+			assert.Contains(t, string(output), version)
 		}
 	}
 }

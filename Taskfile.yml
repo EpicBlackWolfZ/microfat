@@ -125,19 +125,19 @@ tasks:
       golangci-lint run --fix ./...
     - task: fmt
   build:
-    desc: Build host CLI and full/minimal baseline launchers
+    desc: Build host CLI, full/minimal baseline launchers and native installer
     cmds:
     - |-
       {{.TASK_ENV}}
       bash scripts/build.sh host
   build-amd64:
-    desc: Cross-compile Linux AMD64 CLI and full/minimal launchers
+    desc: Cross-compile Linux AMD64 CLI, full/minimal launchers and native installer
     cmds:
     - |-
       {{.TASK_ENV}}
       bash scripts/build.sh amd64
   build-arm64:
-    desc: Cross-compile Linux ARM64 CLI and full/minimal launchers
+    desc: Cross-compile Linux ARM64 CLI, full/minimal launchers and native installer
     cmds:
     - |-
       {{.TASK_ENV}}

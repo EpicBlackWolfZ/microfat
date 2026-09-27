@@ -1,96 +1,86 @@
 # Verify a release before first execution
 
-This is the shared publisher contract for installation and future distribution/updater integrations.
-It authenticates an archive before any downloaded microfat program executes. `microfat verify`
-checks internal integrity after a program has already started; it cannot bootstrap trust in itself.
-See the [threat model](../SECURITY.md#8-threat-model-and-enforcement-map).
+This is the publisher contract for the [verified installer](installation.md) and future distribution
+integrations. `microfat verify` checks internal integrity after a program has started; it cannot
+bootstrap trust in itself. See the [threat model](../SECURITY.md#8-threat-model-and-enforcement-map).
 
 ## Trust bootstrap
 
-Start with a trusted OS, shell, HTTPS/download/checksum utilities and an independently installed
-Cosign verifier. Acquire Cosign through your trusted package manager or verify the pinned upstream
-release by an independent trust path using [Sigstore's installation instructions](https://docs.sigstore.dev/cosign/system_config/installation/).
-Our CI pins Cosign v3.0.6 through a reviewed immutable installer-action revision that embeds its
-download digests. Trusting that action/repository is an explicit CI bootstrap assumption.
+Trust begins with the host OS, Bash, HTTPS/CA configuration and checksum utilities, plus the reviewed
+bootstrap source. An HTTPS script command trusts that source and transport. To pin it independently,
+download/review the script first and compare it with a digest from a separate trusted provisioning
+record. Do not accept a checksum beside an unauthenticated script as an independent anchor.
 
-The source installer uses the host's trusted `PATH` by default. A fake `cosign` earlier in `PATH`
-can claim any signature is valid; microfat cannot detect a compromised host toolchain by asking it
-to verify itself. For an independently provisioned verifier, pin both its absolute path and digest:
+`scripts/install.sh` embeds Cosign v3.0.6 architecture pins from the reviewed
+[sigstore/cosign-installer revision](https://github.com/sigstore/cosign-installer/blob/6f9f17788090df1f26f669e9d70d6ae9567deba6/action.yml):
 
-```bash
-export MICROFAT_COSIGN=/opt/trusted-tools/cosign
-export MICROFAT_COSIGN_SHA256='<64 lowercase hex digits from your trusted provisioning record>'
-bash scripts/install-release.sh 0.2.5 amd64 "$HOME/.local/bin"
-```
+| Architecture | SHA-256 |
+| --- | --- |
+| amd64 | `c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74` |
+| arm64 | `bedac92e8c3729864e13d4a17048007cfafa79d5deca993a43a90ffe018ef2b8` |
 
-This digest must come from an independent trusted record, not be calculated from an untrusted
-download and immediately accepted. The installer rejects partial pins, relative paths, symlinks,
-missing/nonexecutable tools and mismatching bytes **before invoking the verifier**. The installer
-source and its digest must themselves be trusted; fetching and running an unreviewed script is
-also execution before authentication. Same-UID/privileged writers remain outside this boundary.
+It checks the verifier before execution. It does not trust a PATH Cosign. An override requires both
+`--cosign /absolute/regular/executable` and `--cosign-sha256 INDEPENDENT_DIGEST`; partial pins, symlinks,
+relative paths, mismatching bytes and nonexecutable tools fail. Ambient `COSIGN_*` and `SIGSTORE_*`
+options are removed before verification. Same-UID and privileged malicious writers remain outside
+this boundary.
 
-## Exact release policy
+The bootstrap is fixed to helper release v0.3.0. It authenticates that release's checksum file with
+Cosign, verifies `microfat-install_0.3.0_linux_<arch>`, and executes only the authenticated helper.
+The helper version is independent of the requested product release. This avoids a circular dependency
+when installing historical archives. The first public bootstrap is usable only after its helper release
+is published; an unsigned snapshot proves packaging, not publisher authentication.
 
-For release tag `v<VERSION>`, require all of the following:
+## Exact product release policy
 
-1. An explicitly chosen version and architecture. Use `microfat_<VERSION>_linux_<amd64|arm64>.tar.gz`;
-   never substitute a different tag, follow `latest`, or silently fall back to another release.
-2. `checksums.txt.sig` must authenticate the exact downloaded `checksums.txt` bytes under issuer
-   `https://token.actions.githubusercontent.com` and **exact** certificate identity
+1. Detect native Linux amd64/arm64. An explicit stable version is supported from v0.2.3 onward.
+   Otherwise, bounded GitHub latest-stable discovery selects a version once. Discovery metadata is
+   not authentication. Draft/prerelease responses are rejected, and failures never select another tag.
+2. Authenticate the exact `checksums.txt` bytes using `checksums.txt.sig`, issuer
+   `https://token.actions.githubusercontent.com`, and exact certificate identity
    `https://github.com/EpicBlackWolfZ/microfat/.github/workflows/release.yml@refs/tags/v<VERSION>`.
-   Do not use an identity regex, alternate workflow, arbitrary public key or user-supplied issuer.
-3. Verify Cosign's certificate chain and transparency evidence using trusted Sigstore verification
-   material. Do not disable transparency checks or treat an unavailable verifier/network as success.
-4. Select exactly one checksum entry whose complete filename matches the requested archive. Require
-   a 64-digit SHA-256 value and match the downloaded archive **before extraction or installation**.
-5. Extract into a fresh unprivileged directory, check the required products, and install only the
-   three executables. Do not execute any downloaded product as part of authentication.
+3. Retain Cosign certificate-chain and transparency verification. No alternate issuer/workflow,
+   identity regex, arbitrary public key or insecure transparency bypass is accepted.
+4. Strictly parse signed checksums, reject duplicates/unsafe names, require the selected exact
+   `microfat_<VERSION>_linux_<arch>.tar.gz` entry, then check the archive digest before extraction.
+5. Enforce archive path, type, count, size and duplicate-name bounds. Reject links and special files;
+   verify required executable inventory, ELF architecture and fat CLI index without executing products.
+6. Publish an owned generation only after authentication and validation. Downgrade of an existing
+   managed installation requires both an exact `--version` and `--allow-downgrade`.
 
-The [installation example](release-artifacts.md#scenario-a-installing-the-microfat-cli) and
-[source installer](../scripts/install-release.sh) implement these identity/digest rules. The installer
-does not add a source-commit constraint. Operators who independently pin the tag's source commit
-can additionally use `--certificate-github-workflow-sha <40-digit-source-sha>` as the
-[published-release audit](../.github/workflows/release-audit.yml) does. A tag API response alone is
-not an independent source trust anchor.
+The helper bounds request time (two minutes), redirects (five), metadata (1 MiB), archive downloads
+(256 MiB), extracted stream bytes (500 MiB), individual files (250 MiB) and archive entries (1024).
+Product redirects must stay on the intended GitHub HTTPS hosts. Bootstrap downloads also require
+HTTPS throughout, with bounded time, redirects and bytes; downloaded executables still require pins
+or authenticated checksums before execution.
 
-Version pinning prevents accidental substitution; it is not automatic downgrade protection.
-An operator selecting an old signed version explicitly accepts its age and known defects. Updaters
-must retain an approved version/floor independently and reject rollback according to their policy.
-This release does not add an updater or an embedded authentication format.
+The installer does not add an independent source-commit constraint. Operators with a trusted source
+pin can additionally use Cosign's `--certificate-github-workflow-sha`. The signed-draft and published
+release qualification workflows do so. A tag API response alone is not an independent source anchor.
 
-## Historical releases and offline verification
+## Historical and locally staged releases
 
-Published v0.2.3 uses the ordinary `release.yml@refs/tags/v0.2.3` identity, as explained in its
-[corrected release notes](releases/v0.2.3.md#published-signature-and-sbom-verification).
-Do not broaden acceptance to `release-sbom-repair.yml` because an old draft once used a repair
-workflow. No historic immutable asset is changed by this policy. For earlier releases, consult
-the exact release's signing record and reject unestablished identities instead of guessing.
-Historical CycloneDX 1.5/SPDX 2.3 documents remain distinct from the new release schema policy.
+Published v0.2.3 uses the ordinary `release.yml@refs/tags/v0.2.3` identity. Do not broaden acceptance
+to a historical repair workflow. v0.2.3/v0.2.4 retain CycloneDX 1.5/SPDX 2.3; v0.2.5 and later use the
+modern schema policy. No immutable historical asset is rewritten. Versions below v0.2.3 have no
+established installer signing contract and are refused.
 
-The installer downloads over HTTPS and is an online installation workflow. For offline verification,
-stage the archive, signed checksum bytes, signature bundle, independently authenticated verifier,
-and trusted Sigstore root material while connected. A supported Cosign version can verify bundle
-evidence with `--trusted-root /trusted/path/trusted_root.json`; the root is a trust input, not an
-asset to accept from an unauthenticated release download. See
-[Sigstore verification](https://docs.sigstore.dev/cosign/verifying/verify/) and
-[trusted-root configuration](https://docs.sigstore.dev/cosign/system_config/custom_components/).
-Test the chosen version/root/bundle combination without network access before depending on it.
-Missing evidence, unsupported old bundle formats or root-refresh requirements are failures;
-never work around them with `--insecure-ignore-tlog`, `--insecure-ignore-sct` or custom untrusted roots.
+A trusted helper accepts `--release-dir /absolute/assets --version VERSION` for locally downloaded
+archive/checksum/bundle files, including an unpublished signed draft. It copies bounded regular files
+into private staging and applies the same signature, digest and extraction policy. This avoids product
+downloads, but does not promise offline Cosign root availability. Provision trusted Sigstore verification
+material and test network-isolated verification separately before relying on it. Missing trust material
+or unavailable root refresh remains an error; never bypass chain or transparency checks.
 
-## What successful verification proves
+## What verification proves
 
-The accepted signing identity authenticated these checksum bytes, and the selected archive matches
-the signed digest. A separately supplied source-SHA constraint binds the certificate to that
-workflow revision. This does not independently prove source-to-binary reproducibility, a complete
-build provenance chain, absence of vulnerabilities, correctness of dependency attribution or any
-assessed SLSA level. SBOMs and hosted benchmark evidence provide additional, separately validated
-information. Format v2 is unchanged.
+The accepted signing identity authenticated these checksum bytes, and the chosen artifact matches its
+signed digest. This does not independently prove reproducible source-to-binary builds, absence of
+vulnerabilities, dependency-license completeness or an assessed SLSA level. Local ownership metadata
+and running-payload checks establish consistency, not a new publisher-authentication mechanism.
 
-[Real Cosign contract tests](../tests/e2e/release_signature_test.go) use the published v0.2.4
-signature for valid and wrong workflow/version/issuer/source/key cases and modified/missing
-signature/checksum data. [Installer tests](../tests/e2e/install_script_test.go) reject missing or
-modified archives and ambiguous/malformed checksums before installation;
-[verifier-pin tests](../tests/e2e/install_verifier_test.go) prove that untrusted verifier bytes
-are not executed. Mock installer tests validate control flow, while the real signature test and
-published-release audit supply cryptographic and downloaded-product evidence respectively.
+[Real Cosign tests](../tests/e2e/release_signature_test.go) retain valid and wrong workflow, version,
+issuer, source and key cases plus modified/missing evidence. [Acquisition tests](../internal/installrelease/)
+cover bounded local/network input and authentication before extraction; [bootstrap tests](../cmd/microfat-install/bootstrap_test.go)
+prove mismatched verifier/helper bytes never execute. Mocked control-flow tests are separate from actual
+signature and native historical/signed-draft qualification.
