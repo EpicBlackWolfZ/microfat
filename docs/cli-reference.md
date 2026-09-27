@@ -622,7 +622,7 @@ updater arguments. Both `current` and `update_available` checks return 0. JSON s
 | `running_version`, `current_version`, `target_version` | Canonical stable versions without `v`, or null when unknown. |
 | `update_available` | Target is newer than the observed installation; false after successful activation. |
 | `management` | `microfat-installer`, `homebrew`, `unmanaged`, or null when not established. |
-| `can_self_update` | The process owns the active managed generation; root still needs explicit `--system`. |
+| `can_self_update` | The process owns the active managed generation; false after activation makes this process stale. Root still needs `--system`. |
 | `verification` | `not_performed`, `metadata_only`, or `artifact_verified`. |
 | `activated` | Whether this operation activated a generation, including before a later failure. |
 | `error`, `guidance` | Optional diagnostic and next-step text. |

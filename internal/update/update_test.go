@@ -159,6 +159,7 @@ func TestUpdateSelectionAndExecution(t *testing.T) {
 			if changed {
 				assert.NotEqual(t, old, after)
 				assert.Equal(t, artifactVerified, result.Verification)
+				assert.False(t, result.CanSelfUpdate)
 			} else {
 				assert.Equal(t, old, after)
 			}
@@ -395,4 +396,35 @@ func TestDistributionParentIsNotDirectory(t *testing.T) {
 	require.NoError(t, os.WriteFile(parent, []byte("unrelated"), 0o600))
 	_, err := externalManagement(filepath.Join(parent, "microfat"))
 	require.Error(t, err)
+}
+
+func TestCapabilityAfterActivation(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"success", "completion-error"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			service, opts, _, _, _ := updateFixture(t)
+			if scenario == "completion-error" {
+				service.apply = func(
+					ctx context.Context, snapshot install.Snapshot, generation install.Generation, source string, opts install.ApplyOptions,
+				) (install.Result, error) {
+					result, err := install.Apply(ctx, snapshot, generation, source, opts)
+					require.NoError(t, err)
+					return result, errors.New("completion failed after activation")
+				}
+			}
+			result, err := service.Run(t.Context(), opts)
+			if scenario == "success" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, "is active")
+			}
+			require.True(t, result.Activated)
+			assert.False(t, result.CanSelfUpdate, "the running process now belongs to a retained generation")
+			assert.NotEqual(t, *result.RunningVersion, *result.CurrentVersion)
+			rechecked, err := service.Run(t.Context(), Options{Check: true})
+			require.NoError(t, err)
+			assert.Equal(t, rechecked.CanSelfUpdate, result.CanSelfUpdate)
+		})
+	}
 }

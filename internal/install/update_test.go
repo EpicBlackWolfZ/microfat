@@ -3,6 +3,7 @@
 package install
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -43,6 +44,13 @@ func TestUpdateObservationAndActivation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, first.Generation.ID, observed.Running.ID)
 	assert.Equal(t, result.Generation.ID, observed.Current.ID)
+	currentSnapshot, err := InspectUpdate(installedCLI(t, paths))
+	require.NoError(t, err)
+	reused, err := Apply(t.Context(), currentSnapshot, generation, source, ApplyOptions{})
+	require.NoError(t, err)
+	assert.True(t, reused.Reused)
+	assert.False(t, reused.Activated)
+	assert.Equal(t, result.Generation.ID, reused.Generation.ID)
 	_, err = InspectUpdate(physical)
 	require.ErrorIs(t, err, ErrChanged)
 	after, err := os.Stat(filepath.Join(paths.Store, lockFile))
@@ -306,4 +314,105 @@ func TestUpdateCannotReadEntrypointDirectory(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrPermission)
 	assert.NoFileExists(t, filepath.Join(paths.Store, lockFile))
 	assert.Equal(t, old.Generation.ID, readActive(t, paths).ID)
+}
+
+func TestUpdateDoesNotRepairEntrypointsAfterActivation(t *testing.T) {
+	t.Parallel()
+	for _, product := range Products() {
+		for _, change := range []string{"removed", "replaced"} {
+			t.Run(product+"/"+change, func(t *testing.T) {
+				t.Parallel()
+				paths := pathsFor(t)
+				old := applyFixture(t, paths, "0.3.0")
+				snapshot, err := InspectUpdate(installedCLI(t, paths))
+				require.NoError(t, err)
+				next, source := fixture(t, "0.3.1")
+				entrypoint := filepath.Join(paths.Bin, product)
+				unrelated := []byte("independently replaced entrypoint")
+				result, err := apply(t.Context(), snapshot, next, source, ApplyOptions{}, func(phase string) error {
+					if phase == fixtureActivated {
+						require.NoError(t, os.Remove(entrypoint))
+						if change == "replaced" {
+							require.NoError(t, os.WriteFile(entrypoint, unrelated, 0o755))
+						}
+					}
+					return nil
+				})
+				require.ErrorIs(t, err, ErrConflict)
+				assert.True(t, result.Activated)
+				assert.Equal(t, next.ID, readActive(t, paths).ID)
+				assert.FileExists(t, filepath.Join(paths.Store, generationDir, old.Generation.ID, product))
+				if change == "removed" {
+					_, err := os.Lstat(entrypoint)
+					require.ErrorIs(t, err, os.ErrNotExist)
+				} else {
+					data, err := os.ReadFile(entrypoint)
+					require.NoError(t, err)
+					assert.Equal(t, unrelated, data)
+				}
+			})
+		}
+	}
+}
+
+func TestUpdateRejectsReplacedBinAfterActivation(t *testing.T) {
+	t.Parallel()
+	paths := pathsFor(t)
+	applyFixture(t, paths, "0.3.0")
+	snapshot, err := InspectUpdate(installedCLI(t, paths))
+	require.NoError(t, err)
+	next, source := fixture(t, "0.3.1")
+	result, err := apply(t.Context(), snapshot, next, source, ApplyOptions{}, func(phase string) error {
+		if phase == fixtureActivated {
+			require.NoError(t, os.Rename(paths.Bin, paths.Bin+"-original"))
+			require.NoError(t, os.Mkdir(paths.Bin, 0o755))
+		}
+		return nil
+	})
+	require.ErrorIs(t, err, ErrChanged)
+	assert.True(t, result.Activated)
+	entries, err := os.ReadDir(paths.Bin)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
+func TestCancellationAtActivationBoundary(t *testing.T) {
+	t.Parallel()
+	for _, consumer := range []string{"installer", "updater"} {
+		for _, phase := range []string{fixtureBeforeActivation, fixtureActivated} {
+			t.Run(consumer+"/"+phase, func(t *testing.T) {
+				t.Parallel()
+				paths := pathsFor(t)
+				old := applyFixture(t, paths, "0.3.0")
+				snapshot, err := Inspect(paths)
+				require.NoError(t, err)
+				if consumer == "updater" {
+					snapshot, err = InspectUpdate(installedCLI(t, paths))
+					require.NoError(t, err)
+				}
+				next, source := fixture(t, "0.3.1")
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				result, err := apply(ctx, snapshot, next, source, ApplyOptions{}, func(actual string) error {
+					if actual == phase {
+						cancel()
+					}
+					return nil
+				})
+				require.ErrorIs(t, ctx.Err(), context.Canceled)
+				if phase == fixtureBeforeActivation {
+					require.ErrorIs(t, err, context.Canceled)
+					assert.False(t, result.Activated)
+					assert.Equal(t, old.Generation.ID, readActive(t, paths).ID)
+				} else {
+					require.NoError(t, err)
+					assert.True(t, result.Activated)
+					assert.Equal(t, next.ID, readActive(t, paths).ID)
+				}
+				links, err := filepath.Glob(filepath.Join(paths.Store, ".current-*"))
+				require.NoError(t, err)
+				assert.Empty(t, links, "cancellation must not leave an activation link behind")
+			})
+		}
+	}
 }

@@ -232,6 +232,7 @@ func (s *Service) activate(
 	if applied.Activated {
 		result.CurrentVersion = &applied.Generation.Version
 		result.UpdateAvailable = false
+		result.CanSelfUpdate = false
 	}
 	if err != nil {
 		if applied.Activated {

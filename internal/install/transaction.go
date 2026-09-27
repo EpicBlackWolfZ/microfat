@@ -292,7 +292,7 @@ func apply(ctx context.Context, snapshot Snapshot, generation Generation, source
 	}
 	if current != nil {
 		result.Generation, result.Reused = *current, true
-		return result, op.publishEntrypoints()
+		return result, op.completeEntrypoints(snapshot)
 	}
 	if err := op.stage(source, generation); err != nil {
 		return result, err
@@ -322,6 +322,11 @@ func apply(ctx context.Context, snapshot Snapshot, generation Generation, source
 		return result, err
 	}
 	defer func() { _ = op.store.Remove(temporary) }()
+	// Final validation may hash large products. Honor cancellation up to the
+	// atomic activation boundary; afterward report the committed selection.
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	if err := op.store.Rename(temporary, currentLink); err != nil {
 		return result, err
 	}
@@ -332,7 +337,19 @@ func apply(ctx context.Context, snapshot Snapshot, generation Generation, source
 	if err := syncDir(op.store, "."); err != nil {
 		return result, fmt.Errorf("activated; durability not confirmed: %w", err)
 	}
-	return result, op.publishEntrypoints()
+	return result, op.completeEntrypoints(snapshot)
+}
+
+func (op *operation) completeEntrypoints(snapshot Snapshot) error {
+	if !snapshot.updateOnly {
+		return op.publishEntrypoints()
+	}
+	// Updates may only confirm existing links, including after activation.
+	// Missing links require an explicit installer repair, never recreation here.
+	if err := op.checkRoots(); err != nil {
+		return err
+	}
+	return checkExistingLinks(snapshot.paths, snapshot.owner.UID)
 }
 
 func (op *operation) reusableGeneration(requested Generation, opts ApplyOptions) (*Generation, error) {
