@@ -153,7 +153,12 @@ microfat_bootstrap() (
     actual=$(digest "${stage}/helper")
     [[ ${actual} == "${expected}" ]] || fail 'installer helper checksum mismatch; helper was not executed'
     chmod 700 "${stage}/helper"
-    "${stage}/helper" --cosign "${cosign}" --cosign-sha256 "${pin}" "${forwarded[@]}"
+    local status=0
+    "${stage}/helper" --cosign "${cosign}" --cosign-sha256 "${pin}" "${forwarded[@]}" || status=$?
+    if (( status == 126 )); then
+        fail 'cannot execute authenticated helper; staging must permit execution (use --staging-dir)'
+    fi
+    exit "${status}"
 )
 
 microfat_bootstrap "$@"

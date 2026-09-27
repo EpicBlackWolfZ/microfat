@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,7 +20,7 @@ func TestBootstrapTrustBoundary(t *testing.T) {
 	t.Parallel()
 	for _, scenario := range []string{"success", "arm64", "verifier-tamper", "downloaded-verifier-tamper", "helper-tamper",
 		"signature", "missing-checksum", "duplicate-checksum", "invalid-checksum", "download-failure", "unsupported",
-		"relative-stage", "writable-stage", "symlink-stage", "writable-verifier", "hardlink-verifier"} {
+		"relative-stage", "writable-stage", "symlink-stage", "writable-verifier", "hardlink-verifier", "noexec-staging"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
@@ -96,6 +97,9 @@ esac
 				pin = strings.Repeat("0", 64)
 			}
 			stage := root
+			if scenario == "noexec-staging" {
+				stage = noexecStaging(t)
+			}
 			if scenario == "writable-stage" {
 				require.NoError(t, os.Chmod(root, 0o777))
 			}
@@ -131,6 +135,9 @@ esac
 				assert.Contains(t, string(requests), "--max-filesize\n1048576\n")
 			} else {
 				require.Error(t, err, "%s", output)
+				if scenario == "noexec-staging" {
+					assert.Contains(t, string(output), "staging must permit execution (use --staging-dir)")
+				}
 				_, err = os.Stat(filepath.Join(root, "installed"))
 				require.ErrorIs(t, err, os.ErrNotExist, "untrusted helper must not execute")
 			}
@@ -138,11 +145,28 @@ esac
 				_, err = os.Stat(filepath.Join(root, "verified"))
 				require.ErrorIs(t, err, os.ErrNotExist, "untrusted verifier must not execute")
 			}
-			staging, err := filepath.Glob(filepath.Join(root, "microfat-bootstrap.*"))
+			staging, err := filepath.Glob(filepath.Join(stage, "microfat-bootstrap.*"))
 			require.NoError(t, err)
 			assert.Empty(t, staging, "bootstrap cleans its private temporary directory")
 		})
 	}
+}
+
+// Use a real noexec mount when the host provides one; never change mount policy.
+func noexecStaging(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/dev/shm", "microfat-noexec-*")
+	if err != nil {
+		t.Skip("no shared-memory fixture directory available")
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	probe := filepath.Join(dir, "probe")
+	require.NoError(t, os.WriteFile(probe, []byte("#!/bin/sh\nexit 0\n"), 0o700))
+	err = exec.CommandContext(t.Context(), probe).Run()
+	if !errors.Is(err, os.ErrPermission) {
+		t.Skip("shared-memory fixture mount does not reject executable files")
+	}
+	return dir
 }
 
 func TestTruncatedBootstrapHasNoEffects(t *testing.T) {
