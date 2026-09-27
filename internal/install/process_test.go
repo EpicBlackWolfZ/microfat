@@ -153,7 +153,7 @@ func TestIndependentInstallersSerialize(t *testing.T) {
 
 func TestActualProcessInterruption(t *testing.T) {
 	t.Parallel()
-	for _, point := range []string{"staged-microfat", "generation-published", "activated", "linked-microfat"} {
+	for _, point := range []string{"staged-microfat", "generation-published", fixtureActivated, "linked-microfat"} {
 		t.Run(point, func(t *testing.T) {
 			t.Parallel()
 			paths := pathsFor(t)
@@ -166,7 +166,7 @@ func TestActualProcessInterruption(t *testing.T) {
 			require.NoError(t, process.command.Process.Kill())
 			require.Error(t, process.command.Wait())
 			want := "0.3.0"
-			if point == "activated" || point == "linked-microfat" {
+			if point == fixtureActivated || point == "linked-microfat" {
 				want = "0.3.1"
 			}
 			assert.Equal(t, want, readActive(t, paths).Version)

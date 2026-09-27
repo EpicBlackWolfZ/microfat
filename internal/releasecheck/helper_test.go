@@ -1,11 +1,15 @@
 package releasecheck
 
 import (
+	"bytes"
+	"debug/elf"
+	"encoding/binary"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -69,6 +73,42 @@ func TestNativeHelperArtifactValidation(t *testing.T) {
 			assert.NotEmpty(t, inv.Binaries[ReleaseInstaller].Dependencies)
 			data, err := os.ReadFile(path)
 			require.NoError(t, err)
+			for _, scenario := range []string{"fat", "relocatable", "dynamic-loader", "wrong-main", "cgo"} {
+				t.Run(scenario, func(t *testing.T) {
+					mutated := bytes.Clone(data)
+					switch scenario {
+					case "fat":
+						mutated = append(mutated, []byte(format.MagicString)...)
+					case "relocatable":
+						const typeOffset = 16
+						binary.LittleEndian.PutUint16(mutated[typeOffset:], uint16(elf.ET_REL))
+					case "dynamic-loader":
+						const offsetField, entrySizeField, countField = 32, 54, 56
+						offset := binary.LittleEndian.Uint64(mutated[offsetField:])
+						size := uint64(binary.LittleEndian.Uint16(mutated[entrySizeField:]))
+						count := uint64(binary.LittleEndian.Uint16(mutated[countField:]))
+						for i := range count {
+							entry := mutated[offset+i*size:]
+							if elf.ProgType(binary.LittleEndian.Uint32(entry)) == elf.PT_NOTE {
+								binary.LittleEndian.PutUint32(entry, uint32(elf.PT_INTERP))
+								break
+							}
+						}
+					case "wrong-main":
+						mutated = bytes.ReplaceAll(mutated, []byte("/cmd/microfat-install"), []byte("/cmd/microfat-invalid"))
+					case "cgo":
+						mutated = bytes.ReplaceAll(mutated, []byte("CGO_ENABLED=0"), []byte("CGO_ENABLED=1"))
+					}
+					_, err := helperFacts(mutated, filepath.Base(path), arch)
+					require.Error(t, err, "invalid helper must not satisfy the release contract")
+				})
+			}
+			if os.Geteuid() != 0 {
+				require.NoError(t, os.Chmod(path, 0))
+				_, err := ValidateArtifact(path)
+				require.ErrorIs(t, err, os.ErrPermission)
+				require.NoError(t, os.Chmod(path, 0o755))
+			}
 			other := ArchARM64
 			if arch == ArchARM64 {
 				other = ArchAMD64

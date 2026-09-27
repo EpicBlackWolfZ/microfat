@@ -232,3 +232,33 @@ func TestRunAndOptions(t *testing.T) {
 	require.Error(t, err)
 	assert.False(t, errors.Is(err, context.Canceled))
 }
+
+func TestLocalReleaseDirectoryDoesNotFallBackToNetwork(t *testing.T) {
+	t.Parallel()
+	for _, directory := range []string{"relative-release", t.TempDir()} {
+		env, opts, client := fixtureEnvironment(t)
+		opts.version, opts.releaseDir = "0.3.0", directory
+		require.Error(t, execute(t.Context(), opts, env, io.Discard))
+		assert.Zero(t, client.calls)
+		assert.NoDirExists(t, opts.store)
+	}
+}
+
+func TestFirstActivationReportsUnwritableEntrypointsAndRecovers(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() == 0 {
+		t.Skip("requires ordinary-user permissions")
+	}
+	env, opts, _ := fixtureEnvironment(t)
+	require.NoError(t, os.Mkdir(opts.bin, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(opts.bin, 0o755) })
+	err := execute(t.Context(), opts, env, io.Discard)
+	require.ErrorContains(t, err, "v0.3.0 was activated, but installation completion failed")
+	require.FileExists(t, filepath.Join(opts.store, "current", "microfat"))
+	require.NoFileExists(t, filepath.Join(opts.bin, "microfat"))
+	require.NoError(t, os.Chmod(opts.bin, 0o755))
+	var output bytes.Buffer
+	require.NoError(t, execute(t.Context(), opts, env, &output))
+	assert.Contains(t, output.String(), "Verified existing microfat v0.3.0")
+	require.FileExists(t, filepath.Join(opts.bin, "microfat"))
+}

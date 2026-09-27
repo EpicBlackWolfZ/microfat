@@ -34,6 +34,7 @@ func TestRequiredDraftAssets(t *testing.T) {
 		require.Error(t, ValidateAssets(changed))
 	}
 	for _, change := range []func(*Release){func(r *Release) { r.Draft = false }, func(r *Release) { r.Immutable = true },
+		func(r *Release) { r.TagName = "" },
 		func(r *Release) { r.Assets[0].Size = 0 }, func(r *Release) { r.Assets[0].Name = "" },
 		func(r *Release) { r.Assets = append(r.Assets, r.Assets[0]) }} {
 		changed := release

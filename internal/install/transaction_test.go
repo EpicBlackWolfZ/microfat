@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	fixtureFIFO    = "fifo"
-	fixtureSymlink = "symlink"
+	fixtureFIFO      = "fifo"
+	fixtureSymlink   = "symlink"
+	fixtureActivated = "activated"
 )
 
 func fixture(t *testing.T, version string) (Generation, string) {
@@ -117,7 +118,7 @@ func TestInstallationLifecycle(t *testing.T) {
 func TestInterruptedInstallRecovery(t *testing.T) {
 	t.Parallel()
 	points := []string{"staged-microfat", "staged-microfat-stub", "staged-microfat-stub-minimal",
-		"generation-published", "before-activation", "activated", "linked-microfat", "linked-microfat-stub", "linked-microfat-stub-minimal"}
+		"generation-published", "before-activation", fixtureActivated, "linked-microfat", "linked-microfat-stub", "linked-microfat-stub-minimal"}
 	for _, existing := range []bool{false, true} {
 		for _, point := range points {
 			t.Run(point+"/existing="+map[bool]string{false: "no", true: "yes"}[existing], func(t *testing.T) {
@@ -137,7 +138,7 @@ func TestInterruptedInstallRecovery(t *testing.T) {
 					return nil
 				})
 				require.ErrorIs(t, err, injected)
-				activated := point == "activated" || strings.HasPrefix(point, "linked-")
+				activated := point == fixtureActivated || strings.HasPrefix(point, "linked-")
 				assert.Equal(t, activated, result.Activated)
 				if activated {
 					assert.Equal(t, "0.3.1", readActive(t, paths).Version)
