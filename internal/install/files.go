@@ -20,10 +20,10 @@ func NewID() string {
 	return hex.EncodeToString(id[:])
 }
 
-func validateAncestors(name string) error {
+func validateAncestors(name string, allowMissing bool) error {
 	for {
 		info, err := os.Lstat(name)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err != nil && (!allowMissing || !errors.Is(err, os.ErrNotExist)) {
 			return err
 		}
 		if err == nil {
@@ -46,7 +46,9 @@ func ValidateStagingParent(name string) error {
 	if !filepath.IsAbs(name) || filepath.Clean(name) != name {
 		return errors.New("staging parent must be a clean absolute directory")
 	}
-	return validateAncestors(name)
+	// Unlike installation roots, every staging ancestor must already exist.
+	// Never skip an ancestor that disappears before its ownership check.
+	return validateAncestors(name, false)
 }
 
 // ValidateVerifierExecutable prevents a different UID from replacing a pinned
@@ -55,7 +57,7 @@ func ValidateVerifierExecutable(name string) error {
 	if !filepath.IsAbs(name) || filepath.Clean(name) != name {
 		return errors.New("verifier must have a clean absolute executable path")
 	}
-	if err := validateAncestors(filepath.Dir(name)); err != nil {
+	if err := validateAncestors(filepath.Dir(name), false); err != nil {
 		return err
 	}
 	info, err := os.Lstat(name)

@@ -5,8 +5,19 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/install"
 	"github.com/stretchr/testify/require"
 )
+
+func TestStagingParentMustAlreadyExist(t *testing.T) {
+	t.Parallel()
+	parent := filepath.Join(t.TempDir(), "missing", "parent")
+	require.ErrorIs(t, install.ValidateStagingParent(parent), os.ErrNotExist,
+		"validation must not authorize an absent parent that another user could create")
+	_, err := Staging(parent)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	require.NoDirExists(t, filepath.Dir(parent))
+}
 
 func TestStagingRequiresProtectedAncestors(t *testing.T) {
 	t.Parallel()

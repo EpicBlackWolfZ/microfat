@@ -24,7 +24,7 @@ func Inspect(paths Paths) (Snapshot, error) {
 		return snapshot, err
 	}
 	for _, name := range []string{paths.Store, paths.Bin} {
-		if err := validateAncestors(name); err != nil {
+		if err := validateAncestors(name, true); err != nil {
 			return snapshot, err
 		}
 	}
@@ -126,35 +126,22 @@ func openOperation(ctx context.Context, snapshot Snapshot) (*operation, error) {
 	if err := snapshot.paths.Validate(); err != nil {
 		return nil, err
 	}
-	for _, name := range []string{snapshot.paths.Store, snapshot.paths.Bin} {
-		if err := validateAncestors(name); err != nil {
-			return nil, err
-		}
-		if err := os.MkdirAll(name, directoryMode); err != nil {
-			return nil, err
-		}
-	}
 	var err error
-	op.storeInfo, err = rootInfo(snapshot.paths.Store)
+	op.store, op.storeInfo, err = openInstallRoot(snapshot.paths.Store, (*os.Root).Mkdir)
 	if err != nil {
 		return nil, err
 	}
-	op.binInfo, err = rootInfo(snapshot.paths.Bin)
+	op.bin, op.binInfo, err = openInstallRoot(snapshot.paths.Bin, (*os.Root).Mkdir)
 	if err != nil {
+		op.close()
 		return nil, err
 	}
 	if (snapshot.storeInfo != nil && !os.SameFile(snapshot.storeInfo, op.storeInfo)) ||
 		(snapshot.binInfo != nil && !os.SameFile(snapshot.binInfo, op.binInfo)) {
+		op.close()
 		return nil, ErrChanged
 	}
-	op.store, err = os.OpenRoot(snapshot.paths.Store)
-	if err != nil {
-		return nil, err
-	}
 	op.lock, err = lock(ctx, op.store)
-	if err == nil {
-		op.bin, err = os.OpenRoot(snapshot.paths.Bin)
-	}
 	if err == nil {
 		err = op.checkRoots()
 	}
@@ -183,6 +170,9 @@ func (op *operation) checkRoots() error {
 	}{
 		{op.store, op.paths.Store, op.storeInfo}, {op.bin, op.paths.Bin, op.binInfo},
 	} {
+		if err := validateAncestors(pair.path, false); err != nil {
+			return err
+		}
 		current, err := rootInfo(pair.path)
 		if err != nil {
 			return err
@@ -420,9 +410,11 @@ func sameRelease(a, b Generation) bool {
 }
 
 func (op *operation) stage(source string, generation Generation) error {
-	if err := op.store.MkdirAll(generationDir, directoryMode); err != nil {
+	parent, err := openInstallDirectory(op.store, generationDir, (*os.Root).Mkdir)
+	if err != nil {
 		return err
 	}
+	_ = parent.Close()
 	info, err := op.store.Lstat(generationDir)
 	if err != nil {
 		return err

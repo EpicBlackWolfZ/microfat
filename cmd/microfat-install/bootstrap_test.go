@@ -184,11 +184,22 @@ func TestTruncatedBootstrapHasNoEffects(t *testing.T) {
 	t.Parallel()
 	script, err := os.ReadFile("../../scripts/install.sh")
 	require.NoError(t, err)
-	for _, offset := range []int{len(script) / 2, strings.LastIndex(string(script), "microfat_bootstrap \"$@\"")} {
+	// Every byte boundary in the final command matters: a bare function name is
+	// already executable shell syntax, even if its argument forwarding was lost.
+	invocation := strings.LastIndex(string(script), "microfat_bootstrap \"$@\"")
+	require.Positive(t, invocation)
+	start := strings.LastIndex(string(script[:invocation]), "\n{")
+	require.Positive(t, start)
+	end := len(strings.TrimSpace(string(script)))
+	offsets := []int{len(script) / 2}
+	for offset := start; offset < end; offset++ {
+		offsets = append(offsets, offset)
+	}
+	for _, offset := range offsets {
 		cmd := exec.CommandContext(t.Context(), "/bin/bash", "-s")
 		cmd.Stdin = strings.NewReader(string(script[:offset]))
 		cmd.Env = []string{"PATH=/nonexistent"}
 		output, _ := cmd.CombinedOutput()
-		assert.NotContains(t, string(output), "required tool not found", "partial retrieval cannot invoke the function")
+		assert.NotContains(t, string(output), "required tool not found", "partial retrieval at byte %d cannot invoke the function", offset)
 	}
 }

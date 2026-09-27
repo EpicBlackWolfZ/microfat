@@ -308,7 +308,7 @@ func TestUnreadableAncestorsAndConflictingMetadata(t *testing.T) {
 	directory := t.TempDir()
 	changeMode(t, directory, 0)
 	child := filepath.Join(directory, "child")
-	require.ErrorIs(t, validateAncestors(child), os.ErrPermission)
+	require.ErrorIs(t, validateAncestors(child, true), os.ErrPermission)
 	_, err := rootInfo(child)
 	require.ErrorIs(t, err, os.ErrPermission)
 	directory = t.TempDir()

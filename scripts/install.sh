@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # This bootstrap is pinned to the first helper release, independently of the
 # product --version. It becomes usable once those signed assets are published.
-# All effects are inside a function invoked only after its complete definition.
+# Effects require both the complete function definition and invocation group.
 microfat_bootstrap() (
     set -euo pipefail
     IFS=$'\n\t'
@@ -161,4 +161,6 @@ microfat_bootstrap() (
     exit "${status}"
 )
 
-microfat_bootstrap "$@"
+{
+    microfat_bootstrap "$@"
+}

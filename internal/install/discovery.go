@@ -57,7 +57,7 @@ func ValidateDiscovery(original, physical string) (bool, error) {
 func validateDiscoveryGeneration(physical string) error {
 	dir := filepath.Dir(physical)
 	store := filepath.Dir(filepath.Dir(dir))
-	if err := validateAncestors(dir); err != nil {
+	if err := validateAncestors(dir, false); err != nil {
 		return err
 	}
 	root, err := os.OpenRoot(store)

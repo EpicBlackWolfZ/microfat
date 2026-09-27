@@ -4,7 +4,7 @@ The v0.3.0 installer supports Linux amd64 and arm64. It installs the CLI and bot
 as one owned generation, using user directories by default. It does not require Go, preinstalled
 Cosign, jq, Python or tar. Base requirements are Bash, curl with HTTPS support, trusted CA certificates,
 and coreutils (`uname`, `mktemp`, `sha256sum`, `chmod`, `rm`, `stat`). Temporary staging must permit execution
-and have safe owned ancestors (root-owned sticky `/tmp` is supported).
+and use an already existing parent with safe owned ancestors (root-owned sticky `/tmp` is supported).
 
 **First-release availability:** the bootstrap is implemented but needs the signed v0.3.0 helper assets
 to be published. A source checkout or unsigned snapshot alone does not make its public download path
@@ -19,7 +19,17 @@ script over HTTPS trusts that source and transport. For a stronger operator work
 first, compare its digest with an independently trusted provisioning record, review it, then run it.
 Do not treat a checksum fetched beside an untrusted script as an independent trust anchor.
 
-After the first helper release is published:
+After the first helper release is published, the versioned checkout-free command will be:
+
+```bash
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+  https://raw.githubusercontent.com/EpicBlackWolfZ/microfat/v0.3.0/scripts/install.sh | bash -s --
+```
+
+This command is unavailable until v0.3.0 is published. Append installer arguments after `--`, such as
+`--version 0.2.5`. To review first, download the same versioned URL with `curl --output microfat-install.sh`,
+compare `sha256sum microfat-install.sh` with your independent trust record, inspect the script, and run
+`bash microfat-install.sh`. From a reviewed checkout, after publication:
 
 ```bash
 bash scripts/install.sh                         # discover and freeze latest stable
@@ -39,6 +49,8 @@ Add the entrypoint directory to PATH yourself; the installer does not edit shell
 For a noexec temporary filesystem, supply `--staging-dir /absolute/executable/directory`. The installer
 does not change mount policy. System mode requires root plus explicit `--system`, `--bin-dir` and
 `--store-dir`; it never invokes sudo or guesses which user's home should receive a root installation.
+New installation directories use mode `0755`, including under a restrictive umask. Existing directories
+keep their permissions; for system installs, choose existing ancestors that intended users can traverse.
 
 ## Trusted native helper
 
