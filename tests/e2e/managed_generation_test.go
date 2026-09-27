@@ -76,7 +76,7 @@ func TestManagedGenerationPausedUpgrade(t *testing.T) {
 					t.Run(fmt.Sprintf("%s/%s/%s/remove=%t", launcher, mode, profile, removeOld), func(t *testing.T) {
 						bin, store, old := managedLayoutFixture(t, cli, minimal)
 						out := filepath.Join(t.TempDir(), "packed")
-						args := []string{"pack", "--name", "delayed-generation", "--stub-profile", profile,
+						args := []string{"pack", "--arch", currentHostArch, "--name", "delayed-generation", "--stub-profile", profile,
 							"-v", level + "=" + goldenVariantBins[level], "-o", out}
 						output, err := runPausedImage(t, filepath.Join(bin, "microfat"), args,
 							[]string{"MICROFAT_EXEC_MODE=" + mode, "PATH=" + bin}, func() {

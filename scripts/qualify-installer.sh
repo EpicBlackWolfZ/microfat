@@ -55,7 +55,7 @@ for version in "${versions[@]}"; do
             if [[ ${profile} == minimal ]]; then stub_args=(--stub "${bin}/microfat-stub-minimal"); fi
             if [[ -n ${candidate} && ${version} == "${candidate}" ]]; then stub_args=(--stub-profile "${profile}"); fi
             PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" MICROFAT_EXEC_MODE="${mode}" \
-                "${bin}/microfat" pack --name installer-qualification "${stub_args[@]}" \
+                "${bin}/microfat" pack --arch "${arch}" --name installer-qualification "${stub_args[@]}" \
                 -v "${tier}=${helper}" -o "${private}/packed-${mode}-${profile}"
             PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" MICROFAT_EXEC_MODE="${mode}" \
                 "${private}/packed-${mode}-${profile}" --helper-version

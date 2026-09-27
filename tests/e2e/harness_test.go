@@ -171,6 +171,8 @@ func runSetupAndExecute(m *testing.M) int {
 		envKV := []string{}
 		if currentHostArch == archAMD64 {
 			envKV = append(envKV, "GOAMD64="+lvl)
+		} else if currentHostArch == archARM64 {
+			envKV = append(envKV, "GOARM64="+lvl)
 		}
 		ldflags := fmt.Sprintf("-ldflags=-s -w -X main.Variant=%s", lvl)
 		if err := compileBinaryWithFlags(goldenAppPkg, binPath, envKV, ldflags); err != nil {
@@ -225,6 +227,7 @@ func packBinaryWithDict(cli, stub, name, outPath string, variants map[string]str
 func packBinaryCustom(cli, stub, name, outPath string, variants map[string]string, enableDict bool) error {
 	args := []string{
 		"pack",
+		"--arch", currentHostArch,
 		"--stub", stub,
 		"--name", name,
 		"-o", outPath,
