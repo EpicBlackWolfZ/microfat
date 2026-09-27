@@ -1,9 +1,14 @@
 # Production roadmap
 
-Updated 2026-09-21 for the v0.2.5 implementation. GitHub issues define remaining scope,
+Updated 2026-09-27 against `main` at `d81b424` and current v0.3.0 issue membership.
+GitHub issues define remaining scope,
 dependencies and acceptance criteria. Milestones group deliverable outcomes; they are not dates.
 
 ## Current baseline
+
+[v0.2.5](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.2.5) is the latest published
+release, published on 2026-09-21. Both v0.2.4 and v0.2.5 milestones are closed. The v0.3.0 work
+already merged into `main` below is newer than that release; it is not yet a published v0.3.0.
 
 [v0.2.3](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.2.3) was published on
 2026-09-16. It includes the safety and hosted-measurement foundation, per-architecture fat CLI
@@ -16,7 +21,7 @@ The [v0.2.4 release notes](releases/v0.2.4.md) describe the subsequent correctne
 The [v0.2.5 release notes](releases/v0.2.5.md) describe the Go/Task tooling migration, modern
 SBOMs, staged CI and benchmark corrections.
 
-Since that release, [PR #192](https://github.com/EpicBlackWolfZ/microfat/pull/192) added developer
+Before v0.2.5, [PR #192](https://github.com/EpicBlackWolfZ/microfat/pull/192) added developer
 workflow/profiling/leak checks and [PR #194](https://github.com/EpicBlackWolfZ/microfat/pull/194)
 added ShellCheck. They are merged into `main`; they are not new work to implement again.
 
@@ -54,8 +59,8 @@ reproduced defect outside its assertions. Task, Python removal and SBOM migratio
 
 ## v0.2.5: tooling and release trust
 
-The implementation consolidates Go/Task tooling and release trust. The linked issues record
-acceptance evidence; publication still requires the signed-asset and benchmark gates below.
+The published release consolidates Go/Task tooling and release trust. The linked issues record
+acceptance evidence; subsequent releases must retain the signed-asset and benchmark gates below.
 
 | Scope | Issues |
 | --- | --- |
@@ -81,27 +86,60 @@ attestations and historical asset replacement are outside this milestone.
 
 ## v0.3.0: installation and lifecycle contracts
 
+### Implemented on main
+
 | Scope | Issues |
 | --- | --- |
 | Shared atomic trim/optimize identity and metadata policy | [#150](https://github.com/EpicBlackWolfZ/microfat/issues/150) |
-| Expose selection of the already shipped full/minimal stubs | [#40](https://github.com/EpicBlackWolfZ/microfat/issues/40) |
-| Dynamic-linker/ABI checks after basic executable validation | [#154](https://github.com/EpicBlackWolfZ/microfat/issues/154) |
-| Mount and executable-hint qualification; SBOM scope belongs to v0.2.5 | [#157](https://github.com/EpicBlackWolfZ/microfat/issues/157) |
-| Verified user installer with coherent transaction and ownership/layout metadata | [#203](https://github.com/EpicBlackWolfZ/microfat/issues/203) |
-| Explicit updater and Linux Homebrew tap consuming that installation contract | [#204](https://github.com/EpicBlackWolfZ/microfat/issues/204), [#205](https://github.com/EpicBlackWolfZ/microfat/issues/205) |
-| Cache-first auto policy after trust, memfd, image-identity and cache fixes | [#44](https://github.com/EpicBlackWolfZ/microfat/issues/44) |
+| Full/minimal stub selection through direct pack, manifest pack and pgo-pack | [#40](https://github.com/EpicBlackWolfZ/microfat/issues/40) |
+| Bounded declared dynamic-linker, dependency and ABI consistency checks | [#154](https://github.com/EpicBlackWolfZ/microfat/issues/154) |
+| Builder target validation, memory-budget/byte-size corrections and compression precedence | [#252](https://github.com/EpicBlackWolfZ/microfat/issues/252), [#253](https://github.com/EpicBlackWolfZ/microfat/issues/253), [#255](https://github.com/EpicBlackWolfZ/microfat/issues/255), [#254](https://github.com/EpicBlackWolfZ/microfat/issues/254) |
+| Codec lock correction, executable-path whitespace and mode-aware doctor diagnostics | [#257](https://github.com/EpicBlackWolfZ/microfat/issues/257), [#256](https://github.com/EpicBlackWolfZ/microfat/issues/256), [#259](https://github.com/EpicBlackWolfZ/microfat/issues/259) |
+| Codecov reporting while retaining the authoritative exact coverage gate | [#262](https://github.com/EpicBlackWolfZ/microfat/issues/262) |
 
-Transformations follow the threat model and running-image fix, with deliberate ownership, mode,
-hard-link, ACL/xattr, capability and signature handling. Mount tests follow image-identity and path
-contracts. The installer comes before the updater; tap and updater implementations can proceed
-independently once ownership/layout is fixed. The installer defaults to a user directory, while
-system-wide writes are explicit. Ordinary commands do not gain background update checks. Homebrew
-covers Linux amd64/arm64 and retains control of package-managed upgrades; it does not imply macOS support.
+These issues are closed and their implementations are merged. ABI metadata consistency does not
+prove that a target system provides a compatible loader or libc. Profile selection does not implement
+the installer: the [installation contract](design/installation-discovery-contract.md) is still a
+proposed design for the remaining distribution work.
+
+### Remaining scope
+
+Eight issues remain open. The table is the delivery scope, not a claim that all work is absent:
+existing integrity, lifecycle, release-verification and basic real seccomp fallback tests are foundations
+to preserve and extend.
+
+| Scope | Issue | Dependency and completion boundary |
+| --- | --- | --- |
+| Verified user installer | [#203](https://github.com/EpicBlackWolfZ/microfat/issues/203) | Establish authenticated bootstrap, coherent installation transaction, ownership metadata, recovery, uninstall and generation-bound companion discovery together. Existing trust and image-identity prerequisites are merged. |
+| Explicit update checks and self-update | [#204](https://github.com/EpicBlackWolfZ/microfat/issues/204) | Consume #203's transaction and ownership contract. Ordinary commands stay offline with respect to update discovery; package-managed installations remain externally managed. |
+| Official Linux Homebrew tap | [#205](https://github.com/EpicBlackWolfZ/microfat/issues/205) | Consume #203's layout/ownership contract and finalized verified release assets. Cover Linux amd64/arm64, byte preservation, real prefix/link discovery and release-ordered tap publication. |
+| Mount and executable-hint qualification | [#157](https://github.com/EpicBlackWolfZ/microfat/issues/157) | Exercise full/minimal and memfd/cache across bind mounts, read-only roots, symlinks, namespaces/chroot and replacement/unlink. Coordinate the installed layout with #203; SBOM work remains in v0.2.5. |
+| ARM64 QEMU descriptor-execution qualification | [#231](https://github.com/EpicBlackWolfZ/microfat/issues/231) | Reuse the executable-path fixtures from #157; document interpreter/binfmt limits with raw-path controls and explicit skips. Native ARM64 and emulation evidence remain distinct. |
+| Real concurrent execution and policy-denied fallback qualification | [#260](https://github.com/EpicBlackWolfZ/microfat/issues/260) | Reuse #157's disposable mount fixtures, coordinate #231, and qualify the final #44 behavior on native amd64/arm64 with authenticated candidate artifacts. Extend real-process and policy evidence without assuming a cache algorithm defect. |
+| Independent CPU-tuning policy | [#258](https://github.com/EpicBlackWolfZ/microfat/issues/258) | Preserve native Go CPU adaptation independently of memory tuning in launcher/runtimeinit, with explicit precedence and isolated quota-change qualification. Existing defaults remain until deliberately changed. |
+| Cache-first auto execution | [#44](https://github.com/EpicBlackWolfZ/microfat/issues/44) | Existing trust, memfd, image-identity and cache prerequisites are merged. Specify hit/miss/fallback behavior, retain mandatory verification and explicit modes, and measure cold/warm startup with identical tuning. |
+
+### Delivery order and exit
+
+1. Complete #203 as the distribution foundation. Transactionality and ownership metadata belong to
+   the installer itself; deferring either to the updater or tap would leave a circular dependency.
+2. Build #157's reusable qualification fixtures while the installation layout is established. #231
+   can share those fixtures, and #258 can proceed independently of distribution work.
+3. Implement #204 and #205 independently after #203's contract is fixed. Implement #44 with explicit
+   failure tests and startup measurements; finalize #260 against the integrated runtime behavior.
+   Qualification harness development can begin earlier without implying final candidate acceptance.
+4. Qualify the integrated candidate and complete documentation and draft-release asset verification.
+
+The installer defaults to a user directory; system-wide writes are explicit. Homebrew controls its
+own upgrades and removal. Native macOS, new binary formats, speculative compression research and
+dedicated-hardware certification are outside this milestone.
 
 Exit: installation/update failure leaves a coherent usable prior release. Ownership and running-image
 identity are checked before replacement. CLI/full/minimal stubs remain discoverable through supported
-links and execution modes. Transformations and cache policy preserve the documented trust boundary;
-matching loader metadata does not prove a target system has a compatible libc.
+links and execution modes without mixing generations. Native and emulator qualification records include
+environment limits and skips. CPU-policy precedence, cache integrity and the documented trust boundary
+remain intact. The supported architecture/profile/format/codec/execution matrix, exact coverage and
+shared release gates below apply to the final candidate; green intermediate CI is not release publication.
 
 ## v0.4.0: measured improvements and observability
 

@@ -2,7 +2,7 @@
 
 **Document Version:** 1.0.0-draft  
 **Status:** Proposed design for #203 — not implemented by #40  
-**Related Issues:** [#40](https://github.com/EpicBlackWolfZ/microfat/issues/40) (Stub Profile Selection — implemented), [#203](https://github.com/EpicBlackWolfZ/microfat/issues/203) (Verified Linux Release Installer — proposed design), [#204](https://github.com/EpicBlackWolfZ/microfat/issues/204) (Atomic Update Transaction — proposed design), [#205](https://github.com/EpicBlackWolfZ/microfat/issues/205) (Ownership Detection — proposed design)
+**Related Issues:** [#40](https://github.com/EpicBlackWolfZ/microfat/issues/40) (Stub Profile Selection — implemented), [#203](https://github.com/EpicBlackWolfZ/microfat/issues/203) (Verified Installer, Transaction and Ownership — proposed design), [#204](https://github.com/EpicBlackWolfZ/microfat/issues/204) (Updater Consuming the Installation Contract — proposed design), [#205](https://github.com/EpicBlackWolfZ/microfat/issues/205) (Linux Homebrew Distribution — proposed design)
 
 ---
 
@@ -14,7 +14,7 @@ The `microfat` toolchain packages microarchitecture-specialized Go ELF binaries 
 
 ### Implementation Boundary Clarification
 - **Implemented by #40**: The profile selection mechanism (`--stub-profile`, manifest `stub_profile`), explicit `--stub` flag override precedence, companion discovery hierarchy, non-executing ELF machine validation, and sibling directory resolution across native, `memfd_create`, and disk-cache dispatches.
-- **Proposed Future Design for #203, #204, #205**: The verified release downloader/installer (#203), generation directory store and single atomic pointer activation (#204), and installation ownership metadata tracking/adoption (#205). These installer capabilities are **not implemented** in the current release and represent an architecture specification for future implementation.
+- **Proposed Future Design for #203, #204, #205**: The verified release downloader/installer, generation directory store, atomic activation, and installation ownership metadata/adoption all belong to #203. The updater (#204) and Linux Homebrew integration (#205) consume that foundation. These installer capabilities are **not implemented** in the current release and represent an architecture specification for future implementation.
 
 ---
 
@@ -142,9 +142,9 @@ In this proposed model:
 
 ---
 
-## 4. Proposed Transaction Invariants & Concurrency Requirements (#204, #205)
+## 4. Proposed Transaction Invariants & Concurrency Requirements (#203; consumed by #204, #205)
 
-The table below defines the formal behavior that future installer and updater implementations (#203, #204) must satisfy:
+The table below defines the behavior required first from the installer (#203), then retained by the updater (#204) and coordinated with Homebrew ownership (#205):
 
 | Scenario | Proposed Required Behavior |
 | :--- | :--- |
@@ -158,10 +158,10 @@ The table below defines the formal behavior that future installer and updater im
 
 ---
 
-## 5. Illustrative Ownership Metadata Specification (#205)
+## 5. Illustrative Ownership Metadata Specification (#203; consumed by #204, #205)
 
 > [!NOTE]
-> The metadata schema below is **illustrative** for future development of issue #205 and does not represent an active or enforced schema in the current release.
+> The metadata schema below is **illustrative** for future development of issue #203, coordinated with #204/#205, and does not represent an active or enforced schema in the current release.
 
 ```json
 {
@@ -203,6 +203,6 @@ The table below defines the formal behavior that future installer and updater im
 }
 ```
 
-### Proposed Adoption & Safety Rules (#205)
+### Proposed Adoption & Safety Rules (#203; consumed by #204, #205)
 1. **Pre-existing Unmanaged File Protection**: If binaries exist in `$BIN_DIR` without a corresponding `install-manifest.json` and active generation, the installer must flag them as unmanaged and refuse to overwrite them unless `--force-adopt` is explicitly supplied.
 2. **Safe Uninstallation**: Uninstallation verifies file checksums against `install-manifest.json`. Files modified by the user are preserved with a warning. User caches in `$XDG_CACHE_HOME/microfat` are never deleted during application uninstallation.
