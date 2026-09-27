@@ -43,14 +43,21 @@ func TestInstallationChild(t *testing.T) {
 	}
 	snapshot, err := Inspect(paths)
 	require.NoError(t, err)
-	data, err := os.ReadFile(os.Getenv("TEST_INSTALL_GENERATION"))
-	require.NoError(t, err)
-	var generation Generation
-	require.NoError(t, json.Unmarshal(data, &generation))
 	_, err = fmt.Fprintln(os.Stdout, "ready")
 	require.NoError(t, err)
 	_, err = io.ReadFull(os.Stdin, make([]byte, 1))
 	require.NoError(t, err)
+	if mode == "uninstall" {
+		_, err = Uninstall(t.Context(), snapshot)
+		if !errors.Is(err, ErrChanged) {
+			require.NoError(t, err)
+		}
+		return
+	}
+	data, err := os.ReadFile(os.Getenv("TEST_INSTALL_GENERATION"))
+	require.NoError(t, err)
+	var generation Generation
+	require.NoError(t, json.Unmarshal(data, &generation))
 	_, err = apply(t.Context(), snapshot, generation, os.Getenv("TEST_INSTALL_SOURCE"), ApplyOptions{}, func(point string) error {
 		if point == os.Getenv("TEST_INSTALL_STOP") {
 			_, err := fmt.Fprintln(os.Stdout, "stopped")
@@ -78,7 +85,7 @@ func startChild(t *testing.T, paths Paths, mode, version, stop string) child {
 	t.Cleanup(cancel)
 	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestInstallationChild$")
 	command.Env = append(os.Environ(), childEnvironment+"="+mode, "TEST_INSTALL_BIN="+paths.Bin, "TEST_INSTALL_STORE="+paths.Store)
-	if mode != "lock" {
+	if mode == "apply" {
 		generation, source := fixture(t, version)
 		metadata := filepath.Join(t.TempDir(), generationFile)
 		rewriteJSON(t, metadata, generation)
@@ -148,6 +155,51 @@ func TestIndependentInstallersSerialize(t *testing.T) {
 		out, err := exec.CommandContext(t.Context(), filepath.Join(paths.Bin, name)).Output()
 		require.NoError(t, err)
 		assert.Equal(t, active.Version+":"+name+"\n", string(out))
+	}
+}
+
+func TestIndependentInstallerAndUninstallerSerialize(t *testing.T) {
+	t.Parallel()
+	for _, order := range []string{"simultaneous", "installer-first", "uninstaller-first"} {
+		t.Run(order, func(t *testing.T) {
+			t.Parallel()
+			paths := pathsFor(t)
+			old := applyFixture(t, paths, "0.3.0")
+			lockBefore, err := os.Stat(filepath.Join(paths.Store, lockFile))
+			require.NoError(t, err)
+			installer := startChild(t, paths, "apply", "0.3.1", "")
+			uninstaller := startChild(t, paths, "uninstall", "", "")
+			switch order {
+			case "installer-first":
+				installer.proceed(t)
+				require.NoError(t, installer.command.Wait())
+				uninstaller.proceed(t)
+				require.NoError(t, uninstaller.command.Wait())
+			case "uninstaller-first":
+				uninstaller.proceed(t)
+				require.NoError(t, uninstaller.command.Wait())
+				installer.proceed(t)
+				require.NoError(t, installer.command.Wait())
+			default:
+				installer.proceed(t)
+				uninstaller.proceed(t)
+				require.NoError(t, installer.command.Wait())
+				require.NoError(t, uninstaller.command.Wait())
+			}
+			assert.Equal(t, "0.3.1", readActive(t, paths).Version)
+			lockAfter, err := os.Stat(filepath.Join(paths.Store, lockFile))
+			require.NoError(t, err)
+			assert.True(t, os.SameFile(lockBefore, lockAfter), "uninstall must preserve the shared lock inode")
+			for _, name := range Products() {
+				output, err := exec.CommandContext(t.Context(), filepath.Join(paths.Bin, name)).Output()
+				require.NoError(t, err)
+				assert.Equal(t, "0.3.1:"+name+"\n", string(output), "stale uninstall must not remove the new entrypoints")
+				retained := filepath.Join(paths.Store, generationDir, old.Generation.ID, name)
+				output, err = exec.CommandContext(t.Context(), retained).Output()
+				require.NoError(t, err)
+				assert.Equal(t, "0.3.0:"+name+"\n", string(output), "delayed readers retain runnable old products")
+			}
+		})
 	}
 }
 
