@@ -195,6 +195,43 @@ func ResolveInstallationDirectory() (string, error) {
 	return resolveDispatchedInstallationDirectory()
 }
 
+// ResolveInstallationExecutable resolves the physical outer CLI for updates.
+// Native paths must still name the kernel's running inode; dispatched paths use
+// the same payload and managed-generation consistency checks as stub discovery.
+func ResolveInstallationExecutable() (string, error) {
+	if runtime.GOOS != "linux" {
+		return "", install.ErrUnsupported
+	}
+	directory, err := ResolveInstallationDirectory()
+	if err != nil {
+		return "", err
+	}
+	target, err := readlinkProcSelfExe()
+	if err != nil {
+		return "", fmt.Errorf("binding running image for update: %w", err)
+	}
+	if isDispatchedTarget(target) {
+		physical, err := evalSymlinksFunc(os.Getenv(format.EnvOriginalExe))
+		if err != nil || filepath.Dir(physical) != directory {
+			return "", errors.Join(install.ErrChanged, err)
+		}
+		return physical, nil
+	}
+	physical, err := evalSymlinksFunc(target)
+	if err != nil || filepath.Dir(physical) != directory {
+		return "", errors.Join(install.ErrChanged, err)
+	}
+	running, err := os.Stat("/proc/self/exe")
+	if err != nil {
+		return "", err
+	}
+	current, err := os.Stat(physical)
+	if err != nil || !os.SameFile(running, current) {
+		return "", errors.Join(install.ErrChanged, err)
+	}
+	return physical, nil
+}
+
 func resolveDispatchedInstallationDirectory() (string, error) {
 	origExe := os.Getenv(format.EnvOriginalExe)
 	variant, actualSize, actualDigest, err := validateDispatchedPayloadEnvironment()

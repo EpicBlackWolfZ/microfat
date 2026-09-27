@@ -1,7 +1,7 @@
 # Installation ownership and companion discovery
 
 Schema 1 is implemented for the v0.3.0 verified Linux installer ([#203](https://github.com/EpicBlackWolfZ/microfat/issues/203)).
-The updater (#204) and Linux Homebrew integration (#205) remain separate work.
+The updater (#204) consumes this contract; Linux Homebrew integration (#205) remains separate work.
 See [installation](../installation.md) for commands and [release verification](../release-verification.md) for publisher trust.
 
 ## Managed layout
@@ -110,6 +110,27 @@ in the v0.3.0 CLI, not retroactively added to immutable historical executables.
 
 Installation copies authenticated executable bytes unchanged. Never run `strip`, `objcopy` or
 `install -s` on a packed CLI: rewriting an ELF can remove its payload index and trailer.
-Automatic generation garbage collection, package-manager adoption and updater policy are not part
-of schema 1. Future consumers must preserve the stable lock, ownership checks, retained-reader
+Automatic generation garbage collection and package-manager adoption are not part of schema 1. Future consumers must preserve the stable lock, ownership checks, retained-reader
 semantics and single activation pointer rather than replacing three files independently.
+
+## Updater consumer
+
+The v0.3.0 updater reads this schema without changing it. Read-only checks inspect both running and
+active generations without creating a lock. Mutation requires the recorded owner, all matching
+public links, valid product hashes, and a running generation equal to the active generation. Root
+updates additionally require `--system`; roots are derived from validated metadata, never from an
+updater destination override. Native execution is bound to the kernel's running inode; dispatched
+execution retains the outer-image/payload checks above.
+
+The updater captures its snapshot before release discovery/acquisition. Its existing-installation-only
+transaction never recreates removed roots or initializes ownership. Under the stable lock it rechecks
+root/owner identity, active generation metadata and hashes, and public links, including immediately
+before activation. A changed installation requires a fresh invocation. An identical healthy target
+is a no-op; explicit repair stays with the installer. Complete old generations remain available.
+
+External distributions can place a nonempty regular, non-symlink `microfat-distribution.json` beside
+the physical CLI. The schema is exactly `{"schema":1,"owner":"homebrew"}`; unknown fields, unsupported
+values, other-user writable files and inputs over 4096 bytes are rejected. This marker selects the
+fixed `brew upgrade microfat` guidance only. It cannot authorize installation writes, set a version,
+choose a target path, or provide a command to execute. #205 owns producing it and qualifying actual
+Homebrew layouts. Unmarked external installations are still refused by self-update.

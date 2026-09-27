@@ -15,4 +15,6 @@ IFS=$'\n\t'
 mount -t tmpfs -o noexec,nodev,nosuid,mode=1777 tmpfs "$1"
 runuser -u "$2" -- env "PATH=$4" "MICROFAT_TEST_NOEXEC_PARENT=$1" "$3" test -race -v \
     ./cmd/microfat-install -run '^TestBootstrapTrustBoundary/noexec-staging$' -count=1
+runuser -u "$2" -- env "PATH=$4" "MICROFAT_TEST_NOEXEC_PARENT=$1" "$3" test -race -v \
+    ./internal/update -run '^TestUpdateNoexecVerifier$' -count=1
 NAMESPACE

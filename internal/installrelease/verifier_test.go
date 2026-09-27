@@ -130,3 +130,19 @@ func TestCosignPublishedSignature(t *testing.T) {
 	require.NoError(t, os.WriteFile(modified, append(data, 'x'), fileMode))
 	require.Error(t, verifier.Verify(t.Context(), "0.2.4", modified, bundle))
 }
+
+func TestVerifierInterpreterExecutionDenied(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	interpreter := filepath.Join(directory, "non-executable-interpreter")
+	require.NoError(t, os.WriteFile(interpreter, []byte("trusted fixture interpreter"), 0o600))
+	path := filepath.Join(directory, "verifier")
+	data := []byte("#!" + interpreter + "\n")
+	require.NoError(t, os.WriteFile(path, data, 0o700))
+	digest := sha256.Sum256(data)
+	verifier := Cosign{Path: path, SHA256: hex.EncodeToString(digest[:])}
+	err := verifier.Verify(t.Context(), "0.3.0", "checksums.txt", "checksums.txt.sig")
+	require.ErrorIs(t, err, os.ErrPermission)
+	require.ErrorContains(t, err, "verifier execution denied")
+	require.ErrorContains(t, err, "--staging-dir")
+}

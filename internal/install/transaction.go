@@ -127,11 +127,15 @@ func openOperation(ctx context.Context, snapshot Snapshot) (*operation, error) {
 		return nil, err
 	}
 	var err error
-	op.store, op.storeInfo, err = openInstallRoot(snapshot.paths.Store, (*os.Root).Mkdir)
+	mkdir := mkdirFunc((*os.Root).Mkdir)
+	if snapshot.updateOnly {
+		mkdir = func(*os.Root, string, os.FileMode) error { return ErrChanged }
+	}
+	op.store, op.storeInfo, err = openInstallRoot(snapshot.paths.Store, mkdir)
 	if err != nil {
 		return nil, err
 	}
-	op.bin, op.binInfo, err = openInstallRoot(snapshot.paths.Bin, (*os.Root).Mkdir)
+	op.bin, op.binInfo, err = openInstallRoot(snapshot.paths.Bin, mkdir)
 	if err != nil {
 		op.close()
 		return nil, err
@@ -154,6 +158,9 @@ func openOperation(ctx context.Context, snapshot Snapshot) (*operation, error) {
 		if targetErr == nil && target != snapshot.currentTarget {
 			err = ErrChanged
 		}
+	}
+	if err == nil && snapshot.updateOnly {
+		err = op.checkUpdateSnapshot(snapshot)
 	}
 	if err != nil {
 		op.close()
@@ -304,6 +311,11 @@ func apply(ctx context.Context, snapshot Snapshot, generation Generation, source
 	}
 	if err := op.hook("before-activation"); err != nil {
 		return result, err
+	}
+	if snapshot.updateOnly {
+		if err := op.checkUpdateSnapshot(snapshot); err != nil {
+			return result, err
+		}
 	}
 	temporary := ".current-" + NewID()
 	if err := op.store.Symlink(filepath.Join(generationDir, generation.ID), temporary); err != nil {

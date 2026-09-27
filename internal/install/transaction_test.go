@@ -118,7 +118,8 @@ func TestInstallationLifecycle(t *testing.T) {
 func TestInterruptedInstallRecovery(t *testing.T) {
 	t.Parallel()
 	points := []string{"staged-microfat", "staged-microfat-stub", "staged-microfat-stub-minimal",
-		"generation-published", "before-activation", fixtureActivated, "linked-microfat", "linked-microfat-stub", "linked-microfat-stub-minimal"}
+		"generation-published", fixtureBeforeActivation, fixtureActivated,
+		"linked-microfat", "linked-microfat-stub", "linked-microfat-stub-minimal"}
 	for _, existing := range []bool{false, true} {
 		for _, point := range points {
 			t.Run(point+"/existing="+map[bool]string{false: "no", true: "yes"}[existing], func(t *testing.T) {

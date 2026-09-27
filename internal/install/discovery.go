@@ -55,6 +55,10 @@ func ValidateDiscovery(original, physical string) (bool, error) {
 }
 
 func validateDiscoveryGeneration(physical string) error {
+	return inspectDiscoveryGeneration(physical, nil)
+}
+
+func inspectDiscoveryGeneration(physical string, inspect func(*os.Root, Owner, Generation) error) error {
 	dir := filepath.Dir(physical)
 	store := filepath.Dir(filepath.Dir(dir))
 	if err := validateAncestors(dir, false); err != nil {
@@ -98,6 +102,9 @@ func validateDiscoveryGeneration(physical string) error {
 		if err := verifyFileForUID(root, filepath.Join(generationDir, generation.ID, name), generation.Files[name], uid); err != nil {
 			return err
 		}
+	}
+	if inspect != nil {
+		return inspect(root, owner, generation)
 	}
 	return nil
 }

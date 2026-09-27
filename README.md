@@ -49,6 +49,14 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 
 ---
 
+### Checking for updates
+
+Starting with v0.3.0, `microfat update --check` reports the latest stable release without changing
+the installation. Use `microfat update` to authenticate and apply an update to an installer-owned
+installation, or `brew upgrade microfat` for Homebrew. Ordinary commands never check in the background.
+See [update options and recovery](docs/installation.md#explicit-release-checks-and-updates).
+
+
 ## Quick Start
 
 ### 1. Installation

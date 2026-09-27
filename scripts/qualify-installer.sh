@@ -61,6 +61,20 @@ for version in "${versions[@]}"; do
                 "${private}/packed-${mode}-${profile}" --helper-version
         done
     done
+    if [[ -n ${candidate} && ${version} == "${candidate}" ]]; then
+        # Execute the updater inside externally authenticated candidate bytes.
+        # Historical CLIs have no update command; restore with the trusted helper.
+        for mode in memfd cache; do
+            PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" MICROFAT_EXEC_MODE="${mode}" \
+                "${bin}/microfat" update --check --version 0.2.5 --json \
+                > "${output}/updater-${mode}-check.json"
+            PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" MICROFAT_EXEC_MODE="${mode}" \
+                "${bin}/microfat" update --version 0.2.5 --allow-downgrade \
+                --cosign "${cosign}" --cosign-sha256 "${pin}" --staging-dir "${private}" --json \
+                > "${output}/updater-${mode}-signed-downgrade.json"
+            PATH=/nonexistent HOME="${fixture_home}" XDG_DATA_HOME='' "${helper}" "${common[@]}" "${args[@]}"
+        done
+    fi
 done
 PATH=/nonexistent HOME="${fixture_home}" XDG_DATA_HOME='' "${helper}" --uninstall
 [[ ! -e "${fixture_home}/.local/bin/microfat" && ! -L "${fixture_home}/.local/bin/microfat" ]]
