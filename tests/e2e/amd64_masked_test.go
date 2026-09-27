@@ -40,7 +40,7 @@ func TestMaskedLAHFSAHFDispatch(t *testing.T) {
 			stub := stubPath
 			if profile == "minimal" {
 				stub = filepath.Join(dir, "minimal")
-				require.NoError(t, compileBinaryWithFlags(stubPackagePath, stub, []string{"GOAMD64=v1"}, "-tags=minimal"))
+				require.NoError(t, compileBinaryWithFlags(stubPackagePath, stub, []string{envBaselineAMD64}, "-tags=minimal"))
 			}
 			fat := filepath.Join(dir, "fat")
 			require.NoError(t, packBinary(cliPath, stub, "masked-cpuid", fat, goldenVariantBins))

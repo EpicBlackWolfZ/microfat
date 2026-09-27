@@ -54,6 +54,10 @@ func rootInfo(name string) (os.FileInfo, error) {
 }
 
 func readJSON(root *os.Root, name string, dest any) error {
+	return readJSONForUID(root, name, dest, os.Geteuid())
+}
+
+func readJSONForUID(root *os.Root, name string, dest any, uid int) error {
 	file, err := root.OpenFile(name, readFlags(), 0)
 	if err != nil {
 		return err
@@ -63,7 +67,7 @@ func readJSON(root *os.Root, name string, dest any) error {
 	if err != nil {
 		return err
 	}
-	if err := validateInfo(info, false, true); err != nil {
+	if err := validateReadInfo(info, false, uid); err != nil {
 		return err
 	}
 	if info.Size() > metadataLimit {
@@ -121,6 +125,10 @@ func readOwner(root *os.Root, paths Paths) (*Owner, error) {
 }
 
 func readGeneration(root *os.Root, id string) (Generation, error) {
+	return readGenerationForUID(root, id, os.Geteuid())
+}
+
+func readGenerationForUID(root *os.Root, id string, uid int) (Generation, error) {
 	var generation Generation
 	if !idPattern.MatchString(id) {
 		return generation, ErrOwnership
@@ -130,10 +138,10 @@ func readGeneration(root *os.Root, id string) (Generation, error) {
 	if err != nil {
 		return generation, err
 	}
-	if err := validateInfo(info, true, true); err != nil {
+	if err := validateReadInfo(info, true, uid); err != nil {
 		return generation, err
 	}
-	if err := readJSON(root, filepath.Join(name, generationFile), &generation); err != nil {
+	if err := readJSONForUID(root, filepath.Join(name, generationFile), &generation, uid); err != nil {
 		return generation, err
 	}
 	if err := generation.Validate(); err != nil {
@@ -165,6 +173,10 @@ func activeGeneration(root *os.Root) (Generation, error) {
 }
 
 func verifyFile(root *os.Root, name string, expected File) error {
+	return verifyFileForUID(root, name, expected, os.Geteuid())
+}
+
+func verifyFileForUID(root *os.Root, name string, expected File, uid int) error {
 	file, err := root.OpenFile(name, readFlags(), 0)
 	if err != nil {
 		return err
@@ -174,7 +186,7 @@ func verifyFile(root *os.Root, name string, expected File) error {
 	if err != nil {
 		return err
 	}
-	if err := validateInfo(info, false, true); err != nil {
+	if err := validateReadInfo(info, false, uid); err != nil {
 		return err
 	}
 	if info.Size() != expected.Size || info.Mode().Perm() != directoryMode {

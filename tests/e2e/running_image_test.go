@@ -68,7 +68,7 @@ func TestRunningImageSurvivesDeploymentChange(t *testing.T) {
 			stub := stubPath
 			if profile == launcherMinimalProfile {
 				stub = filepath.Join(dir, launcherMinimalProfile)
-				require.NoError(t, compileBinaryWithFlags(stubPackagePath, stub, []string{"GOAMD64=v1"}, "-tags=minimal"))
+				require.NoError(t, compileBinaryWithFlags(stubPackagePath, stub, []string{envBaselineAMD64}, "-tags=minimal"))
 			}
 			old := filepath.Join(dir, "old-fat")
 			newer := filepath.Join(dir, "new-fat")

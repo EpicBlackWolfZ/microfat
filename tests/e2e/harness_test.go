@@ -28,6 +28,8 @@ import (
 )
 
 const (
+	envBaselineAMD64                  = "GOAMD64=v1"
+	execModeNative                    = "native"
 	archAMD64                         = "amd64"
 	archARM64                         = "arm64"
 	envDebugTrue                      = "MICROFAT_DEBUG=1"
@@ -126,7 +128,7 @@ func runSetupAndExecute(m *testing.M) int {
 
 	// 3. Compile microfat-stub
 	stubPath = filepath.Join(e2eRootDir, "microfat-stub")
-	stubEnv := []string{"GOAMD64=v1", "GOARM64=v8.0"}
+	stubEnv := []string{envBaselineAMD64, "GOARM64=v8.0"}
 	if err := compileBinary(stubPackagePath, stubPath, stubEnv); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to compile microfat-stub: %v\n", err)
 		return 1

@@ -39,13 +39,13 @@ func TestPackedCLIBenchmarkHelpers(t *testing.T) {
 	nativeBytes, err := os.ReadFile(cliPath)
 	require.NoError(t, err)
 	wantHarness := fmt.Sprintf("%x", sha256.Sum256(nativeBytes))
-	for _, mode := range []string{"auto", format.ExecModeMemfd, format.ExecModeCache, "native"} {
+	for _, mode := range []string{"auto", format.ExecModeMemfd, format.ExecModeCache, execModeNative} {
 		t.Run(mode, func(t *testing.T) {
 			const timeout = 2 * time.Minute
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 			binary := packed
-			if mode == "native" {
+			if mode == execModeNative {
 				binary = cliPath
 			}
 			cmd := exec.CommandContext(ctx, binary, "benchmark", "run", "--config", config,

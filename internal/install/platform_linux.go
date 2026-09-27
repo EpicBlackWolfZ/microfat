@@ -14,6 +14,13 @@ import (
 const lockPoll = 20 * time.Millisecond
 const lockTimeout = 10 * time.Second
 
+func fileUID(info os.FileInfo) int {
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+		return int(stat.Uid)
+	}
+	return -1
+}
+
 func readFlags() int  { return os.O_RDONLY | unix.O_NOFOLLOW | unix.O_NONBLOCK }
 func writeFlags() int { return os.O_WRONLY | os.O_CREATE | os.O_EXCL | unix.O_NOFOLLOW }
 

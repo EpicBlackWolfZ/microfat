@@ -59,7 +59,7 @@ func TestPathsAndGenerationValidation(t *testing.T) {
 func TestRejectsUnsafeRootsAndOwnership(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{fixtureSymlink, "regular", "writable", "store-symlink", "unclaimed", "owner-schema", "owner-id",
-		"owner-kind", "owner-uid", "owner-bin", "owner-store", "owner-null", "owner-unknown", "owner-duplicate", "owner-trailing",
+		"owner-kind", fixtureOwnerUID, "owner-bin", "owner-store", "owner-null", "owner-unknown", "owner-duplicate", "owner-trailing",
 		"owner-oversize", "owner-hardlink", "owner-fifo", "owner-writable"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -93,7 +93,7 @@ func TestRejectsUnsafeRootsAndOwnership(t *testing.T) {
 					owner.ID = "bad"
 				case "owner-kind":
 					owner.Kind = "homebrew"
-				case "owner-uid":
+				case fixtureOwnerUID:
 					owner.UID++
 				case "owner-bin":
 					owner.Bin = "/unrelated"
@@ -118,7 +118,7 @@ func TestRejectsUnsafeRootsAndOwnership(t *testing.T) {
 					require.NoError(t, os.Chmod(path, 0o666))
 				}
 				if name == "owner-schema" || name == "owner-id" || name == "owner-kind" ||
-					name == "owner-uid" || name == "owner-bin" || name == "owner-store" {
+					name == fixtureOwnerUID || name == "owner-bin" || name == "owner-store" {
 					rewriteJSON(t, path, owner)
 				}
 			}
