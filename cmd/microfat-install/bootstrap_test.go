@@ -155,7 +155,15 @@ esac
 // Use a real noexec mount when the host provides one; never change mount policy.
 func noexecStaging(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/dev/shm", "microfat-noexec-*")
+	parent := os.Getenv("MICROFAT_TEST_NOEXEC_PARENT")
+	required := parent != ""
+	if !required {
+		parent = "/dev/shm"
+	}
+	dir, err := os.MkdirTemp(parent, "microfat-noexec-*")
+	if required {
+		require.NoError(t, err, "required noexec fixture is unavailable")
+	}
 	if err != nil {
 		t.Skip("no shared-memory fixture directory available")
 	}
@@ -163,6 +171,9 @@ func noexecStaging(t *testing.T) string {
 	probe := filepath.Join(dir, "probe")
 	require.NoError(t, os.WriteFile(probe, []byte("#!/bin/sh\nexit 0\n"), 0o700))
 	err = exec.CommandContext(t.Context(), probe).Run()
+	if required {
+		require.ErrorIs(t, err, os.ErrPermission, "required fixture must reject executable files")
+	}
 	if !errors.Is(err, os.ErrPermission) {
 		t.Skip("shared-memory fixture mount does not reject executable files")
 	}
