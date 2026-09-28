@@ -373,6 +373,9 @@ The launcher reads its kernel-held image, so startup continues with the original
 
 `MICROFAT_ORIGINAL_EXE` is inherited environment data and `runtimeinit.Executable()` does not authenticate it. Neither is an identity, authorization token, or authority to overwrite a deployment. See [replacement and deliberate re-exec choices](troubleshooting.md#9-executable-paths-assets-and-deliberate-re-exec) and [transformation guards](lifecycle-modes.md#4-symlinks--atomic-in-place-operations).
 
+For bind mounts, read-only roots and chroots, see the [mount-layout contract and native qualification](mount-layouts.md).
+The payload image, informational pathname and visible sibling assets are checked separately.
+
 ---
 
 ## 7. Diagnostics, Telemetry & Observability
