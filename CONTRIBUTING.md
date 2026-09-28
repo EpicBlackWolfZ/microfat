@@ -111,6 +111,9 @@ Native amd64/arm64 mount qualification runs in a separate required stage using
 `task qualify-mounts MOUNT_TESTS=required MOUNT_BACKEND=sudo`. Locally,
 `task qualify-mounts` uses rootless namespaces and records prerequisite skips explicitly.
 See [mount layouts and replay](docs/mount-layouts.md) for the matrix and evidence format.
+ARM64 QEMU qualification has its own required amd64 job. Run `task qualify-qemu` locally
+or `task qualify-qemu QEMU_TESTS=required` to require all prerequisites. See the
+[QEMU guide](docs/qemu-qualification.md) for isolation, controls and evidence interpretation.
 The full local and release commands retain their existing complete test and coverage scope.
 
 ### Code Coverage Architecture & Codecov Integration

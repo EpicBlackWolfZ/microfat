@@ -89,7 +89,7 @@ func TestWorkflowDependencyContract(t *testing.T) {
 	assert.ElementsMatch(t, []string{"pr-lint", "lint", "gitleaks", "vulncheck"}, needs(t, w.Jobs["test"]))
 	assert.Empty(t, w.Jobs["pr-lint"].If, "title job must succeed explicitly for non-PR events")
 	for _, name := range []string{
-		"integration", "dx", "build", "benchmark-smoke", "kernel", "codeql", "archive-contracts", "installer", "mounts",
+		"integration", "dx", "build", "benchmark-smoke", "kernel", "codeql", "archive-contracts", "installer", "mounts", "qemu",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -22,6 +23,7 @@ var identity = "original"
 
 const (
 	startupFD       = 3
+	tokenArgIndex   = 2
 	inputLimit      = 4096
 	payloadExitCode = 42
 	privateFileMode = 0o600
@@ -44,7 +46,8 @@ func main() {
 	}
 	if len(os.Args) > 1 && (os.Args[1] == "--hang" || os.Args[1] == "--spawn-detached") {
 		if os.Args[1] == "--spawn-detached" {
-			cmd := exec.Command("/proc/self/exe", "--detached-child")
+			// #nosec G204 G702 -- fixed fixture executable; arguments only propagate the cleanup identity token.
+			cmd := exec.Command("/proc/self/exe", append([]string{"--detached-child"}, os.Args[tokenArgIndex:]...)...)
 			cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 			if err := cmd.Start(); err != nil {
@@ -57,6 +60,10 @@ func main() {
 	r := mountfixture.Report{Identity: identity, PID: os.Getpid(), UID: os.Getuid(), EUID: os.Geteuid(),
 		GID: os.Getgid(), EGID: os.Getegid(), Args: os.Args, Environment: os.Getenv("MOUNT_SENTINEL"),
 		Mode: os.Getenv("MICROFAT_EXEC_MODE"), Original: os.Getenv("MICROFAT_ORIGINAL_EXE"), Errors: map[string]string{}}
+	if fd, err := strconv.Atoi(os.Getenv("QEMU_PROBE_FD")); err == nil && fd > startupFD {
+		// Observe before opening any other descriptors, which could reuse the closed number.
+		r.ProbeFDTarget, _ = os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
+	}
 	record := func(key string, err error) {
 		if err != nil {
 			r.Errors[key] = err.Error()
@@ -94,6 +101,9 @@ func main() {
 		if strings.HasPrefix(line, "CapEff:") {
 			r.Capabilities = strings.TrimSpace(strings.TrimPrefix(line, "CapEff:"))
 		}
+		if strings.HasPrefix(line, "NoNewPrivs:") {
+			r.NoNewPrivileges = strings.TrimSpace(strings.TrimPrefix(line, "NoNewPrivs:"))
+		}
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(r); err != nil {
 		panic(err)
@@ -108,7 +118,11 @@ func hang(path string) {
 	if err != nil {
 		panic(err)
 	}
-	data, err := json.Marshal(mountfixture.Process{PID: os.Getpid(), Namespace: namespace})
+	var token string
+	if len(os.Args) > tokenArgIndex {
+		token = os.Args[tokenArgIndex]
+	}
+	data, err := json.Marshal(mountfixture.Process{PID: os.Getpid(), Namespace: namespace, Token: token})
 	if err != nil {
 		panic(err)
 	}

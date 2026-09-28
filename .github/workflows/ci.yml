@@ -125,7 +125,7 @@ jobs:
         with:
           version: v2.13.2
           install-mode: binary
-          args: --timeout=5m ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture
+          args: --timeout=5m ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner
 
   test:
     name: Unit Tests & Coverage Gate (>= 95%)
@@ -570,6 +570,39 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  qemu:
+    name: ARM64 QEMU descriptor qualification
+    needs: [lint, test]
+    if: needs.lint.outputs.run-code-checks == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        with:
+          version: '3.53.1'
+      - name: Extract authenticated static emulator without installing handlers
+        run: bash scripts/acquire-qemu.sh .work/qemu-tool
+      - name: Require isolated F-only controls and launcher matrix
+        run: task qualify-qemu QEMU_TESTS=required QEMU_BACKEND=sudo QEMU_AARCH64="$PWD/.work/qemu-tool/qemu-aarch64-static"
+      - name: Preserve emulator and qualification evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qemu-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .work/qemu-qualification/
+            .work/qemu-tool/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
   integration:
     name: Integration, Chaos and Fuzz Smoke
     needs: [lint, test]
@@ -645,7 +678,7 @@ jobs:
   complete:
     name: CI Complete
     if: always()
-    needs: [pr-lint, lint, gitleaks, vulncheck, test, integration, dx, build, benchmark-smoke, kernel, codeql, archive-contracts, installer, mounts]
+    needs: [pr-lint, lint, gitleaks, vulncheck, test, integration, dx, build, benchmark-smoke, kernel, codeql, archive-contracts, installer, mounts, qemu]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

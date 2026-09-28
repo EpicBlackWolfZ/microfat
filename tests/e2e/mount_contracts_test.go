@@ -56,7 +56,7 @@ func TestMountHarnessContracts(t *testing.T) {
 	dir := t.TempDir()
 	controller := filepath.Join(dir, "controller")
 	reporter := filepath.Join(dir, "reporter")
-	env := []string{"CGO_ENABLED=0", envBaselineAMD64, stubEnvARM64}
+	env := []string{envStatic, envBaselineAMD64, stubEnvARM64}
 	require.NoError(t, compileBinary("./testdata/mount_runner", controller, env))
 	require.NoError(t, compileBinary("./testdata/mount_reporter", reporter, env))
 	p := mountProducts{controller: controller, reporter: reporter, replacement: reporter}
