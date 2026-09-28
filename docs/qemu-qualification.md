@@ -64,7 +64,9 @@ Prerequisites are native Linux amd64, the repository's Go 1.27.1 and Task 3.53.1
 a static native `qemu-aarch64-static`, util-linux `unshare`, and kernel support for
 user, mount and PID namespaces with user-namespace-owned `binfmt_misc`. Standard
 Git, tar and Bash are used to retain source changes and logs. The explicit sudo
-backend additionally uses `setpriv` and util-linux's UID/GID range mapping options.
+backend additionally uses `setpriv` and a native test bootstrap that writes exact
+root/ordinary-user UID/GID maps through Go's process API. It does not depend on
+`newuidmap` grants or change host subordinate-ID configuration.
 
 ```bash
 task qualify-qemu

@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,18 @@ import (
 )
 
 const qemuControllerTimeout = 45 * time.Second
+
+var qemuSupervisorOnce sync.Once
+var qemuSupervisorError error
+
+func qemuSupervisorPath() string { return filepath.Join(e2eRootDir, "userns-runner") }
+
+func buildQemuSupervisor() error {
+	qemuSupervisorOnce.Do(func() {
+		qemuSupervisorError = compileBinary("./testdata/userns_runner", qemuSupervisorPath(), []string{envStatic})
+	})
+	return qemuSupervisorError
+}
 
 type qemuProducts struct {
 	mountProducts
@@ -38,9 +51,8 @@ func qemuNamespaceCommand(backend string, command ...string) []string {
 	}
 	// Clear supplementary groups before setgroups is disabled by userns mapping.
 	// Keep root for setup plus exactly the ordinary payload UID/GID.
-	args := []string{mountSudo, "-n", "--", "setpriv", "--clear-groups", mountUnshare,
-		"--user", "--map-root-user", "--map-users=" + strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getuid()) + ":1",
-		"--map-groups=" + strconv.Itoa(os.Getgid()) + ":" + strconv.Itoa(os.Getgid()) + ":1",
+	args := []string{mountSudo, "-n", "--", "setpriv", "--clear-groups", qemuSupervisorPath(),
+		strconv.Itoa(os.Getuid()), strconv.Itoa(os.Getgid()), mountUnshare,
 		"--mount", "--pid", "--fork", "--kill-child=SIGKILL", "--mount-proc", "--propagation", "private", "--"}
 	return append(args, command...)
 }
@@ -48,6 +60,11 @@ func qemuNamespaceCommand(backend string, command ...string) []string {
 func qemuPrerequisite(backend string) (string, error) {
 	if runtime.GOARCH != archAMD64 || os.Getuid() == 0 || os.Getgid() == 0 {
 		return "qualification requires an ordinary user on native Linux amd64", nil
+	}
+	if backend == mountSudo {
+		if err := buildQemuSupervisor(); err != nil {
+			return "", err
+		}
 	}
 	args := qemuNamespaceCommand(backend, "true")
 	ctx, cancel := context.WithTimeout(context.Background(), mountTimeout)
@@ -74,6 +91,8 @@ func classifyQemuPrerequisite(output string, err error) (string, error) {
 func buildQemuProducts(t *testing.T, output, emulator string) qemuProducts {
 	t.Helper()
 	native := buildMountProducts(t, filepath.Join(output, "native"))
+	require.NoError(t, buildQemuSupervisor())
+	mountCopy(t, output, "native/userns-runner", qemuSupervisorPath())
 	dir := filepath.Join(output, "products")
 	require.NoError(t, os.MkdirAll(dir, privateDirPerm))
 	p := qemuProducts{mountProducts: mountProducts{controller: native.controller, cli: native.cli,
@@ -89,10 +108,10 @@ func buildQemuProducts(t *testing.T, output, emulator string) qemuProducts {
 		{stubPackagePath, p.minimal, "-tags=minimal"},
 	} {
 		require.NoError(t, compileBinaryWithFlags(item.pkg, item.out,
-			[]string{"CGO_ENABLED=0", "GOOS=linux", "GOARCH=arm64", stubEnvARM64}, item.flags))
+			[]string{envStatic, "GOOS=linux", "GOARCH=arm64", stubEnvARM64}, item.flags))
 	}
 	require.NoError(t, compileBinary("./testdata/descriptor_probe", p.nativeProbe,
-		[]string{"CGO_ENABLED=0", "GOARCH=amd64", envBaselineAMD64}))
+		[]string{envStatic, "GOARCH=amd64", envBaselineAMD64}))
 	p.digest = mountDigest(t, p.reporter)
 	return p
 }
@@ -182,6 +201,7 @@ func TestQemuQualification(t *testing.T) {
 	}
 	h.save(t)
 	h.products = buildQemuProducts(t, output, emulator)
+	h.summary.Products["native/userns-runner"] = mountDigest(t, qemuSupervisorPath())
 	require.Equal(t, h.summary.EmulatorSHA256, mountDigest(t, h.products.emulator), "emulator changed while staging")
 	for _, path := range []string{h.products.controller, h.products.cli, h.products.reporter, h.products.full, h.products.minimal,
 		h.products.probe, h.products.nativeProbe, h.products.nativeReporter, h.products.emulator} {

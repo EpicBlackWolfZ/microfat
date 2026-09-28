@@ -262,7 +262,7 @@ tasks:
     cmds:
     - |-
       {{.TASK_ENV}}
-      golangci-lint run ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe
+      golangci-lint run ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner
   lint-shell:
     desc: Run ShellCheck v0.11.0 on all tracked shell scripts
     preconditions:

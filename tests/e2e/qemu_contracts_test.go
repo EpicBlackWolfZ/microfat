@@ -142,6 +142,16 @@ func TestQemuRegistrationContracts(t *testing.T) {
 	}
 }
 
+func TestQemuPrivilegedBootstrapRefusesOrdinaryCredentials(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires ordinary credentials")
+	}
+	require.NoError(t, buildQemuSupervisor())
+	out, err := exec.Command(qemuSupervisorPath(), "1000", "1000", "true").CombinedOutput()
+	require.Error(t, err)
+	require.Contains(t, string(out), "requires explicit privileged setup")
+}
+
 func TestQemuHarnessContracts(t *testing.T) {
 	t.Run("missing-tool", func(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())

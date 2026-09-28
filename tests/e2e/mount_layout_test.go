@@ -278,7 +278,7 @@ func buildMountProducts(t *testing.T, dir string) mountProducts {
 	p := mountProducts{controller: filepath.Join(dir, "mount-runner"), reporter: filepath.Join(dir, "reporter"),
 		replacement: filepath.Join(dir, "replacement"), cli: filepath.Join(dir, "microfat"),
 		full: filepath.Join(dir, "microfat-stub"), minimal: filepath.Join(dir, "microfat-stub-minimal")}
-	env := []string{"CGO_ENABLED=0", envBaselineAMD64, stubEnvARM64}
+	env := []string{envStatic, envBaselineAMD64, stubEnvARM64}
 	for _, item := range []struct{ pkg, out, flags string }{
 		{"./testdata/mount_runner", p.controller, "-ldflags=-s -w"},
 		{"./testdata/mount_reporter", p.reporter, "-ldflags=-s -w"},

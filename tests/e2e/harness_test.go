@@ -29,6 +29,7 @@ import (
 
 const (
 	envBaselineAMD64                  = "GOAMD64=v1"
+	envStatic                         = "CGO_ENABLED=0"
 	execModeNative                    = "native"
 	archAMD64                         = "amd64"
 	archARM64                         = "arm64"
