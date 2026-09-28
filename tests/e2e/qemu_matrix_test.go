@@ -21,9 +21,9 @@ func (h *qemuHarness) controls(t *testing.T) {
 			if name == "explicit-qemu" {
 				req.Command, req.Args = "/emulator", append([]string{mountPayloadPath}, req.Args...)
 			}
-			entry := qemuEntry("controls/"+name, qemuSuccess, req)
+			entry := qemuEntry("controls/"+name, qemuSuccess, h.products.digest, req)
 			h.run(t, &entry, func(run mountfixture.Execution) {
-				assertQemuPayload(t, req, run, h.products.digest, mountPayloadPath)
+				assertQemuPayload(t, req, run, entry.PayloadSHA256, mountPayloadPath)
 			})
 		})
 	}
@@ -48,13 +48,14 @@ func (h *qemuHarness) descriptorControl(t *testing.T, storage, policy string, na
 		outcome = qemuSuccess
 	}
 	req.Command, req.Args = probe, append([]string{payload, storage, policy}, req.Args...)
-	entry := qemuEntry(strings.Join([]string{"controls", arch, storage, policy}, "/"), outcome, req)
+	entry := qemuEntry(strings.Join([]string{"controls", arch, storage, policy}, "/"), outcome, digest, req)
 	h.run(t, &entry, func(run mountfixture.Execution) {
 		record, err := qemuProbeRecord(run.Stderr)
 		require.NoError(t, err, run.Stderr)
 		entry.Probe = &record
 		require.Equal(t, run.PID, record.PID)
 		require.Equal(t, digest, record.Digest)
+		require.Equal(t, record.Digest, entry.PayloadSHA256, "evidence must identify the payload selected by this control")
 		require.Equal(t, storage, record.Storage)
 		require.Greater(t, record.FD, 3)
 		require.NotEmpty(t, record.Target)
@@ -68,15 +69,14 @@ func (h *qemuHarness) descriptorControl(t *testing.T, storage, policy string, na
 			require.Equal(t, seals, record.Seals)
 		}
 		if outcome == qemuLimitation {
-			require.Greater(t, run.ExitCode, 0, run.Stderr)
-			require.Empty(t, run.Started, run.Stdout)
+			require.NoError(t, validateQemuFailure(run), run.Stderr)
 			return
 		}
 		argv0 := payload
 		if !native {
 			argv0 = "/proc/self/fd/" + strconv.Itoa(record.FD)
 		}
-		report := assertQemuPayload(t, req, run, digest, argv0)
+		report := assertQemuPayload(t, req, run, entry.PayloadSHA256, argv0)
 		if native {
 			require.NotEqual(t, record.Target, report.ProbeFDTarget, "original descriptor must close; its number may be reused")
 		} else {
@@ -101,7 +101,7 @@ func (h *qemuHarness) matrix(t *testing.T, c mountConfiguration) {
 				}
 				req = cacheReq
 			}
-			entry := qemuEntry(c.name()+"/"+mode, qemuLimitation, req)
+			entry := qemuEntry(c.name()+"/"+mode, qemuLimitation, h.products.digest, req)
 			entry.Configuration = c
 			info, err := os.Stat(h.products.reporter)
 			require.NoError(t, err)
@@ -110,7 +110,7 @@ func (h *qemuHarness) matrix(t *testing.T, c mountConfiguration) {
 			}
 			h.run(t, &entry, func(run mountfixture.Execution) {
 				var err error
-				entry.Dispatch, err = qemuLimitationResult(run, h.products.digest, dispatch, info.Size())
+				entry.Dispatch, err = qemuLimitationResult(run, entry.PayloadSHA256, dispatch, info.Size())
 				require.NoError(t, err, "%s\n%s", run.Stdout, run.Stderr)
 				if dispatch == execModeMemfd {
 					require.Empty(t, entry.CacheBefore)
@@ -146,7 +146,7 @@ func (h *qemuHarness) lifecycle(t *testing.T, c mountConfiguration) {
 	if c.Profile == launcherMinimalProfile {
 		outcome = qemuMinimal
 	}
-	entry := qemuEntry(c.name()+"/lifecycle", outcome, req)
+	entry := qemuEntry(c.name()+"/lifecycle", outcome, h.products.digest, req)
 	entry.Configuration = c
 	h.run(t, &entry, func(run mountfixture.Execution) {
 		require.Empty(t, run.Started)

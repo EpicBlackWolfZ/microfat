@@ -111,7 +111,9 @@ cleanup results, including detached descendants.
 A passing case with outcome `expected-descriptor-limitation` means that the
 limitation was reproduced. **It does not mean the payload ran successfully.**
 Classification requires successful independent controls, a verified product and
-correct dispatch telemetry before a normal nonzero exit without payload startup.
+correct dispatch telemetry before exit 1 without payload startup or stdout. Stderr
+must contain exactly the expected pre-exec telemetry record; extra diagnostics,
+including panics and runtime failures, invalidate launcher and probe observations.
 Arbitrary failures are not accepted as reproductions. Unexpected success requires
 review of the changed compatibility contract rather than automatic acceptance.
 

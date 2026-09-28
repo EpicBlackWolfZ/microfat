@@ -72,6 +72,61 @@ func TestQemuOutcomeContracts(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestQemuFailureSignatures(t *testing.T) {
+	t.Parallel()
+	const digest = "expected-image"
+	const size = 123
+	const panicExitCode = 2
+	for _, kind := range []string{"launcher", "probe"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			prefix := "[microfat] "
+			var record any = qemuDispatch{Event: "dispatch", Digest: digest, Size: size, Mode: execModeMemfd}
+			if kind == "probe" {
+				prefix, record = qemuProbePrefix, mountfixture.DescriptorProbe{Event: "before-exec"}
+			}
+			data, err := json.Marshal(record)
+			require.NoError(t, err)
+			for _, tc := range []struct {
+				name, before, after, stdout, started string
+				exit                                 int
+				valid                                bool
+			}{
+				{name: "qualified-failure", after: "\n", exit: qemuFailureExit, valid: true},
+				{name: "no-final-newline", exit: qemuFailureExit, valid: true},
+				{name: "success", exit: 0},
+				{name: "signal", exit: -1},
+				{name: "unexpected-exit", exit: expectedExitCode42},
+				{name: "panic-after-telemetry", after: "\npanic: post-dispatch failure\n", exit: panicExitCode},
+				{name: "fatal-before-telemetry", before: "fatal error: runtime failure\n", exit: qemuFailureExit},
+				{name: "diagnostic-after-telemetry", after: "\nqemu: unrelated failure\n", exit: qemuFailureExit},
+				{name: "same-line-diagnostic", after: " unexpected diagnostic", exit: qemuFailureExit},
+				{name: "extra-record", after: "\n" + prefix + string(data), exit: qemuFailureExit},
+				{name: "stdout", stdout: "unexpected output", exit: qemuFailureExit},
+				{name: "payload-started", started: mountStartup, exit: qemuFailureExit},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					run := mountfixture.Execution{ExitCode: tc.exit, Started: tc.started, Stdout: tc.stdout,
+						Stderr: tc.before + prefix + string(data) + tc.after}
+					var err error
+					if kind == "probe" {
+						_, err = qemuProbeRecord(run.Stderr)
+						err = errors.Join(err, validateQemuFailure(run))
+					} else {
+						_, err = qemuLimitationResult(run, digest, execModeMemfd, size)
+					}
+					if tc.valid {
+						require.NoError(t, err)
+					} else {
+						require.Error(t, err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestQemuEvidenceCompleteness(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"complete", "missing", qemuDuplicate, qemuUnknown, "skip", "failed", "no-outcome", "wrong-outcome"} {

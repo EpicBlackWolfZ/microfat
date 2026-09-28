@@ -37,6 +37,7 @@ const (
 	qemuCloexec     = "cloexec"
 	qemuHandler     = "microfat-qemu-arm64"
 	qemuProbePrefix = "[qemu-probe] "
+	qemuFailureExit = 1
 )
 
 type qemuDispatch struct {
@@ -167,37 +168,42 @@ func qemuParentBinfmt(t *testing.T) map[string]string {
 }
 
 func qemuLimitationResult(run mountfixture.Execution, digest, mode string, size int64) (*qemuDispatch, error) {
-	if run.ExitCode <= 0 || run.Started != "" {
-		return nil, errors.New("expected normal nonzero exit before payload startup")
+	if err := validateQemuFailure(run); err != nil {
+		return nil, err
 	}
-	var dispatch *qemuDispatch
-	for line := range strings.SplitSeq(run.Stderr, "\n") {
-		if data, ok := strings.CutPrefix(line, "[microfat] "); ok {
-			var record qemuDispatch
-			if err := json.Unmarshal([]byte(data), &record); err != nil || record.Event != "dispatch" || dispatch != nil {
-				return nil, errors.New("invalid, duplicate or error launcher telemetry")
-			}
-			dispatch = &record
-		}
+	var dispatch qemuDispatch
+	if err := decodeQemuTelemetry(run.Stderr, "[microfat] ", &dispatch); err != nil {
+		return nil, err
 	}
-	if dispatch == nil || dispatch.Digest != digest || dispatch.Size != size || dispatch.Mode != mode {
+	if dispatch.Event != "dispatch" || dispatch.Digest != digest || dispatch.Size != size || dispatch.Mode != mode {
 		return nil, errors.New("missing or incorrect verified dispatch telemetry")
 	}
-	return dispatch, nil
+	return &dispatch, nil
+}
+
+func validateQemuFailure(run mountfixture.Execution) error {
+	if run.ExitCode != qemuFailureExit || run.Started != "" || run.Stdout != "" {
+		return errors.New("expected QEMU exit 1 without payload startup or stdout")
+	}
+	return nil
+}
+
+func decodeQemuTelemetry(stderr, prefix string, record any) error {
+	// The qualified interpreter failure is silent. Only the single pre-exec
+	// record is allowed; a panic or other diagnostic must never count as it.
+	data, ok := strings.CutPrefix(strings.TrimSuffix(stderr, "\n"), prefix)
+	if !ok || strings.ContainsRune(data, '\n') {
+		return errors.New("expected exactly one telemetry record without additional diagnostics")
+	}
+	return json.Unmarshal([]byte(data), record)
 }
 
 func qemuProbeRecord(stderr string) (mountfixture.DescriptorProbe, error) {
 	var result mountfixture.DescriptorProbe
-	count := 0
-	for line := range strings.SplitSeq(stderr, "\n") {
-		if data, ok := strings.CutPrefix(line, qemuProbePrefix); ok {
-			count++
-			if err := json.Unmarshal([]byte(data), &result); err != nil {
-				return result, err
-			}
-		}
+	if err := decodeQemuTelemetry(stderr, qemuProbePrefix, &result); err != nil {
+		return result, err
 	}
-	if count != 1 || result.Event != "before-exec" || result.Error != "" {
+	if result.Event != "before-exec" || result.Error != "" {
 		return result, errors.New("probe did not reach exec exactly once or exec returned")
 	}
 	return result, nil

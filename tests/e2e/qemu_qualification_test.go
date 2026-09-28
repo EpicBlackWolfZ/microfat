@@ -254,7 +254,7 @@ func TestQemuQualification(t *testing.T) {
 
 func (h *qemuHarness) run(t *testing.T, entry *qemuEvidence, check func(mountfixture.Execution)) {
 	t.Helper()
-	entry.Schema, entry.Status, entry.PayloadSHA256 = 1, mountFail, h.products.digest
+	entry.Schema, entry.Status = 1, mountFail
 	entry.Timeout, entry.ControllerTimeout = mountTimeout, qemuControllerTimeout
 	entry.CacheBefore = qemuCacheSnapshot(t, entry.Request.Root)
 	defer func() {
@@ -289,8 +289,9 @@ func (h *qemuHarness) run(t *testing.T, entry *qemuEvidence, check func(mountfix
 	check(entry.Result.Executions[0])
 }
 
-func qemuEntry(id, expected string, req mountfixture.Request) qemuEvidence {
-	return qemuEvidence{mountEvidence: mountEvidence{Case: id, Expected: expected, Request: req}, Outcome: expected}
+func qemuEntry(id, expected, digest string, req mountfixture.Request) qemuEvidence {
+	return qemuEvidence{mountEvidence: mountEvidence{Case: id, Expected: expected, PayloadSHA256: digest, Request: req},
+		Outcome: expected}
 }
 
 func assertQemuPayload(t *testing.T, req mountfixture.Request, run mountfixture.Execution, digest, argv0 string) mountfixture.Report {
