@@ -51,7 +51,7 @@ jobs:
           benchmark_source=$(go run ./internal/cmd/benchmark-evidence .work --source-cohort "$SOURCE_RUN" "$SOURCE_ATTEMPT")
           echo "SOURCE_SHA=$benchmark_source" >> "$GITHUB_ENV"
       - name: Install pinned Task
-        uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
           version: '3.53.1'
 
