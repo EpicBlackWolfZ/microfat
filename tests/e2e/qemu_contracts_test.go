@@ -204,6 +204,39 @@ func TestQemuHarnessContracts(t *testing.T) {
 	})
 }
 
+func TestQemuUnsupportedHostEvidence(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{qemuAuto, mountRequired} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			// Force the platform prerequisite without executing Go or namespace tools.
+			shim := filepath.Join(root, "uname")
+			require.NoError(t, os.WriteFile(shim, []byte("#!/bin/sh\nprintf 'unsupported\\n'\n"), defaultFilePerm))
+			cmd := exec.CommandContext(t.Context(), "bash", "../../scripts/qualify-qemu.sh")
+			cmd.Env = []string{"PATH=" + root + ":" + os.Getenv("PATH"), "QEMU_OUTPUT=" + root,
+				"QEMU_TESTS=" + mode, "GO=/must/not/execute"}
+			out, err := cmd.CombinedOutput()
+			if mode == mountRequired {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err, "%s", out)
+			}
+			require.Contains(t, string(out), "Incomplete QEMU qualification")
+			paths, err := filepath.Glob(filepath.Join(root, "run-*", "summary.json"))
+			require.NoError(t, err)
+			require.Len(t, paths, 1)
+			data, err := os.ReadFile(paths[0])
+			require.NoError(t, err)
+			var summary qemuSummary
+			require.NoError(t, json.Unmarshal(data, &summary))
+			require.Equal(t, "incomplete", summary.Status)
+			require.Equal(t, qemuExpected(), summary.Expected)
+			require.Error(t, validateQemuSummary(summary))
+		})
+	}
+}
+
 func TestQemuPrerequisiteClassification(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
