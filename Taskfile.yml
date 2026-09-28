@@ -47,6 +47,9 @@ vars:
   BENCHMARK_CALIBRATION: '{{.BENCHMARK_CALIBRATION | default ""}}'
   MICROFAT_BENCH_FORTIO: '{{.MICROFAT_BENCH_FORTIO | default ""}}'
   TEST_ARTIFACT_DIR: '{{.TEST_ARTIFACT_DIR | default ""}}'
+  MOUNT_TESTS: '{{.MOUNT_TESTS | default "auto"}}'
+  MOUNT_BACKEND: '{{.MOUNT_BACKEND | default "userns"}}'
+  MOUNT_OUTPUT: '{{.MOUNT_OUTPUT | default ".work/mount-qualification"}}'
   BENCHMARK_BINARY: '{{.BENCHMARK_BINARY | default (printf "%s/microfat" .BIN_DIR)}}'
   TASK_ENV: |
     export GO={{.GO | shellQuote}}
@@ -162,6 +165,15 @@ tasks:
       {{.TASK_ENV}}
       "$GO" test -race -v ./tests/e2e/...
       "$GO" test -race -tags minimal -v ./tests/e2e/...
+  qualify-mounts:
+    desc: Qualify native mount layouts (MOUNT_TESTS=auto|required, MOUNT_BACKEND=userns|sudo)
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      export MOUNT_TESTS={{.MOUNT_TESTS | shellQuote}}
+      export MOUNT_BACKEND={{.MOUNT_BACKEND | shellQuote}}
+      export MOUNT_OUTPUT={{.MOUNT_OUTPUT | shellQuote}}
+      bash scripts/qualify-mounts.sh
   fuzz:
     desc: Run all format, codec, cgroup, microarch and pack fuzz targets (FUZZTIME=5s)
     cmds:
@@ -236,7 +248,7 @@ tasks:
     cmds:
     - |-
       {{.TASK_ENV}}
-      golangci-lint run ./...
+      golangci-lint run ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture
   lint-shell:
     desc: Run ShellCheck v0.11.0 on all tracked shell scripts
     preconditions:
