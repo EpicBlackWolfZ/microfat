@@ -1,5 +1,5 @@
 // Mount runner is a disposable native qualification helper. Invoke it only
-// inside a new private mount namespace; it is never installed with microfat.
+// as PID 1 inside private mount and PID namespaces; it is never installed with microfat.
 package main
 
 import (
@@ -24,12 +24,13 @@ import (
 )
 
 const (
-	outputLimit      = 256 << 10
-	requestLimit     = 1 << 20
-	startupLimit     = 4096
-	requestArgCount  = 2
-	childFailureCode = 125
-	childTimeout     = 30 * time.Second
+	outputLimit        = 256 << 10
+	requestLimit       = 1 << 20
+	startupLimit       = 4096
+	requestArgCount    = 2
+	childFailureCode   = 125
+	childTimeout       = 30 * time.Second
+	outputDrainTimeout = 250 * time.Millisecond
 )
 
 // A noisy child must not turn a bounded qualification into unbounded memory use.
@@ -133,6 +134,13 @@ func run(result *mountfixture.Result) error {
 	}
 	if result.Namespace == req.ParentNamespace {
 		return errors.New("refusing to mount in the parent namespace")
+	}
+	result.PIDNamespace, err = os.Readlink("/proc/self/ns/pid")
+	if err != nil {
+		return err
+	}
+	if req.ParentPIDNamespace == "" || os.Getpid() != 1 || result.PIDNamespace == req.ParentPIDNamespace {
+		return errors.New("fixture supervisor must be PID 1 in a new PID namespace")
 	}
 	for path, target := range map[string]*string{"uid_map": &result.UIDMap, "gid_map": &result.GIDMap} {
 		// #nosec G304 -- path is one of the two fixed namespace map names above.
@@ -296,6 +304,9 @@ func execute(req mountfixture.Request) (mountfixture.Execution, error) {
 	cmd.Env = req.Env
 	cmd.Stdin = strings.NewReader(req.Stdin)
 	cmd.ExtraFiles = []*os.File{writer}
+	// A descendant may retain the standard streams after the direct child is
+	// killed. Finish draining promptly so PID 1 can exit and tear down the tree.
+	cmd.WaitDelay = outputDrainTimeout
 	cmd.SysProcAttr = &syscall.SysProcAttr{Chroot: filepath.Join(req.Root, "rootfs"), Pdeathsig: syscall.SIGKILL, Ptrace: req.Pause}
 	if os.Geteuid() == 0 {
 		uid, gid := req.UID, req.GID
@@ -345,8 +356,14 @@ func execute(req mountfixture.Request) (mountfixture.Execution, error) {
 		r.Error = err.Error()
 	}
 	r.Stdout, r.Stderr = stdout.String(), stderr.String()
+	if deadlineErr := reader.SetReadDeadline(time.Now().Add(outputDrainTimeout)); deadlineErr != nil {
+		return r, deadlineErr
+	}
 	started, readErr := io.ReadAll(io.LimitReader(reader, startupLimit))
 	r.Started = string(started)
+	if errors.Is(err, exec.ErrWaitDelay) {
+		return r, errors.Join(err, readErr, ctx.Err())
+	}
 	return r, errors.Join(readErr, ctx.Err())
 }
 

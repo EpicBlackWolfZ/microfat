@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/runtimeinit"
@@ -23,9 +25,14 @@ const (
 	inputLimit      = 4096
 	payloadExitCode = 42
 	privateFileMode = 0o600
+	probeLifetime   = time.Minute
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--detached-child" {
+		hang("/cache/descendant.json")
+		return
+	}
 	started := os.NewFile(startupFD, "startup-report")
 	if started != nil {
 		if _, err := io.WriteString(started, "payload-started\n"); err != nil {
@@ -35,13 +42,17 @@ func main() {
 			panic(err)
 		}
 	}
-	if len(os.Args) > 1 && os.Args[1] == "--hang" {
-		if err := os.WriteFile("/cache/pid", []byte(fmt.Sprint(os.Getpid())), privateFileMode); err != nil {
-			panic(err)
+	if len(os.Args) > 1 && (os.Args[1] == "--hang" || os.Args[1] == "--spawn-detached") {
+		if os.Args[1] == "--spawn-detached" {
+			cmd := exec.Command("/proc/self/exe", "--detached-child")
+			cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+			if err := cmd.Start(); err != nil {
+				panic(err)
+			}
 		}
-		for {
-			time.Sleep(time.Second)
-		}
+		hang("/cache/pid.json")
+		return
 	}
 	r := mountfixture.Report{Identity: identity, PID: os.Getpid(), UID: os.Getuid(), EUID: os.Geteuid(),
 		GID: os.Getgid(), EGID: os.Getegid(), Args: os.Args, Environment: os.Getenv("MOUNT_SENTINEL"),
@@ -90,4 +101,21 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--exit-42" {
 		os.Exit(payloadExitCode)
 	}
+}
+
+func hang(path string) {
+	namespace, err := os.Readlink("/proc/self/ns/pid")
+	if err != nil {
+		panic(err)
+	}
+	data, err := json.Marshal(mountfixture.Process{PID: os.Getpid(), Namespace: namespace})
+	if err != nil {
+		panic(err)
+	}
+	if err := os.WriteFile(path, data, privateFileMode); err != nil {
+		panic(err)
+	}
+	// Bound even a broken regression's probe; the harness also retains pidfds
+	// for independent cleanup on assertion failures.
+	time.Sleep(probeLifetime)
 }

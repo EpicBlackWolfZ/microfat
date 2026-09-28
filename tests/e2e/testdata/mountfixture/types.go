@@ -14,21 +14,22 @@ type Rename struct {
 }
 
 type Request struct {
-	Root            string   `json:"root"`
-	UID             int      `json:"uid"`
-	GID             int      `json:"gid"`
-	ParentNamespace string   `json:"parent_namespace"`
-	Mounts          []Mount  `json:"mounts"`
-	Proc            string   `json:"proc"`
-	ReadOnlyRoot    bool     `json:"read_only_root"`
-	Command         string   `json:"command"`
-	Args            []string `json:"args"`
-	Env             []string `json:"env"`
-	Stdin           string   `json:"stdin"`
-	Runs            int      `json:"runs"`
-	Pause           bool     `json:"pause"`
-	Renames         []Rename `json:"renames,omitempty"`
-	Remove          []string `json:"remove,omitempty"`
+	Root               string   `json:"root"`
+	UID                int      `json:"uid"`
+	GID                int      `json:"gid"`
+	ParentNamespace    string   `json:"parent_namespace"`
+	ParentPIDNamespace string   `json:"parent_pid_namespace"`
+	Mounts             []Mount  `json:"mounts"`
+	Proc               string   `json:"proc"`
+	ReadOnlyRoot       bool     `json:"read_only_root"`
+	Command            string   `json:"command"`
+	Args               []string `json:"args"`
+	Env                []string `json:"env"`
+	Stdin              string   `json:"stdin"`
+	Runs               int      `json:"runs"`
+	Pause              bool     `json:"pause"`
+	Renames            []Rename `json:"renames,omitempty"`
+	Remove             []string `json:"remove,omitempty"`
 }
 
 type Execution struct {
@@ -41,14 +42,21 @@ type Execution struct {
 }
 
 type Result struct {
-	Schema     int         `json:"schema"`
-	Stage      string      `json:"stage"`
-	Error      string      `json:"error,omitempty"`
-	Namespace  string      `json:"namespace"`
-	UIDMap     string      `json:"uid_map"`
-	GIDMap     string      `json:"gid_map"`
-	MountInfo  string      `json:"mountinfo"`
-	Executions []Execution `json:"executions"`
+	Schema       int         `json:"schema"`
+	Stage        string      `json:"stage"`
+	Error        string      `json:"error,omitempty"`
+	Namespace    string      `json:"namespace"`
+	PIDNamespace string      `json:"pid_namespace"`
+	UIDMap       string      `json:"uid_map"`
+	GIDMap       string      `json:"gid_map"`
+	MountInfo    string      `json:"mountinfo"`
+	Executions   []Execution `json:"executions"`
+}
+
+// Process identifies a test process independently of host PID numbering.
+type Process struct {
+	PID       int    `json:"pid"`
+	Namespace string `json:"pid_namespace"`
 }
 
 type Report struct {

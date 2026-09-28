@@ -1,11 +1,14 @@
 package cigate
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestMountQualificationCannotSilentlySkip(t *testing.T) {
@@ -33,4 +36,42 @@ func TestMountQualificationCannotSilentlySkip(t *testing.T) {
 	}
 	assert.True(t, qualification)
 	assert.True(t, evidence)
+}
+
+func TestMountHelpersLintedLocallyAndInCI(t *testing.T) {
+	t.Parallel()
+	want := []string{"./...", "./tests/e2e/testdata/mount_runner", "./tests/e2e/testdata/mount_reporter",
+		"./tests/e2e/testdata/mountfixture"}
+	data, err := os.ReadFile(filepath.Join("..", "..", "Taskfile.yml"))
+	require.NoError(t, err)
+	var tasks struct {
+		Tasks struct {
+			Lint struct {
+				Commands []string `yaml:"cmds"`
+			} `yaml:"lint-go"`
+		} `yaml:"tasks"`
+	}
+	require.NoError(t, yaml.Unmarshal(data, &tasks))
+	var localPackages, ciPackages []string
+	for _, command := range tasks.Tasks.Lint.Commands {
+		for line := range strings.SplitSeq(command, "\n") {
+			if args, ok := strings.CutPrefix(strings.TrimSpace(line), "golangci-lint run "); ok {
+				localPackages = append(localPackages, strings.Fields(args)...)
+			}
+		}
+	}
+	for _, step := range readWorkflow(t, "ci.yml").Jobs["lint"].Steps {
+		if strings.HasPrefix(step.Uses, "golangci/golangci-lint-action@") {
+			args, ok := step.With["args"].(string)
+			require.True(t, ok)
+			assert.Nil(t, step.ContinueOnError)
+			for _, arg := range strings.Fields(args) {
+				if !strings.HasPrefix(arg, "-") {
+					ciPackages = append(ciPackages, arg)
+				}
+			}
+		}
+	}
+	assert.ElementsMatch(t, want, localPackages)
+	assert.ElementsMatch(t, localPackages, ciPackages, "required CI must lint every package in the local Task")
 }

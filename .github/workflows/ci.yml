@@ -125,7 +125,7 @@ jobs:
         with:
           version: v2.13.2
           install-mode: binary
-          args: --timeout=5m
+          args: --timeout=5m ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture
 
   test:
     name: Unit Tests & Coverage Gate (>= 95%)

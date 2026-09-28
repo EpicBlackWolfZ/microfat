@@ -3,16 +3,12 @@
 package e2e_test
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/tests/e2e/testdata/mountfixture"
 	"github.com/stretchr/testify/require"
@@ -105,18 +101,23 @@ func TestMountHarnessContracts(t *testing.T) {
 		require.Equal(t, "setup", result.Stage)
 		require.Empty(t, result.Executions)
 	})
-	t.Run("timeout-reaps-payload", func(t *testing.T) {
+	t.Run("refuse-shared-pid-namespace", func(t *testing.T) {
 		req := prepareMountRequest(t, p, reporter, "directory", execModeNative)
-		req.Args = []string{"--hang"}
 		request := filepath.Join(req.Root, "request.json")
 		writeMountJSON(t, request, req)
-		const timeout = 2 * time.Second
-		_, _, _, err := invokeMountRunnerTimeout(backend, controller, request, timeout)
-		require.ErrorIs(t, err, context.DeadlineExceeded)
-		data, err := os.ReadFile(filepath.Join(req.Root, "cache/pid"))
-		require.NoError(t, err, "the payload must have started before cancellation")
-		pid, err := strconv.Atoi(string(data))
-		require.NoError(t, err)
-		require.ErrorIs(t, syscall.Kill(pid, 0), syscall.ESRCH, "timed-out payload was not reaped")
+		args := []string{mountUnshare, "--mount", "--propagation", "private"}
+		if backend == mountSudo {
+			args = append([]string{mountSudo, "-n", "--"}, args...)
+		} else {
+			args = append(args, "--user", "--map-current-user", "--keep-caps")
+		}
+		args = append(args, "--", controller, request)
+		output := mountCommandOutput(args[0], args[1:]...)
+		require.Contains(t, output, "fixture supervisor must be PID 1 in a new PID namespace")
 	})
+	for _, mode := range []string{"--hang", "--spawn-detached"} {
+		t.Run("timeout-reaps/"+mode, func(t *testing.T) {
+			assertMountTimeoutCleanup(t, backend, p, mode)
+		})
+	}
 }

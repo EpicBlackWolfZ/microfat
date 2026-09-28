@@ -46,12 +46,19 @@ task qualify-mounts MOUNT_TESTS=required MOUNT_BACKEND=userns
 ```
 
 The default backend uses an unprivileged user namespace while retaining the
-invoking UID/GID. It requires util-linux `unshare` with `--map-current-user` and
-`--keep-caps`, and host support for user/mount namespaces, chroot and ptrace.
+invoking UID/GID. It requires util-linux `unshare` with `--map-current-user`,
+`--keep-caps`, `--pid`, `--fork`, `--kill-child` and `--mount-proc`, and host support
+for user, mount and PID namespaces, chroot, ptrace and pidfds.
 Setup capabilities are removed before the tested executable runs. It never
 automatically invokes sudo. Hosted native CI explicitly selects
 `MOUNT_BACKEND=sudo`; only namespace setup is privileged, and payloads run as the
 ordinary runner user. There is no container-engine dependency.
+
+The fixture supervisor is PID 1 in a disposable PID namespace with its own procfs.
+When it exits, the kernel terminates its remaining descendants, including processes
+that created new sessions. Timeout regressions observe parent and detached-child
+processes through host pidfds and verify teardown independently of namespace PID
+numbering. Reported process IDs are relative to the fixture PID namespace.
 
 `MOUNT_TESTS=auto` records an unavailable namespace prerequisite as a skip and
 prints an incomplete-qualification result. `required` fails on unavailable

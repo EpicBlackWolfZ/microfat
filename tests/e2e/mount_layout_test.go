@@ -262,15 +262,10 @@ func mountPreflight(backend string) string {
 	if os.Getuid() == 0 || os.Getgid() == 0 {
 		return "qualification must be invoked by an ordinary user"
 	}
-	args := []string{"--user", "--map-current-user", "--keep-caps", "--mount", "--propagation", "private", "--", "true"}
-	name := mountUnshare
-	if backend == mountSudo {
-		name = mountSudo
-		args = []string{"-n", "--", mountUnshare, "--mount", "--propagation", "private", "--", "true"}
-	}
+	args := mountNamespaceCommand(backend, "true")
 	ctx, cancel := context.WithTimeout(context.Background(), mountTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
 	if err != nil {
 		return fmt.Sprintf("%s namespace prerequisite unavailable: %v: %s", backend, err, out)
 	}
@@ -374,8 +369,12 @@ func prepareMountRequest(t *testing.T, p mountProducts, binary, scenario, mode s
 	require.NoError(t, os.Chmod(root, privateDirPerm))
 	namespace, err := os.Readlink("/proc/self/ns/mnt")
 	require.NoError(t, err)
+	pidNamespace, err := os.Readlink("/proc/self/ns/pid")
+	require.NoError(t, err)
 	req := mountfixture.Request{Root: root, UID: os.Getuid(), GID: os.Getgid(), ParentNamespace: namespace,
-		Proc: "normal", Command: mountPayloadPath, Runs: 1, Args: []string{"--exit-42", mountPayloadArgs, "literal\targument"}, Stdin: mountStdin,
+		ParentPIDNamespace: pidNamespace,
+		Proc:               "normal", Command: mountPayloadPath, Runs: 1,
+		Args: []string{"--exit-42", mountPayloadArgs, "literal\targument"}, Stdin: mountStdin,
 		Env: []string{"PATH=/entry", "HOME=/home", "TMPDIR=/tmp", "MICROFAT_EXEC_MODE=" + mode, "MICROFAT_CACHE_DIR=/cache",
 			"XDG_CACHE_HOME=/cache", "MOUNT_SENTINEL=preserved", "APP_ASSET_DIR=/assets"}}
 	if mode != execModeNative {
@@ -458,14 +457,23 @@ func invokeMountRunner(backend, controller, request string) ([]string, mountfixt
 	return invokeMountRunnerTimeout(backend, controller, request, mountTimeout)
 }
 
+func mountNamespaceCommand(backend string, command ...string) []string {
+	// Namespace init exiting kills every descendant, including new sessions.
+	// unshare also kills init if its waiting parent is terminated unexpectedly.
+	args := []string{mountUnshare, "--mount", "--pid", "--fork", "--kill-child=SIGKILL", "--mount-proc",
+		"--propagation", "private"}
+	if backend == mountSudo {
+		args = append([]string{mountSudo, "-n", "--"}, args...)
+	} else {
+		args = append(args, "--user", "--map-current-user", "--keep-caps")
+	}
+	return append(append(args, "--"), command...)
+}
+
 func invokeMountRunnerTimeout(backend, controller, request string, timeout time.Duration) (
 	[]string, mountfixture.Result, string, error,
 ) {
-	args := []string{mountUnshare, "--user", "--map-current-user", "--keep-caps", "--mount",
-		"--propagation", "private", "--", controller, request}
-	if backend == mountSudo {
-		args = []string{mountSudo, "-n", "--", mountUnshare, "--mount", "--propagation", "private", "--", controller, request}
-	}
+	args := mountNamespaceCommand(backend, controller, request)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
@@ -515,6 +523,8 @@ func runMountCase(t *testing.T, backend, output, controller string, summary *mou
 	require.Equal(t, 1, entry.Result.Schema)
 	require.Empty(t, entry.Result.Error)
 	require.NotEqual(t, entry.Request.ParentNamespace, entry.Result.Namespace)
+	require.NotEmpty(t, entry.Result.PIDNamespace)
+	require.NotEqual(t, entry.Request.ParentPIDNamespace, entry.Result.PIDNamespace)
 	require.Len(t, entry.Result.Executions, entry.Request.Runs)
 	parentNamespace, namespaceErr := os.Readlink("/proc/self/ns/mnt")
 	require.NoError(t, namespaceErr)
