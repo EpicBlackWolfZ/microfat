@@ -33,6 +33,7 @@ type workflowJob struct {
 		FailFast *bool `yaml:"fail-fast"`
 		Matrix   struct {
 			Include []map[string]string `yaml:"include"`
+			Arch    []string            `yaml:"arch"`
 		} `yaml:"matrix"`
 	} `yaml:"strategy"`
 }
@@ -87,7 +88,9 @@ func TestWorkflowDependencyContract(t *testing.T) {
 	assert.ElementsMatch(t, RequiredJobs(), jobs, "every job must be accounted for by the aggregate")
 	assert.ElementsMatch(t, []string{"pr-lint", "lint", "gitleaks", "vulncheck"}, needs(t, w.Jobs["test"]))
 	assert.Empty(t, w.Jobs["pr-lint"].If, "title job must succeed explicitly for non-PR events")
-	for _, name := range []string{"integration", "dx", "build", "benchmark-smoke", "kernel", "codeql", "archive-contracts", "installer"} {
+	for _, name := range []string{
+		"integration", "dx", "build", "benchmark-smoke", "kernel", "codeql", "archive-contracts", "installer", "mounts",
+	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			assert.ElementsMatch(t, []string{"lint", "test"}, needs(t, w.Jobs[name]))

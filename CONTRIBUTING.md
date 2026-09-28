@@ -107,6 +107,10 @@ under ignored `.work/`, not published documentation directories.
 CI uses `task coverage-unit` for its middle stage. It runs the unit tests in `cmd`, `internal`,
 `runtimeinit` and `benchmarks` with both profiles and the same production statement universe.
 The dedicated black-box suite runs afterwards through `task e2e`, also with both profiles.
+Native amd64/arm64 mount qualification runs in a separate required stage using
+`task qualify-mounts MOUNT_TESTS=required MOUNT_BACKEND=sudo`. Locally,
+`task qualify-mounts` uses rootless namespaces and records prerequisite skips explicitly.
+See [mount layouts and replay](docs/mount-layouts.md) for the matrix and evidence format.
 The full local and release commands retain their existing complete test and coverage scope.
 
 ### Code Coverage Architecture & Codecov Integration

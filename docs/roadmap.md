@@ -1,6 +1,6 @@
 # Production roadmap
 
-Updated 2026-09-27 against `main` at `d81b424` and current v0.3.0 issue membership.
+Updated 2026-09-28 for the updater and native mount-layout qualification.
 GitHub issues define remaining scope,
 dependencies and acceptance criteria. Milestones group deliverable outcomes; they are not dates.
 
@@ -96,6 +96,8 @@ attestations and historical asset replacement are outside this milestone.
 | Builder target validation, memory-budget/byte-size corrections and compression precedence | [#252](https://github.com/EpicBlackWolfZ/microfat/issues/252), [#253](https://github.com/EpicBlackWolfZ/microfat/issues/253), [#255](https://github.com/EpicBlackWolfZ/microfat/issues/255), [#254](https://github.com/EpicBlackWolfZ/microfat/issues/254) |
 | Codec lock correction, executable-path whitespace and mode-aware doctor diagnostics | [#257](https://github.com/EpicBlackWolfZ/microfat/issues/257), [#256](https://github.com/EpicBlackWolfZ/microfat/issues/256), [#259](https://github.com/EpicBlackWolfZ/microfat/issues/259) |
 | Codecov reporting while retaining the authoritative exact coverage gate | [#262](https://github.com/EpicBlackWolfZ/microfat/issues/262) |
+| Explicit verified update checks and generation-based self-update | [#204](https://github.com/EpicBlackWolfZ/microfat/issues/204) |
+| Source-built native mount, executable-hint and mounted-generation qualification | [#157](https://github.com/EpicBlackWolfZ/microfat/issues/157) |
 
 These issues are closed and their implementations are merged. ABI metadata consistency does not
 prove that a target system provides a compatible loader or libc. The #203 implementation now supplies
@@ -105,16 +107,14 @@ published signed helper assets; implementation and snapshot validation do not es
 
 ### Remaining scope
 
-Eight issues remain open. The table is the delivery scope, not a claim that all work is absent:
+The table is the remaining delivery scope, not a claim that all work is absent:
 existing integrity, lifecycle, release-verification and basic real seccomp fallback tests are foundations
 to preserve and extend.
 
 | Scope | Issue | Dependency and completion boundary |
 | --- | --- | --- |
 | Verified user installer | [#203](https://github.com/EpicBlackWolfZ/microfat/issues/203) | Implementation covers bootstrap, transactions, ownership, repair/uninstall and physical-generation discovery. Retain the issue's acceptance boundary through review and native signed-draft qualification; the first helper release is not available merely because a snapshot passes. |
-| Explicit update checks and self-update | [#204](https://github.com/EpicBlackWolfZ/microfat/issues/204) | Consume #203's transaction and ownership contract. Ordinary commands stay offline with respect to update discovery; package-managed installations remain externally managed. |
 | Official Linux Homebrew tap | [#205](https://github.com/EpicBlackWolfZ/microfat/issues/205) | Consume #203's layout/ownership contract and finalized verified release assets. Cover Linux amd64/arm64, byte preservation, real prefix/link discovery and release-ordered tap publication. |
-| Mount and executable-hint qualification | [#157](https://github.com/EpicBlackWolfZ/microfat/issues/157) | Exercise full/minimal and memfd/cache across bind mounts, read-only roots, symlinks, namespaces/chroot and replacement/unlink. Coordinate the installed layout with #203; SBOM work remains in v0.2.5. |
 | ARM64 QEMU descriptor-execution qualification | [#231](https://github.com/EpicBlackWolfZ/microfat/issues/231) | Reuse the executable-path fixtures from #157; document interpreter/binfmt limits with raw-path controls and explicit skips. Native ARM64 and emulation evidence remain distinct. |
 | Real concurrent execution and policy-denied fallback qualification | [#260](https://github.com/EpicBlackWolfZ/microfat/issues/260) | Reuse #157's disposable mount fixtures, coordinate #231, and qualify the final #44 behavior on native amd64/arm64 with authenticated candidate artifacts. Extend real-process and policy evidence without assuming a cache algorithm defect. |
 | Independent CPU-tuning policy | [#258](https://github.com/EpicBlackWolfZ/microfat/issues/258) | Preserve native Go CPU adaptation independently of memory tuning in launcher/runtimeinit, with explicit precedence and isolated quota-change qualification. Existing defaults remain until deliberately changed. |
@@ -124,9 +124,9 @@ to preserve and extend.
 
 1. Complete #203 as the distribution foundation. Transactionality and ownership metadata belong to
    the installer itself; deferring either to the updater or tap would leave a circular dependency.
-2. Build #157's reusable qualification fixtures while the installation layout is established. #231
-   can share those fixtures, and #258 can proceed independently of distribution work.
-3. Implement #204 and #205 independently after #203's contract is fixed. Implement #44 with explicit
+2. Reuse #157's [mount qualification fixtures](mount-layouts.md) for #231 and #260. Their source-built
+   native evidence does not replace emulator or authenticated-candidate qualification. #258 remains independent.
+3. Implement #205 against #203's established contract and #204's ownership detection. Implement #44 with explicit
    failure tests and startup measurements; finalize #260 against the integrated runtime behavior.
    Qualification harness development can begin earlier without implying final candidate acceptance.
 4. Qualify the integrated candidate and complete documentation and draft-release asset verification.
