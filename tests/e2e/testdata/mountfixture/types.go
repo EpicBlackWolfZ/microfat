@@ -65,6 +65,7 @@ type Result struct {
 
 // Process identifies a test process independently of host PID numbering.
 type Process struct {
+	Token     string `json:"token,omitempty"`
 	PID       int    `json:"pid"`
 	Namespace string `json:"pid_namespace"`
 }

@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -237,7 +238,7 @@ func TestQemuQualification(t *testing.T) {
 	for _, mode := range []string{"--hang", "--spawn-detached"} {
 		t.Run("timeout-reaps/"+mode, func(t *testing.T) {
 			req := prepareQemuRequest(t, h.products, h.products.reporter, execModeNative)
-			req.Args = []string{mode}
+			req.Args = []string{mode, "microfat-fixture-" + rand.Text()}
 			assertFixtureTimeoutCleanup(t, req,
 				qemuNamespaceCommand(backend, h.products.controller, filepath.Join(req.Root, "request.json")))
 		})

@@ -23,6 +23,7 @@ var identity = "original"
 
 const (
 	startupFD       = 3
+	tokenArgIndex   = 2
 	inputLimit      = 4096
 	payloadExitCode = 42
 	privateFileMode = 0o600
@@ -45,7 +46,8 @@ func main() {
 	}
 	if len(os.Args) > 1 && (os.Args[1] == "--hang" || os.Args[1] == "--spawn-detached") {
 		if os.Args[1] == "--spawn-detached" {
-			cmd := exec.Command("/proc/self/exe", "--detached-child")
+			// #nosec G204 G702 -- fixed fixture executable; arguments only propagate the cleanup identity token.
+			cmd := exec.Command("/proc/self/exe", append([]string{"--detached-child"}, os.Args[tokenArgIndex:]...)...)
 			cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 			if err := cmd.Start(); err != nil {
@@ -116,7 +118,11 @@ func hang(path string) {
 	if err != nil {
 		panic(err)
 	}
-	data, err := json.Marshal(mountfixture.Process{PID: os.Getpid(), Namespace: namespace})
+	var token string
+	if len(os.Args) > tokenArgIndex {
+		token = os.Args[tokenArgIndex]
+	}
+	data, err := json.Marshal(mountfixture.Process{PID: os.Getpid(), Namespace: namespace, Token: token})
 	if err != nil {
 		panic(err)
 	}
