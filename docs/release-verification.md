@@ -84,3 +84,18 @@ issuer, source and key cases plus modified/missing evidence. [Acquisition tests]
 cover bounded local/network input and authentication before extraction; [bootstrap tests](../cmd/microfat-install/bootstrap_test.go)
 prove mismatched verifier/helper bytes never execute. Mocked control-flow tests are separate from actual
 signature and native historical/signed-draft qualification.
+
+## Updater verification scope
+
+`microfat update --check` reports official HTTPS metadata only. The JSON result explicitly says
+`metadata_only`; no signature verifier or product archive is downloaded for a check. An actual
+update freezes one published stable version, authenticates the same independently pinned Cosign
+used by the bootstrap (or an explicit path/digest override), then enforces the existing exact
+workflow/tag, issuer, signed checksum and archive rules before installation. No network error or
+verification failure selects a different release. Same-version and newer-than-latest no-ops do
+not claim fresh artifact authentication.
+
+Native updater qualification distinguishes controlled forward-version fixtures from real signed
+historical downloads. The signed-draft gate executes the updater from authenticated candidate bytes,
+performs explicit historical downgrades, and restores the candidate through the authenticated helper.
+Historical CLIs have no updater command. This evidence is separate from publishing the candidate.

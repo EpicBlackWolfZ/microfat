@@ -587,3 +587,46 @@ for uncertainty, histogram, cache, tuning, and memory qualifications.
   candidate runner-class policy from independent training/holdout jobs.
 - `microfat benchmark gate --input <bundle> --calibration <trusted-policy.json>`: retain coarse size gating and
   enable startup gating only for a matching validated runner class. Unmatched startup results remain report-only.
+
+## `update`
+
+Check official release metadata or explicitly update an installer-owned Linux amd64/arm64 installation.
+
+```bash
+microfat update --check --json
+microfat update
+microfat update --version 0.3.0
+microfat update --version 0.2.5 --allow-downgrade
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--check` | Read published stable release metadata; no artifact authentication or installation changes. |
+| `--json` | Emit one schema-versioned result on stdout, with diagnostics on stderr. |
+| `--version VERSION` | Select an exact published stable release, optionally prefixed with `v`. |
+| `--allow-downgrade` | Permit a pinned older version; requires `--version`. |
+| `--system` | Explicit root-owned update, while already running as root. |
+| `--staging-dir PATH` | Existing safe parent for private acquisition storage and verifier execution. |
+| `--cosign PATH` / `--cosign-sha256 HEX` | Paired independent verifier override. |
+
+`--check` cannot be combined with mutation-only options. No positional arguments are accepted.
+Stable releases before v0.2.3, prereleases, drafts, and unknown development versions are unsupported.
+The top-level `microfat --version` still prints build identity.
+
+Exit codes: 0 for successful checks, no-ops and updates; 1 for operational failure; 2 for invalid
+updater arguments. Both `current` and `update_available` checks return 0. JSON schema 1 reports:
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `current`, `update_available`, `installed_newer`, `selected_older`, `updated`, `downgraded`, or `error`. |
+| `running_version`, `current_version`, `target_version` | Canonical stable versions without `v`, or null when unknown. |
+| `update_available` | Target is newer than the observed installation; false after successful activation. |
+| `management` | `microfat-installer`, `homebrew`, `unmanaged`, or null when not established. |
+| `can_self_update` | The process owns the active managed generation; false after activation makes this process stale. Root still needs `--system`. |
+| `verification` | `not_performed`, `metadata_only`, or `artifact_verified`. |
+| `activated` | Whether this operation activated a generation, including before a later failure. |
+| `error`, `guidance` | Optional diagnostic and next-step text. |
+
+Manual/Homebrew installations may check but cannot self-update. Failed activation completion may
+leave the new version active: inspect `activated` and the reported current version before recovery.
+See [installation and recovery](installation.md#explicit-release-checks-and-updates).

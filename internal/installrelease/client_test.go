@@ -58,7 +58,7 @@ func elfFixture(arch string) []byte {
 	data[elf.EI_VERSION] = byte(elf.EV_CURRENT)
 	binary.LittleEndian.PutUint16(data[16:], uint16(elf.ET_EXEC))
 	machine := elf.EM_X86_64
-	if arch == "arm64" {
+	if arch == fixtureARM64 {
 		machine = elf.EM_AARCH64
 	}
 	binary.LittleEndian.PutUint16(data[18:], uint16(machine))
@@ -75,7 +75,7 @@ func fatFixture(t *testing.T, arch string) []byte {
 	_, err := data.Write(payload)
 	require.NoError(t, err)
 	level := "v1"
-	if arch == "arm64" {
+	if arch == fixtureARM64 {
 		level = "v8.0"
 	}
 	index := &format.Index{Version: 2, TargetOS: "linux", TargetArch: arch, Variants: []format.VariantEntry{{Level: level, Offset: 64,

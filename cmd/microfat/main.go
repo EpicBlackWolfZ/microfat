@@ -48,6 +48,12 @@ func main() {
 
 	rootCmd := newRootCmd()
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		var updateErr updateCommandError
+		if errors.As(err, &updateErr) {
+			_, _ = fmt.Fprintln(rootCmd.ErrOrStderr(), "microfat update:", err)
+			exitFunc(updateErr.code)
+			return
+		}
 		exitFunc(1)
 	}
 }
@@ -154,6 +160,7 @@ self-dispatching fat executable with zero persistent process overhead and payloa
 	cmd.AddCommand(newPgoPackCmd())
 	cmd.AddCommand(newPrewarmCmd())
 	cmd.AddCommand(newDoctorCmd())
+	cmd.AddCommand(newUpdateCmd())
 	cmd.AddCommand(newBenchmarkCmd())
 
 	return cmd

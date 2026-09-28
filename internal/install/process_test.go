@@ -43,6 +43,12 @@ func TestInstallationChild(t *testing.T) {
 	}
 	snapshot, err := Inspect(paths)
 	require.NoError(t, err)
+	if mode == "update" {
+		physical, resolveErr := filepath.EvalSymlinks(filepath.Join(paths.Bin, "microfat"))
+		require.NoError(t, resolveErr)
+		snapshot, err = InspectUpdate(physical)
+		require.NoError(t, err)
+	}
 	_, err = fmt.Fprintln(os.Stdout, "ready")
 	require.NoError(t, err)
 	_, err = io.ReadFull(os.Stdin, make([]byte, 1))
@@ -67,7 +73,7 @@ func TestInstallationChild(t *testing.T) {
 		}
 		return nil
 	})
-	if errors.Is(err, ErrChanged) {
+	if errors.Is(err, ErrChanged) || (mode == "update" && errors.Is(err, ErrConflict)) {
 		return
 	}
 	require.NoError(t, err)
@@ -85,7 +91,7 @@ func startChild(t *testing.T, paths Paths, mode, version, stop string) child {
 	t.Cleanup(cancel)
 	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestInstallationChild$")
 	command.Env = append(os.Environ(), childEnvironment+"="+mode, "TEST_INSTALL_BIN="+paths.Bin, "TEST_INSTALL_STORE="+paths.Store)
-	if mode == "apply" {
+	if mode == "apply" || mode == "update" {
 		generation, source := fixture(t, version)
 		metadata := filepath.Join(t.TempDir(), generationFile)
 		rewriteJSON(t, metadata, generation)
