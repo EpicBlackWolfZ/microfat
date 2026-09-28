@@ -103,28 +103,8 @@ func run(result *mountfixture.Result) error {
 	if len(os.Args) != requestArgCount {
 		return errors.New("usage: mount-runner request.json")
 	}
-	// #nosec G703 -- the E2E controller supplies this private fixture request, never product input.
-	file, err := os.Open(os.Args[1])
+	req, err := readRequest(os.Args[1])
 	if err != nil {
-		return err
-	}
-	requestData, readErr := io.ReadAll(io.LimitReader(file, requestLimit+1))
-	if err := errors.Join(readErr, file.Close()); err != nil {
-		return err
-	}
-	if len(requestData) > requestLimit {
-		return errors.New("oversized fixture request")
-	}
-	var req mountfixture.Request
-	decoder := json.NewDecoder(bytes.NewReader(requestData))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&req); err != nil {
-		return err
-	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return errors.New("trailing fixture request data")
-	}
-	if err := validate(req); err != nil {
 		return err
 	}
 	result.Stage = "namespace"
@@ -142,6 +122,9 @@ func run(result *mountfixture.Result) error {
 	if req.ParentPIDNamespace == "" || os.Getpid() != 1 || result.PIDNamespace == req.ParentPIDNamespace {
 		return errors.New("fixture supervisor must be PID 1 in a new PID namespace")
 	}
+	if err := checkBinfmtNamespace(req, result); err != nil {
+		return err
+	}
 	for path, target := range map[string]*string{"uid_map": &result.UIDMap, "gid_map": &result.GIDMap} {
 		// #nosec G304 -- path is one of the two fixed namespace map names above.
 		data, readErr := os.ReadFile("/proc/self/" + path)
@@ -157,6 +140,9 @@ func run(result *mountfixture.Result) error {
 	if err := setup(req); err != nil {
 		return err
 	}
+	if err := setupBinfmt(req, result); err != nil {
+		return err
+	}
 	data, err := os.ReadFile("/proc/self/mountinfo")
 	if err != nil {
 		return err
@@ -169,6 +155,10 @@ func run(result *mountfixture.Result) error {
 		}
 	}
 	result.Stage = "execution"
+	if req.Binfmt != nil && req.Binfmt.Preflight {
+		result.Stage = "complete"
+		return nil
+	}
 	for range req.Runs {
 		run, err := execute(req)
 		result.Executions = append(result.Executions, run)
@@ -178,6 +168,34 @@ func run(result *mountfixture.Result) error {
 	}
 	result.Stage = "complete"
 	return nil
+}
+
+func readRequest(path string) (mountfixture.Request, error) {
+	var req mountfixture.Request
+	// #nosec G304 G703 -- the E2E controller supplies this private fixture request, never product input.
+	file, err := os.Open(path)
+	if err != nil {
+		return req, err
+	}
+	requestData, readErr := io.ReadAll(io.LimitReader(file, requestLimit+1))
+	if err := errors.Join(readErr, file.Close()); err != nil {
+		return req, err
+	}
+	if len(requestData) > requestLimit {
+		return req, errors.New("oversized fixture request")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(requestData))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		return req, err
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return req, errors.New("trailing fixture request data")
+	}
+	if err := validate(req); err != nil {
+		return req, err
+	}
+	return req, nil
 }
 
 func validate(req mountfixture.Request) error {
@@ -197,6 +215,9 @@ func validate(req mountfixture.Request) error {
 	if req.Pause && req.Runs != 1 {
 		return errors.New("mutation cases must run exactly once")
 	}
+	if req.Binfmt != nil && (req.Binfmt.ParentUserNamespace == "" || req.Pause) {
+		return errors.New("binfmt requires a parent user namespace and cannot use ptrace mutation")
+	}
 	for _, mount := range req.Mounts {
 		if _, err := sourcePath(req.Root, mount.Source); err != nil {
 			return err
@@ -205,6 +226,10 @@ func validate(req mountfixture.Request) error {
 			return errors.New("invalid fixture mount target")
 		}
 	}
+	return validateChanges(req)
+}
+
+func validateChanges(req mountfixture.Request) error {
 	for _, rename := range req.Renames {
 		if _, err := sourcePath(req.Root, rename.From); err != nil {
 			return err
@@ -313,7 +338,8 @@ func execute(req mountfixture.Request) (mountfixture.Execution, error) {
 		if uid <= 0 || uid > math.MaxUint32 || gid <= 0 || gid > math.MaxUint32 {
 			return r, errors.New("invalid child credentials")
 		}
-		cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: []uint32{}}
+		cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: []uint32{},
+			NoSetGroups: req.Binfmt != nil}
 	}
 	var stdout, stderr boundedBuffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

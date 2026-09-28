@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -57,6 +58,10 @@ func main() {
 	r := mountfixture.Report{Identity: identity, PID: os.Getpid(), UID: os.Getuid(), EUID: os.Geteuid(),
 		GID: os.Getgid(), EGID: os.Getegid(), Args: os.Args, Environment: os.Getenv("MOUNT_SENTINEL"),
 		Mode: os.Getenv("MICROFAT_EXEC_MODE"), Original: os.Getenv("MICROFAT_ORIGINAL_EXE"), Errors: map[string]string{}}
+	if fd, err := strconv.Atoi(os.Getenv("QEMU_PROBE_FD")); err == nil && fd > startupFD {
+		// Observe before opening any other descriptors, which could reuse the closed number.
+		r.ProbeFDTarget, _ = os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
+	}
 	record := func(key string, err error) {
 		if err != nil {
 			r.Errors[key] = err.Error()
@@ -93,6 +98,9 @@ func main() {
 	for line := range strings.SplitSeq(string(data), "\n") {
 		if strings.HasPrefix(line, "CapEff:") {
 			r.Capabilities = strings.TrimSpace(strings.TrimPrefix(line, "CapEff:"))
+		}
+		if strings.HasPrefix(line, "NoNewPrivs:") {
+			r.NoNewPrivileges = strings.TrimSpace(strings.TrimPrefix(line, "NoNewPrivs:"))
 		}
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(r); err != nil {

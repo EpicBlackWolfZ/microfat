@@ -239,3 +239,10 @@ Restart=always
 ---
 
 [**← Container Runtime Tuning**](runtime-tuning.md) | [**Main Index**](../README.md#documentation-guide) | [**Advanced Optimizations →**](advanced-optimizations.md)
+
+## ARM64 user-mode emulation
+
+See the [QEMU descriptor-execution qualification](qemu-qualification.md) for the
+F-only interpreter limitation, full-profile `optimize-to` extraction route, and
+minimal-profile restrictions. Extraction is explicit and changes the executable
+into a single selected raw payload; it is not an automatic dispatch fallback.

@@ -27,18 +27,23 @@ func assertMountTimeoutCleanup(t *testing.T, backend string, p mountProducts, mo
 	t.Helper()
 	req := prepareMountRequest(t, p, p.reporter, "directory", execModeNative)
 	req.Args = []string{mode}
+	assertFixtureTimeoutCleanup(t, req, mountNamespaceCommand(backend, p.controller, filepath.Join(req.Root, "request.json")))
+}
+
+func assertFixtureTimeoutCleanup(t *testing.T, req mountfixture.Request, args []string) {
+	t.Helper()
 	request := filepath.Join(req.Root, "request.json")
 	writeMountJSON(t, request, req)
 	result := make(chan error, 1)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _, _, err := invokeMountRunnerTimeout(backend, p.controller, request, mountCleanupTimeout)
+		_, _, _, err := invokeMountArgs(args, mountCleanupTimeout)
 		result <- err
 	}()
 	t.Cleanup(func() { <-done })
 	files := []string{"pid.json"}
-	if mode == "--spawn-detached" {
+	if req.Args[0] == "--spawn-detached" {
 		files = append(files, "descendant.json")
 	}
 	var descriptors []int

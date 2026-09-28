@@ -14,6 +14,7 @@ type Rename struct {
 }
 
 type Request struct {
+	Binfmt             *Binfmt  `json:"binfmt,omitempty"`
 	Root               string   `json:"root"`
 	UID                int      `json:"uid"`
 	GID                int      `json:"gid"`
@@ -32,6 +33,12 @@ type Request struct {
 	Remove             []string `json:"remove,omitempty"`
 }
 
+// Binfmt is restricted to the isolated F-only ARM64 qualification fixture.
+type Binfmt struct {
+	ParentUserNamespace string `json:"parent_user_namespace"`
+	Preflight           bool   `json:"preflight,omitempty"`
+}
+
 type Execution struct {
 	PID      int    `json:"pid"`
 	Stdout   string `json:"stdout"`
@@ -42,15 +49,18 @@ type Execution struct {
 }
 
 type Result struct {
-	Schema       int         `json:"schema"`
-	Stage        string      `json:"stage"`
-	Error        string      `json:"error,omitempty"`
-	Namespace    string      `json:"namespace"`
-	PIDNamespace string      `json:"pid_namespace"`
-	UIDMap       string      `json:"uid_map"`
-	GIDMap       string      `json:"gid_map"`
-	MountInfo    string      `json:"mountinfo"`
-	Executions   []Execution `json:"executions"`
+	UserNamespace string      `json:"user_namespace,omitempty"`
+	Registration  string      `json:"registration,omitempty"`
+	Prerequisite  string      `json:"prerequisite,omitempty"`
+	Schema        int         `json:"schema"`
+	Stage         string      `json:"stage"`
+	Error         string      `json:"error,omitempty"`
+	Namespace     string      `json:"namespace"`
+	PIDNamespace  string      `json:"pid_namespace"`
+	UIDMap        string      `json:"uid_map"`
+	GIDMap        string      `json:"gid_map"`
+	MountInfo     string      `json:"mountinfo"`
+	Executions    []Execution `json:"executions"`
 }
 
 // Process identifies a test process independently of host PID numbering.
@@ -60,6 +70,8 @@ type Process struct {
 }
 
 type Report struct {
+	ProbeFDTarget     string            `json:"probe_fd_target,omitempty"`
+	NoNewPrivileges   string            `json:"no_new_privileges,omitempty"`
 	Identity          string            `json:"identity"`
 	Digest            string            `json:"digest"`
 	PID               int               `json:"pid"`
@@ -79,4 +91,16 @@ type Report struct {
 	ExplicitAsset     string            `json:"explicit_asset"`
 	Capabilities      string            `json:"capabilities"`
 	Errors            map[string]string `json:"errors"`
+}
+
+type DescriptorProbe struct {
+	Target  string `json:"target"`
+	Event   string `json:"event"`
+	PID     int    `json:"pid"`
+	FD      int    `json:"fd"`
+	Flags   int    `json:"flags"`
+	Seals   int    `json:"seals"`
+	Storage string `json:"storage"`
+	Digest  string `json:"digest"`
+	Error   string `json:"error,omitempty"`
 }

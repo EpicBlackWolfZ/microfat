@@ -85,5 +85,5 @@ executables provide independent controls for procfs absence.
 These are source-built functional checks with static Go payloads. They do not
 qualify every dynamic loader, container security policy, filesystem, concurrent
 writer or emulator. They do not authenticate a release candidate or establish
-performance claims. QEMU descriptor qualification (#231) and concurrent/policy
+performance claims. [QEMU descriptor qualification](qemu-qualification.md) (#231) and concurrent/policy
 qualification against authenticated candidate artifacts (#260) remain separate.

@@ -307,20 +307,28 @@ func mountLevel() string {
 }
 
 func packMountProduct(t *testing.T, p mountProducts, output string, c mountConfiguration) string {
+	return packMountProductArch(t, p, output, c, runtime.GOARCH)
+}
+
+func packMountProductArch(t *testing.T, p mountProducts, output string, c mountConfiguration, arch string) string {
 	t.Helper()
 	path := filepath.Join(output, "products", c.name())
 	stub := p.full
 	if c.Profile == launcherMinimalProfile {
 		stub = p.minimal
 	}
-	args := []string{inputPackCommand, mountArchFlag, runtime.GOARCH, "--stub", stub, "--format-version", strconv.Itoa(c.Version),
-		"--compression", c.Codec, "-v", mountLevel() + "=" + p.reporter, "-o", path}
+	level := "v1"
+	if arch == archARM64 {
+		level = manifestARM64Base
+	}
+	args := []string{inputPackCommand, mountArchFlag, arch, "--stub", stub, "--format-version", strconv.Itoa(c.Version),
+		"--compression", c.Codec, "-v", level + "=" + p.reporter, "-o", path}
 	if c.Dictionary {
 		// Dictionary training requires two variants. Both entries deliberately
 		// contain the same baseline-compatible reporter so every host executes
 		// identical bytes; this fixture does not claim tier specialization.
 		second := "v2"
-		if runtime.GOARCH == archARM64 {
+		if arch == archARM64 {
 			second = "v8.1"
 		}
 		args = append(args, "--dict", "-v", second+"="+p.reporter)
@@ -474,6 +482,10 @@ func invokeMountRunnerTimeout(backend, controller, request string, timeout time.
 	[]string, mountfixture.Result, string, error,
 ) {
 	args := mountNamespaceCommand(backend, controller, request)
+	return invokeMountArgs(args, timeout)
+}
+
+func invokeMountArgs(args []string, timeout time.Duration) ([]string, mountfixture.Result, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
