@@ -277,7 +277,9 @@ Choose re-exec behavior deliberately:
 - To restart the **currently running payload** on Linux, `syscall.Exec("/proc/self/exe", os.Args, os.Environ())` executes the kernel-held payload image even if its disk name has gone away. Handle the returned error. This requires accessible procfs and bypasses the fat launcher, so it does not redispatch or recompute launcher tuning. Audit inherited environment and open descriptors for the application's re-exec contract.
 - To update software, let a deployment manager verify and atomically install a complete artifact at its configured target. The cache path and original-path hint are not update targets. A native executable has ordinary OS path semantics but still needs an explicit concurrency/update contract.
 
-These choices do not guarantee third-party libraries support memfd paths, deleted files, changed mount views or dynamic assets. Mount-specific lifecycle coverage remains tracked in [#157](https://github.com/EpicBlackWolfZ/microfat/issues/157).
+These choices do not guarantee third-party libraries support memfd paths, deleted files, changed mount views or dynamic assets.
+The [mount-layout guide](mount-layouts.md) describes native qualification, procfs failures,
+read-only-root cache requirements and companion discovery through mounted generations.
 
 ---
 

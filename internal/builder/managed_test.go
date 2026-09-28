@@ -89,8 +89,25 @@ func TestManagedCompanionsBindToOldGeneration(t *testing.T) {
 				assert.Equal(t, filepath.Join(old, name), resolved)
 			}
 			if mode != "native" {
+				physical, err := ResolveInstallationExecutable()
+				require.NoError(t, err)
+				assert.Equal(t, filepath.Join(old, "microfat"), physical)
+				originalEval := evalSymlinksFunc
+				calls := 0
+				evalSymlinksFunc = func(path string) (string, error) {
+					if path == filepath.Join(old, "microfat") {
+						calls++
+						if calls == 2 {
+							return "", install.ErrChanged
+						}
+					}
+					return originalEval(path)
+				}
+				_, err = ResolveInstallationExecutable()
+				require.ErrorIs(t, err, install.ErrChanged)
+				evalSymlinksFunc = originalEval
 				t.Setenv(format.EnvOriginalExe, filepath.Join(paths.Bin, "microfat"))
-				_, err := ResolveStubWithOptions(ResolveStubOptions{TargetArch: runtime.GOARCH})
+				_, err = ResolveStubWithOptions(ResolveStubOptions{TargetArch: runtime.GOARCH})
 				require.ErrorIs(t, err, install.ErrDiscovery, "same payload hash cannot authorize a moving hint")
 			}
 		})

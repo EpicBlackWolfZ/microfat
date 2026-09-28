@@ -76,6 +76,10 @@ func (v Cosign) Verify(ctx context.Context, version, checksums, bundle string) e
 	output := &boundedOutput{}
 	command.Stdout, command.Stderr = output, output
 	if err := command.Run(); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return fmt.Errorf("verifier execution denied; use --staging-dir on an executable filesystem "+
+				"or an independently pinned executable verifier: %w", err)
+		}
 		return fmt.Errorf("release signature verification failed: %w: %s", err, output.String())
 	}
 	if err := ctx.Err(); err != nil {

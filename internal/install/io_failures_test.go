@@ -55,7 +55,7 @@ func TestPermissionLossAtPublicationBoundaries(t *testing.T) {
 					require.Len(t, stages, 1)
 					changeMode(t, stages[0], 0o500)
 				}
-				if point == "before-activation" {
+				if point == fixtureBeforeActivation {
 					switch scenario {
 					case "activation-link":
 						changeMode(t, paths.Store, 0o500)

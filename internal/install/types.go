@@ -115,6 +115,8 @@ type Snapshot struct {
 	currentTarget string
 	current       *Generation
 	currentError  error
+	updateOnly    bool
+	updateFiles   map[string]os.FileInfo
 }
 
 func (s Snapshot) Owner() *Owner {

@@ -27,7 +27,7 @@ func TestArchiveSafety(t *testing.T) {
 			t.Parallel()
 			arch := "amd64"
 			if scenario == "valid-arm64" {
-				arch = "arm64"
+				arch = fixtureARM64
 			}
 			archive := archiveFixture(t, arch, func(header *tar.Header, data []byte) (*tar.Header, []byte) {
 				if header.Name != "microfat-stub" {
@@ -53,7 +53,7 @@ func TestArchiveSafety(t *testing.T) {
 				case "missing-product":
 					return nil, nil
 				case "wrong-arch":
-					data = elfFixture("arm64")
+					data = elfFixture(fixtureARM64)
 				case "bad-elf":
 					data[0] = 0
 				case "fat-stub":
