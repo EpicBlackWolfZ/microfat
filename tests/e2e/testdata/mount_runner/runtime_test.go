@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -215,4 +216,15 @@ func TestCacheSnapshotReportsUnsafeObjectsWithoutFollowing(t *testing.T) {
 	require.NoError(t, file.Close())
 	_, err = snapshotRuntimeCache(mountfixture.Request{Root: "/missing"}, 0)
 	require.True(t, errors.Is(err, os.ErrNotExist))
+}
+
+func TestLostPolicyListenerIsNotNormalHangup(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	// Linux's maximum descriptor is below MaxInt32; this positive descriptor
+	// reaches poll and produces POLLNVAL without risking descriptor reuse.
+	ready, err := pollPolicy(ctx, math.MaxInt32)
+	require.False(t, ready)
+	require.ErrorContains(t, err, "policy listener failed")
 }

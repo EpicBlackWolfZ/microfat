@@ -151,10 +151,13 @@ func pollPolicy(ctx context.Context, fd int) (bool, error) {
 		if err != nil {
 			return false, err
 		}
+		if poll[0].Revents&(unix.POLLERR|unix.POLLNVAL) != 0 {
+			return false, errors.New("policy listener failed")
+		}
 		if poll[0].Revents&unix.POLLIN != 0 {
 			return true, nil
 		}
-		if poll[0].Revents&(unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) != 0 {
+		if poll[0].Revents&unix.POLLHUP != 0 {
 			return false, nil
 		}
 	}
