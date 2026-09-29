@@ -79,10 +79,10 @@ func UpdateNeeded(current, candidate []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	switch installrelease.CompareVersions(to, from) {
-	case -1:
+	switch order := installrelease.CompareVersions(to, from); {
+	case order < 0:
 		return false, errors.New("refusing cask downgrade")
-	case 0:
+	case order == 0:
 		if !bytes.Equal(current, candidate) {
 			return false, errors.New("same-version cask differs; a reviewed repair is required")
 		}

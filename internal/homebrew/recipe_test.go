@@ -54,6 +54,12 @@ func TestUpdatePolicy(t *testing.T) {
 	}{
 		{"first", nil, current, true, false}, {"same", current, current, false, false},
 		{"upgrade", current, newer, true, false}, {"downgrade", newer, current, false, true},
+		{"major digit length downgrade", fixtureRecipe(t, "100.3.0"), fixtureRecipe(t, "9.3.0"), false, true},
+		{"minor digit length downgrade", fixtureRecipe(t, "0.100.0"), fixtureRecipe(t, "0.9.0"), false, true},
+		{"patch digit length downgrade", fixtureRecipe(t, "0.3.100"), fixtureRecipe(t, "0.3.9"), false, true},
+		{"major digit length upgrade", fixtureRecipe(t, "9.3.0"), fixtureRecipe(t, "100.3.0"), true, false},
+		{"minor digit length upgrade", fixtureRecipe(t, "0.9.0"), fixtureRecipe(t, "0.100.0"), true, false},
+		{"patch digit length upgrade", fixtureRecipe(t, "0.3.9"), fixtureRecipe(t, "0.3.100"), true, false},
 		{"same changed", append([]byte("# human change\n"), current...), current, false, true},
 		{"invalid current", []byte("bad"), current, false, true}, {"invalid candidate", current, nil, false, true},
 	} {
