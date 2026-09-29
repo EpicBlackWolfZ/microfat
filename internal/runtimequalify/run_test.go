@@ -305,3 +305,55 @@ func TestFilesystemAndOptionBoundaries(t *testing.T) {
 	require.Empty(t, envValue(nil, "KEY"))
 	require.Equal(t, "sudo", namespaceCommand(Sudo, "true")[0])
 }
+
+func TestEvidenceWritesRemainComplete(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, "summary.json")
+	value := strings.Repeat("evidence", 1<<13)
+	require.NoError(t, WriteJSON(path, value))
+	done := make(chan error, 1)
+	defer func() { <-done }()
+	go func() {
+		defer close(done)
+		for range 32 {
+			if err := WriteJSON(path, value); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	for {
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		var actual string
+		require.NoError(t, json.Unmarshal(data, &actual), "a concurrent reader must never observe a partial summary")
+		require.Equal(t, value, actual)
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+			entries, err := os.ReadDir(root)
+			require.NoError(t, err)
+			require.Len(t, entries, 1, "successful writes must clean temporary files")
+			return
+		default:
+		}
+	}
+}
+
+func TestEvidenceWriteFailurePreservesExistingRecord(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, "summary.json")
+	require.NoError(t, WriteJSON(path, "previous"))
+	require.Error(t, WriteJSON(path, make(chan bool)))
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.JSONEq(t, `"previous"`, string(data))
+	require.Error(t, WriteJSON(filepath.Join(path, "missing-parent"), "next"))
+	require.Error(t, WriteJSON(root, "cannot replace a directory"))
+	entries, err := filepath.Glob(filepath.Join(filepath.Dir(root), ".runtime-evidence-*"))
+	require.NoError(t, err)
+	require.Empty(t, entries, "failed rename must clean temporary files")
+}

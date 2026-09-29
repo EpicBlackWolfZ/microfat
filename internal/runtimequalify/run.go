@@ -32,7 +32,17 @@ func WriteJSON(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), dataMode)
+	file, err := os.CreateTemp(filepath.Dir(path), ".runtime-evidence-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(file.Name()) }()
+	_, writeErr := file.Write(append(data, '\n'))
+	if err := errors.Join(writeErr, file.Close()); err != nil {
+		return err
+	}
+	// Readers and interrupted runs retain the last complete evidence record.
+	return os.Rename(file.Name(), path)
 }
 
 func Run(ctx context.Context, options Options, out io.Writer, environment []string, execute releaseaudit.Execute) error {
