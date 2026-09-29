@@ -77,7 +77,13 @@ Payloads may retain their ordinary standard streams and Go runtime event
 descriptors; launcher, staging, policy and synchronization descriptors must close.
 
 Seccomp programs check the syscall architecture. Notification handling permits
-bootstrap execution, then inspects the descriptor selected for payload execution.
+bootstrap execution, then pins the descriptor selected for payload execution and
+checks mandatory seals and rejected mutation attempts before replying. Writable
+probe handles close before the reply so they cannot cause ETXTBSY. Hashing runs
+after the reply against the pinned read-only descriptor, which survives payload
+exec/exit and descriptor closure. Its digest must match the independently known
+payload digest; any inspection failure still invalidates the case. This prevents
+Go preemption from repeatedly cancelling a slow full-CLI hash while exec waits.
 It does not emulate successful syscalls or write application memory. Kernel-confirmed
 cancelled notification IDs are recorded with a bounded limit; no application is
 retried. This is a test synchronization mechanism, not a hostile-process security
@@ -89,7 +95,9 @@ Each child has a 30-second limit, batches a 60-second limit, and stdout/stderr
 a 256 KiB limit each. Startup reporting is also bounded. Overflow invalidates
 evidence. Killing namespace PID 1 terminates even detached descendants. Required
 native source CI separately runs the timeout/detached-child regression with
-pidfds to verify teardown.
+pidfds to verify teardown, plus full/minimal fat CLI execution in all three modes.
+The real CLI is padded to 64 MiB for this regression so inspection exceeds the
+preemption interval even on fast runners; asynchronous preemption stays enabled.
 
 ## Authenticated candidates
 
@@ -162,6 +170,11 @@ this requirement.
 For v0.3.0 and later, including prereleases, the release producer calls
 `runtime-qualification.yml` after staging its signed draft. These native jobs have
 read-only repository permissions and no publishing credentials.
+The producer, which already has draft access, downloads the exact draft assets,
+signed checksums and release metadata and uploads an artifact named for its run
+and attempt. Both runtime and installer qualification consume that artifact and
+authenticate the received bytes before execution. They do not query unpublished
+releases with read-only tokens; GitHub requires push access to see drafts.
 
 Both normal publication and manual recovery use the same finalizer. It requires
 successful jobs and complete candidate summaries from the exact producer run

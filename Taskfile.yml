@@ -84,7 +84,7 @@ vars:
 
 tasks:
   test-runtime-fixtures:
-    desc: Require native runtime supervisor timeout and detached-child cleanup regressions
+    desc: Require native fat CLI inspection, timeout and detached-child cleanup regressions
     cmds:
     - |-
       {{.TASK_ENV}}

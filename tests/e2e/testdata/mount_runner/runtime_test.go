@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/EpicBlackWolfZ/microfat/tests/e2e/testdata/mountfixture"
 	"github.com/stretchr/testify/require"
@@ -140,9 +144,11 @@ func TestNotificationRejectsUnexpectedInput(t *testing.T) {
 	_, _, err = decideRuntimeNotification("fd-pressure", n, 0, -1)
 	require.Error(t, err)
 	n.Data.Args[0] = ^uint64(0)
-	require.Error(t, inspectRuntimeTarget(n, &event, false))
+	_, err = pinRuntimeTarget(n, &event, false)
+	require.Error(t, err)
 	n.Data.Args[0] = 0
-	require.Error(t, inspectRuntimeTarget(n, &event, false))
+	_, err = pinRuntimeTarget(n, &event, false)
+	require.Error(t, err)
 }
 
 func TestListenerTransferAndLoss(t *testing.T) {
@@ -227,4 +233,57 @@ func TestLostPolicyListenerIsNotNormalHangup(t *testing.T) {
 	ready, err := pollPolicy(ctx, math.MaxInt32)
 	require.False(t, ready)
 	require.ErrorContains(t, err, "policy listener failed")
+}
+
+func TestRuntimeTargetRemainsPinnedAfterTheChildClosesIt(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"cache", "sealed", "unsealed"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			var source *os.File
+			if kind == "cache" {
+				var err error
+				source, err = os.CreateTemp(t.TempDir(), "image-")
+				require.NoError(t, err)
+			} else {
+				fd, err := unix.MemfdCreate("microfat_payload", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
+				require.NoError(t, err)
+				source = os.NewFile(uintptr(fd), "image")
+			}
+			defer source.Close()
+			payload := []byte("pinned image bytes")
+			_, err := source.Write(payload)
+			require.NoError(t, err)
+			if kind == "sealed" {
+				_, err := unix.FcntlInt(source.Fd(), unix.F_ADD_SEALS, mandatorySeals)
+				require.NoError(t, err)
+			}
+			path := append([]byte(fmt.Sprintf("/proc/self/fd/%d", source.Fd())), 0)
+			// #nosec G103 -- this live byte slice is read through this test process's procfs memory descriptor.
+			address := uint64(uintptr(unsafe.Pointer(&path[0])))
+			// #nosec G115 -- the operating system's positive PID fits the kernel notification field.
+			notice := notification{PID: uint32(os.Getpid()), Data: notificationData{Number: unix.SYS_EXECVE, Args: [6]uint64{address}}}
+			var event mountfixture.PolicyEvent
+			pinned, err := pinRuntimeTarget(notice, &event, true)
+			runtime.KeepAlive(path)
+			if kind == "unsealed" {
+				require.ErrorContains(t, err, "missing mandatory seals")
+				require.Nil(t, pinned)
+				return
+			}
+			require.NoError(t, err)
+			defer pinned.Close()
+			require.Equal(t, kind == "sealed", event.Immutable)
+			require.Empty(t, event.Digest, "hashing must not delay the notification reply")
+			require.NoError(t, source.Close())
+			if kind == "cache" {
+				require.NoError(t, os.Remove(source.Name()))
+				require.NoError(t, os.WriteFile(source.Name(), []byte("replacement"), 0o600))
+			}
+			digest, err := hashRuntimeFile(pinned)
+			require.NoError(t, err)
+			require.Equal(t, fmt.Sprintf("%x", sha256.Sum256(payload)), digest,
+				"inspection must retain the notified inode after close, unlink and replacement")
+		})
+	}
 }

@@ -239,19 +239,10 @@ func superviseRuntime(ctx context.Context, policy string, socket, pid int) polic
 			result.err = err
 			return result
 		}
-		event, response, err := decideRuntimeNotification(policy, notice, completed, pid)
-		validErr := notificationValid(fd, &notice.ID)
-		if errors.Is(validErr, unix.ENOENT) {
-			err = validErr
-		} else if err == nil {
-			err = validErr
-		}
-		if err == nil {
-			err = sendNotification(fd, &response)
-		}
+		event, replied, err := handleRuntimeNotification(fd, policy, notice, completed, pid)
 		// Go's asynchronous preemption can cancel a notification. Only a
 		// kernel-confirmed invalid ID may be retried; no exec has been authorized.
-		if errors.Is(err, unix.ENOENT) && errors.Is(notificationValid(fd, &notice.ID), unix.ENOENT) {
+		if !replied && errors.Is(err, unix.ENOENT) && errors.Is(notificationValid(fd, &notice.ID), unix.ENOENT) {
 			cancelled++
 			event.Decision = "cancelled"
 			result.events = append(result.events, event)
@@ -268,6 +259,37 @@ func superviseRuntime(ctx context.Context, policy string, socket, pid int) polic
 		}
 		completed++
 	}
+}
+
+func handleRuntimeNotification(fd int, policy string, notice notification, ordinal, pid int) (mountfixture.PolicyEvent, bool, error) {
+	event, response, err := decideRuntimeNotification(policy, notice, ordinal, pid)
+	var target *os.File
+	if err == nil && (event.Decision == "continue" || event.Decision == "deny-EPERM") {
+		target, err = pinRuntimeTarget(notice, &event, policy == "observe")
+	}
+	if target != nil {
+		defer func() { _ = target.Close() }()
+	}
+	validErr := notificationValid(fd, &notice.ID)
+	if errors.Is(validErr, unix.ENOENT) {
+		err = validErr
+	} else if err == nil {
+		err = validErr
+	}
+	if err != nil {
+		return event, false, err
+	}
+	if err := sendNotification(fd, &response); err != nil {
+		return event, false, err
+	}
+	// The descriptor and mandatory seals are pinned before replying. Hashing the
+	// full CLI while exec is pending lets Go preemption cancel every reply.
+	// Audit the same inode after the reply, even if the child has already exited;
+	// an audit failure still invalidates the case, never retries the application.
+	if target != nil {
+		event.Digest, err = hashRuntimeFile(target)
+	}
+	return event, true, err
 }
 
 func decideRuntimeNotification(policy string, notice notification, ordinal, pid int) (
@@ -297,9 +319,6 @@ func decideRuntimeNotification(policy string, notice notification, ordinal, pid 
 		event.Decision = "bootstrap"
 		return event, response, nil
 	}
-	if err := inspectRuntimeTarget(notice, &event, policy == "observe"); err != nil {
-		return event, response, err
-	}
 	if policy == "exec-all" || (policy == "exec-first" && ordinal == 1) {
 		event.Decision = "deny-EPERM"
 		response.Flags, response.Error = 0, -int32(unix.EPERM)
@@ -307,65 +326,69 @@ func decideRuntimeNotification(policy string, notice notification, ordinal, pid 
 	return event, response, nil
 }
 
-func inspectRuntimeTarget(notice notification, event *mountfixture.PolicyEvent, inspectSeals bool) error {
+func pinRuntimeTarget(notice notification, event *mountfixture.PolicyEvent, inspectSeals bool) (*os.File, error) {
 	address := notice.Data.Args[0]
 	if notice.Data.Number == unix.SYS_EXECVEAT {
 		address = notice.Data.Args[1]
 	}
 	if address > math.MaxInt64 {
-		return errors.New("invalid notification path pointer")
+		return nil, errors.New("invalid notification path pointer")
 	}
 	file, err := os.Open(fmt.Sprintf("/proc/%d/mem", notice.PID))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	buffer := make([]byte, startupLimit)
 	n, readErr := file.ReadAt(buffer, int64(address))
 	closeErr := file.Close()
 	end := bytes.IndexByte(buffer[:n], 0)
 	if end < 0 || closeErr != nil {
-		return errors.Join(readErr, closeErr, errors.New("unbounded exec pathname"))
+		return nil, errors.Join(readErr, closeErr, errors.New("unbounded exec pathname"))
 	}
 	path := string(buffer[:end])
 	fdText, ok := strings.CutPrefix(path, "/proc/self/fd/")
 	if !ok {
-		return errors.New("payload exec did not use a descriptor")
+		return nil, errors.New("payload exec did not use a descriptor")
 	}
 	fd, err := strconv.Atoi(fdText)
 	if err != nil || fd < 0 {
-		return errors.New("invalid payload descriptor")
+		return nil, errors.New("invalid payload descriptor")
 	}
 	path = runtimeDescriptorPath(notice.PID, fd)
 	event.Target, err = os.Readlink(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	flags := os.O_RDONLY
 	memfd := strings.Contains(event.Target, "memfd:microfat_payload")
-	if inspectSeals && memfd {
-		flags = os.O_RDWR
-	}
 	// #nosec G304 -- numeric descriptor under the notified fixture task's procfs directory.
-	file, err = os.OpenFile(path, flags, 0)
+	file, err = os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	if memfd {
+		event.Seals, err = unix.FcntlInt(file.Fd(), unix.F_GET_SEALS, 0)
+		if err != nil || event.Seals&mandatorySeals != mandatorySeals {
+			return nil, errors.Join(err, errors.New("missing mandatory seals"), file.Close())
+		}
+		if inspectSeals {
+			if err := inspectRuntimeSeals(file, event); err != nil {
+				return nil, errors.Join(err, file.Close())
+			}
+		}
+	}
+	return file, nil
+}
+
+func inspectRuntimeSeals(pinned *os.File, event *mountfixture.PolicyEvent) error {
+	// Keep the writable handle only for the mutation probes. Holding it across
+	// CONTINUE would introduce ETXTBSY into an otherwise executable memfd.
+	path := fmt.Sprintf("/proc/self/fd/%d", pinned.Fd())
+	// #nosec G304 -- reopen only the supervisor's already pinned numeric descriptor.
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = file.Close() }()
-	before, err := hashRuntimeFile(file)
-	if err != nil {
-		return err
-	}
-	event.Digest = before
-	if !memfd {
-		return nil
-	}
-	event.Seals, err = unix.FcntlInt(file.Fd(), unix.F_GET_SEALS, 0)
-	if err != nil || event.Seals&mandatorySeals != mandatorySeals {
-		return errors.Join(err, errors.New("missing mandatory seals"))
-	}
-	if !inspectSeals {
-		return nil
-	}
 	stat, err := file.Stat()
 	if err != nil {
 		return err
@@ -373,13 +396,12 @@ func inspectRuntimeTarget(notice notification, event *mountfixture.PolicyEvent, 
 	_, writeErr := file.WriteAt([]byte{0}, 0)
 	shrinkErr, growErr := file.Truncate(stat.Size()-1), file.Truncate(stat.Size()+1)
 	_, sealErr := unix.FcntlInt(file.Fd(), unix.F_ADD_SEALS, unix.F_SEAL_FUTURE_WRITE)
-	after, hashErr := hashRuntimeFile(file)
 	event.Immutable = errors.Is(writeErr, unix.EPERM) && errors.Is(shrinkErr, unix.EPERM) &&
-		errors.Is(growErr, unix.EPERM) && errors.Is(sealErr, unix.EPERM) && before == after
-	if !event.Immutable || hashErr != nil {
-		return errors.Join(hashErr, errors.New("memfd immutability control failed"))
+		errors.Is(growErr, unix.EPERM) && errors.Is(sealErr, unix.EPERM)
+	if !event.Immutable {
+		return errors.New("memfd immutability control failed")
 	}
-	return nil
+	return file.Close()
 }
 
 func hashRuntimeFile(file *os.File) (string, error) {

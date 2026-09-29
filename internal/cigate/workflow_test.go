@@ -22,14 +22,15 @@ type workflow struct {
 }
 
 type workflowJob struct {
-	Name     string            `yaml:"name"`
-	Needs    yaml.Node         `yaml:"needs"`
-	If       string            `yaml:"if"`
-	Uses     string            `yaml:"uses"`
-	Timeout  int               `yaml:"timeout-minutes"`
-	Env      map[string]string `yaml:"env"`
-	Steps    []workflowStep    `yaml:"steps"`
-	Strategy struct {
+	Permissions map[string]string `yaml:"permissions"`
+	Name        string            `yaml:"name"`
+	Needs       yaml.Node         `yaml:"needs"`
+	If          string            `yaml:"if"`
+	Uses        string            `yaml:"uses"`
+	Timeout     int               `yaml:"timeout-minutes"`
+	Env         map[string]string `yaml:"env"`
+	Steps       []workflowStep    `yaml:"steps"`
+	Strategy    struct {
 		FailFast *bool `yaml:"fail-fast"`
 		Matrix   struct {
 			Include []map[string]string `yaml:"include"`
