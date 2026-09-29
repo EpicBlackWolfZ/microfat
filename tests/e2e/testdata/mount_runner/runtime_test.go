@@ -259,6 +259,10 @@ func TestRuntimeTargetRemainsPinnedAfterTheChildClosesIt(t *testing.T) {
 				require.NoError(t, err)
 			}
 			path := append([]byte(fmt.Sprintf("/proc/self/fd/%d", source.Fd())), 0)
+			// The synthetic kernel pointer must remain stable across stack growth.
+			var memory runtime.Pinner
+			memory.Pin(&path[0])
+			defer memory.Unpin()
 			// #nosec G103 -- this live byte slice is read through this test process's procfs memory descriptor.
 			address := uint64(uintptr(unsafe.Pointer(&path[0])))
 			// #nosec G115 -- the operating system's positive PID fits the kernel notification field.
