@@ -12,6 +12,8 @@ jobs:
   gate:
     name: Pre-Release Verification Gate
     runs-on: ubuntu-latest
+    outputs:
+      runtime-required: ${{ steps.runtime-policy.outputs.required }}
     env:
       MICROFAT_SBOM_TESTS: required
     steps:
@@ -55,6 +57,12 @@ jobs:
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
           version: '3.53.1'
+
+      - name: Select native runtime release policy
+        id: runtime-policy
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: echo "required=$(go run ./internal/cmd/runtime-qualify required-tag "$RELEASE_TAG")" >> "$GITHUB_OUTPUT"
 
       - name: Install pinned ShellCheck for the full release gate
         run: |
@@ -119,6 +127,17 @@ jobs:
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             --bundle dist/checksums.txt.sig \
             dist/checksums.txt
+
+  runtime-qualification:
+    name: Runtime candidate
+    needs: [gate, goreleaser]
+    if: needs.gate.outputs.runtime-required == 'true'
+    uses: ./.github/workflows/runtime-qualification.yml
+    permissions:
+      contents: read
+    with:
+      tag: ${{ github.ref_name }}
+      source: ${{ github.sha }}
 
   installer-qualification:
     name: Signed installer draft (${{ matrix.arch }})

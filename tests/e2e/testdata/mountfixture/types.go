@@ -2,6 +2,8 @@
 // qualification and its subprocess helpers. It is not a product API.
 package mountfixture
 
+import "time"
+
 type Mount struct {
 	Source   string `json:"source"`
 	Target   string `json:"target"`
@@ -14,6 +16,7 @@ type Rename struct {
 }
 
 type Request struct {
+	Runtime            *Runtime `json:"runtime,omitempty"`
 	Binfmt             *Binfmt  `json:"binfmt,omitempty"`
 	Root               string   `json:"root"`
 	UID                int      `json:"uid"`
@@ -40,27 +43,34 @@ type Binfmt struct {
 }
 
 type Execution struct {
-	PID      int    `json:"pid"`
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
-	Started  string `json:"started"`
-	ExitCode int    `json:"exit_code"`
-	Error    string `json:"error,omitempty"`
+	Duration     time.Duration `json:"duration_ns,omitempty"`
+	Timeout      bool          `json:"timeout,omitempty"`
+	Phase        int           `json:"phase,omitempty"`
+	Signal       string        `json:"signal,omitempty"`
+	Truncated    bool          `json:"truncated,omitempty"`
+	PolicyEvents []PolicyEvent `json:"policy_events,omitempty"`
+	PID          int           `json:"pid"`
+	Stdout       string        `json:"stdout"`
+	Stderr       string        `json:"stderr"`
+	Started      string        `json:"started"`
+	ExitCode     int           `json:"exit_code"`
+	Error        string        `json:"error,omitempty"`
 }
 
 type Result struct {
-	UserNamespace string      `json:"user_namespace,omitempty"`
-	Registration  string      `json:"registration,omitempty"`
-	Prerequisite  string      `json:"prerequisite,omitempty"`
-	Schema        int         `json:"schema"`
-	Stage         string      `json:"stage"`
-	Error         string      `json:"error,omitempty"`
-	Namespace     string      `json:"namespace"`
-	PIDNamespace  string      `json:"pid_namespace"`
-	UIDMap        string      `json:"uid_map"`
-	GIDMap        string      `json:"gid_map"`
-	MountInfo     string      `json:"mountinfo"`
-	Executions    []Execution `json:"executions"`
+	CacheSnapshots []CacheSnapshot `json:"cache_snapshots,omitempty"`
+	UserNamespace  string          `json:"user_namespace,omitempty"`
+	Registration   string          `json:"registration,omitempty"`
+	Prerequisite   string          `json:"prerequisite,omitempty"`
+	Schema         int             `json:"schema"`
+	Stage          string          `json:"stage"`
+	Error          string          `json:"error,omitempty"`
+	Namespace      string          `json:"namespace"`
+	PIDNamespace   string          `json:"pid_namespace"`
+	UIDMap         string          `json:"uid_map"`
+	GIDMap         string          `json:"gid_map"`
+	MountInfo      string          `json:"mountinfo"`
+	Executions     []Execution     `json:"executions"`
 }
 
 // Process identifies a test process independently of host PID numbering.
@@ -71,6 +81,8 @@ type Process struct {
 }
 
 type Report struct {
+	Descriptors       map[string]string `json:"descriptors,omitempty"`
+	Seals             int               `json:"seals,omitempty"`
 	ProbeFDTarget     string            `json:"probe_fd_target,omitempty"`
 	NoNewPrivileges   string            `json:"no_new_privileges,omitempty"`
 	Identity          string            `json:"identity"`
@@ -92,6 +104,47 @@ type Report struct {
 	ExplicitAsset     string            `json:"explicit_asset"`
 	Capabilities      string            `json:"capabilities"`
 	Errors            map[string]string `json:"errors"`
+}
+
+// Runtime selects bounded runtime qualification extensions. Zero/nil preserves
+// the original mount and QEMU protocol.
+type Runtime struct {
+	Capability bool   `json:"capability,omitempty"`
+	Workers    int    `json:"workers"`
+	Policy     string `json:"policy"`
+	Cache      string `json:"cache"`
+	BusyName   string `json:"busy_name,omitempty"`
+}
+
+// PolicyProbe is produced by a plain payload, independently of the launcher.
+type PolicyProbe struct {
+	MemfdErrno int `json:"memfd_errno"`
+	SealErrno  int `json:"seal_errno"`
+}
+
+type PolicyEvent struct {
+	Syscall   int32  `json:"syscall"`
+	PID       uint32 `json:"pid"`
+	Decision  string `json:"decision"`
+	Target    string `json:"target,omitempty"`
+	Digest    string `json:"digest,omitempty"`
+	Seals     int    `json:"seals,omitempty"`
+	Immutable bool   `json:"immutable,omitempty"`
+}
+
+type CacheEntry struct {
+	Name   string `json:"name"`
+	Digest string `json:"sha256,omitempty"`
+	Mode   uint32 `json:"mode"`
+	UID    uint32 `json:"uid"`
+	Size   int64  `json:"size"`
+}
+
+type CacheSnapshot struct {
+	Phase      int          `json:"phase"`
+	Entries    []CacheEntry `json:"entries"`
+	Filesystem int64        `json:"filesystem"`
+	Flags      int64        `json:"flags"`
 }
 
 type DescriptorProbe struct {
