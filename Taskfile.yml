@@ -83,6 +83,26 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  test-runtime-fixtures:
+    desc: Require native fat CLI inspection, timeout and detached-child cleanup regressions
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      MICROFAT_RUNTIME_FIXTURES=required MICROFAT_MOUNT_BACKEND={{.MOUNT_BACKEND | default "userns" | shellQuote}} \
+        {{.GO | shellQuote}} test -race ./tests/e2e -run '^TestRuntimeFixture' -count=1
+  qualify-runtime:
+    desc: Qualify native runtime concurrency and policy (RUNTIME_INPUT=source|candidate, RUNTIME_TESTS=auto|required)
+    cmds:
+    - |
+      {{.GO | shellQuote}} run -race ./internal/cmd/runtime-qualify \
+        --go {{.GO | shellQuote}} \
+        --input {{.RUNTIME_INPUT | default "source" | shellQuote}} \
+        --tests {{.RUNTIME_TESTS | default "auto" | shellQuote}} \
+        --backend {{.RUNTIME_BACKEND | default "userns" | shellQuote}} \
+        --output {{.RUNTIME_OUTPUT | default ".work/runtime-qualification" | shellQuote}} \
+        --dist {{.RUNTIME_DIST | default "" | shellQuote}} \
+        --tag {{.RUNTIME_TAG | default "" | shellQuote}} \
+        --source {{.RUNTIME_SOURCE | default "" | shellQuote}}
   homebrew-prepare:
     desc: Authenticate a public immutable release and generate a Linux cask (TAG and OUTPUT required)
     cmds:

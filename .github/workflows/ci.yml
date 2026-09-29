@@ -611,6 +611,42 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  runtime:
+    name: Native runtime qualification (${{ matrix.arch }})
+    needs: [lint, test]
+    if: needs.lint.outputs.run-code-checks == 'true'
+    runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        with:
+          version: '3.53.1'
+      - name: Prove fat CLI inspection and runtime supervisor teardown
+        run: |
+          mkdir -p .work/runtime-qualification
+          task test-runtime-fixtures MOUNT_BACKEND=sudo | tee .work/runtime-qualification/fixture-tests.log
+      - name: Require complete native concurrency and policy qualification
+        run: task qualify-runtime RUNTIME_TESTS=required RUNTIME_BACKEND=sudo
+      - name: Preserve runtime qualification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-source-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .work/runtime-qualification/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+
   qemu:
     name: ARM64 QEMU descriptor qualification
     needs: [lint, test]
@@ -719,7 +755,7 @@ jobs:
   complete:
     name: CI Complete
     if: always()
-    needs: [pr-lint, lint, gitleaks, vulncheck, test, integration, dx, build, benchmark-smoke, kernel, codeql, archive-contracts, installer, mounts, qemu, homebrew]
+    needs: [pr-lint, lint, gitleaks, vulncheck, test, integration, dx, build, benchmark-smoke, kernel, codeql, archive-contracts, installer, mounts, qemu, homebrew, runtime]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

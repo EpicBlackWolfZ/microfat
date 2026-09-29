@@ -114,6 +114,12 @@ See [mount layouts and replay](docs/mount-layouts.md) for the matrix and evidenc
 ARM64 QEMU qualification has its own required amd64 job. Run `task qualify-qemu` locally
 or `task qualify-qemu QEMU_TESTS=required` to require all prerequisites. See the
 [QEMU guide](docs/qemu-qualification.md) for isolation, controls and evidence interpretation.
+Native runtime concurrency and kernel-policy qualification is also required on
+amd64 and arm64. Run `task qualify-runtime RUNTIME_TESTS=required` locally and
+`task test-runtime-fixtures` for supervisor teardown regressions. The default
+backend is rootless; CI explicitly selects sudo. See
+[runtime qualification](docs/runtime-qualification.md) for authenticated candidate
+inputs, evidence, replay and the mandatory v0.3.0+ publication gate.
 The full local and release commands retain their existing complete test and coverage scope.
 
 ### Code Coverage Architecture & Codecov Integration

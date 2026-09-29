@@ -24,7 +24,7 @@ type Job struct {
 // expected job here prevents a removed dependency from silently approving a PR.
 func RequiredJobs() []string {
 	return []string{"pr-lint", "lint", "gitleaks", "vulncheck", "test", "integration", "dx", "build",
-		"benchmark-smoke", "kernel", "codeql", "archive-contracts", "installer", "mounts", "qemu", "homebrew"}
+		"benchmark-smoke", "kernel", "codeql", "archive-contracts", "installer", "mounts", "qemu", "homebrew", "runtime"}
 }
 
 // Evaluate accepts only a complete, successful code pipeline or the documented

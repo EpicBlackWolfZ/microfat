@@ -5,6 +5,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/runtimeinit"
 	"github.com/EpicBlackWolfZ/microfat/tests/e2e/testdata/mountfixture"
+	"golang.org/x/sys/unix"
 )
 
 var identity = "original"
@@ -44,6 +46,10 @@ func main() {
 			panic(err)
 		}
 	}
+	if len(os.Args) > 1 && os.Args[1] == "--policy-probe" {
+		policyProbe()
+		return
+	}
 	if len(os.Args) > 1 && (os.Args[1] == "--hang" || os.Args[1] == "--spawn-detached") {
 		if os.Args[1] == "--spawn-detached" {
 			// #nosec G204 G702 -- fixed fixture executable; arguments only propagate the cleanup identity token.
@@ -60,6 +66,9 @@ func main() {
 	r := mountfixture.Report{Identity: identity, PID: os.Getpid(), UID: os.Getuid(), EUID: os.Geteuid(),
 		GID: os.Getgid(), EGID: os.Getegid(), Args: os.Args, Environment: os.Getenv("MOUNT_SENTINEL"),
 		Mode: os.Getenv("MICROFAT_EXEC_MODE"), Original: os.Getenv("MICROFAT_ORIGINAL_EXE"), Errors: map[string]string{}}
+	if os.Getenv("RUNTIME_QUALIFY") == "1" {
+		r.Descriptors = descriptors()
+	}
 	if fd, err := strconv.Atoi(os.Getenv("QEMU_PROBE_FD")); err == nil && fd > startupFD {
 		// Observe before opening any other descriptors, which could reuse the closed number.
 		r.ProbeFDTarget, _ = os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
@@ -80,6 +89,9 @@ func main() {
 	record("runtime_executable", err)
 	image, err := os.Open("/proc/self/exe")
 	if err == nil {
+		if os.Getenv("RUNTIME_QUALIFY") == "1" {
+			r.Seals, _ = unix.FcntlInt(image.Fd(), unix.F_GET_SEALS, 0)
+		}
 		hash := sha256.New()
 		_, err = io.Copy(hash, image)
 		record("digest", err)
@@ -108,9 +120,59 @@ func main() {
 	if err := json.NewEncoder(os.Stdout).Encode(r); err != nil {
 		panic(err)
 	}
+	finish()
+}
+
+func finish() {
+	if len(os.Args) > 1 && os.Args[1] == "--signal-term" {
+		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+			panic(err)
+		}
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--exit-42" {
 		os.Exit(payloadExitCode)
 	}
+}
+
+func policyProbe() {
+	var result mountfixture.PolicyProbe
+	fd, err := unix.MemfdCreate("qualification-probe", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
+	var errno syscall.Errno
+	if err != nil {
+		if !errors.As(err, &errno) {
+			panic(err)
+		}
+		result.MemfdErrno = int(errno)
+	} else {
+		_, err := unix.FcntlInt(uintptr(fd), unix.F_ADD_SEALS, unix.F_SEAL_WRITE)
+		if err != nil {
+			if !errors.As(err, &errno) {
+				panic(err)
+			}
+			result.SealErrno = int(errno)
+		}
+		if err := unix.Close(fd); err != nil {
+			panic(err)
+		}
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+		panic(err)
+	}
+}
+
+func descriptors() map[string]string {
+	result := map[string]string{}
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		panic(err)
+	}
+	for _, entry := range entries {
+		target, err := os.Readlink("/proc/self/fd/" + entry.Name())
+		if err == nil {
+			result[entry.Name()] = target
+		}
+	}
+	return result
 }
 
 func hang(path string) {

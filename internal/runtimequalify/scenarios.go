@@ -1,0 +1,30 @@
+package runtimequalify
+
+const (
+	createEPERM       = "create-eperm"
+	createENOSYS      = "create-enosys"
+	execFirst         = "exec-first"
+	execAll           = "exec-all"
+	fdPressure        = "fd-pressure"
+	readOnly          = "readonly"
+	readOnlyWarm      = "readonly-warm"
+	noExec            = "noexec"
+	procMissing       = "proc-missing"
+	procInaccessible  = "proc-inaccessible"
+	procNoexec        = "proc-noexec"
+	capability        = "capability"
+	busy              = "busy"
+	insecure          = "insecure"
+	corruptPayload    = "corrupt-payload"
+	corruptDictionary = "corrupt-dictionary"
+	corruptCache      = "corrupt-cache"
+	symlink           = "symlink"
+	fifo              = "fifo"
+	fullStub          = "microfat-stub"
+	minimalStub       = "microfat-stub-minimal"
+	seal              = "seal"
+	observe           = "observe"
+)
+
+const amd64 = "amd64"
+const arm64 = "arm64"

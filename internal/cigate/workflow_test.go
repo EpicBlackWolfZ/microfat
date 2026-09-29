@@ -22,14 +22,15 @@ type workflow struct {
 }
 
 type workflowJob struct {
-	Name     string            `yaml:"name"`
-	Needs    yaml.Node         `yaml:"needs"`
-	If       string            `yaml:"if"`
-	Uses     string            `yaml:"uses"`
-	Timeout  int               `yaml:"timeout-minutes"`
-	Env      map[string]string `yaml:"env"`
-	Steps    []workflowStep    `yaml:"steps"`
-	Strategy struct {
+	Permissions map[string]string `yaml:"permissions"`
+	Name        string            `yaml:"name"`
+	Needs       yaml.Node         `yaml:"needs"`
+	If          string            `yaml:"if"`
+	Uses        string            `yaml:"uses"`
+	Timeout     int               `yaml:"timeout-minutes"`
+	Env         map[string]string `yaml:"env"`
+	Steps       []workflowStep    `yaml:"steps"`
+	Strategy    struct {
 		FailFast *bool `yaml:"fail-fast"`
 		Matrix   struct {
 			Include []map[string]string `yaml:"include"`
@@ -90,7 +91,7 @@ func TestWorkflowDependencyContract(t *testing.T) {
 	assert.Empty(t, w.Jobs["pr-lint"].If, "title job must succeed explicitly for non-PR events")
 	assert.ElementsMatch(t, []string{"lint", "test", "build"}, needs(t, w.Jobs["homebrew"]))
 	for _, name := range []string{
-		"integration", "dx", "build", "benchmark-smoke", "kernel", "codeql", "archive-contracts", "installer", "mounts", "qemu",
+		"integration", "dx", "build", "benchmark-smoke", "kernel", "codeql", "archive-contracts", "installer", "mounts", "qemu", "runtime",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

@@ -21,12 +21,14 @@ type Command func(...string) ([]byte, error)
 type Environment func(string) string
 
 type Asset struct {
+	ID     int64  `json:"id"`
 	Name   string `json:"name"`
 	Size   int64  `json:"size"`
 	Digest string `json:"digest"`
 }
 
 type Release struct {
+	ID        int64   `json:"id"`
 	Draft     bool    `json:"draft"`
 	Immutable bool    `json:"immutable"`
 	TagName   string  `json:"tag_name"`
@@ -153,16 +155,38 @@ func Finalize(options FinalizeOptions, env Environment, gh Command) error {
 	if err != nil {
 		return err
 	}
+	runtimeFiles, err := qualifyRuntimeRelease(repo, tag, source, runs.Runs, release, gh)
+	if err != nil {
+		return err
+	}
 	archive, checksum, err := evidenceFiles(options.Root)
 	if err != nil {
 		return err
 	}
-	for _, file := range []string{archive, checksum} {
+	return publishQualifiedEvidence(repo, tag, release, []string{archive, checksum}, runtimeFiles, gh)
+}
+
+func publishQualifiedEvidence(repo, tag string, release Release, benchmarkFiles, runtimeFiles []string, gh Command) error {
+	for _, file := range benchmarkFiles {
 		if err := uploadEvidence(release, file, gh); err != nil {
 			return err
 		}
 	}
-	_, err = gh(releaseCommand, "edit", tag, "--draft=false", "--latest")
+	for _, file := range runtimeFiles {
+		if err := uploadEvidence(release, file, gh); err != nil {
+			return err
+		}
+	}
+	if len(runtimeFiles) > 0 {
+		current, err := draftRelease(repo, tag, gh)
+		if err != nil {
+			return err
+		}
+		if err := sameRuntimeInventory(release, current); err != nil {
+			return err
+		}
+	}
+	_, err := gh(releaseCommand, "edit", tag, "--draft=false", "--latest")
 	return err
 }
 

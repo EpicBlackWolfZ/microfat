@@ -9,10 +9,10 @@ case "${1:-test}" in
     test|coverage|coverage-unit) ;;
     *) echo 'usage: test-profiles.sh test|coverage|coverage-unit' >&2; exit 1 ;;
 esac
-test_packages=(./...)
+test_packages=(./... ./tests/e2e/testdata/mount_runner)
 if [[ "${1:-test}" == coverage-unit ]]; then
     # Keep the full production statement universe while staging black-box tests later.
-    test_packages=(./cmd/... ./internal/... ./runtimeinit/... ./benchmarks/...)
+    test_packages=(./cmd/... ./internal/... ./runtimeinit/... ./benchmarks/... ./tests/e2e/testdata/mount_runner)
 fi
 run_tests() {
     local profile="${1}"
@@ -37,6 +37,6 @@ if [[ "${1:-test}" == coverage || "${1:-test}" == coverage-unit ]]; then
         -coverpkg=./cmd/...,./internal/...,./runtimeinit/...,./benchmarks/... "${test_packages[@]}"
     "${GO}" run ./internal/cmd/coverage "${COVERAGE_FILE}" "${TEST_ARTIFACT_DIR}/default.out" "${TEST_ARTIFACT_DIR}/minimal.out"
 else
-    run_tests default -race ./...
-    run_tests minimal -race -tags minimal ./...
+    run_tests default -race "${test_packages[@]}"
+    run_tests minimal -race -tags minimal "${test_packages[@]}"
 fi

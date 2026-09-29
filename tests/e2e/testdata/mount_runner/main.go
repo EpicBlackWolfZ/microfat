@@ -34,10 +34,16 @@ const (
 )
 
 // A noisy child must not turn a bounded qualification into unbounded memory use.
-type boundedBuffer struct{ bytes.Buffer }
+type boundedBuffer struct {
+	bytes.Buffer
+	truncated bool
+}
 
 func (b *boundedBuffer) Write(p []byte) (int, error) {
 	n := len(p)
+	if n > outputLimit-b.Len() {
+		b.truncated = true
+	}
 	if remaining := outputLimit - b.Len(); remaining > 0 {
 		if len(p) > remaining {
 			p = p[:remaining]
@@ -85,6 +91,11 @@ func child(args []string) error {
 	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
 	data := [2]unix.CapUserData{}
 	if err := unix.Capset(&header, &data[0]); err != nil {
+		return err
+	}
+	var err error
+	args, err = runtimeChild(args)
+	if err != nil {
 		return err
 	}
 	command := args[0]
@@ -143,6 +154,9 @@ func run(result *mountfixture.Result) error {
 	if err := setupBinfmt(req, result); err != nil {
 		return err
 	}
+	if err := setupRuntime(req); err != nil {
+		return err
+	}
 	data, err := os.ReadFile("/proc/self/mountinfo")
 	if err != nil {
 		return err
@@ -158,6 +172,9 @@ func run(result *mountfixture.Result) error {
 	if req.Binfmt != nil && req.Binfmt.Preflight {
 		result.Stage = "complete"
 		return nil
+	}
+	if req.Runtime != nil {
+		return runRuntime(req, result)
 	}
 	for range req.Runs {
 		run, err := execute(req)
@@ -209,7 +226,8 @@ func validate(req mountfixture.Request) error {
 	if !info.IsDir() || info.Mode().Perm() != 0o700 || int(info.Sys().(*syscall.Stat_t).Uid) != req.UID {
 		return errors.New("fixture root ownership or permissions mismatch")
 	}
-	if req.UID <= 0 || req.GID <= 0 || req.ParentNamespace == "" || req.Runs < 1 || req.Runs > 2 {
+	if !ordinaryID(req.UID) || !ordinaryID(req.GID) ||
+		req.ParentNamespace == "" || req.Runs < 1 || req.Runs > 2 {
 		return errors.New("ordinary UID/GID, namespace identity and one or two runs are required")
 	}
 	if req.Pause && req.Runs != 1 {
@@ -217,6 +235,9 @@ func validate(req mountfixture.Request) error {
 	}
 	if req.Binfmt != nil && (req.Binfmt.ParentUserNamespace == "" || req.Pause) {
 		return errors.New("binfmt requires a parent user namespace and cannot use ptrace mutation")
+	}
+	if err := validateRuntime(req); err != nil {
+		return err
 	}
 	for _, mount := range req.Mounts {
 		if _, err := sourcePath(req.Root, mount.Source); err != nil {
@@ -228,6 +249,8 @@ func validate(req mountfixture.Request) error {
 	}
 	return validateChanges(req)
 }
+
+func ordinaryID(value int) bool { return value > 0 && uint64(value) <= math.MaxUint32 }
 
 func validateChanges(req mountfixture.Request) error {
 	for _, rename := range req.Renames {
@@ -382,6 +405,7 @@ func execute(req mountfixture.Request) (mountfixture.Execution, error) {
 		r.Error = err.Error()
 	}
 	r.Stdout, r.Stderr = stdout.String(), stderr.String()
+	r.Truncated = stdout.truncated || stderr.truncated
 	if deadlineErr := reader.SetReadDeadline(time.Now().Add(outputDrainTimeout)); deadlineErr != nil {
 		return r, deadlineErr
 	}
