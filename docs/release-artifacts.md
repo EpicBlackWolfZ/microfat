@@ -102,6 +102,12 @@ Extracting `microfat_<version>_linux_<arch>.tar.gz` provides:
 
 ### Scenario A: Installing the `microfat` CLI
 
+The [official Homebrew tap](https://github.com/EpicBlackWolfZ/homebrew-tap) selects these same archives
+for Linux amd64 and arm64. Its first cask requires the public v0.3.0 release and a merged recipe PR;
+see [Homebrew commands](installation.md#homebrew-linux-amd64-and-arm64). The tap generator consumes
+the authenticated release inventory directly, so GoReleaser's `meta: true` archive output does not
+need fabricated platform metadata or a second packaging pass.
+
 Use the [verified installer](installation.md) to authenticate the release and publish all three products
 as one owned generation. The first bootstrap needs published v0.3.0 helper assets; the guide also covers
 a trusted source helper and independently provisioned verifier. Historical v0.2.3 through v0.2.5 remain

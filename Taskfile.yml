@@ -83,6 +83,29 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  homebrew-prepare:
+    desc: Authenticate a public immutable release and generate a Linux cask (TAG and OUTPUT required)
+    cmds:
+    - '{{.GO | shellQuote}} run ./internal/cmd/homebrew-release prepare --tag {{.TAG | default "" | shellQuote}} --output {{.OUTPUT | default "" | shellQuote}}'
+  homebrew-check:
+    desc: Test the cask template or authenticate and regenerate an explicit CASK
+    cmds:
+    - '{{.GO | shellQuote}} test ./internal/homebrew ./internal/cmd/homebrew-release'
+    - |-
+      cask={{.CASK | default "" | shellQuote}}
+      if [ -n "$cask" ]; then
+        {{.GO | shellQuote}} run ./internal/cmd/homebrew-release check --cask "$cask"
+      fi
+  qualify-homebrew:
+    desc: Qualify Homebrew in a disposable prefix (OUTPUT must be new; optional DIST and CASK)
+    cmds:
+    - |-
+      MICROFAT_HOMEBREW_TESTS=required \
+      MICROFAT_HOMEBREW_WORKSPACE="$PWD" \
+      MICROFAT_HOMEBREW_OUTPUT={{.OUTPUT | default "" | shellQuote}} \
+      MICROFAT_HOMEBREW_DIST={{.DIST | default "" | shellQuote}} \
+      MICROFAT_HOMEBREW_CASK={{.CASK | default "" | shellQuote}} \
+      {{.GO | shellQuote}} test -v ./tests/e2e -run '^TestHomebrewQualification$' -count=1 -timeout=30m
   default:
     cmds:
     - task: all
