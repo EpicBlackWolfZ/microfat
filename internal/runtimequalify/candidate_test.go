@@ -148,3 +148,31 @@ func TestCandidateAuthenticationFailureStopsBeforeExecution(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthenticationRecordsMustRemainAvailable(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"metadata", "destination", "missing-signature", "missing-checksums"} {
+		t.Run(mode, func(t *testing.T) {
+			c := candidateFixture(t)
+			c.runner.Execute = func(context.Context, process.Spec) (releaseaudit.Result, error) {
+				return releaseaudit.Result{}, nil
+			}
+			switch mode {
+			case "metadata":
+				require.NoError(t, os.Remove(filepath.Join(c.options.Dist, "release.json")))
+			case "destination":
+				require.NoError(t, os.Mkdir(filepath.Join(c.options.Output, "authentication"), privateMode))
+			case "missing-signature":
+				require.NoError(t, os.Remove(filepath.Join(c.options.Dist, "checksums.txt.sig")))
+			case "missing-checksums":
+				require.NoError(t, os.Remove(filepath.Join(c.options.Dist, "checksums.txt")))
+			}
+			if strings.HasPrefix(mode, "missing") {
+				require.Error(t, c.retainAuthentication())
+			} else {
+				require.Error(t, c.acquire())
+			}
+			require.NoDirExists(t, filepath.Join(c.options.Output, "products"))
+		})
+	}
+}

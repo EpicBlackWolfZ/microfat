@@ -68,8 +68,8 @@ func (f *runtimeFake) execute(_ context.Context, spec process.Spec) (releaseaudi
 		switch spec.Args[0] {
 		case "rev-parse":
 			result.Stdout = testSource
-		case "status":
-		case "diff":
+		case testStatus:
+		case testDiff:
 			result.Stdout = "retained patch"
 		case "ls-files":
 			result.Stdout = "scenarios.go\x00"
@@ -199,7 +199,7 @@ func TestSourceControllerAndAllFixtures(t *testing.T) {
 
 func TestRunRetainsExpectedManifestOnEarlyFailure(t *testing.T) {
 	t.Parallel()
-	for _, stage := range []string{"version", "rev-parse", "status", "uname", "unshare", "build", "pack", "verify"} {
+	for _, stage := range []string{"version", "rev-parse", testStatus, "uname", "unshare", "build", "pack", "verify"} {
 		t.Run(stage, func(t *testing.T) {
 			c, f := fakeController(t, runtime.GOARCH)
 			f.failed = stage
@@ -288,7 +288,7 @@ func TestFilesystemAndOptionBoundaries(t *testing.T) {
 	require.NoError(t, options.Validate("linux", arm64))
 	require.Error(t, options.Validate("darwin", amd64))
 	require.Error(t, options.Validate("linux", "386"))
-	options.Tag = "v0.3.0"
+	options.Tag = testCandidateTag
 	require.Error(t, options.Validate("linux", amd64))
 	options.Input, options.Dist, options.Source = Candidate, t.TempDir(), testSource
 	require.NoError(t, options.Validate("linux", amd64))

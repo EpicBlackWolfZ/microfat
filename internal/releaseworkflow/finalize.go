@@ -163,7 +163,11 @@ func Finalize(options FinalizeOptions, env Environment, gh Command) error {
 	if err != nil {
 		return err
 	}
-	for _, file := range []string{archive, checksum} {
+	return publishQualifiedEvidence(repo, tag, release, []string{archive, checksum}, runtimeFiles, gh)
+}
+
+func publishQualifiedEvidence(repo, tag string, release Release, benchmarkFiles, runtimeFiles []string, gh Command) error {
+	for _, file := range benchmarkFiles {
 		if err := uploadEvidence(release, file, gh); err != nil {
 			return err
 		}
@@ -182,7 +186,7 @@ func Finalize(options FinalizeOptions, env Environment, gh Command) error {
 			return err
 		}
 	}
-	_, err = gh(releaseCommand, "edit", tag, "--draft=false", "--latest")
+	_, err := gh(releaseCommand, "edit", tag, "--draft=false", "--latest")
 	return err
 }
 

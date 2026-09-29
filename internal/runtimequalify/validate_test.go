@@ -201,7 +201,7 @@ func TestEvidenceRejectsInvalidObservations(t *testing.T) {
 		{"wrong-filesystem", func(e *Evidence) { e.Result.CacheSnapshots[0].Filesystem = 0 }},
 		{"wrong-cache-phase", func(e *Evidence) { e.Result.CacheSnapshots[0].Phase++ }},
 		{"wrong-cache-mode", func(e *Evidence) { e.Result.CacheSnapshots[0].Entries[0].Mode = 0o100777 }},
-		{"wrong-cache-hash", func(e *Evidence) { e.Result.CacheSnapshots[0].Entries[0].Digest = "wrong" }},
+		{"wrong-cache-hash", func(e *Evidence) { e.Result.CacheSnapshots[0].Entries[0].Digest = testWrongValue }},
 		{"missing-cache-file", func(e *Evidence) { e.Result.CacheSnapshots[0].Entries = nil }},
 		{"staging-file", func(e *Evidence) { e.Result.CacheSnapshots[0].Entries[0].Name = ".staging" }},
 		{"unexpected-policy", func(e *Evidence) {
@@ -218,14 +218,14 @@ func TestEvidenceRejectsInvalidObservations(t *testing.T) {
 
 func TestSummaryRequiresEntireMatrix(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"schema", "status", "input", "arch", "source", "kernel", "pages", "toolchain", "missing", "expected",
+	for _, name := range []string{"schema", testStatus, "input", "arch", "source", "kernel", "pages", "toolchain", "missing", "expected",
 		"failed", "duplicate", "unexpected", "reason", "invalid-observation"} {
 		t.Run(name, func(t *testing.T) {
 			s := validSummary(t)
 			switch name {
 			case "schema":
 				s.Schema++
-			case "status":
+			case testStatus:
 				s.Status = Incomplete
 			case "input":
 				s.Input = "qemu"
@@ -262,8 +262,8 @@ func TestSummaryRequiresEntireMatrix(t *testing.T) {
 
 func TestCandidateProvenance(t *testing.T) {
 	t.Parallel()
-	base := Summary{Input: Candidate, Tag: "v0.3.0", ChecksumsSHA256: testHash, RunID: "123", Attempt: "2",
-		Assets: map[string]string{}, Release: Release{ID: 1, Tag: "v0.3.0", Draft: true,
+	base := Summary{Input: Candidate, Tag: testCandidateTag, ChecksumsSHA256: testHash, RunID: "123", Attempt: "2",
+		Assets: map[string]string{}, Release: Release{ID: 1, Tag: testCandidateTag, Draft: true,
 			Assets: []Asset{{ID: 1, Name: "checksums.txt", Size: 1, Digest: "sha256:" + testHash},
 				{ID: 2, Name: "checksums.txt.sig", Size: 1, Digest: "sha256:" + testHash}}}}
 	contract, err := releasecheck.NewReleaseContract(base.Tag)
@@ -301,9 +301,9 @@ func TestCandidateProvenance(t *testing.T) {
 			case "duplicate":
 				s.Release.Assets = append(s.Release.Assets, s.Release.Assets[0])
 			case "asset-digest":
-				s.Release.Assets[0].Digest = "wrong"
+				s.Release.Assets[0].Digest = testWrongValue
 			case "checksum-digest":
-				s.Release.Assets[0].Digest = "wrong"
+				s.Release.Assets[0].Digest = testWrongValue
 			case "missing-product":
 				s.Release.Assets = s.Release.Assets[1:]
 			case "missing-signature":

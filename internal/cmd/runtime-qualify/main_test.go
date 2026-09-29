@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -11,6 +12,13 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/releaseaudit"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMainReleasePolicy(t *testing.T) {
+	original := os.Args
+	t.Cleanup(func() { os.Args = original })
+	os.Args = []string{"runtime-qualify", "required-tag", "v0.3.0"}
+	main()
+}
 
 func TestRequiredReleaseLineIncludingPrereleases(t *testing.T) {
 	t.Parallel()

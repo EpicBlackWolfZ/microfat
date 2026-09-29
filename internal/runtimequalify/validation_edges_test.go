@@ -83,6 +83,24 @@ func TestEvidenceRejectsControlAndPolicyFailures(t *testing.T) {
 	require.NoError(t, validateDescriptors(map[string]string{"4": "anon_inode:[eventpoll]", "5": "anon_inode:[eventfd]"}))
 }
 
+func TestTelemetryRejectsMalformedTypedFieldsAndWrongFailure(t *testing.T) {
+	t.Parallel()
+	for _, log := range []string{
+		`[microfat] {"event":"dispatch","selected_size_bytes":"not a number"}`,
+		`[microfat] {"event":"error","stage":false}`,
+		`[microfat] {"event":"error","stage":""}`,
+	} {
+		e := validEvidence(t, caseFor(t, Full, Cache))
+		e.Result.Executions[0].Stderr = log
+		require.Error(t, ValidateEvidence(e))
+	}
+	e := validEvidence(t, caseFor(t, Full, Cache))
+	e.Result.Executions[0].Stderr += "[microfat:hint] expected resource failure\n"
+	require.NoError(t, ValidateEvidence(e))
+	e.Result.Executions[0].Stderr = strings.ReplaceAll(e.Result.Executions[0].Stderr, "no space left", "unrelated error")
+	require.Error(t, ValidateEvidence(e))
+}
+
 func candidateCLIEvidence(t *testing.T, mode string) Evidence {
 	t.Helper()
 	e := validEvidence(t, caseFor(t, distributedCLI, mode))
@@ -103,19 +121,19 @@ func TestUnmodifiedCandidateCLIRequiresInspectedImage(t *testing.T) {
 	for _, mode := range []string{Memfd, Cache, Auto} {
 		require.NoError(t, ValidateEvidence(candidateCLIEvidence(t, mode)))
 	}
-	for _, failure := range []string{"exit", "json", "notification", "digest", "seals", "stderr", "source-stderr"} {
+	for _, failure := range []string{testExit, "json", "notification", "digest", "seals", "stderr", "source-stderr"} {
 		t.Run(failure, func(t *testing.T) {
 			e := candidateCLIEvidence(t, Memfd)
 			run := &e.Result.Executions[0]
 			switch failure {
-			case "exit":
+			case testExit:
 				run.ExitCode = 1
 			case "json":
 				run.Stdout = "{"
 			case "notification":
 				run.PolicyEvents = nil
 			case "digest":
-				run.PolicyEvents[1].Digest = "wrong"
+				run.PolicyEvents[1].Digest = testWrongValue
 			case "seals":
 				run.PolicyEvents[1].Immutable = false
 			case "stderr":

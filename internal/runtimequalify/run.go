@@ -72,17 +72,16 @@ func Run(ctx context.Context, options Options, out io.Writer, environment []stri
 	if err := c.save(); err != nil {
 		return err
 	}
-	err = c.qualify(out)
-	if err != nil {
-		c.summary.Error = err.Error()
-		c.summary.Status = Fail
-	}
+	return c.complete(c.qualify(out))
+}
+
+func (c *controller) complete(err error) error {
 	if err == nil && c.summary.Status != Incomplete {
 		c.summary.Status = Pass
-		if validationErr := ValidateSummary(c.summary); validationErr != nil {
-			err = validationErr
-			c.summary.Status = Fail
-		}
+		err = ValidateSummary(c.summary)
+	}
+	if err != nil {
+		c.summary.Error, c.summary.Status = err.Error(), Fail
 	}
 	return errors.Join(err, c.save())
 }

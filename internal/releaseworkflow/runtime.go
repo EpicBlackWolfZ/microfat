@@ -149,6 +149,10 @@ func qualifyRuntimeRelease(repo, tag, source string, runs []WorkflowRun, release
 			return nil, err
 		}
 	}
+	return packageRuntimeEvidence(directory, tag)
+}
+
+func packageRuntimeEvidence(directory, tag string) ([]string, error) {
 	archive := filepath.Join(directory, "runtime-evidence_"+strings.TrimPrefix(tag, "v")+".tar.gz")
 	if err := archiveRuntimeEvidence(directory, archive); err != nil {
 		return nil, err

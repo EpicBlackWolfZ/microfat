@@ -216,7 +216,7 @@ func TestRequiredProducerCannotUseHistoricalBypass(t *testing.T) {
 	require.Error(t, err)
 	run := successfulBuild()
 	run.HeadBranch, run.ID, run.Attempt = release.TagName, 27, 2
-	for _, scenario := range []string{"api-error", "missing-jobs", "truncated-jobs", "download", "bad-summary"} {
+	for _, scenario := range []string{"api-error", "missing-jobs", "truncated-jobs", "download", "bad-summary", "no-summary"} {
 		t.Run(scenario, func(t *testing.T) {
 			gh := func(args ...string) ([]byte, error) {
 				if args[0] == "api" {
@@ -241,6 +241,9 @@ func TestRequiredProducerCannotUseHistoricalBypass(t *testing.T) {
 				}
 				target := args[len(args)-1]
 				require.NoError(t, os.MkdirAll(target, 0o700))
+				if scenario == "no-summary" {
+					return nil, nil
+				}
 				require.NoError(t, runtimequalify.WriteJSON(filepath.Join(target, "summary.json"), runtimequalify.Summary{}))
 				return nil, nil
 			}
@@ -297,4 +300,129 @@ func TestBothFinalizersRequireNativeCandidateJobs(t *testing.T) {
 			require.True(t, gateQueried)
 		})
 	}
+}
+
+func TestRuntimeArchiveAndFinalInventoryPublication(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"success", "archive-exists", "checksum-directory", "upload-failure", "recheck", "changed", "publish"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(root, "record.json"), []byte("evidence"), runtimeEvidenceMode))
+			release := runtimeRelease(t)
+			archive := filepath.Join(root, "runtime-evidence_0.3.0.tar.gz")
+			if mode == "archive-exists" {
+				require.NoError(t, os.WriteFile(archive, nil, runtimeEvidenceMode))
+			}
+			if mode == "checksum-directory" {
+				require.NoError(t, os.Mkdir(archive+".sha256", 0o700))
+			}
+			files, err := packageRuntimeEvidence(root, release.TagName)
+			if mode == "archive-exists" || mode == "checksum-directory" {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, files, 2)
+			hash, err := HashFile(files[0])
+			require.NoError(t, err)
+			checksum, err := os.ReadFile(files[1])
+			require.NoError(t, err)
+			require.Equal(t, hash+"  "+filepath.Base(files[0])+"\n", string(checksum))
+			uploaded, checked, published := 0, false, false
+			gh := func(args ...string) ([]byte, error) {
+				switch {
+				case args[0] == "api":
+					checked = true
+					require.Equal(t, 2, uploaded)
+					current := release
+					current.Assets = slices.Clone(release.Assets)
+					if mode == "changed" {
+						current.Assets[0].ID++
+					}
+					return json.Marshal(current)
+				case args[1] == "view":
+					if mode == "recheck" {
+						return nil, errors.New("draft unavailable")
+					}
+					return []byte("19"), nil
+				case args[1] == "upload":
+					if mode == "upload-failure" {
+						return nil, errors.New("upload rejected")
+					}
+					uploaded++
+				case args[1] == "edit":
+					require.True(t, checked)
+					require.Equal(t, 2, uploaded)
+					published = true
+					if mode == "publish" {
+						return nil, errors.New("publication failed")
+					}
+				default:
+					t.Fatalf("unexpected command: %v", args)
+				}
+				return nil, nil
+			}
+			err = publishQualifiedEvidence(fixtureRepo, release.TagName, release, nil, files, gh)
+			if mode == "success" {
+				require.NoError(t, err)
+				require.True(t, published)
+			} else {
+				require.Error(t, err)
+				require.Equal(t, mode == "publish", published)
+			}
+		})
+	}
+}
+
+func TestRuntimeEvidenceStorageErrorsFailClosed(t *testing.T) {
+	t.Parallel()
+	if os.Getuid() == 0 {
+		t.Skip("permission controls require ordinary credentials")
+	}
+	_, err := readRuntimeSummary(filepath.Join(t.TempDir(), "missing"))
+	require.Error(t, err)
+	require.Error(t, archiveRuntimeEvidence(filepath.Join(t.TempDir(), "missing"), filepath.Join(t.TempDir(), "out")))
+	for _, target := range []string{"summary", "archive-entry", "archive-directory", "archive-subdirectory"} {
+		t.Run(target, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "summary.json")
+			require.NoError(t, os.WriteFile(path, []byte("{}"), runtimeEvidenceMode))
+			switch target {
+			case "archive-subdirectory":
+				nested := filepath.Join(root, "unreadable")
+				require.NoError(t, os.Mkdir(nested, 0))
+				t.Cleanup(func() { require.NoError(t, os.Chmod(nested, 0o700)) })
+			case "archive-directory":
+				require.NoError(t, os.Chmod(root, 0))
+				t.Cleanup(func() { require.NoError(t, os.Chmod(root, 0o700)) })
+			default:
+				require.NoError(t, os.Chmod(path, 0))
+			}
+			if target == "summary" {
+				_, err := readRuntimeSummary(root)
+				require.Error(t, err)
+			} else {
+				require.Error(t, archiveRuntimeEvidence(root, filepath.Join(t.TempDir(), "evidence.tar.gz")))
+			}
+		})
+	}
+}
+
+func TestRuntimeEvidenceRequiresPrivateStorage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "not-a-directory")
+	require.NoError(t, os.WriteFile(path, nil, runtimeEvidenceMode))
+	t.Setenv("TMPDIR", path)
+	release := runtimeRelease(t)
+	run := successfulBuild()
+	run.HeadBranch, run.ID, run.Attempt = release.TagName, 27, 2
+	_, err := qualifyRuntimeRelease(fixtureRepo, release.TagName, fixtureSHA, []WorkflowRun{run}, release,
+		func(args ...string) ([]byte, error) {
+			require.Equal(t, "api", args[0], "download must not begin without private storage")
+			return json.Marshal(struct {
+				Jobs []Job `json:"jobs"`
+			}{Jobs: []Job{
+				{Name: runtimeJob("amd64"), Conclusion: success}, {Name: runtimeJob("arm64"), Conclusion: success},
+			}})
+		})
+	require.Error(t, err)
 }
