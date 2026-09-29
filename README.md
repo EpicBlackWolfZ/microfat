@@ -61,6 +61,21 @@ See [update options and recovery](docs/installation.md#explicit-release-checks-a
 
 ### 1. Installation
 
+#### Homebrew on Linux
+
+The official shared tap is [`EpicBlackWolfZ/homebrew-tap`](https://github.com/EpicBlackWolfZ/homebrew-tap).
+Its first microfat cask requires the published, authenticated v0.3.0 release and a merged recipe PR.
+Once that recipe is available, install the CLI and both launcher stubs with:
+
+```bash
+brew install --cask EpicBlackWolfZ/tap/microfat
+brew upgrade --cask microfat
+brew uninstall --cask microfat
+```
+
+Supported platforms are Linux amd64 and arm64. Qualification uses Homebrew 7.0.2 with Linux cask support.
+See [Homebrew installation and recovery](docs/installation.md#homebrew-linux-amd64-and-arm64).
+
 #### Verified Linux installer and release archives
 
 The v0.3.0 installer installs the CLI and both companions coherently into user-owned generation storage.
@@ -448,4 +463,3 @@ task demo-check
 ## License
 
 Apache 2.0
-

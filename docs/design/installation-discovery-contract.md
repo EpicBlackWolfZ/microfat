@@ -1,7 +1,8 @@
 # Installation ownership and companion discovery
 
 Schema 1 is implemented for the v0.3.0 verified Linux installer ([#203](https://github.com/EpicBlackWolfZ/microfat/issues/203)).
-The updater (#204) consumes this contract; Linux Homebrew integration (#205) remains separate work.
+The updater (#204) consumes this contract; Linux Homebrew integration (#205) uses the separate
+external-distribution marker below.
 See [installation](../installation.md) for commands and [release verification](../release-verification.md) for publisher trust.
 
 ## Managed layout
@@ -132,5 +133,9 @@ External distributions can place a nonempty regular, non-symlink `microfat-distr
 the physical CLI. The schema is exactly `{"schema":1,"owner":"homebrew"}`; unknown fields, unsupported
 values, other-user writable files and inputs over 4096 bytes are rejected. This marker selects the
 fixed `brew upgrade microfat` guidance only. It cannot authorize installation writes, set a version,
-choose a target path, or provide a command to execute. #205 owns producing it and qualifying actual
-Homebrew layouts. Unmarked external installations are still refused by self-update.
+choose a target path, or provide a command to execute. The official cask writes this marker with
+mode 0644 beside all three unmodified executables in the versioned Caskroom. Native Homebrew
+qualification checks its physical location and both memfd/cache discovery paths through brew's links.
+The marker does not make the Caskroom an installer-owned generation and grants no retention or
+transaction guarantees beyond Homebrew's own lifecycle. Unmarked external installations are still
+refused by self-update. See [Homebrew maintenance](../homebrew.md).

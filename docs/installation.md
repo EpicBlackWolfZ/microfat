@@ -1,4 +1,41 @@
-# Verified Linux installation
+# Linux installation
+
+## Homebrew (Linux amd64 and arm64)
+
+The official shared repository is [EpicBlackWolfZ/homebrew-tap](https://github.com/EpicBlackWolfZ/homebrew-tap),
+which Homebrew addresses as `EpicBlackWolfZ/tap`. The first `microfat` cask is pending publication and
+authentication of v0.3.0 and maintainer merge of its generated recipe PR. These commands become usable
+only after that recipe is merged:
+
+```bash
+brew install --cask EpicBlackWolfZ/tap/microfat
+brew upgrade --cask microfat
+brew reinstall --cask microfat
+brew uninstall --cask microfat
+```
+
+Use a current Homebrew with Linux cask support; native qualification is pinned to Homebrew 7.0.2.
+macOS and other architectures are rejected by the cask's platform requirements. Native macOS support
+remains [#17](https://github.com/EpicBlackWolfZ/microfat/issues/17).
+
+The cask selects the exact versioned Linux archive for your architecture using a fixed SHA-256 hash.
+All three executables stay together in Homebrew's versioned Caskroom, with links in `$(brew --prefix)/bin`.
+Their bytes are preserved, including the fat CLI's appended payloads; no ELF rewriting or stripping runs.
+Automatic sibling-stub discovery works through those links under both memfd and cache dispatch.
+
+Homebrew owns this installation. `microfat update --check` can report availability, while a
+version-changing `microfat update` refuses and directs you to `brew upgrade microfat`.
+Do not run the standalone installer into the same bin directory or move its ownership metadata here.
+Uninstall removes the cask and its links; it leaves workload files, microfat caches and unrelated
+installations alone. Use `brew reinstall --cask microfat` for a damaged cask installation. A failed
+checksum check during upgrade preserves the previous installation. No automatic downgrade command
+or cross-release rollback guarantee is provided.
+
+Tap automation authenticates the release before proposing metadata. At installation, Homebrew verifies
+the archive against the reviewed recipe's fixed hash; the cask does not run an installer or Cosign.
+See [Homebrew release maintenance](homebrew.md) for the publication order, checks and recovery procedure.
+
+## Verified installer requirements
 
 The v0.3.0 installer supports Linux amd64 and arm64. It installs the CLI and both launcher stubs
 as one owned generation, using user directories by default. It does not require Go, preinstalled

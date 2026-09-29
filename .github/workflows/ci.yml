@@ -486,6 +486,47 @@ jobs:
             dist/*.json
             dist/checksums.txt
 
+  homebrew:
+    name: Native Homebrew (${{ matrix.arch }})
+    needs: [lint, test, build]
+    if: needs.lint.outputs.run-code-checks == 'true'
+    runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        with:
+          version: '3.53.1'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: snapshot-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .work/homebrew-snapshot
+      - name: Qualify real Homebrew lifecycle and byte preservation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: task qualify-homebrew OUTPUT=.work/homebrew-qualification DIST=.work/homebrew-snapshot
+      - name: Retain Homebrew evidence on failure and success
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: homebrew-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          include-hidden-files: true
+          path: |
+            .work/homebrew-qualification/commands.log
+            .work/homebrew-qualification/brew-logs/
+            .work/homebrew-qualification/published/verification.json
+
   installer:
     name: Native installer (${{ matrix.arch }})
     needs: [lint, test]
@@ -678,7 +719,7 @@ jobs:
   complete:
     name: CI Complete
     if: always()
-    needs: [pr-lint, lint, gitleaks, vulncheck, test, integration, dx, build, benchmark-smoke, kernel, codeql, archive-contracts, installer, mounts, qemu]
+    needs: [pr-lint, lint, gitleaks, vulncheck, test, integration, dx, build, benchmark-smoke, kernel, codeql, archive-contracts, installer, mounts, qemu, homebrew]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
