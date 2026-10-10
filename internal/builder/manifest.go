@@ -12,6 +12,7 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
+	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,6 +23,7 @@ var (
 	ErrInvalidManifest     = errors.New("invalid manifest configuration")
 	ErrDuplicateVariant    = errors.New("duplicate variant level in manifest")
 	ErrUnsupportedArch     = errors.New("unsupported target architecture")
+	ErrUnsupportedOS       = pack.ErrUnsupportedOS
 	ErrInvalidVariantLevel = errors.New("invalid variant level for target architecture")
 	ErrProfileNotFound     = errors.New("specified PGO profile file not found")
 	ErrStubNotFound        = errors.New("microfat launcher stub binary not found")
@@ -128,9 +130,6 @@ func ValidateManifest(m *Manifest) error {
 	if m.Package == "" {
 		m.Package = "."
 	}
-	if m.TargetOS == "" {
-		m.TargetOS = "linux"
-	}
 	if m.TargetArch == "" {
 		m.TargetArch = "amd64"
 	}
@@ -140,6 +139,11 @@ func ValidateManifest(m *Manifest) error {
 		return fmt.Errorf("%w: %q (expected %s or %s)", ErrUnsupportedArch, m.TargetArch, microarch.ArchAMD64, microarch.ArchARM64)
 	}
 	m.TargetArch = targetArchLower
+	targetOS, err := pack.NormalizeTargetOS(m.TargetOS)
+	if err != nil {
+		return err
+	}
+	m.TargetOS = targetOS
 
 	if len(m.Variants) == 0 {
 		return ErrEmptyManifest

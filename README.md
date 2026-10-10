@@ -143,6 +143,13 @@ Summary: Environment is fully ready for high-performance Microfat dispatch!
 
 ### 3. Compile & Package a Fat Binary
 
+Packaging targets Linux amd64 or arm64. Direct `--os` and manifest `target_os` accept only Linux
+(case-insensitively), with Linux as the default. ELF validation rejects conflicting OSABI values
+and embedded Go `GOOS` settings in both payloads and custom launcher stubs. Generic SysV ELF
+(`ELFOSABI_NONE`) remains accepted because Linux binaries commonly use it; this value alone
+does not establish operating-system compatibility or the availability of a required loader or libc.
+`--skip-elf-validation` explicitly bypasses ELF evidence checks but does not enable other target systems.
+
 #### AMD64 (x86_64) Packaging
 ```bash
 # 1. Compile variants with Go microarchitecture targets
