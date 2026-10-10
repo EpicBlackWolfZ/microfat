@@ -196,9 +196,8 @@ func runStartupBenchmarkSuite(srcDir, benchDir, microfatStub, microfatCli, csvPa
 
 	if err := exportStartupCSV(finalCSVPath, observations); err != nil {
 		panic(fmt.Errorf("exporting startup CSV to %s: %w", finalCSVPath, err))
-	} else {
-		fmt.Printf("\n==> ✔ Exported %d raw telemetry observations to CSV: %s\n\n", len(observations), finalCSVPath)
 	}
+	fmt.Printf("\n==> ✔ Exported %d raw telemetry observations to CSV: %s\n\n", len(observations), finalCSVPath)
 }
 
 func buildStartupScenarios(srcDir, benchDir, microfatStub, microfatCli string) []StartupScenario {
