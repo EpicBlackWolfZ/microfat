@@ -64,14 +64,16 @@ func handleMetaCommand(
 	selectedEntry *format.VariantEntry,
 	policyRes microarch.PolicyResult,
 ) (bool, error) {
+	opts := lifecycle.DefaultOptions()
 	if isImageMutation(arg1) {
 		if err := validateDeploymentPath(selfPath, selfFile); err != nil {
 			return true, err
 		}
-	}
-	opts, err := parseLifecycleOptions(os.Args[1:])
-	if err != nil {
-		return true, err
+		var err error
+		opts, err = parseLifecycleOptions(os.Args[1:])
+		if err != nil {
+			return true, err
+		}
 	}
 	switch {
 	case arg1 == flagHelp:
