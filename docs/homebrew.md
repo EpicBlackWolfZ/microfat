@@ -73,7 +73,7 @@ proposal prevent ordinary stale candidates from replacing a newer cask.
 
 ## Local commands and evidence
 
-Use Go 1.27.1 and Task v3.53.1 from a reviewed checkout:
+Use Go 1.27.2 and Task v3.53.1 from a reviewed checkout:
 
 ```bash
 task homebrew-check

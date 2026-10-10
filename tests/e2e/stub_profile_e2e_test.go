@@ -215,7 +215,7 @@ import "fmt"
 func main() { fmt.Println("SAMPLE_MANIFEST_SUCCESS") }
 `
 	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(mainSource), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module sample\ngo 1.27.1\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module sample\ngo 1.27.2\n"), 0o644))
 
 	t.Run("ManifestPack_StubProfileMinimal_InManifest", func(t *testing.T) {
 		fatOut := filepath.Join(testDir, "manifest_min.fat")
@@ -310,7 +310,7 @@ func TestStubProfile_ABICombinedIntegration(t *testing.T) {
 	// Create test Go package for manifest and PGO mixed-ABI tests
 	pkgDir := filepath.Join(testDir, "src", "mixedapp")
 	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module mixedapp\ngo 1.27.1\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module mixedapp\ngo 1.27.2\n"), 0o644))
 	mainSrc := []byte("package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"MIXED_OK\") }\n")
 	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), mainSrc, 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "cgo.go"), []byte("//go:build cgo_variant\npackage main\nimport \"C\"\n"), 0o644))

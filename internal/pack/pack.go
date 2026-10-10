@@ -2,7 +2,6 @@
 package pack
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"debug/elf"
 	"encoding/hex"
@@ -733,14 +732,10 @@ func ValidateELFBinary(path string, targetOS, targetArch string) error {
 	if err != nil {
 		return err
 	}
-	if err := PreflightELFHeaders(data); err != nil {
+	f, err := readExecutableELF(data)
+	if err != nil {
 		return fmt.Errorf("%w (%s): %w", ErrInvalidELF, path, err)
 	}
-	f, err := elf.NewFile(bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("%w (%s): %v", ErrInvalidELF, path, err)
-	}
-	defer func() { _ = f.Close() }()
 
 	if f.Class != elf.ELFCLASS64 {
 		return fmt.Errorf("%w (%s): expected 64-bit ELF, got class %v", ErrInvalidELF, path, f.Class)

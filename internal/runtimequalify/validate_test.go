@@ -133,7 +133,7 @@ func validEvidence(t *testing.T, c Case) Evidence {
 func validSummary(t *testing.T) Summary {
 	t.Helper()
 	s := Summary{Schema: Schema, Status: Pass, Input: Source, Architecture: amd64, Source: testSource, Kernel: "Linux x86_64",
-		PageSize: 4096, Toolchain: "go version go1.27.1 linux/amd64", Expected: Cases(),
+		PageSize: 4096, Toolchain: "go version go1.27.2 linux/amd64", Expected: Cases(),
 		Products: map[string]string{"microfat": testHash, fullStub: testHash, minimalStub: testHash,
 			"reporter": testHash, "mount-runner": testHash}}
 	for _, c := range s.Expected {
@@ -218,7 +218,8 @@ func TestEvidenceRejectsInvalidObservations(t *testing.T) {
 
 func TestSummaryRequiresEntireMatrix(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"schema", testStatus, "input", "arch", "source", "kernel", "pages", "toolchain", "missing", "expected",
+	for _, name := range []string{"schema", testStatus, "input", "arch", "source", "kernel", "pages", "toolchain", "old Go patch",
+		"missing", "expected",
 		"failed", "duplicate", "unexpected", "reason", "invalid-observation"} {
 		t.Run(name, func(t *testing.T) {
 			s := validSummary(t)
@@ -239,6 +240,8 @@ func TestSummaryRequiresEntireMatrix(t *testing.T) {
 				s.PageSize = 0
 			case "toolchain":
 				s.Toolchain = "go1.26"
+			case "old Go patch":
+				s.Toolchain = "go version go1.27.1 linux/" + s.Architecture
 			case "missing":
 				s.Results = s.Results[1:]
 			case "expected":

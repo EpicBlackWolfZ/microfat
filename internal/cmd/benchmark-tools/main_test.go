@@ -16,9 +16,9 @@ import (
 )
 
 const testLock = `{"fortio":{"module":"fortio.org/fortio","version":"v1.75.2","module_sum":"h1:module",
-"go_mod_sum":"h1:mod","source_commit":"source","toolchain":"go1.27.1"}}`
+"go_mod_sum":"h1:mod","source_commit":"source","toolchain":"go1.27.2"}}`
 const testModule = `{"Path":"fortio.org/fortio","Version":"v1.75.2","Sum":"h1:module","GoModSum":"h1:mod","Origin":{"Hash":"source"}}`
-const testGoVersion = "go version go1.27.1 linux/amd64"
+const testGoVersion = "go version go1.27.2 linux/amd64"
 const kernelSuccess = "MICROFAT_KERNEL_RESULT=0\n"
 
 func TestFortioIdentity(t *testing.T) {
@@ -28,7 +28,8 @@ func TestFortioIdentity(t *testing.T) {
 	require.Equal(t, "v1.75.2", version)
 	require.NoError(t, verifyFortio([]byte(testLock), []byte(testModule)))
 	for _, replacement := range []struct{ old, new string }{
-		{"fortio.org/fortio", "example.org/other"}, {"v1.75.2", "v1.75.2-rc1"}, {"go1.27.1", "go1.26.1"},
+		{"fortio.org/fortio", "example.org/other"}, {"v1.75.2", "v1.75.2-rc1"},
+		{"go1.27.2", "go1.26.1"}, {"go1.27.2", "go1.27.1"},
 		{"h1:module", ""}, {"h1:mod", ""}, {"source", ""},
 	} {
 		t.Run("lock "+replacement.old, func(t *testing.T) {
@@ -44,7 +45,8 @@ func TestFortioIdentity(t *testing.T) {
 		require.Error(t, err)
 	}
 	for _, invalid := range []string{"", "go version go1.27.10 linux/amd64", "go version go1.26.1 linux/amd64",
-		"go version go1.27.1", "unexpected go1.27.1 text", testGoVersion + " trailing"} {
+		"go version go1.27.1 linux/amd64",
+		"go version go1.27.2", "unexpected go1.27.2 text", testGoVersion + " trailing"} {
 		_, err := fortioVersion([]byte(testLock), invalid)
 		require.Error(t, err)
 	}

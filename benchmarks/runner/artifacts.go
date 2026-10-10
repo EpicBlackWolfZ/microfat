@@ -42,8 +42,8 @@ func buildArtifacts(ctx context.Context, cfg ExperimentConfig, opts RunOptions, 
 	ctx, cancel := context.WithTimeout(ctx, buildTimeout)
 	defer cancel()
 	version, _, err := process.Run(ctx, process.Spec{Path: opts.Go, Args: []string{"version"}, Dir: opts.Repository})
-	if err != nil || !strings.Contains(string(version), "go1.27.1 ") {
-		return nil, errors.New("benchmark builds require Go 1.27.1")
+	if err != nil || !strings.Contains(string(version), "go1.27.2 ") {
+		return nil, errors.New("benchmark builds require Go 1.27.2")
 	}
 	sha, _, err := process.Run(ctx, process.Spec{Path: "git", Args: []string{"rev-parse", "HEAD"}, Dir: opts.Repository})
 	if err != nil {

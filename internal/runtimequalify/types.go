@@ -245,7 +245,7 @@ type Summary struct {
 func ValidateSummary(s Summary) error {
 	if s.Schema != Schema || s.Status != Pass || !slices.Contains([]string{Source, Candidate}, s.Input) ||
 		!slices.Contains([]string{amd64, arm64}, s.Architecture) || !sourcePattern.MatchString(s.Source) ||
-		!nativeKernel(s.Kernel, s.Architecture) || s.PageSize <= 0 || s.Toolchain != "go version go1.27.1 linux/"+s.Architecture {
+		!nativeKernel(s.Kernel, s.Architecture) || s.PageSize <= 0 || s.Toolchain != "go version go1.27.2 linux/"+s.Architecture {
 		return errors.New("invalid runtime qualification identity or completion")
 	}
 	for _, name := range []string{"microfat", fullStub, minimalStub, "reporter", "mount-runner"} {

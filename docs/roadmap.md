@@ -196,7 +196,7 @@ resources or homelab changes are committed by this roadmap.
 
 ## Shared release gates
 
-- Keep Go 1.27.1, race checks, exact default/minimal statement coverage of at least 95%, lint,
+- Keep Go 1.27.2, race checks, exact default/minimal statement coverage of at least 95%, lint,
   ShellCheck, vulnerability/security checks and the applicable integration/packaging matrix.
 - Preserve mandatory payload/cache hashes, descriptor-bound reads/execution, bounded decompression,
   mandatory memfd seals and elevated-launch rejection. Same-UID cache writers remain trusted.

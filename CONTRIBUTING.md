@@ -19,11 +19,11 @@ All participants in the `microfat` community are expected to adhere to the [Code
 
 ## 3. Development Prerequisites & Setup
 
-- **Go Toolchain**: Go **1.27.1**, matching `go.mod` and CI.
+- **Go Toolchain**: Go **1.27.2 minimum**, matching `go.mod`; CI and qualification builds pin **1.27.2**.
 - **Task**: [Task](https://taskfile.dev/) **v3.53.1**, pinned in CI.
 - **Git**: Working copy cloned from `https://github.com/EpicBlackWolfZ/microfat`.
 - **Required for `task all`**:
-  - `golangci-lint` (v2.13.2+)
+  - `golangci-lint` (v2.14.0+)
   - `shellcheck` (v0.11.0)
   - `govulncheck`
 - **Additional tools**: `gotestsum` is optional for test presentation; `goreleaser` is required for `task snapshot`.
@@ -34,6 +34,12 @@ All participants in the `microfat` community are expected to adhere to the [Code
   These tests build variants with differing dependency versions and local replacements.
 
 Missing mandatory linters or scanners fail the task; no weaker fallback is substituted.
+
+Install the Go 1.27.2 binary on `PATH` and verify it with `GOTOOLCHAIN=local go version`.
+Tests and qualification subprocesses use the installed toolchain with automatic switching
+disabled. If a repository-local `.go/bin/go` is present, update it too, or select the patched
+binary explicitly with `task all GO=/absolute/path/to/go1.27.2/bin/go`.
+
 ### Quickstart
 
 ```bash

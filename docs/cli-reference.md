@@ -239,6 +239,10 @@ ELF validation accepts 64-bit `ET_EXEC` and `ET_DYN` executables, including dyna
 executables and PIE/static PIE, with an entry point in a file-backed executable load segment.
 Relocatable objects, core dumps and nonexecutable shared libraries are rejected before replacing
 any output. This does not certify interpreter/libc compatibility across variants.
+Validation checks ELF and program headers plus section-table bounds, without reading section
+contents or resolving section names. Compressed auxiliary metadata cannot force decompression
+or repeated name allocations during this check; malformed unused section contents are outside
+its execution contract.
 `--skip-elf-validation` bypasses ELF structure checks only; regular-file, size and snapshot
 checks still apply, and a bypassed input is not guaranteed to execute.
 
