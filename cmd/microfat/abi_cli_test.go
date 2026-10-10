@@ -168,7 +168,7 @@ func TestPrintABIReport(t *testing.T) {
 func TestCLI_SkipELFValidation_Warnings(t *testing.T) {
 	t.Parallel()
 
-	const expectedWarn = "[microfat] Warning: ELF architecture and declared ABI validation " +
+	const expectedWarn = "[microfat] Warning: ELF platform, architecture and declared ABI validation " +
 		"explicitly skipped via --skip-elf-validation"
 
 	t.Run("pgo pack with skip-elf-validation emits warning", func(t *testing.T) {

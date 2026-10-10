@@ -520,7 +520,7 @@ func TestStubProfile_ABICombinedIntegration(t *testing.T) {
 		})
 		require.NoError(t, err, "pack with skip validation failed: %s", string(out))
 		assert.Contains(t, string(out),
-			"[microfat] Warning: ELF architecture and declared ABI validation explicitly skipped via --skip-elf-validation")
+			"[microfat] Warning: ELF platform, architecture and declared ABI validation explicitly skipped via --skip-elf-validation")
 		assert.Contains(t, string(out), "Declared ABI Requirements: skipped (--skip-elf-validation)")
 		assert.Contains(t, string(out), "microfat-stub-minimal")
 		verifyFatIntegrity(t, fatSkip)

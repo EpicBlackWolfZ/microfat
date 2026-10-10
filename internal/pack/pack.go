@@ -36,6 +36,7 @@ var (
 	ErrSizeMismatch        = codec.ErrSizeMismatch
 	ErrInvalidELF          = errors.New("invalid ELF binary")
 	ErrUnsupportedArch     = errors.New("unsupported target architecture")
+	ErrUnsupportedOS       = errors.New("unsupported target operating system")
 )
 
 // VariantCompressionOptions configures compression parameters for a specific variant level.
@@ -326,9 +327,11 @@ func validateOptions(opts *Options) error {
 	if opts.OutputPath == "" {
 		return errors.New("output path must not be empty")
 	}
-	if opts.TargetOS == "" {
-		opts.TargetOS = "linux"
+	targetOS, err := NormalizeTargetOS(opts.TargetOS)
+	if err != nil {
+		return err
 	}
+	opts.TargetOS = targetOS
 	if opts.TargetArch == "" {
 		opts.TargetArch = microarch.ArchAMD64
 	}
@@ -399,6 +402,15 @@ func canonicalTargetArch(arch string) (string, error) {
 	default:
 		return "", fmt.Errorf("%w: %q (expected amd64 or arm64)", ErrUnsupportedArch, arch)
 	}
+}
+
+// NormalizeTargetOS applies the Linux-only producer policy shared by pack and build.
+// An omitted target defaults to Linux; case variants serialize as "linux".
+func NormalizeTargetOS(targetOS string) (string, error) {
+	if targetOS == "" || strings.EqualFold(targetOS, "linux") {
+		return "linux", nil
+	}
+	return "", fmt.Errorf("%w: %q (expected linux)", ErrUnsupportedOS, targetOS)
 }
 
 func sortVariantLevels(variants map[string]string, targetArch string) []string {
@@ -745,6 +757,10 @@ func validatePayloadABIs(opts *Options, levels []string) error {
 
 // ValidateELFBinary checks if the file at path is a valid 64-bit ELF binary matching targetOS and targetArch.
 func ValidateELFBinary(path string, targetOS, targetArch string) error {
+	osName, err := NormalizeTargetOS(targetOS)
+	if err != nil {
+		return err
+	}
 	arch, err := canonicalTargetArch(targetArch)
 	if err != nil {
 		return err
@@ -775,6 +791,9 @@ func ValidateELFBinary(path string, targetOS, targetArch string) error {
 		}
 	}
 	if err := validateExecutableELF(f, uint64(len(data))); err != nil {
+		return fmt.Errorf("%w (%s): %w", ErrInvalidELF, path, err)
+	}
+	if err := validateELFPlatform(data, f, osName); err != nil {
 		return fmt.Errorf("%w (%s): %w", ErrInvalidELF, path, err)
 	}
 

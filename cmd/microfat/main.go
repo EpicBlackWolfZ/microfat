@@ -542,7 +542,7 @@ func newPackCmd() *cobra.Command {
 			}
 			if flags.SkipELFValidation {
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(),
-					"[microfat] Warning: ELF architecture and declared ABI validation explicitly skipped via --skip-elf-validation")
+					"[microfat] Warning: ELF platform, architecture and declared ABI validation explicitly skipped via --skip-elf-validation")
 			}
 			if flags.ManifestPath != "" {
 				return runManifestPack(cmd, flags)
@@ -555,7 +555,7 @@ func newPackCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.StubPath, "stub", "", "Path to microfat launcher stub binary")
 	cmd.Flags().StringVarP(&flags.OutputPath, "output", "o", "", "Destination output path for the fat binary")
 	cmd.Flags().StringVar(&appName, "name", "", "Application name")
-	cmd.Flags().StringVar(&targetOS, "os", "linux", "Target operating system")
+	cmd.Flags().StringVar(&targetOS, "os", "linux", "Target operating system (linux)")
 	cmd.Flags().StringVar(&targetArch, "arch", "amd64", "Target architecture (amd64 or arm64)")
 	cmd.Flags().StringArrayVarP(&rawVariants, "variant", "v", nil,
 		"Variant mapping in <level>=<path> format (e.g. -v v1=bin/v1 -v v3=bin/v3 for amd64, or -v v8.0=bin/v80 -v v8.2=bin/v82 for arm64)")
@@ -601,6 +601,10 @@ func runDirectPack(
 	appName, targetOS, targetArch string,
 	rawVariants []string,
 ) error {
+	targetOS, err := pack.NormalizeTargetOS(targetOS)
+	if err != nil {
+		return err
+	}
 	actualStubPath, err := builder.ResolveStubWithOptions(builder.ResolveStubOptions{
 		CLIStub:    flags.StubPath,
 		CLIProfile: flags.StubProfile,
@@ -711,7 +715,8 @@ func bindManifestBuildFlags(cmd *cobra.Command, flags *builder.BuildOptions) {
 		"Target shared Zstandard dictionary size in bytes (default: 112 KB)")
 	cmd.Flags().IntVar(&flags.FormatVersion, "format-version", format.FormatVersionCurrent,
 		"Binary format specification version (1 for JSON, 2 for binary table)")
-	cmd.Flags().BoolVar(&flags.SkipELFValidation, "skip-elf-validation", false, "Skip ELF architecture and executable structure validation")
+	cmd.Flags().BoolVar(&flags.SkipELFValidation, "skip-elf-validation", false,
+		"Skip ELF platform, architecture and executable structure validation")
 	cmd.Flags().BoolVar(&flags.AllowMixedABI, "allow-mixed-abi", false,
 		"Allow packaging variants with differing declared ABI requirements (interpreters, dependencies, symbol versions)")
 	cmd.Flags().BoolVar(&flags.KeepIntermediates, "keep-intermediates", false, "Keep intermediate compiled variant ELF binaries")
@@ -733,7 +738,7 @@ then packages them into a self-dispatching microfat binary.`,
 			}
 			if flags.SkipELFValidation {
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(),
-					"[microfat] Warning: ELF architecture and declared ABI validation explicitly skipped via --skip-elf-validation")
+					"[microfat] Warning: ELF platform, architecture and declared ABI validation explicitly skipped via --skip-elf-validation")
 			}
 			if flags.ManifestPath == "" && len(args) > 0 {
 				flags.ManifestPath = args[0]
