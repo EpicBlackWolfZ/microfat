@@ -1514,7 +1514,6 @@ func resolveCacheDirFD(customDir string, materialize bool) (int, string, error) 
 		seen[cleanDir] = true
 		attempted = append(attempted, cleanDir)
 
-		// #nosec G703 -- cache directory creation with private permissions
 		if err := prepareCacheDir(cleanDir, materialize); err != nil {
 			continue
 		}
@@ -1533,6 +1532,9 @@ func prepareCacheDir(dir string, materialize bool) error {
 	if !materialize {
 		return nil
 	}
+	// Cache paths intentionally come from the caller or environment of the non-elevated process.
+	// On Unix, callers validate the no-follow directory descriptor, ownership and permissions before cache use.
+	// #nosec G703 -- caller-selected cache location; private creation followed by descriptor validation.
 	return os.MkdirAll(dir, PrivateCacheDirMode)
 }
 

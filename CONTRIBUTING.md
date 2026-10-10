@@ -23,7 +23,7 @@ All participants in the `microfat` community are expected to adhere to the [Code
 - **Task**: [Task](https://taskfile.dev/) **v3.53.1**, pinned in CI.
 - **Git**: Working copy cloned from `https://github.com/EpicBlackWolfZ/microfat`.
 - **Required for `task all`**:
-  - `golangci-lint` (v2.13.2+)
+  - `golangci-lint` (v2.14.0+)
   - `shellcheck` (v0.11.0)
   - `govulncheck`
 - **Additional tools**: `gotestsum` is optional for test presentation; `goreleaser` is required for `task snapshot`.

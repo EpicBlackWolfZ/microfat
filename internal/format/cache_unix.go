@@ -49,6 +49,7 @@ func OpenAndValidateCacheDirFD(dir string, allowRemediate bool) (int, error) {
 			return -1, fmt.Errorf("%w: cache directory root cannot be a symlink: %s", ErrInsecureCacheDir, dir)
 		}
 		if errors.Is(err, unix.ENOTDIR) || errors.Is(err, syscall.ENOTDIR) {
+			// #nosec G703 -- diagnostic only after a failed no-follow open; both paths reject the directory.
 			if fi, lerr := os.Lstat(dir); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
 				return -1, fmt.Errorf("%w: cache directory root cannot be a symlink: %s", ErrInsecureCacheDir, dir)
 			}
