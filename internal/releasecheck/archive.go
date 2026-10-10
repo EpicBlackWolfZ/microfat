@@ -23,6 +23,8 @@ import (
 const (
 	maxSingleFileBytes   = 250 * 1024 * 1024 // 250 MB
 	maxTotalExtractBytes = 500 * 1024 * 1024 // 500 MB
+	maxArchiveBytes      = 512 * 1024 * 1024 // Includes tar headers and padding.
+	maxArchivePadding    = 1024 * 1024
 	dirPerms             = 0o755
 	filePerms            = 0o644
 	execPerms            = 0o755
@@ -201,11 +203,12 @@ func ValidateArchive(archivePath, expectedArch string, contract *ReleaseContract
 		EmbeddedVariants: make(map[string]*VariantFacts),
 	}
 
-	if err := processArchiveEntries(tar.NewReader(gzr), extractedDir, facts); err != nil {
+	decoded := &io.LimitedReader{R: gzr, N: maxArchiveBytes + 1}
+	if err := processArchiveEntries(tar.NewReader(decoded), extractedDir, facts); err != nil {
 		return nil, err
 	}
 
-	if err := drainArchiveTrailer(trArchive); err != nil {
+	if err := drainArchiveTrailer(decoded); err != nil {
 		return nil, err
 	}
 	facts.ArchiveSHA256 = hex.EncodeToString(h.Sum(nil))
@@ -280,10 +283,25 @@ func processArchiveEntries(tr *tar.Reader, stagingDir string, facts *ArchiveFact
 	return nil
 }
 
-func drainArchiveTrailer(r io.Reader) error {
+// drainArchiveTrailer verifies gzip through EOF, allowing only bounded zero tar padding.
+// Gzip's default multistream decoding also verifies empty and padding-only extra members.
+func drainArchiveTrailer(r *io.LimitedReader) error {
 	var drainBuf [drainBufferSize]byte
+	var padding int64
 	for {
-		_, err := r.Read(drainBuf[:])
+		n, err := r.Read(drainBuf[:])
+		if r.N == 0 {
+			return fmt.Errorf("archive exceeds decompressed size limit (%d)", maxArchiveBytes)
+		}
+		padding += int64(n)
+		if padding > maxArchivePadding {
+			return fmt.Errorf("archive trailer exceeds padding limit (%d)", maxArchivePadding)
+		}
+		for _, value := range drainBuf[:n] {
+			if value != 0 {
+				return errors.New("unexpected data after tar archive")
+			}
+		}
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
@@ -422,7 +440,8 @@ func ExtractArchiveSafely(archivePath, targetDir string) error {
 	}
 	defer func() { _ = gzr.Close() }()
 
-	tr := tar.NewReader(gzr)
+	decoded := &io.LimitedReader{R: gzr, N: maxArchiveBytes + 1}
+	tr := tar.NewReader(decoded)
 	seenEntries := make(map[string]bool)
 	var totalExtracted int64
 
@@ -468,7 +487,7 @@ func ExtractArchiveSafely(archivePath, targetDir string) error {
 		}
 	}
 
-	return drainArchiveTrailer(af)
+	return drainArchiveTrailer(decoded)
 }
 
 // ExtractFileFromArchive safely validates the entire archive and extracts targetName at root to destPath.
@@ -491,7 +510,8 @@ func ExtractFileFromArchive(archivePath, targetName, destPath string) error {
 	}
 	defer func() { _ = gzr.Close() }()
 
-	tr := tar.NewReader(gzr)
+	decoded := &io.LimitedReader{R: gzr, N: maxArchiveBytes + 1}
+	tr := tar.NewReader(decoded)
 	seenEntries := make(map[string]bool)
 	var matchedBytes []byte
 	found := false
@@ -537,6 +557,9 @@ func ExtractFileFromArchive(archivePath, targetName, destPath string) error {
 		}
 	}
 
+	if err := drainArchiveTrailer(decoded); err != nil {
+		return err
+	}
 	if !found {
 		return fmt.Errorf("target file %q not found in archive %s", targetName, archivePath)
 	}

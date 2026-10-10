@@ -42,6 +42,17 @@ CGO-disabled build settings, expected main package and absence of an ELF interpr
 The historical inventory remains six signed payloads; v0.3.0 requires twelve (four artifacts and
 their eight SBOMs), without accepting arbitrary extra checksum entries.
 
+Release contract validation and extraction consume gzip through EOF to verify every member's
+CRC and uncompressed size, including data after the tar end marker. They limit the complete
+decompressed stream to 512 MiB. Full archive extraction retains the 250 MiB per-file and 500 MiB
+extracted-file limits; single-file extraction retains its 250 MiB target-file limit. After tar ends,
+at most 1 MiB of zero padding is allowed, including padding in additional
+gzip members. Empty additional members are accepted; nonzero trailing data, a second tar archive,
+raw trailing bytes and malformed or truncated gzip members are rejected. The archive SHA-256
+covers the complete compressed artifact, including accepted padding members. These format checks
+complement the independent checksum and signature authentication described in the
+[verification contract](release-verification.md).
+
 CycloneDX expresses archive/executable/variant containment through nested components and
 linked modules through dependency edges. The pinned cdxgen **cdx-convert v13.1.0** tool receives
 a flattened conversion view; Go verifies that conversion preserves all components, hashes,
