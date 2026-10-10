@@ -426,7 +426,8 @@ func printHelp(idx *format.Index, hostInfo microarch.Info, selected *format.Vari
 	fmt.Printf("  MICROFAT_POLICY              Policy preset (e.g. safe_avx512, no_downclock)\n")
 	fmt.Printf("  MICROFAT_AVX512_DOWNCLOCK_PROTECTION  Enable Intel Skylake-X/Cascade Lake downclock mitigation (1/true)\n")
 	fmt.Printf("  MICROFAT_CACHE_DIR           Custom destination cache directory\n")
-	fmt.Printf("  MICROFAT_EXEC_MODE           Execution mode: memfd (default) or cache\n\n")
+	fmt.Printf("  MICROFAT_EXEC_MODE           Execution mode: memfd (default) or cache\n")
+	fmt.Printf("  MICROFAT_CPU_POLICY          CPU tuning: static (default) or native Go adaptation\n\n")
 	fmt.Printf("All other arguments and flags are forwarded directly to the application.\n")
 }
 
@@ -438,6 +439,7 @@ func printInfo(
 	totalSize int64,
 	jsonOutput bool,
 ) error {
+	cpuPolicy := cgroup.ResolveCPUPolicy(os.Getenv(format.EnvCPUPolicy), cgroup.CPUPolicyStatic)
 	if jsonOutput {
 		var cgInfo *format.CgroupInfo
 		if limits, err := readCgroupLimitsFunc(); err == nil && limits.CgroupVersion != cgroup.VersionUnknown {
@@ -445,7 +447,9 @@ func printInfo(
 				Version:          limits.CgroupVersion,
 				MemoryLimitBytes: limits.MemoryLimitBytes,
 				CPUQuota:         limits.CPUQuota,
-				GOMAXPROCS:       limits.CPUs,
+			}
+			if cpuPolicy == cgroup.CPUPolicyStatic {
+				cgInfo.GOMAXPROCS = limits.CPUs
 			}
 			if limits.MemoryLimitBytes > 0 {
 				if memLimit, ok := cgroup.CalculateGOMEMLIMIT(
@@ -510,9 +514,12 @@ func printInfo(
 		} else {
 			fmt.Printf("  • Memory Ceiling:  unlimited\n")
 		}
-		if limits.CPUs > 0 {
+		switch {
+		case limits.CPUQuota > 0 && cpuPolicy == cgroup.CPUPolicyNative:
+			fmt.Printf("  • CPU CFS Quota:   %.2f cores -> native Go CPU policy\n", limits.CPUQuota)
+		case limits.CPUs > 0:
 			fmt.Printf("  • CPU CFS Quota:   %.2f cores -> Auto GOMAXPROCS: %d\n", limits.CPUQuota, limits.CPUs)
-		} else {
+		default:
 			fmt.Printf("  • CPU CFS Quota:   unlimited\n")
 		}
 	}

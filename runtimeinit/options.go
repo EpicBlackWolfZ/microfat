@@ -9,6 +9,17 @@ import (
 // Profile represents a workload-aware Go runtime garbage collection tuning profile.
 type Profile = cgroup.GCProfile
 
+// CPUPolicy controls whether AutoTune sets a fixed CPU limit or preserves Go's runtime CPU policy.
+type CPUPolicy = cgroup.CPUPolicy
+
+const (
+	// CPUPolicyStatic applies microfat's fixed, floor-based cgroup quota policy.
+	CPUPolicyStatic CPUPolicy = cgroup.CPUPolicyStatic
+
+	// CPUPolicyNative preserves the Go runtime's CPU policy and existing user choices.
+	CPUPolicyNative CPUPolicy = cgroup.CPUPolicyNative
+)
+
 const (
 	// ProfileDefault represents the standard Go runtime default behavior (GOGC=100 or user-provided).
 	ProfileDefault Profile = cgroup.GCProfileDefault
@@ -35,6 +46,7 @@ type config struct {
 	liveHeapEstimateBytes int64
 	explicitGOGC          *int
 	dryRun                bool
+	cpuPolicy             CPUPolicy
 }
 
 // Option configures auto-tuning behavior for AutoTune.
@@ -50,6 +62,17 @@ func defaultConfig() *config {
 		liveHeapEstimateBytes: 0,
 		explicitGOGC:          nil,
 		dryRun:                false,
+		cpuPolicy:             CPUPolicyStatic,
+	}
+}
+
+// WithCPUPolicy chooses CPU tuning independently of memory and GC tuning.
+// CPUPolicyNative leaves GOMAXPROCS untouched, preserving Go's automatic CPU updates
+// when enabled by the application and runtime. MICROFAT_CPU_POLICY overrides this option.
+// Invalid policies use the default static policy.
+func WithCPUPolicy(policy CPUPolicy) Option {
+	return func(c *config) {
+		c.cpuPolicy = cgroup.ResolveCPUPolicy(string(policy), CPUPolicyStatic)
 	}
 }
 

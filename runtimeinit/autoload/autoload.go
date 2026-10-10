@@ -5,6 +5,9 @@
 //
 //	import _ "github.com/EpicBlackWolfZ/microfat/runtimeinit/autoload"
 //
+// Set MICROFAT_CPU_POLICY=native to preserve the Go runtime's CPU policy while
+// retaining memory and GC tuning. The default static policy applies a fixed CPU limit.
+//
 // For custom options or programmatic control, import "github.com/EpicBlackWolfZ/microfat/runtimeinit" directly
 // and invoke runtimeinit.AutoTune(opts...).
 package autoload

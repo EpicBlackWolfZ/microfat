@@ -19,9 +19,10 @@ When running standard Go applications inside Docker or Kubernetes containers:
 1. **The OOMKill Problem (`GOMEMLIMIT`)**:
    - Go's default garbage collector triggers relative to live heap size (`GOGC=100`) rather than the container's hard memory limit.
    - Under sudden spikes in allocation, the Linux kernel OOM killer terminates the container before Go reaches its GC threshold.
-2. **The CPU Throttling Problem (`GOMAXPROCS`)**:
-   - `runtime.NumCPU()` reports the physical or virtual core count of the entire host machine (e.g. 64 or 128 cores), even if the container is assigned a fractional quota (e.g. `2.0 CPUs`).
-   - Launching 64 goroutine worker threads causes extreme Linux Completely Fair Scheduler (CFS) period exhaustion, context switching, and high p99 request latency.
+2. **CPU Parallelism and Quotas (`GOMAXPROCS`)**:
+   - `runtime.NumCPU()` reports the logical CPUs available at process startup, without converting a cgroup CPU bandwidth quota into a CPU count. With unrestricted affinity, this may be the host count.
+   - Go 1.25 introduced a container-aware default `GOMAXPROCS` and periodic updates. Microfat's default `static` policy deliberately applies its existing startup quota calculation instead; `native` preserves the application's Go CPU behavior while retaining memory and GC tuning.
+   - CPU throttling depends on workload and quota. Neither policy guarantees lower latency or better throughput. See the [Go 1.25 runtime changes](https://go.dev/doc/go1.25#runtime).
 
 ---
 
@@ -39,8 +40,10 @@ flowchart TD
     V2 --> CalcMem["Calculate GOMEMLIMIT (90% limit, 64MB min headroom)"]
     V1 --> CalcMem
     
-    V2 --> CalcCPU["Calculate GOMAXPROCS (floor quota, min 1)"]
-    V1 --> CalcCPU
+    V2 --> CPUPolicy{"CPU policy"}
+    V1 --> CPUPolicy
+    CPUPolicy -->|"static (default)"| CalcCPU["Calculate GOMAXPROCS (floor quota, min 1)"]
+    CPUPolicy -->|"native"| NativeCPU["Preserve application Go CPU behavior"]
     
     CalcMem --> CheckEnv{"Are variables already set?"}
     CalcCPU --> CheckEnv
@@ -86,7 +89,32 @@ Given a CFS quota $Q$ and period $P$:
 $$\text{CPU Quota} = \frac{Q}{P}$$
 $$\text{GOMAXPROCS} = \max(1, \lfloor \text{CPU Quota} \rfloor)$$
 
-- **Floor Rounding**: Using $\lfloor \text{Quota} \rfloor$ ensures Go does not oversubscribe CFS scheduler periods, reducing oversubscription; CPU throttling and latency spikes remain possible.
+The default `static` policy uses this floor calculation, with a minimum of one CPU. The launcher
+injects `GOMAXPROCS` before starting the payload; `runtimeinit` uses a positive
+`runtime.GOMAXPROCS` setter unless an explicit environment setting already exists. Both disable
+Go's automatic CPU updates. Microfat applies this policy at startup or a subsequent explicit
+`AutoTune` call; it does not watch changing quotas or affinity. An inherited launcher setting
+continues to take precedence during later initialization.
+
+Select `MICROFAT_CPU_POLICY=native` to preserve the application's Go CPU policy while continuing
+memory and GC tuning. Native mode neither injects `GOMAXPROCS`, calls its positive setter, nor
+calls `runtime.SetDefaultGOMAXPROCS`. It preserves explicit `GOMAXPROCS`, `GODEBUG`, and prior
+runtime setters, including settings made by other libraries. Switching from static to native
+after a setter has run does not restore automatic adaptation.
+
+For an application built with Go 1.25 or newer, the native default considers logical CPUs,
+affinity, and Linux cgroup CPU bandwidth. It rounds fractional quota up and normally uses at
+least two CPUs, unless logical CPU count or affinity is below two. Automatic updates follow
+quota and affinity changes, up to once per second and less often while idle. A positive
+`GOMAXPROCS` environment value or setter disables updates. `GODEBUG=containermaxprocs=0`
+disables quota-aware defaults; `updatemaxprocs=0` disables updates. Both default to zero for
+applications whose main module language version is Go 1.24 or older; the newer toolchain
+alone does not guarantee adaptation. Older payload runtimes retain their own defaults.
+See the [runtime CPU policy documentation](https://pkg.go.dev/runtime#GOMAXPROCS).
+
+For example, a `1.5` CPU quota produces `1` under Microfat's static policy and normally `2`
+under Go's native default. This is a policy difference, not performance evidence. Any future
+default change requires representative workload measurements.
 
 ---
 
@@ -96,12 +124,16 @@ Microfat strictly adheres to the following precedence order:
 
 1. **Explicit User / Kubernetes Environment Variables (Highest Priority)**:
    - If `GOMEMLIMIT` or `GOMAXPROCS` is already present in the environment (e.g. via Kubernetes deployment manifest or CLI), Microfat **never** overrides it.
-2. **Custom Memory Ratio**:
+2. **Independent CPU Policy**:
+   - `MICROFAT_CPU_POLICY=static` is the default. `native` preserves Go's CPU policy without disabling memory or GC tuning, for both full and minimal launchers and for `runtimeinit/autoload`.
+   - Programmatic callers can use `runtimeinit.WithCPUPolicy(runtimeinit.CPUPolicyNative)`. A valid environment policy overrides this option; an invalid environment policy falls back to the valid option, or the static default. Invalid options also use the static default.
+   - Policy values accept surrounding whitespace and case-insensitive `static`/`native`. Native mode does not rewrite operator settings or enable Go behavior that the application has disabled.
+3. **Custom Memory Ratio**:
    - Set `MICROFAT_MEM_RATIO=0.85` to allocate 85% of memory instead of 90%.
-3. **Dry-Run Simulation**:
+4. **Dry-Run Simulation**:
    - Set `MICROFAT_DRY_RUN=1` or `MICROFAT_DRY_RUN=true` to simulate auto-tuning and inspect calculated limits without mutating the active Go runtime.
-4. **Full Opt-Out**:
-   - Set `MICROFAT_AUTOTUNE=0` or `MICROFAT_AUTOTUNE=false` to disable cgroup inspection and injection entirely.
+5. **Full Opt-Out**:
+   - Set `MICROFAT_AUTOTUNE=0` or `MICROFAT_AUTOTUNE=false` to disable tuning application/injection. `runtimeinit` skips inspection; the launcher may still inspect limits for diagnostics and extraction admission checks.
 
 ---
 
@@ -272,6 +304,7 @@ import (
 
 func main() {
 	res := runtimeinit.AutoTune(
+		runtimeinit.WithCPUPolicy(runtimeinit.CPUPolicyNative),       // Keep Go's CPU policy; memory and GC still tune
 		runtimeinit.WithProfile(runtimeinit.ProfileLatencyCritical), // GOGC=75 for strict SLA microservices
 		runtimeinit.WithMemoryRatio(0.85),                          // 85% instead of default 90%
 		runtimeinit.WithMinHeadroom(128*1024*1024),                  // 128MB reserved headroom
@@ -305,6 +338,10 @@ func main() {
 
 Use `runtimeinit.WithDryRun(true)` (or environment variable `MICROFAT_DRY_RUN=1`) to compute and inspect the full container resource tuning plan without mutating Go runtime settings (`debug.SetMemoryLimit`, `runtime.GOMAXPROCS`, and `debug.SetGCPercent`):
 
+Under native policy, `Result.CPUPolicy` reports `native`, the CPU plan is unset (`GOMAXPROCS=0`),
+and `MaxProcsApplied=false`, including dry runs. `runtime.GOMAXPROCS(0)` can inspect current
+runtime parallelism without changing it. Memory and GC plan fields remain independent.
+
 ```go
 package main
 
@@ -324,6 +361,22 @@ func main() {
 		res.DryRun, res.GOMEMLIMIT, res.GOMAXPROCS, res.GOGC, res.MemLimitApplied, res.SkippedReason)
 }
 ```
+
+### Qualifying Live Quota Changes
+
+Run `task test-cpu-quota` with `MICROFAT_BENCH_CGROUP_ROOT` set to an existing delegated Linux
+cgroup v2 subtree with CPU and memory controllers enabled. The qualification requires at least
+three CPUs in the runner's allowed affinity and enough inherited CPU quota to observe the
+`2` → `3` → `2` native transition. The required target fails if these controls are unavailable;
+the ordinary test suite skips this opt-in qualification.
+
+The test reuses the benchmark control harness to create and remove its own child cgroups,
+attaches only fixture children, and changes only their quotas and affinity. It checks full and
+minimal launchers in memfd and cache modes, standalone option/environment/autoload tuning,
+static preservation, explicit CPU settings, disabled Go adaptation, dry runs, and repeated
+initialization. Memory and GC tuning are checked separately. It measures behavior, not
+performance. CI retains the native amd64 and arm64 qualification logs alongside kernel-control
+evidence.
 
 ### Locating Original Executable & Sibling Assets (`runtimeinit.Executable`)
 
