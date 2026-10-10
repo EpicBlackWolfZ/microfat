@@ -65,45 +65,50 @@ func Executable() (string, error) {
 
 // Result contains the outcome and resolved parameters of a container auto-tuning operation.
 type Result struct {
-	CgroupVersion             int     `json:"cgroup_version"`
-	MemoryLimitBytes          int64   `json:"memory_limit_bytes"`
-	MemoryHighBytes           int64   `json:"memory_high_bytes,omitempty"`
-	EffectiveMemoryLimitBytes int64   `json:"effective_memory_limit_bytes,omitempty"`
-	ConstrainingLimit         string  `json:"constraining_limit,omitempty"`
-	CPUQuota                  float64 `json:"cpu_quota"`
-	GOMEMLIMIT                int64   `json:"gomemlimit,omitempty"`
-	GOMAXPROCS                int     `json:"gomaxprocs,omitempty"`
-	GOGC                      int     `json:"gogc,omitempty"`
-	ProfileApplied            string  `json:"profile_applied,omitempty"`
-	MemLimitApplied           bool    `json:"mem_limit_applied"`
-	MaxProcsApplied           bool    `json:"max_procs_applied"`
-	GOGCApplied               bool    `json:"gogc_applied"`
-	DryRun                    bool    `json:"dry_run,omitempty"`
-	SkippedReason             string  `json:"skipped_reason,omitempty"`
+	CgroupVersion             int       `json:"cgroup_version"`
+	MemoryLimitBytes          int64     `json:"memory_limit_bytes"`
+	MemoryHighBytes           int64     `json:"memory_high_bytes,omitempty"`
+	EffectiveMemoryLimitBytes int64     `json:"effective_memory_limit_bytes,omitempty"`
+	ConstrainingLimit         string    `json:"constraining_limit,omitempty"`
+	CPUQuota                  float64   `json:"cpu_quota"`
+	CPUPolicy                 CPUPolicy `json:"cpu_policy"`
+	GOMEMLIMIT                int64     `json:"gomemlimit,omitempty"`
+	GOMAXPROCS                int       `json:"gomaxprocs,omitempty"`
+	GOGC                      int       `json:"gogc,omitempty"`
+	ProfileApplied            string    `json:"profile_applied,omitempty"`
+	MemLimitApplied           bool      `json:"mem_limit_applied"`
+	MaxProcsApplied           bool      `json:"max_procs_applied"`
+	GOGCApplied               bool      `json:"gogc_applied"`
+	DryRun                    bool      `json:"dry_run,omitempty"`
+	SkippedReason             string    `json:"skipped_reason,omitempty"`
 }
 
 // Telemetry records structured JSON telemetry emitted during runtimeinit auto-tuning.
 type Telemetry struct {
-	Event               string  `json:"event"`
-	TimestampUnixNano   int64   `json:"timestamp_unix_nano"`
-	CgroupVersion       int     `json:"cgroup_version"`
-	CgroupMemLimitBytes int64   `json:"cgroup_mem_limit_bytes"`
-	CgroupMemHighBytes  int64   `json:"cgroup_mem_high_bytes,omitempty"`
-	EffectiveMemBytes   int64   `json:"effective_mem_bytes,omitempty"`
-	ConstrainingLimit   string  `json:"constraining_limit,omitempty"`
-	CgroupCPUQuota      float64 `json:"cgroup_cpu_quota"`
-	GOMEMLIMIT          string  `json:"gomemlimit,omitempty"`
-	GOMAXPROCS          string  `json:"gomaxprocs,omitempty"`
-	GOGC                string  `json:"gogc,omitempty"`
-	ProfileApplied      string  `json:"profile_applied,omitempty"`
-	MemLimitApplied     bool    `json:"mem_limit_applied"`
-	MaxProcsApplied     bool    `json:"max_procs_applied"`
-	GOGCApplied         bool    `json:"gogc_applied"`
-	DryRun              bool    `json:"dry_run,omitempty"`
-	SkippedReason       string  `json:"skipped_reason,omitempty"`
+	Event               string    `json:"event"`
+	TimestampUnixNano   int64     `json:"timestamp_unix_nano"`
+	CgroupVersion       int       `json:"cgroup_version"`
+	CgroupMemLimitBytes int64     `json:"cgroup_mem_limit_bytes"`
+	CgroupMemHighBytes  int64     `json:"cgroup_mem_high_bytes,omitempty"`
+	EffectiveMemBytes   int64     `json:"effective_mem_bytes,omitempty"`
+	ConstrainingLimit   string    `json:"constraining_limit,omitempty"`
+	CgroupCPUQuota      float64   `json:"cgroup_cpu_quota"`
+	CPUPolicy           CPUPolicy `json:"cpu_policy"`
+	GOMEMLIMIT          string    `json:"gomemlimit,omitempty"`
+	GOMAXPROCS          string    `json:"gomaxprocs,omitempty"`
+	GOGC                string    `json:"gogc,omitempty"`
+	ProfileApplied      string    `json:"profile_applied,omitempty"`
+	MemLimitApplied     bool      `json:"mem_limit_applied"`
+	MaxProcsApplied     bool      `json:"max_procs_applied"`
+	GOGCApplied         bool      `json:"gogc_applied"`
+	DryRun              bool      `json:"dry_run,omitempty"`
+	SkippedReason       string    `json:"skipped_reason,omitempty"`
 }
 
 // AutoTune inspects container cgroup limits and configures GOMEMLIMIT, GOMAXPROCS, and GOGC.
+// CPU tuning defaults to CPUPolicyStatic. CPUPolicyNative leaves GOMAXPROCS untouched,
+// allowing the Go runtime to keep automatic CPU updates when they are enabled.
+// Selecting native after static tuning does not undo the earlier setting or an explicit application choice.
 //
 // Precedence rules:
 //  1. If MICROFAT_AUTOTUNE is set to "0" or "false", tuning is skipped entirely.
@@ -112,6 +117,7 @@ type Telemetry struct {
 //  4. If GOGC is already set in the environment, debug.SetGCPercent is skipped.
 //  5. MICROFAT_GC_PROFILE / MICROFAT_LIVE_HEAP_ESTIMATE env variables take precedence over in-code defaults.
 //  6. If MICROFAT_MEM_RATIO is defined (e.g. "0.85"), it overrides the default memory limit calculation ratio.
+//  7. MICROFAT_CPU_POLICY overrides WithCPUPolicy; native leaves GOMAXPROCS untouched.
 func AutoTune(opts ...Option) Result {
 	cfg := defaultConfig()
 	dryRunEnv := strings.TrimSpace(getenvFunc(format.EnvDryRun))
@@ -123,11 +129,13 @@ func AutoTune(opts ...Option) Result {
 			opt(cfg)
 		}
 	}
+	cfg.cpuPolicy = cgroup.ResolveCPUPolicy(getenvFunc(format.EnvCPUPolicy), cfg.cpuPolicy)
 
 	// 1. Check if auto-tuning is explicitly disabled
 	autoTuneEnv := strings.TrimSpace(getenvFunc(format.EnvAutotune))
 	if autoTuneEnv == envValDisabledZero || strings.EqualFold(autoTuneEnv, envValDisabledFalse) {
 		res := Result{
+			CPUPolicy:     cfg.cpuPolicy,
 			DryRun:        cfg.dryRun,
 			SkippedReason: "auto-tuning disabled by " + format.EnvAutotune,
 		}
@@ -151,6 +159,7 @@ func AutoTune(opts ...Option) Result {
 		}
 		res := Result{
 			CgroupVersion: limits.CgroupVersion,
+			CPUPolicy:     cfg.cpuPolicy,
 			DryRun:        cfg.dryRun,
 			SkippedReason: reason,
 		}
@@ -164,6 +173,7 @@ func AutoTune(opts ...Option) Result {
 		MemoryHighBytes:           limits.MemoryHighBytes,
 		EffectiveMemoryLimitBytes: limits.EffectiveMemoryLimitBytes,
 		CPUQuota:                  limits.CPUQuota,
+		CPUPolicy:                 cfg.cpuPolicy,
 		DryRun:                    cfg.dryRun,
 	}
 
@@ -189,6 +199,7 @@ func AutoTune(opts ...Option) Result {
 		activeProfile,
 		activeLiveHeap,
 	)
+	plan.ApplyCPUPolicy(cfg.cpuPolicy)
 	res.ConstrainingLimit = plan.ConstrainingLimit
 	resolveGOGCPlan(cfg, activeProfile, &plan)
 	res.SkippedReason = plan.GOGCSkippedReason
@@ -322,9 +333,9 @@ func logResult(cfg *config, res Result) {
 
 	if cfg.logger != nil {
 		cfg.logger(
-			"cgroup_version=%d gomemlimit=%d gomaxprocs=%d gogc=%s applied_mem=%t applied_cpu=%t applied_gogc=%t "+
+			"cgroup_version=%d gomemlimit=%d gomaxprocs=%d cpu_policy=%s gogc=%s applied_mem=%t applied_cpu=%t applied_gogc=%t "+
 				"profile=%q constraining=%q skipped=%q dry_run=%t",
-			res.CgroupVersion, res.GOMEMLIMIT, res.GOMAXPROCS, gogcStr,
+			res.CgroupVersion, res.GOMEMLIMIT, res.GOMAXPROCS, res.CPUPolicy, gogcStr,
 			res.MemLimitApplied, res.MaxProcsApplied, res.GOGCApplied, res.ProfileApplied, res.ConstrainingLimit, res.SkippedReason,
 			res.DryRun,
 		)
@@ -351,6 +362,7 @@ func logResult(cfg *config, res Result) {
 			EffectiveMemBytes:   res.EffectiveMemoryLimitBytes,
 			ConstrainingLimit:   res.ConstrainingLimit,
 			CgroupCPUQuota:      res.CPUQuota,
+			CPUPolicy:           res.CPUPolicy,
 			GOMEMLIMIT:          memLimitStr,
 			GOMAXPROCS:          maxProcsStr,
 			GOGC:                gogcStr,
@@ -370,11 +382,12 @@ func logResult(cfg *config, res Result) {
 	if debugOpt == envValEnabledOne || strings.EqualFold(debugOpt, envValEnabledTrue) {
 		_, _ = fmt.Fprintf(stderrWriter,
 			"[microfat:runtimeinit] cgroup_v=%d mem_bytes=%d mem_high=%d effective_mem=%d constraining=%s cpu_quota=%.2f "+
-				"gomemlimit=%dB (%t) gomaxprocs=%d (%t) gogc=%s (%t) profile=%s dry_run=%t reason=%q\n",
+				"gomemlimit=%dB (%t) gomaxprocs=%d (%t) cpu_policy=%s gogc=%s (%t) profile=%s dry_run=%t reason=%q\n",
 			res.CgroupVersion, res.MemoryLimitBytes, res.MemoryHighBytes, res.EffectiveMemoryLimitBytes, res.ConstrainingLimit,
 			res.CPUQuota,
 			res.GOMEMLIMIT, res.MemLimitApplied,
 			res.GOMAXPROCS, res.MaxProcsApplied,
+			res.CPUPolicy,
 			gogcStr, res.GOGCApplied,
 			res.ProfileApplied,
 			res.DryRun,

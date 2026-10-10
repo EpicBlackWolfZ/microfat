@@ -305,7 +305,7 @@ tasks:
     cmds:
     - |-
       {{.TASK_ENV}}
-      golangci-lint run ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner
+      golangci-lint run ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter
   lint-shell:
     desc: Run ShellCheck v0.11.0 on all tracked shell scripts
     preconditions:
@@ -422,6 +422,12 @@ tasks:
     - |-
       {{.TASK_ENV}}
       MICROFAT_BENCH_REQUIRE_CONTROLS=1 "$GO" test -v ./benchmarks/system -run '^Test(KernelControls|RealCgroupIntegration)$' -count=1
+  test-cpu-quota:
+    desc: Qualify static/native CPU policies through live quota changes in a delegated cgroup
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      MICROFAT_CPU_QUOTA_TESTS=required "$GO" test -race -v ./tests/e2e -run '^TestCPUQuotaAdaptation$' -count=1
   benchmark-kernel-v1:
     desc: Prove cgroup v1 enforcement in a networkless QEMU TCG guest
     cmds:

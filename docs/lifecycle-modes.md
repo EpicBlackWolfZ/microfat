@@ -42,7 +42,7 @@ Verify the result and establish a new trusted digest/signature when distributing
 | **Command** | Default build artifact | `./app --microfat:trim` or `microfat trim app` | `./app --microfat:optimize` |
 | **Disk Size** | Stub + all compressed variants | Stub + selected compressed variant | Selected uncompressed payload |
 | **Microarch Portability** | Runs on **any** machine (`v1`–`v4` or `v8.0`–`v9.5`) | Locked to chosen level (e.g. `v3`) | Locked to chosen level (e.g. `v3`) |
-| **Container Auto-Tuning** | ✅ Continuous `GOMEMLIMIT` & `GOMAXPROCS` | ✅ Continuous `GOMEMLIMIT` & `GOMAXPROCS` | ❌ Requires standalone `runtimeinit/autoload` import |
+| **Container Auto-Tuning** | ✅ Startup memory/GC tuning; static or native CPU policy | ✅ Startup memory/GC tuning; static or native CPU policy | Requires standalone `runtimeinit` or `runtimeinit/autoload` for Microfat tuning |
 | **In-Memory RAM Exec** | ✅ Anonymous RAM (`memfd_create`) | ✅ Anonymous RAM (`memfd_create`) | ❌ Standard OS disk `mmap` |
 | **Read-Only Rootfs** | ✅ Zero disk I/O | ✅ Zero disk I/O | ✅ Native disk read |
 | **Startup Work** | Select, verify, extract/cache and execute | Verify, extract/cache and execute | Native process startup |

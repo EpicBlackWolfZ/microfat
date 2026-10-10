@@ -256,7 +256,7 @@ export MICROFAT_LIVE_HEAP_ESTIMATE=150MB
 **No.** Decompression work occurs **only once at process launch** when streaming into anonymous RAM (`memfd_create`). The payload then executes as a native process without a resident launcher daemon.
 
 ### Q2: Why does `runtime.NumCPU()` still return the host core count?
-In Go, `runtime.NumCPU()` queries the host hardware. However, Microfat automatically sets `GOMAXPROCS` to match the container's CFS CPU quota (e.g. `2` cores for `cpu: 2000m`), reducing scheduler oversubscription; throttling remains possible.
+`runtime.NumCPU()` reports the logical CPUs available at startup, without translating cgroup CPU bandwidth into a core count. Microfat's default `static` policy sets `GOMAXPROCS` from the floor-rounded quota at startup (e.g. `2` for `cpu: 2000m`). Use `MICROFAT_CPU_POLICY=native` to preserve Go's container-aware default and quota/affinity updates when the application's runtime enables them. Explicit environment values, prior setters, and `GODEBUG` settings still take precedence; see the [CPU policy caveats](runtime-tuning.md#b-gomaxprocs-cpu-quota). Throttling remains possible under either policy.
 
 ### Q3: How do I eliminate startup overhead entirely for CLI tools?
 Use Raw Native ELF mode:

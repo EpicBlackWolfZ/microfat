@@ -290,6 +290,7 @@ func buildAutoTunedEnviron(
 		gcProfile,
 		liveHeap,
 	)
+	plan.ApplyCPUPolicy(cgroup.ResolveCPUPolicy(os.Getenv(format.EnvCPUPolicy), cgroup.CPUPolicyStatic))
 
 	env = resolveBatchGCEnviron(env, keyIndex, &plan)
 

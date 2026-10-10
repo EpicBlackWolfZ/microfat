@@ -83,6 +83,7 @@ const (
 	EnvDebug                     = "MICROFAT_DEBUG"
 	EnvLog                       = "MICROFAT_LOG"
 	EnvAutotune                  = "MICROFAT_AUTOTUNE"
+	EnvCPUPolicy                 = "MICROFAT_CPU_POLICY"
 	EnvDryRun                    = "MICROFAT_DRY_RUN"
 	EnvMemRatio                  = "MICROFAT_MEM_RATIO"
 	EnvGCProfile                 = "MICROFAT_GC_PROFILE"
@@ -397,7 +398,7 @@ type CgroupInfo struct {
 	MemoryLimitBytes int64   `json:"memory_limit_bytes"`
 	CPUQuota         float64 `json:"cpu_quota"`
 	GOMEMLIMIT       string  `json:"gomemlimit,omitempty"`
-	GOMAXPROCS       int     `json:"gomaxprocs,omitempty"`
+	GOMAXPROCS       int     `json:"gomaxprocs,omitempty,omitzero"`
 	GOGC             string  `json:"gogc,omitempty"`
 	GCProfile        string  `json:"gc_profile,omitempty"`
 }

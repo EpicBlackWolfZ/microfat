@@ -260,6 +260,17 @@ func main() {
 }
 ```
 
+To keep memory and GC tuning while preserving Go's native CPU adaptation, set
+`MICROFAT_CPU_POLICY=native` for the launcher or autoload, or use the programmatic option:
+
+```go
+res := runtimeinit.AutoTune(runtimeinit.WithCPUPolicy(runtimeinit.CPUPolicyNative))
+```
+
+The default remains `static` (floor-rounded quota, minimum one CPU). Native mode preserves
+explicit CPU settings and does not re-enable adaptation disabled by an earlier setter or
+`GODEBUG`. See [CPU policies and Go-version caveats](docs/runtime-tuning.md#b-gomaxprocs-cpu-quota).
+
 ### Dry-Run Simulation (`WithDryRun`)
 To simulate container resource tuning and inspect computed parameters without mutating active Go runtime state (`debug.SetMemoryLimit`, `runtime.GOMAXPROCS`, `debug.SetGCPercent`):
 
@@ -318,6 +329,7 @@ Fat executables using the full launcher support reserved meta-commands for diagn
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `MICROFAT_AUTOTUNE` | `1` / `true` | Set to `0` or `false` to disable automatic `GOMEMLIMIT` and `GOMAXPROCS` injection. |
+| `MICROFAT_CPU_POLICY` | `static` | Use `native` to preserve Go CPU behavior while retaining independent memory and GC tuning. |
 | `MICROFAT_MEM_RATIO` | `0.90` | Fraction of container cgroup memory limit to assign to `GOMEMLIMIT` (e.g. `0.85`). |
 | `MICROFAT_GC_PROFILE` | `default` | Workload GC profile preset (`latency_critical`, `memory_constrained`, `batch_etl`, `adaptive`, `default`). |
 | `MICROFAT_FORCE_LEVEL` | *(unset)* | Pin execution strictly to a specific level (`v1`, `v2`, `v3`, `v4`, `v8.0`..`v9.5`). Fails fast on incompatibility. |
