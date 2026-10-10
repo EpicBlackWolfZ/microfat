@@ -109,6 +109,11 @@ Before any `trim`, `specialize`, `optimize`, or corresponding `-to` command, the
 
 ### Transactional Lifecycle & Metadata Policies
 
+The launcher parses `--microfat:metadata-policy` and `--microfat:break-hardlinks` only when
+the first argument selects a transformation command. An unhandled first argument forwards
+the complete argument list to the application unchanged, including `--` and later
+`--microfat:*` arguments. Help, info and prewarm commands ignore these transformation options.
+
 All transformation operations (both CLI `microfat trim` and launcher stub meta-commands) execute within a shared, transactional lifecycle engine:
 
 1. **Create-Only Publication for Fresh Outputs**:
