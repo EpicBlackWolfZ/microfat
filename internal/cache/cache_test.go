@@ -674,9 +674,9 @@ func TestMaterializeVariantAtFD(t *testing.T) {
 		require.NoError(t, err, "open")
 		defer func() { _ = unix.Close(renameFD) }()
 
-		dirTarget := filepath.Join(renameSubDir, validSHA)
-		require.NoError(t, os.MkdirAll(dirTarget, 0o700), "mkdir dirTarget")
-		require.NoError(t, os.WriteFile(filepath.Join(dirTarget, "child"), []byte("data"), 0o600), "write child")
+		originalRename := renameAtFunc
+		t.Cleanup(func() { renameAtFunc = originalRename })
+		renameAtFunc = func(int, string, int, string) error { return unix.EACCES }
 
 		_, err = MaterializeVariantAtFD(renameFD, renameSubDir, entry, func(w io.Writer) error {
 			_, writeErr := w.Write(payload)
@@ -685,6 +685,7 @@ func TestMaterializeVariantAtFD(t *testing.T) {
 		if err == nil || !errors.Is(err, format.ErrCacheWrite) {
 			t.Fatalf("expected ErrCacheWrite on rename failure, got: %v", err)
 		}
+		require.ErrorIs(t, err, unix.EACCES)
 
 		// Verify no dangling temp files
 		entries, _ := os.ReadDir(renameSubDir)

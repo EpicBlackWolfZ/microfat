@@ -681,6 +681,9 @@ func TestRunBinaryMetaCommands(t *testing.T) {
 
 func TestExecuteVariantExecutionPaths(t *testing.T) {
 	tempDir := t.TempDir()
+	oldExisting := resolveExistingCacheDirFunc
+	t.Cleanup(func() { resolveExistingCacheDirFunc = oldExisting })
+	resolveExistingCacheDirFunc = func(string) (int, string, error) { return -1, "", os.ErrNotExist }
 	payloadData := []byte("PAYLOAD_EXEC_TEST")
 	entry, rawFile := createDummyVariantFile(t, tempDir, payloadData)
 	defer func() { _ = rawFile.Close() }()
@@ -1695,6 +1698,9 @@ func TestExecuteVariant_TelemetryJSONValidation(t *testing.T) {
 }
 
 func TestExecuteVariant_DiagnosticHints(t *testing.T) {
+	oldExisting := resolveExistingCacheDirFunc
+	t.Cleanup(func() { resolveExistingCacheDirFunc = oldExisting })
+	resolveExistingCacheDirFunc = func(string) (int, string, error) { return -1, "", os.ErrNotExist }
 	tempDir := t.TempDir()
 	payloadData := []byte("DIAGNOSTIC_HINTS_PAYLOAD")
 	entry, rawFile := createDummyVariantFile(t, tempDir, payloadData)

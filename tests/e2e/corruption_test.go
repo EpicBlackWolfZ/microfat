@@ -126,11 +126,12 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 			entry = &idx.Variants[0]
 		}
 
+		// Force source extraction even if this payload is already cached.
 		// Mutate a byte in the payload stream of the selected variant
 		payloadTarget := entry.Offset + tamperedPayloadOffsetPadding
 		mutateFileBytes(t, corruptPath, payloadTarget, []byte{0xEE})
 
-		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue})
+		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue, format.EnvExecMode + "=" + format.ExecModeMemfd})
 		if err == nil && exitCode == defaultExitCode {
 			t.Fatalf("expected failure for corrupted payload stream, but execution succeeded")
 		}
@@ -184,7 +185,7 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 
 		// Outer trailer checksum is valid, but internal execution boundary must reject decompression/size mismatch
-		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue})
+		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue, format.EnvExecMode + "=" + format.ExecModeMemfd})
 		if err == nil && exitCode == defaultExitCode {
 			t.Fatalf("expected failure for tampered metadata with valid outer checksum, but succeeded")
 		}
@@ -210,7 +211,7 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 		dictTarget := idx.DictionaryOffset + tamperedDictOffsetPadding
 		mutateFileBytes(t, corruptPath, dictTarget, []byte{0xCC})
 
-		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue})
+		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue, format.EnvExecMode + "=" + format.ExecModeMemfd})
 		if err == nil && exitCode == defaultExitCode {
 			t.Fatalf("expected failure for tampered shared dictionary, but execution succeeded")
 		}
@@ -261,7 +262,7 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 
 		// Outer checksum matches, but semantic validation must reject overlapping payloads
-		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue})
+		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue, format.EnvExecMode + "=" + format.ExecModeMemfd})
 		if err == nil && exitCode == defaultExitCode {
 			t.Fatalf("expected failure for overlapping variant payload index, but execution succeeded")
 		}

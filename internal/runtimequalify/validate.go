@@ -62,7 +62,7 @@ func expectedFailure(c Case, phase int) []string {
 }
 
 func expectedMode(c Case) string {
-	if c.Mode == Cache || (c.Mode == Auto && c.Policy != "" && c.Policy != observe) {
+	if c.Mode == Cache || (c.Mode == Auto && (c.Scenario == readOnlyWarm || (c.Policy != "" && c.Policy != observe))) {
 		return Cache
 	}
 	return Memfd
@@ -335,10 +335,20 @@ func validateTelemetry(e Evidence, run mountfixture.Execution, failure bool) ([]
 			return nil, errors.New("unexpected telemetry event")
 		}
 	}
-	if !slices.Equal(sequence, expectedSequence(e.Case, run.Phase)) {
+	if !matchesExpectedSequence(e.Case, run.Phase, sequence) {
 		return nil, fmt.Errorf("unexpected telemetry sequence: %v", sequence)
 	}
 	return dispatches, nil
+}
+
+func matchesExpectedSequence(c Case, phase int, sequence []string) bool {
+	if slices.Equal(sequence, expectedSequence(c, phase)) {
+		return true
+	}
+	// A peer may materialize a verified entry before another worker's first lookup.
+	// Both first-phase outcomes must still execute exactly one verified cache image.
+	return c.Mode == Auto && strings.HasPrefix(c.Scenario, "concurrent-") && phase == 0 &&
+		slices.Equal(sequence, []string{"dispatch/cache"})
 }
 
 func validatePolicyEvents(e Evidence, run mountfixture.Execution) error {
@@ -396,8 +406,8 @@ func validateCacheEvidence(e Evidence) error {
 		return errors.New("incomplete cache snapshots")
 	}
 	for phase, snapshot := range e.Result.CacheSnapshots {
-		if snapshot.Phase != phase || snapshot.Filesystem == 0 {
-			return errors.New("invalid cache filesystem observation")
+		if err := validateCacheSnapshot(e.Case, phase, snapshot); err != nil {
+			return err
 		}
 		switch e.Request.Runtime.Cache {
 		case readOnly:
@@ -435,11 +445,29 @@ func validateCacheEvidence(e Evidence) error {
 	return nil
 }
 
+func validateCacheSnapshot(c Case, phase int, snapshot mountfixture.CacheSnapshot) error {
+	if snapshot.Phase != phase || snapshot.Filesystem == 0 {
+		return errors.New("invalid cache filesystem observation")
+	}
+	if (c.Scenario == corruptPayload || c.Scenario == corruptDictionary) && len(snapshot.Entries) != 0 {
+		return errors.New("source corruption left a cache artifact")
+	}
+	return nil
+}
+
 // expectedSequence is the scenario contract, including pre-dispatch failures and
 // the one permitted auto fallback. Application termination never adds an attempt.
 func expectedSequence(c Case, phase int) []string {
 	if c.Scenario == procMissing || c.Scenario == procInaccessible || c.Scenario == capability {
 		return nil
+	}
+	if c.Mode == Auto {
+		if c.Scenario == readOnlyWarm || (strings.HasPrefix(c.Scenario, "concurrent-") && phase > 0) {
+			return []string{"dispatch/cache"}
+		}
+		if c.Scenario == symlink || c.Scenario == fifo || c.Scenario == insecure {
+			return []string{"cache_create_temp", "launcher_main"}
+		}
 	}
 	var sequence []string
 	if c.Mode != Cache {

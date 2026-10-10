@@ -29,7 +29,7 @@ Verify the result and establish a new trusted digest/signature when distributing
   │   2. Trimmed Fat Binary (--trim)  │         │ 3. Raw Native ELF (--optimize)    │
   │ Retains stub + single selected v3  │         │ Strips stub; raw uncompressed v3  │
   │     Size: depends on codec     │         │        Size: native payload     │
-  │ Auto-tunes cgroup & RAM memfd     │         │ Zero launcher overhead (mmap)     │
+  │ Auto-tunes cgroup & cache/memfd    │         │ Zero launcher overhead (mmap)     │
   └───────────────────────────────────┘         └───────────────────────────────────┘
 ```
 
@@ -43,9 +43,9 @@ Verify the result and establish a new trusted digest/signature when distributing
 | **Disk Size** | Stub + all compressed variants | Stub + selected compressed variant | Selected uncompressed payload |
 | **Microarch Portability** | Runs on **any** machine (`v1`–`v4` or `v8.0`–`v9.5`) | Locked to chosen level (e.g. `v3`) | Locked to chosen level (e.g. `v3`) |
 | **Container Auto-Tuning** | ✅ Startup memory/GC tuning; static or native CPU policy | ✅ Startup memory/GC tuning; static or native CPU policy | Requires standalone `runtimeinit` or `runtimeinit/autoload` for Microfat tuning |
-| **In-Memory RAM Exec** | ✅ Anonymous RAM (`memfd_create`) | ✅ Anonymous RAM (`memfd_create`) | ❌ Standard OS disk `mmap` |
-| **Read-Only Rootfs** | ✅ Zero disk I/O | ✅ Zero disk I/O | ✅ Native disk read |
-| **Startup Work** | Select, verify, extract/cache and execute | Verify, extract/cache and execute | Native process startup |
+| **In-Memory RAM Exec** | ✅ Sealed memfd on an auto miss or when explicitly requested | ✅ Sealed memfd on an auto miss or when explicitly requested | ❌ Standard OS disk `mmap` |
+| **Read-Only Rootfs** | Verified warm cache or permitted sealed memfd; cold cache fallback needs writable storage | Verified warm cache or permitted sealed memfd; cold cache fallback needs writable storage | ✅ Native disk read |
+| **Startup Work** | Select, verify warm cache or extract payload, tune and execute | Verify warm cache or extract payload, tune and execute | Native process startup |
 | **Runtime Execution** | Native hardware speed (AVX2/FMA/SVE) | Native hardware speed (AVX2/FMA/SVE) | Native hardware speed (AVX2/FMA/SVE) |
 
 ---
@@ -136,7 +136,11 @@ All transformation operations (both CLI `microfat trim` and launcher stub meta-c
 
 ## 5. Node Cache Prewarming (`--microfat:prewarm` / `microfat prewarm`)
 
-In cold-start sensitive environments (e.g. serverless containers, Kubernetes `initContainers`, node boot scripts, or golden AMI images), pre-extracting the decompressed binary eliminates decompression latency on first execution while still preserving universal multi-variant fat binary distribution.
+In cold-start sensitive environments (e.g. serverless containers, Kubernetes `initContainers`, node
+boot scripts, or golden AMI images), pre-extracting the binary avoids decompression on a verified
+warm hit while preserving universal multi-variant distribution. Default auto mode discovers a
+prewarmed entry read-only; no execution-mode override is needed. Cache hashing, launcher work and
+normal ELF startup still apply. A successful cold auto memfd launch does not populate this cache.
 
 ### Prewarming Mechanics
 
@@ -152,8 +156,8 @@ In cold-start sensitive environments (e.g. serverless containers, Kubernetes `in
        │           (or custom $MICROFAT_CACHE_DIR)              │
        └────────────────────────────┬───────────────────────────┘
                                     │
-         Runtime Launch with        │ Direct execve (0 decompression overhead)
-         MICROFAT_EXEC_MODE=cache   │ + Full cgroup auto-tuning
+         Runtime Launch with        │ Verify descriptor, then execve
+         auto (default) or cache    │ + Full cgroup auto-tuning
                                     ▼
        ┌────────────────────────────────────────────────────────┐
        │            Running Optimal Microarch Process           │
@@ -176,6 +180,14 @@ microfat prewarm --json /usr/local/bin/myapp
 ```
 
 Verification opens existing cache directories without creating them or repairing permissions, and never extracts or removes entries. Missing or insecure explicit directories fail directly. Automatic discovery tries the configured XDG/home and temporary-directory candidates without modifying any of them; if none is secure and present it fails. Missing or corrupt entries produce a failing exit status and remain untouched. This contract also applies to the full launcher's verify meta-command and library cache verification with implicit directory selection.
+
+Auto dispatch also starts with read-only discovery, but missing or corrupt safe regular entries
+proceed to sealed memfd. Unsafe entries are rejected without repair. Prewarming and explicit cache
+mode can materialize missing entries and repair corrupt safe regular entries. Every launch verifies
+the selected descriptor's size, owner, mode and SHA-256. A valid warm hit does not re-decompress the
+embedded source payload or dictionary; authenticate the whole artifact before deployment.
+Cache entries remain mutable by trusted same-UID writers. See the
+[dispatch policy](architecture.md#7-cache-first-auto-dispatch--descriptor-bound-execution).
 
 
 ### Launcher Stub Hook
@@ -213,7 +225,7 @@ spec:
       image: myapp:latest
       env:
         - name: MICROFAT_EXEC_MODE
-          value: "cache"
+          value: "auto"
       volumeMounts:
         - name: app-cache
           mountPath: /root/.cache/microfat
@@ -230,7 +242,7 @@ After=network.target
 
 [Service]
 Environment=MICROFAT_CACHE_DIR=/var/cache/microfat
-Environment=MICROFAT_EXEC_MODE=cache
+Environment=MICROFAT_EXEC_MODE=auto
 ExecStartPre=/usr/local/bin/myapp --microfat:prewarm
 ExecStart=/usr/local/bin/myapp --port 8080
 Restart=always

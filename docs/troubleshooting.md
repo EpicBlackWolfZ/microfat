@@ -48,19 +48,29 @@ A seccomp policy or `vm.memfd_noexec=2` can deny executable memfd creation; kern
 The `memfd_create()` syscall succeeded, but `fcntl(fd, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL)` was blocked or restricted by the container runtime's seccomp filter, preventing Microfat from sealing the anonymous memory file.
 
 #### Mandatory Memory Sealing Security Contract:
-Microfat strictly **prohibits executing unsealed anonymous memory descriptors**. Allowing unsealed descriptors to be passed to `execve` creates an in-memory Time-of-Check to Time-of-Use (TOCTOU) vulnerability where other threads or processes with access to `/proc/self/mem` or the open descriptor could modify the decompressed ELF payload prior to execution. If sealing fails:
-- Under **`MICROFAT_EXEC_MODE=auto` (default)**: The launcher immediately closes the unsealed file descriptor and cleanly falls back to hardened, descriptor-bound disk cache execution (`~/.cache/microfat` or `/tmp/.microfat-<uid>`).
+Microfat strictly **prohibits executing unsealed anonymous memory descriptors**. Mandatory seals
+prevent writes, resizing and writable shared mappings to the extracted backing file between
+verification and execution. They do not provide general process-memory isolation. If sealing fails:
+
+- Under **`MICROFAT_EXEC_MODE=auto` (default)** after a cache miss: The launcher closes the unsealed
+  descriptor and can materialize a verified disk cache entry. If memfd followed a warm-cache exec
+  failure, it returns both errors without retrying cache.
 - Under **`MICROFAT_EXEC_MODE=memfd`**: The launcher strictly enforces in-memory execution and fails fast, terminating the process with an explicit `ErrMemfdSealingFailed` error and full diagnostic context without attempting fallback.
 
 ---
 
 ### Execution Modes Overview (`MICROFAT_EXEC_MODE`)
 
-| Mode | In-Memory (`memfd`) | Kernel Sealing (`F_ADD_SEALS`) | Disk Cache Fallback | Error Behavior |
+| Mode | First choice | Fallback | Cache writes | Error Behavior |
 | :--- | :--- | :--- | :--- | :--- |
-| **`auto`** *(default)* | Preferred (0 disk I/O) | Enforced | Enabled (Descriptor-bound) | Falls back transparently on `memfd` or sealing denial. |
-| **`memfd`** | Mandatory | Mandatory | Disabled | Fails fast with `ErrMemfdCreate` or `ErrMemfdSealingFailed`. |
-| **`cache`** | Skipped | Skipped | Mandatory | Bypasses in-memory execution directly to disk cache. |
+| **`auto`** *(default)* | Read-only lookup of a verified existing cache entry | Sealed memfd on miss or warm exec failure; cold memfd denial can materialize cache | Only after a cold memfd failure | Unsafe entries and extraction corruption terminate dispatch; warm cache and memfd failures are both reported without cache retry. |
+| **`memfd`** | Verified, mandatorily sealed memfd | None | None; bypasses cache lookup | Fails on creation, extraction, sealing or execution errors. |
+| **`cache`** | Verified cache descriptor | None | Creates missing cache and repairs corrupt safe regular entries | Rejects unsafe entries and fails if cache cannot execute. |
+
+Every cache hit checks descriptor-bound size, owner, permissions and SHA-256. `MICROFAT_VERIFY_CACHE`
+is ignored and cannot disable verification. Missing or corrupt safe regular entries remain untouched
+when auto succeeds through memfd. Warm hits avoid decompression; hashing and ELF startup still cost
+time. See the [complete dispatch contract](architecture.md#7-cache-first-auto-dispatch--descriptor-bound-execution).
 
 ---
 
@@ -91,7 +101,8 @@ securityContext:
 
 ### Remediation 2: Configure Cache Mode or Auto Fallback
 If container security policies restrict in-memory sealing and cannot be modified:
-1. Ensure the default `MICROFAT_EXEC_MODE=auto` is active so Microfat falls back automatically to disk cache execution.
+1. Use the default `MICROFAT_EXEC_MODE=auto` to execute a verified prewarmed entry, or materialize
+   cache after a cold memfd denial. The cache directory must be writable for cold materialization.
 2. Or explicitly set `MICROFAT_EXEC_MODE=cache` to bypass in-memory probing altogether:
 
 ```yaml
@@ -110,11 +121,19 @@ env:
 
 #### Root Cause:
 When running in hardened containers (`readOnlyRootFilesystem: true`) or distroless images without a home directory:
-- Microfat prefers `memfd_create`, which does not create a persistent extracted payload file.
-- However, if `memfd_create` is also blocked, the fallback to `$HOME/.cache/microfat` fails because the rootfs is read-only.
+- Auto first checks a warm cache read-only. A valid executable entry needs no cache write.
+- An absent directory/entry or corrupt safe regular entry uses sealed memfd without modifying the
+  cache. Successful cold memfd execution does not populate the cache.
+- If cold memfd creation, sealing or execution is blocked, disk materialization needs a writable
+  cache. It fails when every selected destination is read-only or unavailable.
+- If a warm entry cannot execute (for example, its mount is `noexec`), auto tries sealed memfd once.
+  If memfd also fails, it reports both attempts without repairing or retrying that entry.
 
-#### Remediation: Mount a Writable `tmpfs`
-Mount an in-memory `emptyDir` (or `tmpfs`) volume at `/tmp` and point `MICROFAT_CACHE_DIR` to it:
+#### Remediation: Prewarm or Mount a Writable `tmpfs`
+Prewarm cache for the runtime UID on executable storage before making it read-only, or permit
+explicit `MICROFAT_EXEC_MODE=memfd` when immutable extracted storage is required. If policies deny
+memfd and the cache may start cold, mount an in-memory `emptyDir` (or `tmpfs`) volume at `/tmp` and
+point `MICROFAT_CACHE_DIR` to it:
 
 ```yaml
 apiVersion: v1
@@ -149,18 +168,22 @@ spec:
 
 #### Security Model Invariants:
 1. All Microfat cache directories (`$XDG_CACHE_HOME/microfat` or `/tmp/.microfat-<uid>`) are strictly created with `0o700` (`rwx------`) permissions.
-2. Extracted variant binaries are owned by the current UID and locked to `0o700`.
+2. Materialized variant binaries are owned by the current UID and created with `0o700`. Every hit
+   rechecks descriptor metadata and SHA-256; same-UID writers remain trusted and can mutate the inode.
 3. Multi-tenant hosts automatically isolate cache entries per UID into `/tmp/.microfat-<uid>`.
 
 #### Resolving Permission Conflicts:
-If a previous execution as `root` created the cache directory with `0700`, subsequent runs as a non-root user (`UID 10001`) will fail to write to the directory.
+If a previous execution as `root` created the cache directory with `0700`, subsequent runs as a
+non-root user (`UID 10001`) cannot use that directory. Configure a user-private cache for the runtime
+UID. Auto does not repair directories during lookup, and symlinks, special files, foreign-owned
+entries or unsafe modes are terminal errors rather than a reason to overwrite them.
 
 ```bash
-# Clean up or fix ownership of the cache path
-sudo rm -rf /tmp/.microfat-* ~/.cache/microfat
-
-# Or set an explicit user-private cache directory
+# Select a cache directory private to this runtime UID
 export MICROFAT_CACHE_DIR="/tmp/microfat-$(id -u)"
+
+# Populate it explicitly before making the cache read-only
+./myapp --microfat:prewarm
 ```
 
 ---
@@ -237,7 +260,7 @@ export MICROFAT_LIVE_HEAP_ESTIMATE=150MB
 ## 7. Tampering & Payload Integrity Verification Failures
 
 > [!NOTE]
-> Microfat's verification mechanism detects in-transit corruption, storage degradation, and partial tampering when the trailer/index remains intact. It does not replace public-key publisher signing (e.g. Cosign/GPG) for proving producer authenticity against an adversary who rewrites the entire executable. See [SECURITY.md](../SECURITY.md#payload-integrity-vs-producer-authenticity-hashing-vs-signing).
+> Microfat's verification mechanism detects in-transit corruption, storage degradation, and partial tampering when the trailer/index remains intact. It does not replace public-key publisher signing (e.g. Cosign/GPG) for proving producer authenticity against an adversary who rewrites the entire executable. See [SECURITY.md](../SECURITY.md#6-payload-integrity-vs-producer-authenticity-hashing-vs-signing).
 
 ### Common Verification Error Sentinels:
 
@@ -253,7 +276,10 @@ export MICROFAT_LIVE_HEAP_ESTIMATE=150MB
 ## 8. Frequently Asked Questions (FAQ)
 
 ### Q1: Does Microfat add latency to long-running microservices?
-**No.** Decompression work occurs **only once at process launch** when streaming into anonymous RAM (`memfd_create`). The payload then executes as a native process without a resident launcher daemon.
+Microfat adds startup work, then the payload runs natively without a resident launcher daemon.
+Warm auto/cache hits verify and execute existing payload bytes without decompression. Cold memfd
+launches extract once per invocation; explicit cache mode or prewarming can retain the extracted
+payload for later launches. Hashing, selection, tuning and normal ELF startup still have a cost.
 
 ### Q2: Why does `runtime.NumCPU()` still return the host core count?
 `runtime.NumCPU()` reports the logical CPUs available at startup, without translating cgroup CPU bandwidth into a core count. Microfat's default `static` policy sets `GOMAXPROCS` from the floor-rounded quota at startup (e.g. `2` for `cpu: 2000m`). Use `MICROFAT_CPU_POLICY=native` to preserve Go's container-aware default and quota/affinity updates when the application's runtime enables them. Explicit environment values, prior setters, and `GODEBUG` settings still take precedence; see the [CPU policy caveats](runtime-tuning.md#b-gomaxprocs-cpu-quota). Throttling remains possible under either policy.

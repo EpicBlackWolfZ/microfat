@@ -7,6 +7,9 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCalculateStats(t *testing.T) {
@@ -194,7 +197,7 @@ func TestExportStartupCSV(t *testing.T) {
 			Timestamp:          "2026-08-27T22:00:00.000Z",
 			Iteration:          1,
 			ConfigName:         "1. Native v1",
-			ExecMode:           "native",
+			ExecMode:           execModeNative,
 			SelectedVariant:    "v1",
 			TotalWallDuration:  12500 * time.Microsecond,
 			LauncherInternalUs: 0,
@@ -205,7 +208,7 @@ func TestExportStartupCSV(t *testing.T) {
 			Timestamp:          "2026-08-27T22:00:01.000Z",
 			Iteration:          1,
 			ConfigName:         "3. Universal FAT (Cold memfd)",
-			ExecMode:           "memfd",
+			ExecMode:           execModeMemfd,
 			SelectedVariant:    "v3",
 			TotalWallDuration:  13800 * time.Microsecond,
 			LauncherInternalUs: 450,
@@ -248,19 +251,19 @@ func TestPrintStartupSummaryTables(t *testing.T) {
 	}
 	summaries := []StartupSummary{
 		{
-			Scenario:           StartupScenario{Name: "1. Native v1", ExecMode: "native", Size: 2000000},
+			Scenario:           StartupScenario{Name: "1. Native v1", ExecMode: execModeNative, Size: 2000000},
 			WallStats:          sampleStat,
 			LauncherStats:      Stats{},
 			DecompressionStats: Stats{},
 		},
 		{
-			Scenario:           StartupScenario{Name: "2. Native v3", ExecMode: "native", Size: 2000000},
+			Scenario:           StartupScenario{Name: "2. Native v3", ExecMode: execModeNative, Size: 2000000},
 			WallStats:          sampleStat,
 			LauncherStats:      Stats{},
 			DecompressionStats: Stats{},
 		},
 		{
-			Scenario:           StartupScenario{Name: "3. Universal FAT (Cold memfd)", ExecMode: "memfd", Size: 4000000},
+			Scenario:           StartupScenario{Name: "3. Universal FAT (Cold memfd)", ExecMode: execModeMemfd, Size: 4000000},
 			WallStats:          sampleStat,
 			LauncherStats:      sampleStat,
 			DecompressionStats: sampleStat,
@@ -288,14 +291,15 @@ echo '{"version":"1.0","total_compute_ms":10.0}'
 	}
 
 	scenarios := []StartupScenario{
-		{Name: "Mock Native", Path: mockScript, ExecMode: "native", Size: 100},
-		{Name: "Mock Cold Cache", Path: mockScript, ExecMode: "cold-cache", IsCold: true, Size: 100},
-		{Name: "Mock Memfd", Path: mockScript, ExecMode: "memfd", Size: 100},
+		{Name: "Mock Native", Path: mockScript, ExecMode: execModeNative, Size: 100},
+		{Name: "Mock Cold Auto", Path: mockScript, ExecMode: execModeAuto, IsCold: true, Size: 100},
+		{Name: "Mock Memfd", Path: mockScript, ExecMode: execModeMemfd, Size: 100},
 	}
 
-	runStartupWarmups(scenarios, 1, tempDir)
+	require.NoError(t, runStartupWarmups(scenarios, 1, tempDir))
 
-	summaries, observations := measureStartupScenarios(scenarios, 2, tempDir)
+	summaries, observations, err := measureStartupScenarios(scenarios, 2, tempDir)
+	require.NoError(t, err)
 	if len(summaries) != 3 {
 		t.Fatalf("expected 3 summaries, got %d", len(summaries))
 	}
@@ -306,7 +310,95 @@ echo '{"version":"1.0","total_compute_ms":10.0}'
 	if observations[0].TotalWallDuration <= 0 {
 		t.Errorf("expected positive wall duration, got %v", observations[0].TotalWallDuration)
 	}
-	if observations[0].LauncherInternalUs != 350 {
-		t.Errorf("expected 350 launcher us, got %d", observations[0].LauncherInternalUs)
+	if observations[2].LauncherInternalUs != 350 {
+		t.Errorf("expected 350 launcher us, got %d", observations[2].LauncherInternalUs)
 	}
+}
+
+func TestStartupMatrixScenarios(t *testing.T) {
+	t.Parallel()
+	scenarios := startupMatrixScenarios("format/profile/codec", "/fat", 123, "/warm")
+	require.Len(t, scenarios, 5)
+	for i, expected := range []struct {
+		mode string
+		cold bool
+	}{
+		{execModeMemfd, true}, {execModeCache, true}, {execModeCache, false}, {execModeAuto, true}, {execModeAuto, false},
+	} {
+		assert.Equal(t, expected.mode, scenarios[i].ExecMode)
+		assert.Equal(t, expected.cold, scenarios[i].IsCold)
+		assert.Contains(t, scenarios[i].Env, "MICROFAT_EXEC_MODE="+expected.mode)
+		if !expected.cold {
+			assert.Contains(t, scenarios[i].Env, "XDG_CACHE_HOME=/warm")
+			assert.Contains(t, scenarios[i].Env, "MICROFAT_CACHE_DIR=/warm/microfat")
+		}
+	}
+}
+
+func TestStartupEnvironment(t *testing.T) {
+	t.Parallel()
+	env := startupEnvironment([]string{
+		"PATH=/bin", "MICROFAT_CACHE_DIR=/unexpected", "MICROFAT_FORCE_LEVEL=v1", "MICROFAT_EXEC_MODE=cache",
+		"GOMAXPROCS=16", "GOMEMLIMIT=1GiB", "GOGC=off", "XDG_CACHE_HOME=/unexpected",
+	}, []string{"MICROFAT_EXEC_MODE=auto", "XDG_CACHE_HOME=/isolated"})
+	assert.Equal(t, []string{
+		"PATH=/bin", "GOMAXPROCS=1", "GOMEMLIMIT=off", "GOGC=100", "MICROFAT_AUTOTUNE=0", "MICROFAT_LOG=json",
+		"MICROFAT_EXEC_MODE=auto", "XDG_CACHE_HOME=/isolated",
+	}, env)
+}
+
+func TestStartupIterationRejectsInvalidResults(t *testing.T) {
+	// Keep script creation and exec serial to avoid inheriting another subtest's writable descriptor at fork.
+	for _, tc := range []struct {
+		name, body, mode, want string
+	}{
+		{"process failure", "exit 1", execModeAuto, "failed"},
+		{"missing readiness", "exit 0", execModeNative, "did not report READY"},
+		{"missing dispatch", "echo READY", execModeAuto, "no dispatch telemetry"},
+		{"incomplete dispatch", "echo READY; echo '{\"event\":\"dispatch\"}' >&2", execModeAuto, "incomplete dispatch"},
+		{"unexpected mode", "echo READY; echo '{\"event\":\"dispatch\",\"selected_variant\":\"v3\",\"exec_mode\":\"cache\"}' >&2",
+			execModeMemfd, "requested memfd but dispatched cache"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "startup")
+			require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"+tc.body+"\n"), 0o755))
+			scenario := StartupScenario{Name: tc.name, Path: path, ExecMode: tc.mode}
+			_, err := runStartupIteration(scenario, dir, 1)
+			require.ErrorContains(t, err, tc.want)
+			require.Error(t, runStartupWarmups([]StartupScenario{scenario}, 1, dir))
+			_, observations, err := measureStartupScenarios([]StartupScenario{scenario}, 1, dir)
+			require.ErrorContains(t, err, tc.want)
+			assert.Empty(t, observations)
+		})
+	}
+}
+
+func TestStartupIterationColdCacheIsolation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "startup")
+	script := `#!/bin/sh
+[ -d "${XDG_CACHE_HOME}" ] || exit 1
+[ "${MICROFAT_CACHE_DIR}" = "${XDG_CACHE_HOME}/microfat" ] || exit 1
+[ -z "$(ls -A "${XDG_CACHE_HOME}")" ] || exit 1
+touch "${XDG_CACHE_HOME}/marker"
+echo READY
+echo '{"event":"dispatch","selected_variant":"v3","exec_mode":"cache"}' >&2
+`
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o755))
+	scenario := StartupScenario{Name: "cold cache", Path: path, ExecMode: execModeCache, IsCold: true}
+	for iteration := range 2 {
+		observation, err := runStartupIteration(scenario, dir, iteration)
+		require.NoError(t, err)
+		assert.Equal(t, "absent", observation.CacheState)
+		assert.Equal(t, execModeCache, observation.RequestedMode)
+		assert.Equal(t, execModeCache, observation.ExecMode)
+	}
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "per-iteration cache directories must be removed")
+	scenario.IsCold = true
+	_, err = runStartupIteration(scenario, filepath.Join(dir, "missing"), 1)
+	require.ErrorContains(t, err, "creating empty cache")
 }

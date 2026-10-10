@@ -46,11 +46,12 @@ var (
 		_, err := unix.FcntlInt(uintptr(fd), unix.F_ADD_SEALS, seals)
 		return err
 	}
-	readCgroupLimitsFunc = cgroup.ReadLimits
-	resolveCacheDirFunc  = format.ResolveCacheDirFD
-	userHomeDirFunc      = os.UserHomeDir
-	cryptoRandReader     = rand.Reader
-	openCachedBinaryFunc = func(path string) (int, error) {
+	readCgroupLimitsFunc        = cgroup.ReadLimits
+	resolveCacheDirFunc         = format.ResolveCacheDirFD
+	resolveExistingCacheDirFunc = format.ResolveExistingCacheDirFD
+	userHomeDirFunc             = os.UserHomeDir
+	cryptoRandReader            = rand.Reader
+	openCachedBinaryFunc        = func(path string) (int, error) {
 		return cache.OpenFileFunc(path)
 	}
 	openCachedBinaryAtFunc = func(dirFD int, name string) (int, error) {
@@ -109,8 +110,6 @@ func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, idx *
 	return nil
 }
 
-// executeVariant runs the selected variant payload in-memory using Linux memfd_create,
-// falling back to user cache execution if memfd is restricted or if cache mode is explicitly requested.
 func isPayloadCorruptionOrDecompressionError(err error) bool {
 	if err == nil {
 		return false
@@ -126,6 +125,8 @@ func isPayloadCorruptionOrDecompressionError(err error) bool {
 		errors.Is(err, codec.ErrUnsupportedCodec)
 }
 
+// executeVariant prefers a verified existing cache hit in auto mode. Misses use sealed memfd,
+// with materializing cache fallback only after an eligible memfd failure.
 func executeVariant(
 	selfPath string,
 	selfFile *os.File,
@@ -150,16 +151,31 @@ func executeVariant(
 	if strings.EqualFold(requestedMode, format.ExecModeCache) {
 		return executeViaCache(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, nil, startTime)
 	}
+	if strings.EqualFold(requestedMode, format.ExecModeMemfd) {
+		return executeViaMemfd(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, startTime)
+	}
 
-	// 1. Try In-Memory memfd_create
+	hit, cacheErr := executeExistingCache(selfPath, entry, args, baseEnv, hostInfo, policyRes, startTime)
+	if hit && cacheErr == nil {
+		return nil
+	}
+	if cacheErr != nil && !errors.Is(cacheErr, format.ErrExecve) {
+		return cacheErr
+	}
+
+	// A miss or denied warm-cache exec tries immutable in-memory execution.
 	err := executeViaMemfd(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, startTime)
 	if err == nil {
 		return nil
 	}
 
-	// If explicit memfd execution mode was requested, fail fast without fallback
-	if strings.EqualFold(requestedMode, format.ExecModeMemfd) {
-		return err
+	if hit {
+		// Cache exec already failed. Do not retry it, including after extraction corruption.
+		dispErr := buildCombinedDispatchError(format.ErrExecve, format.ExecModeAuto, err, format.StageCacheExec, cacheErr)
+		dispErr.Attempts[0], dispErr.Attempts[1] = dispErr.Attempts[1], dispErr.Attempts[0]
+		dispErr.Summary = fmt.Sprintf("launcher execution failed in auto mode: verified cache exec failed: %v; memfd failed: %v", cacheErr, err)
+		logErrorDiagnostics(dispErr.Attempts[1].Stage, dispErr, hostInfo, entry, policyRes, "both execution paths failed; no cache retry")
+		return dispErr
 	}
 
 	// If fat binary payload or dictionary is corrupted, fail fast without attempting fallback
@@ -169,6 +185,48 @@ func executeVariant(
 
 	// 2. Fallback to cached file execution
 	return executeViaCache(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, err, startTime)
+}
+
+// executeExistingCache performs read-only discovery and verification. Corrupt regular entries
+// are misses without unlinking; unsafe entries are rejected without repair or fallback.
+func executeExistingCache(
+	selfPath string,
+	entry *format.VariantEntry,
+	args []string,
+	baseEnv []string,
+	hostInfo microarch.Info,
+	policyRes microarch.PolicyResult,
+	startTime time.Time,
+) (bool, error) {
+	if !format.ValidateChecksum(entry.SHA256) {
+		return false, nil // Source extraction reports invalid metadata without a cache filename open.
+	}
+	dirFD, _, err := resolveExistingCacheDirFunc("")
+	if err != nil || dirFD < 0 {
+		return false, nil
+	}
+	defer func() { _ = unix.Close(dirFD) }()
+	fd, err := cache.OpenAndValidateVariantAtFDWithOpener(dirFD, entry.SHA256, entry, false, openCachedBinaryAtFunc)
+	if err != nil {
+		if cache.IsSymlinkErr(err) || errors.Is(err, cache.ErrNonRegularFile) || errors.Is(err, cache.ErrUnsafeFile) {
+			if cache.IsSymlinkErr(err) {
+				err = fmt.Errorf("refusal to execute symlink: %w", err)
+			}
+			return false, handleCacheError(format.ErrCacheWrite, format.StageCacheCreateTemp, err,
+				nil, format.ExecModeAuto, hostInfo, entry, policyRes, "refusal to execute unsafe cache entry")
+		}
+		return false, nil
+	}
+	defer func() { _ = unix.Close(fd) }()
+	env, limits := buildAutoTunedEnviron(selfPath, baseEnv, entry, format.ExecModeCache, hostInfo, policyRes)
+	logDiagnostics(entry, format.ExecModeCache, hostInfo, policyRes, env, limits, 0, time.Since(startTime))
+	procPath := "/proc/self/fd/" + strconv.Itoa(fd)
+	// #nosec G204, G702 -- execute the same descriptor whose bytes and metadata were verified.
+	if err := execveFunc(procPath, args, env); err != nil {
+		return true, handleCacheError(format.ErrExecve, format.StageCacheExec, err,
+			nil, format.ExecModeAuto, hostInfo, entry, policyRes, procPath)
+	}
+	return true, nil
 }
 
 func upsertEnv(env []string, keyIndex map[string]int, key, val string) []string {
@@ -461,13 +519,16 @@ func logErrorDiagnostics(
 		requestedMode = format.ExecModeAuto
 	}
 	attemptedMode := format.ExecModeMemfd
-	if strings.HasPrefix(stage, "cache") {
+	if strings.HasPrefix(stage, "cache") || stage == format.StageCacheExec {
 		attemptedMode = format.ExecModeCache
 	}
 	var attempts []format.ExecutionAttempt
 	var dispErr *format.DispatchError
 	if errors.As(err, &dispErr) {
 		attempts = dispErr.Attempts
+		if len(attempts) > 0 {
+			attemptedMode = attempts[len(attempts)-1].AttemptedMode
+		}
 		if dispErr.RequestedMode != "" {
 			requestedMode = dispErr.RequestedMode
 		}
@@ -486,8 +547,12 @@ func logErrorDiagnosticsWithAttempts(
 	attempts []format.ExecutionAttempt,
 	details string,
 ) {
-	hint := format.DiagnoseError(stage, err)
-	errno, errnoName := format.ExtractErrno(err)
+	currentErr := err
+	if len(attempts) > 0 && attempts[len(attempts)-1].Err != nil {
+		currentErr = attempts[len(attempts)-1].Err
+	}
+	hint := format.DiagnoseError(stage, currentErr)
+	errno, errnoName := format.ExtractErrno(currentErr)
 
 	logOpt := os.Getenv(format.EnvLog)
 	if strings.EqualFold(logOpt, "json") {
@@ -616,7 +681,7 @@ func executeViaMemfd(
 
 	fd, err := createExecutableMemfd()
 	if err != nil {
-		details := "falling back to disk cache"
+		details := "memfd creation failed; auto fallback depends on prior cache execution"
 		if strings.EqualFold(requestedMode, format.ExecModeMemfd) {
 			details = "forced memfd mode: no cache fallback will be attempted"
 		}

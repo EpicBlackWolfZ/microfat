@@ -36,12 +36,16 @@ vars:
       fi
   MICROFAT: '{{.MICROFAT | default .MICROFAT_DEFAULT}}'
   MICROFAT_STUB: '{{.MICROFAT_STUB | default .MICROFAT_STUB_DEFAULT}}'
+  MICROFAT_STUB_MINIMAL: '{{.MICROFAT_STUB_MINIMAL | default (printf "%s/microfat-stub-minimal" .REPO_ROOT_BIN)}}'
+  STARTUP_ITERATIONS: '{{.STARTUP_ITERATIONS | default "50"}}'
+  STARTUP_CSV: '{{.STARTUP_CSV | default ""}}'
   TASK_ENV: |
     export GO={{.GO | shellQuote}}
     export BINARY_NAME={{.BINARY_NAME | shellQuote}}
     export BIN_DIR={{.BIN_DIR | shellQuote}}
     export MICROFAT={{.MICROFAT | shellQuote}}
     export MICROFAT_STUB={{.MICROFAT_STUB | shellQuote}}
+    export MICROFAT_STUB_MINIMAL={{.MICROFAT_STUB_MINIMAL | shellQuote}}
 tasks:
   default:
     cmds:
@@ -156,7 +160,7 @@ tasks:
     cmds:
     - |-
       {{.TASK_ENV}}
-      cd runner && "$GO" run main.go -startup
+      cd runner && "$GO" run main.go -startup -n {{.STARTUP_ITERATIONS | shellQuote}} -csv {{.STARTUP_CSV | shellQuote}}
   clean:
     desc: Remove demo build outputs
     cmds:

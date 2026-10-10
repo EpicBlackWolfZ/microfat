@@ -93,12 +93,8 @@ func configureScenario(c *controller, item Case, lineage Lineage, req *mountfixt
 			return err
 		}
 	case corruptPayload, corruptDictionary:
-		// A warm valid cache proves auto does not fall back after payload corruption.
-		if item.Mode == Auto {
-			if err := copyFile(c.reporter, cacheImage, privateMode, false); err != nil {
-				return err
-			}
-		}
+		// Keep the cache absent so auto extracts the damaged source and must abort
+		// without materializing a cache fallback. A verified warm hit skips extraction.
 		return corruptBundle(app, item.Scenario == corruptDictionary)
 	case symlink:
 		return os.Symlink("/deployment/app", cacheImage)

@@ -58,16 +58,24 @@ Single-worker cases exercise:
 | Denied F_ADD_SEALS | Auto uses verified cache; forced memfd refuses |
 | Deny first payload exec / every payload exec | Auto falls back once / no application starts |
 | Full private 16 MiB tmpfs | Actual ENOSPC, no startup, no staging residue |
-| Read-only cache | Cold population fails; a valid warm file executes |
+| Read-only cache | Forced-cache cold population fails; auto cold memfd leaves it untouched; a valid warm file executes |
 | Noexec cache | Forced cache fails; unrestricted auto uses memfd; denied memfd leaves no path |
 | Child RLIMIT_NOFILE zero at memfd-create notification | Continued real syscall produces EMFILE; forced memfd and auto fail |
 | Normal/noexec/missing/inaccessible procfs | Noexec traversal works; absent access fails at its observed privilege-check stage |
-| Verified cache inode held open for writing | Kernel ETXTBSY without startup; a separate invocation succeeds after closing the writer |
+| Verified cache inode held open for writing | Forced cache returns ETXTBSY; auto can use sealed memfd after warm exec failure |
 | Actual production memfd | Mandatory seals present; write, shrink, grow and additional-seal attempts fail without changing bytes |
-| Corrupt payload/dictionary copies | Failure before startup, including auto with an otherwise valid warm cache |
-| Corrupt warm cache | Only newly verified bytes execute |
+| Corrupt payload/dictionary copies | Extraction fails before startup; a verified warm auto hit does not read or decompress unused source bytes |
+| Corrupt warm cache | Auto leaves the safe regular entry untouched and uses verified sealed memfd; explicit cache repairs only from newly verified bytes |
 | Symlink, FIFO, unsafe mode, capability-bearing executable | Prompt refusal without application startup |
 | Payload exit 42 and SIGTERM | Preserve result, with exactly one startup |
+
+The cache-first policy also has deterministic [dispatch fault tests](../cmd/microfat-stub/cache_first_linux_test.go)
+and [full/minimal process regressions](../tests/e2e/cache_first_test.go). They cover read-only cold and
+warm lookup, mandatory hit verification, unsafe-entry rejection and cache-to-memfd failure order.
+Warm-cache execution denial permits one memfd attempt; if it fails, diagnostics preserve both
+attempts without cache retry. Cold auto lookup does not materialize or repair entries unless memfd
+creation, sealing or execution fails. Corruption during extraction is terminal. These source tests
+do not replace native or authenticated candidate qualification.
 
 The reporter independently hashes its executable and records PID, credentials,
 arguments, stdin, environment and descriptor targets. Checks require the selected

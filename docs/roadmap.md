@@ -118,7 +118,7 @@ to preserve and extend.
 | ARM64 QEMU descriptor-execution qualification | [#231](https://github.com/EpicBlackWolfZ/microfat/issues/231) | The [F-only QEMU qualification](qemu-qualification.md) reuses #157 fixtures with raw-path and descriptor controls, required CI and explicit prerequisite skips. Keep #231 open until reviewed and merged. Native ARM64 and emulation evidence remain distinct. |
 | Real concurrent execution and policy-denied fallback qualification | [#260](https://github.com/EpicBlackWolfZ/microfat/issues/260) | Reuse #157's disposable mount fixtures, coordinate #231, and qualify the final #44 behavior on native amd64/arm64 with authenticated candidate artifacts. Extend real-process and policy evidence without assuming a cache algorithm defect. |
 | Independent CPU-tuning policy | [#258](https://github.com/EpicBlackWolfZ/microfat/issues/258) | Preserve native Go CPU adaptation independently of memory tuning in launcher/runtimeinit, with explicit precedence and isolated quota-change qualification. Existing defaults remain until deliberately changed. |
-| Cache-first auto execution | [#44](https://github.com/EpicBlackWolfZ/microfat/issues/44) | Existing trust, memfd, image-identity and cache prerequisites are merged. Specify hit/miss/fallback behavior, retain mandatory verification and explicit modes, and measure cold/warm startup with identical tuning. |
+| Cache-first auto execution | [#44](https://github.com/EpicBlackWolfZ/microfat/issues/44) | The PR implementation defines read-only hits, non-mutating misses and bounded fallback, retaining mandatory descriptor verification, sealed memfd and explicit modes. Failure regressions and cold/warm measurements with identical tuning accompany review. Await maintainer merge; keep #44 open until then and qualify the integrated behavior under #260. |
 
 ### Delivery order and exit
 
@@ -126,8 +126,8 @@ to preserve and extend.
    the installer itself; deferring either to the updater or tap would leave a circular dependency.
 2. Reuse #157's [mount qualification fixtures](mount-layouts.md) for #231 and #260. Their source-built
    native evidence does not replace emulator or authenticated-candidate qualification. #258 remains independent.
-3. Implement #205 against #203's established contract and #204's ownership detection. Implement #44 with explicit
-   failure tests and startup measurements; finalize #260 against the integrated runtime behavior.
+3. Implement #205 against #203's established contract and #204's ownership detection. Review #44's explicit
+   failure tests and startup measurements, then finalize #260 against the merged runtime behavior.
    Qualification harness development can begin earlier without implying final candidate acceptance.
 4. Qualify the integrated candidate and complete documentation and draft-release asset verification.
 
