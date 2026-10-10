@@ -59,7 +59,7 @@ func (f *runtimeFake) execute(_ context.Context, spec process.Spec) (releaseaudi
 	switch spec.Path {
 	case "go":
 		if spec.Args[0] == "version" {
-			result.Stdout = "go version go1.27.1 linux/" + f.c.summary.Architecture
+			result.Stdout = "go version go1.27.2 linux/" + f.c.summary.Architecture
 			break
 		}
 		require.Equal(f.t, "build", spec.Args[0])

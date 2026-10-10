@@ -46,11 +46,20 @@ func fixtureCompiler(t *testing.T, behavior string) string {
 	binary, err := os.Executable()
 	require.NoError(t, err)
 	path := filepath.Join(t.TempDir(), "go")
-	script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'go version go1.27.1 linux/amd64'; exit 0; fi\n" +
+	script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'go version go1.27.2 linux/amd64'; exit 0; fi\n" +
 		"while [ \"$#\" -gt 0 ]; do if [ \"$1\" = -o ]; then shift; output=$1; fi; shift; done\n" +
 		"case \"$output\" in\n" + behavior + "\n*/head-packer) cp /bin/false \"$output\"; exit 0;;\nesac\ncp '" + binary + "' \"$output\"\n"
 	require.NoError(t, testfixture.WriteExecutable(path, []byte(script)))
 	return path
+}
+
+func TestArtifactBuildRejectsOutdatedGoPatch(t *testing.T) {
+	t.Parallel()
+	compiler := filepath.Join(t.TempDir(), "go")
+	script := "#!/bin/sh\nprintf '%s\\n' 'go version go1.27.1 linux/amd64'\n"
+	require.NoError(t, testfixture.WriteExecutable(compiler, []byte(script)))
+	_, err := buildArtifacts(context.Background(), DefaultExperimentConfig(), RunOptions{Go: compiler}, t.TempDir())
+	require.ErrorContains(t, err, "benchmark builds require Go 1.27.2")
 }
 
 func TestArtifactBuildFailures(t *testing.T) {

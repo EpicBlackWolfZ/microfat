@@ -60,7 +60,7 @@ clear `CLOEXEC` globally or modify host binfmt registrations to make a launch pa
 
 ## Running the qualification
 
-Prerequisites are native Linux amd64, the repository's Go 1.27.1 and Task 3.53.1,
+Prerequisites are native Linux amd64, the repository's Go 1.27.2 and Task 3.53.1,
 a static native `qemu-aarch64-static`, util-linux `unshare`, and kernel support for
 user, mount and PID namespaces with user-namespace-owned `binfmt_misc`. Standard
 Git, tar and Bash are used to retain source changes and logs. The explicit sudo

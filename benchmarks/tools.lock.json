@@ -7,6 +7,6 @@
     "source_commit": "630bfb3db6cf663b4e01524f9e9be945e44f8a20",
     "source": "https://github.com/fortio/fortio/tree/v1.75.2",
     "histogram": "Fortio variable-width histogram; uncorrected service-time observations",
-    "toolchain": "go1.27.1"
+    "toolchain": "go1.27.2"
   }
 }

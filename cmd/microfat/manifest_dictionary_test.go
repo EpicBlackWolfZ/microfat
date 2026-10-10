@@ -20,7 +20,7 @@ func TestManifestDictionaryPrecedence(t *testing.T) {
 			dir := t.TempDir()
 			stubPath, err := os.Executable()
 			require.NoError(t, err)
-			require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module dictfixture\ngo 1.27.1\n"), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module dictfixture\ngo 1.27.2\n"), 0o600))
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte(`package main
 import "fmt"
 func main() { fmt.Println("dictionary payload") }

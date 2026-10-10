@@ -17,7 +17,7 @@ import (
 
 const (
 	fortioModule    = "fortio.org/fortio"
-	goToolchain     = "go1.27.1"
+	goToolchain     = "go1.27.2"
 	minimumCPUs     = 2
 	benchmarkMemory = 2 * 1024 * 1024 * 1024
 	baselineCommand = "baseline"
@@ -60,7 +60,7 @@ func fortioVersion(lock []byte, version string) (string, error) {
 	}
 	fields := strings.Fields(version)
 	if len(fields) != 4 || fields[0] != "go" || fields[1] != "version" || fields[2] != pin.Toolchain {
-		return "", fmt.Errorf("Go 1.27.1 required; got %q", version)
+		return "", fmt.Errorf("Go 1.27.2 required; got %q", version)
 	}
 	return pin.Version, nil
 }

@@ -272,7 +272,7 @@ import "fmt"
 func main() { fmt.Println("WS_MANIFEST_OK") }
 `
 	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(mainSource), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplews\ngo 1.27.1\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplews\ngo 1.27.2\n"), 0o644))
 
 	manifestContent := `name: ws-manifest-app
 package: ` + pkgDir + `

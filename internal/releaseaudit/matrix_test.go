@@ -42,7 +42,7 @@ func (f *productFake) execute(_ context.Context, spec process.Spec) (Result, err
 		require.Equal(f.t, "verify-blob", spec.Args[0])
 	case "go":
 		if spec.Args[0] == "version" {
-			result.Stdout = "go version go1.27.1 linux/" + f.options.Arch
+			result.Stdout = "go version go1.27.2 linux/" + f.options.Arch
 		} else {
 			require.Equal(f.t, "build", spec.Args[0])
 			require.Contains(f.t, spec.Args, "-buildvcs=false")
@@ -278,7 +278,7 @@ func TestAuditOrchestration(t *testing.T) {
 	require.Equal(t, options.Source, record["source"])
 	require.Error(t, Run(context.Background(), options, io.Discard, nil, fake.execute), "cannot reuse prior evidence directory")
 	for _, test := range []string{"invalid options", "invalid output parent", "signature", "extraction",
-		"go version failure", "wrong toolchain", "record failure", "hash failure"} {
+		"go version failure", "wrong toolchain", "old Go patch", "record failure", "hash failure"} {
 		t.Run(test, func(t *testing.T) {
 			t.Parallel()
 			options := optionsFor(t)
@@ -299,10 +299,13 @@ func TestAuditOrchestration(t *testing.T) {
 				}
 			case "go version failure":
 				fake.failAt = 2
-			case "wrong toolchain":
+			case "wrong toolchain", "old Go patch":
 				fake.change = func(spec process.Spec, r *Result) {
 					if spec.Path == "go" {
 						r.Stdout = "go version go1.26.0 linux/amd64"
+						if test == "old Go patch" {
+							r.Stdout = "go version go1.27.1 linux/" + options.Arch
+						}
 					}
 				}
 			case "record failure":

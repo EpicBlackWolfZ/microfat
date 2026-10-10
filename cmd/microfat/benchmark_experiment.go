@@ -96,7 +96,7 @@ func newExperimentRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fortio, "fortio", os.Getenv("MICROFAT_BENCH_FORTIO"), "Path to pinned Fortio 1.75.2")
 	cmd.Flags().StringVar(&repository, "repository", ".", "Source repository used for native and fat builds")
 	cmd.Flags().StringVar(&baseRepository, "base-repository", "", "Base checkout for counterbalanced packer/stub revision comparison")
-	cmd.Flags().StringVar(&goTool, "go", "go", "Go 1.27.1 executable")
+	cmd.Flags().StringVar(&goTool, "go", "go", "Go 1.27.2 executable")
 	return cmd
 }
 
