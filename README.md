@@ -15,11 +15,11 @@
 ## Key Highlights
 
 - 🚀 **Dynamic Hardware Dispatch**: Automatically probes host CPU instruction extensions (`AVX2`, `FMA`, `BMI2`, `AVX-512`, `SVE`, `SVE2`) and selects a compatible variant according to the configured policy.
-- ⚡ **Zero Persistent Process Overhead**: Dispatches via Linux `memfd_create` and `syscall.Exec` directly from anonymous RAM (no wrapper daemon, PID 1 preserved in containers).
+- ⚡ **Zero Persistent Process Overhead**: Replaces the launcher through `syscall.Exec` using a verified existing cache entry or sealed Linux `memfd` (no wrapper daemon, PID 1 preserved in containers).
 - 🛡️ **Container Auto-Tuning**: Automatically parses Linux cgroup v1 & v2 limits to set a soft Go-runtime memory budget (`GOMEMLIMIT`) and CPU parallelism (`GOMAXPROCS`); neither guarantees freedom from OOM kills or CPU throttling.
 - ✂️ **Flexible Lifecycle Modes**:
   - **Universal Fat Binary**: Distribute one Linux executable per architecture, selecting among the included compatible variants.
-  - **Trimmed Fat Binary (`--microfat:trim` / `microfat trim`)**: Discard unneeded variants on disk while retaining launcher auto-tuning and RAM execution.
+  - **Trimmed Fat Binary (`--microfat:trim` / `microfat trim`)**: Discard unneeded variants on disk while retaining launcher auto-tuning and cache/memfd dispatch.
   - **Raw Native ELF (`--microfat:optimize`)**: Permanently specialize to raw uncompressed ELF machine code with no microfat launcher or decompression stage; normal ELF startup still applies.
 - 🔒 **Payload Integrity Verification**: 56-byte trailer with SHA-256 index hashing and variant checksum validation.
 - 📦 **Shared Inter-Variant Dictionary**: Multi-variant compression with trained Zstandard dictionaries; measure size savings on your own variants.
@@ -283,7 +283,7 @@ res := runtimeinit.AutoTune(
 ```
 
 ### Locating Original Executable & Sibling Assets (`runtimeinit.Executable`)
-When running packaged inside a microfat binary, child payloads execute via anonymous `memfd` in RAM where `os.Executable()` resolves to `memfd:microfat_payload (deleted)`. Use `runtimeinit.Executable()` to retrieve the path to the original fat binary for locating neighboring configuration files, assets, plugins, or sibling CLI binaries:
+When running packaged inside a microfat binary, `os.Executable()` identifies the extracted payload: a content-addressed cache path in cache mode or `memfd:microfat_payload (deleted)` in memfd mode. Use `runtimeinit.Executable()` to retrieve the path to the original fat binary for locating neighboring configuration files, assets, plugins, or sibling CLI binaries:
 
 ```go
 exePath, err := runtimeinit.Executable()
@@ -337,10 +337,33 @@ Fat executables using the full launcher support reserved meta-commands for diagn
 | `MICROFAT_DISABLE_VARIANTS` | *(unset)* | Comma-separated list of variant levels to exclude from selection (e.g. `v4`). |
 | `MICROFAT_POLICY` | *(unset)* | Preset policy name (`safe_avx512`, `no_downclock`). |
 | `MICROFAT_AVX512_DOWNCLOCK_PROTECTION` | `0` / `false` | Enable automatic Intel Skylake-X / Cascade Lake Xeon downclocking mitigation. |
-| `MICROFAT_EXEC_MODE` | *(unset: auto)* | Auto tries sealed memfd, then cache. Explicit `memfd` fails closed; `cache` uses verified disk materialization. |
+| `MICROFAT_EXEC_MODE` | *(unset: auto)* | Auto checks an existing verified cache entry, then sealed memfd on a miss; cold memfd denial can materialize cache. Explicit `memfd` bypasses cache and fails closed; `cache` materializes verified disk entries. |
 | `MICROFAT_CACHE_DIR` | *(unset)* | Custom node cache directory (defaults to `$XDG_CACHE_HOME/microfat` or `~/.cache/microfat`). |
+| `MICROFAT_VERIFY_CACHE` | *(ignored)* | Cache size, ownership, permissions and SHA-256 checks are mandatory on every hit; this variable cannot disable them. |
 | `GOMEMLIMIT` | *(unset)* | If already set by the user or Kubernetes YAML, `microfat` **never** overrides it. |
 | `GOMAXPROCS` | *(unset)* | If already set by the user or Kubernetes YAML, `microfat` **never** overrides it. |
+
+The default `auto` mode performs a read-only lookup before creating a memfd. A valid hit executes
+the same descriptor whose size, owner, mode and SHA-256 were checked, without decompressing the
+source payload or dictionary. An absent directory/entry or corrupt safe regular entry remains
+untouched and uses sealed memfd. A symlink, special file, foreign owner or unsafe entry mode is
+rejected, as is an entry whose metadata cannot be inspected after a failed open. Cache hashing,
+launcher work and normal ELF startup still have a cost.
+
+If memfd creation, sealing or execution fails after a miss, auto may materialize and verify a disk
+cache entry. If an existing verified cache entry cannot execute, auto tries sealed memfd once;
+failure reports both attempts without retrying the cache. Corruption found during extraction
+terminates dispatch. Explicit `cache` mode and prewarming can populate the cache; a successful cold
+auto memfd launch does not. Read-only roots therefore work with a usable warm cache or permitted
+sealed memfd, while cold cache fallback needs writable storage.
+
+Cache execution trusts same-UID writers: pinning the descriptor prevents pathname substitution,
+but the cached inode remains mutable. Use explicit `memfd` when immutable extracted storage is
+required, and authenticate the complete distribution externally before execution. See the
+[execution policy](docs/architecture.md#7-cache-first-auto-dispatch--descriptor-bound-execution)
+and [security boundary](SECURITY.md#7-launcher-and-cache-deployment-boundary). The
+[startup measurements](docs/cache-first-startup.md) compare complete cold and warm processes
+across both formats, stub profiles and all codecs with identical tuning.
 
 ---
 

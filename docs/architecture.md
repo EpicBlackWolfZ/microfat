@@ -156,7 +156,8 @@ For backward compatibility, Microfat can read and produce Format v1 JSON manifes
 
 ## 6. In-Memory Execution Pipeline & Kernel Memory Sealing (`memfd_create`)
 
-To execute from a sealed anonymous file while preserving process identity and signal behavior:
+Explicit `MICROFAT_EXEC_MODE=memfd`, a cold auto lookup, or fallback from a verified warm cache
+that cannot execute uses this pipeline. It preserves process identity and signal behavior:
 
 ```mermaid
 sequenceDiagram
@@ -169,7 +170,7 @@ sequenceDiagram
     Stub->>Stub: Read Trailer & Zero-Alloc Decode Index Table (< 800ns)
     Stub->>Stub: Detect Host CPUID / AT_HWCAP (< 100ns)
     Stub->>Stub: Probe Cgroups (Auto GOMEMLIMIT, GOMAXPROCS)
-    Stub->>OS: memfd_create("microfat_payload", MFD_CLOEXEC | MFD_ALLOW_SEALING)
+    Stub->>OS: memfd_create("microfat_payload", MFD_EXEC | MFD_CLOEXEC | MFD_ALLOW_SEALING)
     OS-->>Stub: fd=3
     Stub->>RAM: Stream and verify selected payload into fd=3
     Stub->>OS: fcntl(fd=3, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL)
@@ -183,33 +184,81 @@ sequenceDiagram
 
 Microfat enforces kernel-level memory descriptor sealing to protect decompressed ELF executables in RAM:
 
-1. **Seal-Permissive Creation**: The anonymous file descriptor is created with `MFD_CLOEXEC | MFD_ALLOW_SEALING`.
+1. **Seal-Permissive Creation**: The anonymous file descriptor is created with `MFD_EXEC | MFD_CLOEXEC | MFD_ALLOW_SEALING`. Only `EINVAL` permits a retry without `MFD_EXEC` for older kernels; policy denial is not bypassed.
 2. **Payload Extraction & Digest Verification**: The target variant is streamed and decompressed directly into anonymous RAM while verifying the SHA-256 digest.
 3. **Mandatory Kernel Sealing**: Before execution, `fcntl(fd, F_ADD_SEALS, ...)` applies four mandatory seals:
-   - `F_SEAL_WRITE`: Prevents any write operations, `mmap` writes, or local `/proc/self/mem` modifications to the binary code in RAM.
+   - `F_SEAL_WRITE`: Prevents writes and writable shared mappings to the backing file; it does not provide general process-memory isolation.
    - `F_SEAL_SHRINK` & `F_SEAL_GROW`: Prevents truncating or expanding the memory file bounds.
    - `F_SEAL_SEAL`: Permanently freezes the seal bitmask, preventing any subsequent seal additions or alterations.
 4. **Direct Descriptor Execution**: The process image is replaced in-place via `/proc/self/fd/<fd>`.
 5. **Sealing Failure Guarantees**: Microfat strictly treats unsealed memory as unsafe. If sealing fails (e.g., `ENOSYS`, `EINVAL`, or `EPERM` due to seccomp filters or kernel restrictions):
-   - Under auto-dispatch (`MICROFAT_EXEC_MODE=auto`), the launcher immediately closes the unsealed descriptor and cleanly falls back to the hardened cache execution path.
+   - Under auto-dispatch (`MICROFAT_EXEC_MODE=auto`) after a cache miss, the launcher closes the unsealed descriptor and can materialize a verified cache entry. If memfd was attempted after a warm-cache execution failure, it reports both failures without retrying cache.
    - Under explicit memfd mode (`MICROFAT_EXEC_MODE=memfd`), execution halts immediately with `ErrMemfdSealingFailed` without attempting fallback.
 
 ---
 
-## 7. Resilient Disk Cache Fallback & TOCTOU Defense
+## 7. Cache-First Auto Dispatch & Descriptor-Bound Execution
 
-If `memfd_create` or memory sealing is restricted by a locked-down seccomp policy or older kernel:
-1. The stub falls back to `$XDG_CACHE_HOME/microfat/<sha256>` (or `~/.cache/microfat/<sha256>`). If `$HOME` is unavailable, it resolves to `/tmp/.microfat-<uid>/<sha256>`.
-2. **Private Permission Isolation**: All cache directories and variant binaries are created with strict `0o700` (`rwx------`) permissions, isolating cached binaries per-user on multi-tenant systems.
-3. **Atomic Installation**: Missing variants are extracted to a private temporary file (`.exec-*.tmp`), verified, synchronized to disk, and atomically moved via `os.Rename`.
-4. **Descriptor-Bound Validation (`O_NOFOLLOW`)**:
-   - The launcher opens cached binaries exclusively with `unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW`.
-   - `O_NOFOLLOW` ensures the kernel immediately refuses symlink traversal with `ELOOP`, defeating same-UID symlink hijacking attacks.
-   - Size and integrity validation operate directly on the opened file descriptor (`fstat` and `pread`).
-5. **TOCTOU Immunity via `/proc/self/fd/<fd>`**:
-   - The verified file descriptor is executed directly via `/proc/self/fd/<fd>`.
-   - Validation and execution are descriptor-bound to the exact same VFS inode via `/proc/self/fd/<fd>`, completely eliminating Time-of-Check to Time-of-Use (TOCTOU) file replacement races.
-6. **Warm-cache execution**: Subsequent launches verify and execute the cached binary descriptor without decompression. Hashing, launcher work, and normal ELF startup still apply.
+Unset `MICROFAT_EXEC_MODE` and explicit `auto` use the same policy in full and minimal launchers:
+
+| Existing cache result | Next action | Filesystem effects |
+| :--- | :--- | :--- |
+| Valid selected entry | Execute its verified descriptor without source extraction | Read-only lookup and verification |
+| Directory absent/unavailable, entry absent, or safe regular entry cannot open | Extract, verify, seal and execute memfd | Lookup leaves paths untouched |
+| Corrupt safe regular entry | Extract, verify, seal and execute memfd | Corrupt entry remains untouched |
+| Symlink, special file, foreign owner or unsafe entry mode | Reject dispatch | No repair, deletion or fallback |
+| Entry metadata cannot be inspected after a non-ENOENT open failure | Reject dispatch | No repair, deletion or fallback |
+| Verified entry cannot execute | Try sealed memfd once | No cache rewrite or retry |
+
+On a miss, memfd creation, sealing or execution failure permits the existing verified disk
+materialization path. That path can create the cache or replace a corrupt safe regular entry.
+After a warm entry fails execution, a memfd failure returns both attempts in order (cache, then
+memfd), without another cache attempt. Payload/dictionary corruption or decompression errors found
+during extraction are terminal under all modes.
+
+Explicit `memfd` skips cache discovery and requires creation, verification, sealing and execution
+to succeed. Explicit `cache` skips memfd and materializes/repairs only safe regular cache entries.
+`MICROFAT_VERIFY_CACHE` is ignored: it cannot disable any cache validation.
+
+### Cache validation and materialization
+
+1. **Read-only discovery**: Auto first opens existing cache directories, using
+   `$MICROFAT_CACHE_DIR` when supplied, otherwise the XDG/home and temporary-directory candidates
+   (`$XDG_CACHE_HOME/microfat`, `~/.cache/microfat`, `/tmp/.microfat-<uid>`). It does not create
+   directories, repair permissions, extract payloads or remove entries during lookup.
+2. **Private permission boundary**: Existing directories must have the expected owner and no
+   group/other write permission. Materialized directories and variant binaries use `0o700`.
+   Entries must be regular files owned by the effective UID, without group/other write or special
+   permission bits.
+3. **Descriptor-bound verification**: Opens use
+   `O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK` relative to the validated directory descriptor.
+   `O_NOFOLLOW` rejects a symlink in the final entry component; `O_NONBLOCK` prevents FIFO waits.
+   Every hit checks the exact descriptor's size, owner, mode and SHA-256 against the selected index
+   entry. No environment setting weakens those checks. If an open fails before a descriptor exists,
+   no-follow metadata inspection can only add a refusal reason; uninspectable entry metadata fails
+   closed. Pathname metadata never authorizes execution.
+4. **Descriptor-bound execution**: `/proc/self/fd/<fd>` executes the verified inode. Pathname
+   replacement cannot redirect that descriptor to another inode, but trusted same-UID writers can
+   still modify its contents. Cache execution does not provide memfd's immutable backing storage.
+5. **Atomic materialization when requested**: Explicit cache mode, prewarming or a cold memfd
+   fallback extracts to a private `.exec-*.tmp` file, verifies and synchronizes it, then atomically
+   installs it. Unsafe entries are rejected rather than repaired.
+
+A warm hit avoids source payload/dictionary decompression and uses the cached executable's digest
+as integrity evidence against the validated index. It does not verify unused compressed bytes;
+authenticate the complete distribution externally before execution. Cache hashing, launcher work
+and normal ELF startup still apply. A successful cold memfd launch leaves no persistent cache,
+so use prewarming or explicit cache mode to populate one.
+
+The [startup measurements](cache-first-startup.md) compare full-process cold and warm launches
+across formats, stub profiles, codecs and execution modes with identical tuning.
+
+Read-only roots can use a valid executable warm entry or sealed memfd without cache writes.
+If neither executes, cold disk fallback requires writable cache storage. See the
+[runbook](troubleshooting.md#3-read-only-container-root-filesystems-readonlyrootfilesystem-true),
+[security boundary](../SECURITY.md#7-launcher-and-cache-deployment-boundary),
+[dispatch fault tests](../cmd/microfat-stub/cache_first_linux_test.go) and
+[full/minimal regressions](../tests/e2e/cache_first_test.go).
 
 ---
 
@@ -257,8 +306,8 @@ Microfat strictly distinguishes between three complementary layers:
 
 | Profile | Build Directive | Stub Binary Size | Supported Capabilities | Recommended Use Case |
 | :--- | :--- | :--- | :--- | :--- |
-| **Standard Full Stub** | `go build ./cmd/microfat-stub` | `~3.2 MB` | Fast binary table decoding, in-RAM memfd, cgroup auto-tuning, full interactive meta-commands (`--microfat:*`). | General cloud services, developer workstations, release binaries. |
-| **Minimal Stub** | `go build -tags minimal ./cmd/microfat-stub` | `~1.1 MB` | Fast binary table decoding, in-RAM memfd, cgroup auto-tuning. Meta-commands stripped. | Ultra-lean container base images, microVMs, edge IoT. |
+| **Standard Full Stub** | `go build ./cmd/microfat-stub` | `~3.2 MB` | Fast binary table decoding, cache-first auto/sealed memfd dispatch, cgroup auto-tuning, full interactive meta-commands (`--microfat:*`). | General cloud services, developer workstations, release binaries. |
+| **Minimal Stub** | `go build -tags minimal ./cmd/microfat-stub` | `~1.1 MB` | Fast binary table decoding, cache-first auto/sealed memfd dispatch, cgroup auto-tuning. Meta-commands stripped. | Ultra-lean container base images, microVMs, edge IoT. |
 
 ---
 

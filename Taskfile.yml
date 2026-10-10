@@ -468,7 +468,7 @@ tasks:
     - task: build
     - |-
       {{.TASK_ENV}}
-      task --dir examples/demo bench-startup
+      task --dir examples/demo bench-startup STARTUP_ITERATIONS={{.STARTUP_ITERATIONS | default "50" | shellQuote}} STARTUP_CSV={{.STARTUP_CSV | default "" | shellQuote}}
   bench-matrix:
     desc: Alias for the exploratory startup matrix
     cmds:

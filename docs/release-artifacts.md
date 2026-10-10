@@ -89,7 +89,7 @@ Extracting `microfat_<version>_linux_<arch>.tar.gz` provides:
 
 2. **`microfat-stub` (Standard Launcher Stub)**:
    - The default launcher stitched to the head of fat executables created by `microfat pack`.
-   - Includes full runtime features: CPU feature detection, Linux cgroup v1/v2 limit auto-tuning (`GOMEMLIMIT`, `GOMAXPROCS`), container OOM protection, and `memfd_create` in-memory execution with disk cache fallback.
+   - Includes full runtime features: CPU feature detection, Linux cgroup v1/v2 soft-runtime auto-tuning (`GOMEMLIMIT`, `GOMAXPROCS`), and cache-first auto dispatch. It verifies an existing cache descriptor, uses sealed memfd on a miss, and can materialize verified cache after a cold memfd failure. See the [dispatch contract](architecture.md#7-cache-first-auto-dispatch--descriptor-bound-execution).
 
 3. **`microfat-stub-minimal` (Minimal Launcher Stub)**:
    - A lightweight stub compiled with `-tags=minimal`.

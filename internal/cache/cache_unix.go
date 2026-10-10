@@ -116,7 +116,12 @@ func OpenAndValidateAtFDWithOpener(
 
 	fd, err := opener(dirFD, name)
 	if err != nil {
-		return -1, err
+		if isNotExistErr(err) {
+			return -1, err
+		}
+		var stat unix.Stat_t
+		statErr := unix.Fstatat(dirFD, name, &stat, unix.AT_SYMLINK_NOFOLLOW)
+		return -1, classifyFailedCacheOpen(name, err, stat, statErr)
 	}
 
 	onCorrupt := func() {
@@ -151,7 +156,12 @@ func OpenAndValidateFDWithOpener(
 
 	fd, err := opener(path)
 	if err != nil {
-		return -1, err
+		if isNotExistErr(err) {
+			return -1, err
+		}
+		var stat unix.Stat_t
+		statErr := unix.Lstat(path, &stat)
+		return -1, classifyFailedCacheOpen(path, err, stat, statErr)
 	}
 
 	onCorrupt := func() {
@@ -170,16 +180,9 @@ func validateOpenedDescriptor(fd int, label string, expectedSize int64, expected
 		return -1, fmt.Errorf("fstat cache descriptor: %w", statErr)
 	}
 
-	isRegular := (stat.Mode & unix.S_IFMT) == unix.S_IFREG
-	if !isRegular {
+	if err := validateCacheEntryMetadata(stat, label); err != nil {
 		_ = unix.Close(fd)
-		// Do NOT remove non-regular targets (such as symlinks or directories)
-		return -1, fmt.Errorf("%w: %s (mode 0o%o)", ErrNonRegularFile, label, stat.Mode)
-	}
-
-	if err := validateCacheMetadata(stat, os.Geteuid()); err != nil {
-		_ = unix.Close(fd)
-		return -1, fmt.Errorf("%w: %s", err, label)
+		return -1, err
 	}
 
 	if stat.Size != expectedSize {
@@ -199,6 +202,44 @@ func validateOpenedDescriptor(fd int, label string, expectedSize int64, expected
 	}
 
 	return fd, nil
+}
+
+// Failed opens can reject sockets and devices before a descriptor exists. The
+// no-follow metadata check only adds refusal reasons; it never accepts a hit or
+// substitutes for descriptor-bound size and checksum validation.
+func classifyFailedCacheOpen(label string, openErr error, stat unix.Stat_t, statErr error) error {
+	if statErr != nil {
+		return fmt.Errorf("%w: cannot inspect cache entry %s after open failure: %w (metadata check: %w)",
+			ErrUnsafeFile, label, openErr, statErr)
+	}
+	if err := validateCacheEntryMetadata(stat, label); err != nil {
+		return fmt.Errorf("%w: open failed: %w", err, openErr)
+	}
+	return openErr
+}
+
+func validateCacheEntryMetadata(stat unix.Stat_t, label string) error {
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
+		return fmt.Errorf("%w: %s (mode 0o%o)", ErrNonRegularFile, label, stat.Mode)
+	}
+	if err := validateCacheMetadata(stat, os.Geteuid()); err != nil {
+		return fmt.Errorf("%w: %s", err, label)
+	}
+	return nil
+}
+
+// Existing unsafe entries must not become replacement targets for direct
+// materialization callers. Same-UID pathname mutation remains outside the trust
+// boundary, and this check is never used to authorize execution.
+func validateCacheReplacementAt(dirFD int, name string) error {
+	var stat unix.Stat_t
+	if err := unix.Fstatat(dirFD, name, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		if isNotExistErr(err) {
+			return nil
+		}
+		return fmt.Errorf("%w: cannot inspect cache replacement target %s: %w", ErrUnsafeFile, name, err)
+	}
+	return validateCacheEntryMetadata(stat, name)
 }
 
 // Ownership checks do not prevent mutation by a trusted same-UID writer.
@@ -365,6 +406,9 @@ func MaterializeVariantAtFD(
 	cleanDir := filepath.Clean(dirPath)
 	cachedName := filepath.Clean(entry.SHA256)
 	cachedBinary := filepath.Join(cleanDir, cachedName)
+	if err := validateCacheReplacementAt(dirFD, cachedName); err != nil {
+		return "", fmt.Errorf("%w: refusing cache replacement: %w", format.ErrCacheWrite, err)
+	}
 
 	tmpFD, tmpName, tmpPath, createErr := createTempFileAt(dirFD, cleanDir)
 	if createErr != nil {

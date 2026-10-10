@@ -20,7 +20,7 @@ It does not extend that result to every QEMU version or registration.
 | ARM64 descriptor probe with `FD_CLOEXEC`, disk or sealed memfd | Interpreter fails before payload startup. |
 | Same probe with its descriptor deliberately retained | Payload executes; retained descriptor is reported. This is a diagnostic only. |
 | Full/minimal fat ARM64 launcher, explicit memfd or cold/warm cache | Verified dispatch reaches the execution boundary, then fails before payload startup. |
-| Fat ARM64 launcher, current memfd-first auto mode | Same descriptor limitation; auto is not an emulator workaround. |
+| Fat ARM64 launcher, current cache-first auto mode | Same descriptor limitation on verified cache and sealed memfd execution; auto is not an emulator workaround. |
 | Native descriptor probe with `FD_CLOEXEC` | Payload executes and the original execution descriptor is closed. |
 
 The kernel's [`F` flag](https://github.com/torvalds/linux/blob/v6.8/Documentation/admin-guide/binfmt-misc.rst)

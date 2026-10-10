@@ -238,6 +238,9 @@ func TestReadOnlyCacheDirectoryHandling(t *testing.T) {
 }
 
 func TestSimulatedSeccompMemfdFallback(t *testing.T) {
+	oldExisting := resolveExistingCacheDirFunc
+	t.Cleanup(func() { resolveExistingCacheDirFunc = oldExisting })
+	resolveExistingCacheDirFunc = func(string) (int, string, error) { return -1, "", os.ErrNotExist }
 
 	payload := []byte("#!/bin/sh\necho 'memfd-fallback-test'\n")
 	fatFile, entry, idx := createSyntheticFatFile(t, payload)
@@ -705,6 +708,9 @@ func TestMemfdSealingVerificationAndImmutability(t *testing.T) {
 }
 
 func TestMemfdSealingGracefulFallback(t *testing.T) {
+	oldExisting := resolveExistingCacheDirFunc
+	t.Cleanup(func() { resolveExistingCacheDirFunc = oldExisting })
+	resolveExistingCacheDirFunc = func(string) (int, string, error) { return -1, "", os.ErrNotExist }
 	payload := []byte("#!/bin/sh\necho 'memfd-seal-fallback-test'\n")
 	fatFile, entry, idx := createSyntheticFatFile(t, payload)
 
@@ -963,7 +969,7 @@ func TestRedTeam_DecompressionError_DoesNotFallbackToPreExistingCache(t *testing
 
 	cacheDir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
-	t.Setenv(format.EnvExecMode, "")
+	t.Setenv(format.EnvExecMode, format.ExecModeMemfd)
 	t.Setenv(format.EnvDispatchMode, "")
 
 	// Pre-populate cache directory with entry.SHA256
@@ -1019,7 +1025,7 @@ func TestRedTeam_ChecksumMismatch_DoesNotFallbackToPreExistingCache(t *testing.T
 
 	cacheDir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
-	t.Setenv(format.EnvExecMode, "")
+	t.Setenv(format.EnvExecMode, format.ExecModeMemfd)
 	t.Setenv(format.EnvDispatchMode, "")
 
 	// Pre-populate cache directory with authentic entry.SHA256

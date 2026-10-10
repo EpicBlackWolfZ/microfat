@@ -13,6 +13,7 @@ or permission to replace a file. See the [asset-location example](runtime-tuning
 | Individual executable bind mount | The mounted inode remains selected even if its underlying source pathname is replaced. Mount neighboring assets and companion stubs separately when needed. |
 | Read-only deployment directory | Launching does not require writing beside the fat executable. Packing requires a separate writable output destination. |
 | Read-only root with accessible procfs | Explicit memfd dispatch works without a writable deployment. Explicit cache dispatch needs usable executable cache storage. |
+| Read-only root with default auto dispatch | Read-only lookup can execute a verified warm entry; a cold miss uses sealed memfd without cache writes. Cold memfd failure needs writable storage for materialization. |
 | Read-only root and no writable cache storage | An explicit cache cold miss fails before payload startup. It does not switch to memfd. |
 | Procfs mounted `noexec` | This does not by itself prevent traversal through `/proc/self/fd` to an executable target. It is different from an inaccessible or missing `/proc`. |
 | Missing or inaccessible procfs | The launcher fails closed. Its secure-execution check reads `/proc/self/auxv` before opening or dispatching the payload. |

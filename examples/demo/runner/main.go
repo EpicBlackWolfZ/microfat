@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/csv"
 	json "encoding/json/v2"
 	"flag"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
@@ -30,6 +32,7 @@ const (
 	ultraWarmup        = 1
 	stdIterations      = 50
 	startupIterations  = 50
+	startupTimeout     = 10 * time.Second
 	heavyIterations    = 20
 	ultraIterations    = 3
 	dirPermission      = 0o750
@@ -38,8 +41,8 @@ const (
 	csvTimestampLayout = "20060102-150405"
 	execModeNative     = "native"
 	execModeMemfd      = "memfd"
-	execModeColdCache  = "cold-cache"
-	execModeWarmCache  = "warm-cache"
+	execModeCache      = "cache"
+	execModeAuto       = "auto"
 	envExecModeMemfd   = "MICROFAT_EXEC_MODE=memfd"
 )
 
@@ -78,6 +81,8 @@ type StartupObservation struct {
 	Timestamp          string        `json:"timestamp"`
 	Iteration          int           `json:"iteration"`
 	ConfigName         string        `json:"config_name"`
+	RequestedMode      string        `json:"requested_mode"`
+	CacheState         string        `json:"cache_state"`
 	ExecMode           string        `json:"exec_mode"`
 	SelectedVariant    string        `json:"selected_variant"`
 	TotalWallDuration  time.Duration `json:"total_wall_duration"`
@@ -172,10 +177,15 @@ func runStartupBenchmarkSuite(srcDir, benchDir, microfatStub, microfatCli, csvPa
 	scenarios := buildStartupScenarios(srcDir, benchDir, microfatStub, microfatCli)
 
 	fmt.Println("\n==> Step 2: Running warm-up cycles across execution modes...")
-	runStartupWarmups(scenarios, warmups, benchDir)
+	if err := runStartupWarmups(scenarios, warmups, benchDir); err != nil {
+		panic(err)
+	}
 
 	fmt.Printf("\n==> Step 3: Measuring Startup Overhead & Microsecond Telemetry [%d iterations]...\n", iterations)
-	summaries, observations := measureStartupScenarios(scenarios, iterations, benchDir)
+	summaries, observations, err := measureStartupScenarios(scenarios, iterations, benchDir)
+	if err != nil {
+		panic(err)
+	}
 
 	printStartupSummaryTables(summaries)
 
@@ -185,246 +195,169 @@ func runStartupBenchmarkSuite(srcDir, benchDir, microfatStub, microfatCli, csvPa
 	}
 
 	if err := exportStartupCSV(finalCSVPath, observations); err != nil {
-		fmt.Printf("Warning: failed to export CSV to %s: %v\n", finalCSVPath, err)
+		panic(fmt.Errorf("exporting startup CSV to %s: %w", finalCSVPath, err))
 	} else {
 		fmt.Printf("\n==> ✔ Exported %d raw telemetry observations to CSV: %s\n\n", len(observations), finalCSVPath)
 	}
 }
 
 func buildStartupScenarios(srcDir, benchDir, microfatStub, microfatCli string) []StartupScenario {
-	fmt.Println("==> Step 1: Compiling and packaging multi-architecture test binaries...")
+	fmt.Println("==> Step 1: Compiling and packaging the full startup matrix...")
+	fmt.Println("    Every process uses GOMAXPROCS=1, GOMEMLIMIT=off, GOGC=100 and MICROFAT_AUTOTUNE=0.")
+	fmt.Println("    Cold/warm describes the extracted cache; executable and OS page caches are warmed.")
 
-	v1Native := filepath.Join(benchDir, "01_v1_native")
-	v2Native := filepath.Join(benchDir, "02_v2_temp")
-	v3Native := filepath.Join(benchDir, "03_v3_native")
-	v4Native := filepath.Join(benchDir, "00_v4_temp")
-
-	fatZstd := filepath.Join(benchDir, "04_fat_zstd")
-	fatLZ4 := filepath.Join(benchDir, "05_fat_lz4")
-	fatNone := filepath.Join(benchDir, "06_fat_none")
-	fatTrimmed := filepath.Join(benchDir, "07_fat_trimmed")
-	optimizedV3 := filepath.Join(benchDir, "08_optimized_v3")
-
-	goBin := resolveGoBinary()
-	mustRun(srcDir, goBin, "build", "-ldflags=-s -w", "-o", v1Native, "main.go", "ENV:GOAMD64=v1")
-	mustRun(srcDir, goBin, "build", "-ldflags=-s -w", "-o", v2Native, "main.go", "ENV:GOAMD64=v2")
-	mustRun(srcDir, goBin, "build", "-ldflags=-s -w", "-o", v3Native, "main.go", "ENV:GOAMD64=v3")
-	mustRun(srcDir, goBin, "build", "-ldflags=-s -w", "-o", v4Native, "main.go", "ENV:GOAMD64=v4")
-
-	// 1. Zstd (Default)
-	mustRun(benchDir, microfatCli, "pack",
-		"--stub", microfatStub,
-		"--name", "demo-app",
-		"-v", "v1="+v1Native,
-		"-v", "v2="+v2Native,
-		"-v", "v3="+v3Native,
-		"-v", "v4="+v4Native,
-		"-o", fatZstd,
-	)
-
-	// 2. LZ4 Codec
-	mustRun(benchDir, microfatCli, "pack",
-		"--stub", microfatStub,
-		"--name", "demo-app",
-		"--compression", "lz4",
-		"-v", "v1="+v1Native,
-		"-v", "v2="+v2Native,
-		"-v", "v3="+v3Native,
-		"-v", "v4="+v4Native,
-		"-o", fatLZ4,
-	)
-
-	// 3. None / Uncompressed Codec
-	mustRun(benchDir, microfatCli, "pack",
-		"--stub", microfatStub,
-		"--name", "demo-app",
-		"--compression", "none",
-		"-v", "v1="+v1Native,
-		"-v", "v2="+v2Native,
-		"-v", "v3="+v3Native,
-		"-v", "v4="+v4Native,
-		"-o", fatNone,
-	)
-
-	// 4. Zstd with Shared Inter-Variant Dictionary
-	fatDict := filepath.Join(benchDir, "07_fat_dict")
-	mustRun(benchDir, microfatCli, "pack",
-		"--stub", microfatStub,
-		"--name", "demo-app",
-		"--dict",
-		"-v", "v1="+v1Native,
-		"-v", "v2="+v2Native,
-		"-v", "v3="+v3Native,
-		"-v", "v4="+v4Native,
-		"-o", fatDict,
-	)
-
-	// 5. Format v1 JSON Manifest Format
-	fatV1 := filepath.Join(benchDir, "08_fat_v1")
-	mustRun(benchDir, microfatCli, "pack",
-		"--stub", microfatStub,
-		"--name", "demo-app",
-		"--format-version", "1",
-		"-v", "v1="+v1Native,
-		"-v", "v2="+v2Native,
-		"-v", "v3="+v3Native,
-		"-v", "v4="+v4Native,
-		"-o", fatV1,
-	)
-
-	// 6. Minimal Stub Profile (if available)
-	microfatStubMinimal := resolveBinary("microfat-stub-minimal")
-	fatMinimal := filepath.Join(benchDir, "09_fat_minimal")
-	hasMinimal := false
-	if _, err := os.Stat(microfatStubMinimal); err == nil {
-		mustRun(benchDir, microfatCli, "pack",
-			"--stub", microfatStubMinimal,
-			"--name", "demo-app",
-			"-v", "v1="+v1Native,
-			"-v", "v2="+v2Native,
-			"-v", "v3="+v3Native,
-			"-v", "v4="+v4Native,
-			"-o", fatMinimal,
-		)
-		hasMinimal = true
+	levels := []string{"v1", "v2", "v3", "v4"}
+	nativePaths := make([]string, 0, len(levels))
+	for _, level := range levels {
+		path := filepath.Join(benchDir, "native_"+level)
+		mustRun(srcDir, resolveGoBinary(), "build", "-ldflags=-s -w", "-o", path, "main.go", "ENV:GOAMD64="+level)
+		nativePaths = append(nativePaths, path)
 	}
-
-	// 7. Trimmed Fat
-	mustRun(benchDir, microfatCli, "trim", fatZstd, "-o", fatTrimmed)
-
-	// 8. Optimized raw ELF
-	// #nosec G204 -- benchmark runner invokes locally built fat binary for optimize-to test
-	cmdOpt := exec.Command(fatZstd, "--microfat:optimize-to="+optimizedV3)
-	if err := cmdOpt.Run(); err != nil {
-		panic(err)
-	}
-
-	// 9. Pre-warm dedicated cache directory for warm-cache scenario
-	warmCacheDir := filepath.Join(benchDir, "warm_cache")
-	if err := os.MkdirAll(warmCacheDir, dirPermission); err != nil {
-		panic(err)
-	}
-	// #nosec G204 -- prewarm run on local test fat binary
-	cmdPrewarm := exec.Command(fatZstd, "--microfat:prewarm")
-	cmdPrewarm.Env = append(os.Environ(), "XDG_CACHE_HOME="+warmCacheDir)
-	if err := cmdPrewarm.Run(); err != nil {
-		panic(err)
-	}
-
 	scenarios := []StartupScenario{
-		{Name: "1. Native v1 (Baseline SSE2)", Path: v1Native, ExecMode: execModeNative, Size: getFileSize(v1Native)},
-		{Name: "2. Native v3 (AVX2/FMA)", Path: v3Native, ExecMode: execModeNative, Size: getFileSize(v3Native)},
-		{
-			Name:     "3. Universal FAT Format v2 (Cold memfd)",
-			Path:     fatZstd,
-			ExecMode: execModeMemfd,
-			Env:      []string{envExecModeMemfd},
-			Size:     getFileSize(fatZstd),
-		},
-		{
-			Name:     "4. Universal FAT Format v1 JSON (Cold memfd)",
-			Path:     fatV1,
-			ExecMode: execModeMemfd,
-			Env:      []string{envExecModeMemfd},
-			Size:     getFileSize(fatV1),
-		},
-		{
-			Name:     "5. Universal FAT Zstd-Dict (Cold memfd)",
-			Path:     fatDict,
-			ExecMode: execModeMemfd,
-			Env:      []string{envExecModeMemfd},
-			Size:     getFileSize(fatDict),
-		},
-		{
-			Name:     "6. Universal FAT (Cold cache)",
-			Path:     fatZstd,
-			ExecMode: execModeColdCache,
-			IsCold:   true,
-			Env:      []string{"MICROFAT_EXEC_MODE=cache"},
-			Size:     getFileSize(fatZstd),
-		},
-		{
-			Name:      "7. Universal FAT (Warm cache)",
-			Path:      fatZstd,
-			ExecMode:  execModeWarmCache,
-			WarmCache: warmCacheDir,
-			Env:       []string{"MICROFAT_EXEC_MODE=cache", "XDG_CACHE_HOME=" + warmCacheDir},
-			Size:      getFileSize(fatZstd),
-		},
-		{
-			Name:     "8. Universal FAT LZ4 (Cold memfd)",
-			Path:     fatLZ4,
-			ExecMode: execModeMemfd,
-			Env:      []string{envExecModeMemfd},
-			Size:     getFileSize(fatLZ4),
-		},
-		{
-			Name:     "9. Universal FAT None (Cold memfd)",
-			Path:     fatNone,
-			ExecMode: execModeMemfd,
-			Env:      []string{envExecModeMemfd},
-			Size:     getFileSize(fatNone),
-		},
+		{Name: "Native v1", Path: nativePaths[0], ExecMode: execModeNative, Size: getFileSize(nativePaths[0])},
+		{Name: "Native v3", Path: nativePaths[2], ExecMode: execModeNative, Size: getFileSize(nativePaths[2])},
 	}
-
-	if hasMinimal {
-		scenarios = append(scenarios, StartupScenario{
-			Name:     "10. Universal FAT Minimal Stub (Cold memfd)",
-			Path:     fatMinimal,
-			ExecMode: execModeMemfd,
-			Env:      []string{envExecModeMemfd},
-			Size:     getFileSize(fatMinimal),
-		})
+	profiles := []struct{ name, path string }{
+		{"full", microfatStub},
+		{"minimal", resolveBinary("microfat-stub-minimal")},
 	}
+	for _, profile := range profiles {
+		if _, err := os.Stat(profile.path); err != nil {
+			panic(fmt.Errorf("startup matrix requires %s stub: %w", profile.name, err))
+		}
+		for _, version := range []string{"2", "1"} {
+			for _, codec := range []string{"zstd", "lz4", "none", "zstd-dict"} {
+				name := "Format v" + version + " " + profile.name + " " + codec
+				path := filepath.Join(benchDir, "fat_v"+version+"_"+profile.name+"_"+codec)
+				args := []string{"pack", "--stub", profile.path, "--name", "demo-app", "--format-version", version, "-o", path}
+				if codec == "zstd-dict" {
+					args = append(args, "--dict")
+				} else {
+					args = append(args, "--compression", codec)
+				}
+				for i, level := range levels {
+					args = append(args, "-v", level+"="+nativePaths[i])
+				}
+				mustRun(benchDir, microfatCli, args...)
 
+				warmCache := filepath.Join(benchDir, "warm_v"+version+"_"+profile.name+"_"+codec)
+				if err := os.MkdirAll(warmCache, dirPermission); err != nil {
+					panic(err)
+				}
+				// Explicit cache also supports warming minimal stubs, which have no meta-commands.
+				warmScenario := StartupScenario{
+					Name: name + " (cache/warm)", Path: path, ExecMode: execModeCache,
+					WarmCache: warmCache, Env: []string{
+						"MICROFAT_EXEC_MODE=cache", "XDG_CACHE_HOME=" + warmCache,
+						format.EnvCacheDir + "=" + filepath.Join(warmCache, "microfat"),
+					},
+				}
+				if _, err := runStartupIteration(warmScenario, benchDir, 0); err != nil {
+					panic(fmt.Errorf("warming cache for %s: %w", name, err))
+				}
+				scenarios = append(scenarios, startupMatrixScenarios(name, path, getFileSize(path), warmCache)...)
+			}
+		}
+	}
+	// Keep the single-variant and native extraction comparisons alongside the complete matrix.
+	fatZstd := scenarios[2].Path
+	fatTrimmed := filepath.Join(benchDir, "fat_trimmed")
+	optimized := filepath.Join(benchDir, "optimized")
+	mustRun(benchDir, microfatCli, "trim", fatZstd, "-o", fatTrimmed)
+	// #nosec G204 -- benchmark executes a locally built artifact to extract its selected ELF
+	cmd := exec.Command(fatZstd, "--microfat:optimize-to="+optimized)
+	cmd.Env = startupEnvironment(os.Environ(), nil)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		panic(fmt.Errorf("optimizing startup artifact: %w: %s", err, out))
+	}
 	scenarios = append(scenarios,
 		StartupScenario{
-			Name:     "11. Trimmed FAT (Cold memfd)",
-			Path:     fatTrimmed,
-			ExecMode: execModeMemfd,
-			Env:      []string{envExecModeMemfd},
-			Size:     getFileSize(fatTrimmed),
+			Name: "Trimmed zstd (memfd/absent)", Path: fatTrimmed, ExecMode: execModeMemfd,
+			IsCold: true, Env: []string{envExecModeMemfd}, Size: getFileSize(fatTrimmed),
 		},
-		StartupScenario{Name: "12. Optimized v3 (from FAT)", Path: optimizedV3, ExecMode: execModeNative, Size: getFileSize(optimizedV3)},
+		StartupScenario{Name: "Optimized native", Path: optimized, ExecMode: execModeNative, Size: getFileSize(optimized)},
 	)
-
 	for _, s := range scenarios {
-		fmt.Printf("  • %-36s -> %6.2f MB (%d bytes)\n", s.Name, float64(s.Size)/bytesInMegabyte, s.Size)
+		fmt.Printf("  • %-44s -> %6.2f MB (%d bytes)\n", s.Name, float64(s.Size)/bytesInMegabyte, s.Size)
 	}
-
 	return scenarios
 }
 
-func runStartupWarmups(scenarios []StartupScenario, warmups int, benchDir string) {
-	for _, s := range scenarios {
-		for range warmups {
-			_ = runStartupIteration(s, benchDir, 0)
-		}
+func startupMatrixScenarios(name, path string, size int64, warmCache string) []StartupScenario {
+	modes := []struct {
+		mode string
+		warm bool
+	}{
+		{execModeMemfd, false},
+		{execModeCache, false},
+		{execModeCache, true},
+		{execModeAuto, false},
+		{execModeAuto, true},
 	}
+	scenarios := make([]StartupScenario, 0, len(modes))
+	for _, mode := range modes {
+		state := "absent"
+		env := []string{format.EnvExecMode + "=" + mode.mode}
+		if mode.warm {
+			state = "warm"
+			env = append(env, "XDG_CACHE_HOME="+warmCache, format.EnvCacheDir+"="+filepath.Join(warmCache, "microfat"))
+		}
+		scenarios = append(scenarios, StartupScenario{
+			Name: name + " (" + mode.mode + "/" + state + ")", Path: path, ExecMode: mode.mode,
+			IsCold: !mode.warm, WarmCache: warmCache, Env: env, Size: size,
+		})
+	}
+	return scenarios
 }
 
-func runStartupIteration(s StartupScenario, benchDir string, iter int) StartupObservation {
+// Strip inherited launcher controls so user cache paths, force levels, and tuning cannot change a run.
+func startupEnvironment(base, extra []string) []string {
+	env := make([]string, 0, len(base)+len(extra))
+	for _, entry := range base {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "MICROFAT_") || key == "XDG_CACHE_HOME" ||
+			key == "GOMAXPROCS" || key == "GOMEMLIMIT" || key == "GOGC" {
+			continue
+		}
+		env = append(env, entry)
+	}
+	env = append(env, "GOMAXPROCS=1", "GOMEMLIMIT=off", "GOGC=100", "MICROFAT_AUTOTUNE=0", "MICROFAT_LOG=json")
+	return append(env, extra...)
+}
+
+func runStartupWarmups(scenarios []StartupScenario, warmups int, benchDir string) error {
+	for _, s := range scenarios {
+		for range warmups {
+			if _, err := runStartupIteration(s, benchDir, 0); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func runStartupIteration(s StartupScenario, benchDir string, iter int) (StartupObservation, error) {
 	var cleanupDir string
 	extraEnv := make([]string, len(s.Env))
 	copy(extraEnv, s.Env)
 
 	if s.IsCold {
 		tDir, err := os.MkdirTemp(benchDir, "cold-cache-iter-*")
-		if err == nil {
-			cleanupDir = tDir
-			extraEnv = append(extraEnv, "XDG_CACHE_HOME="+tDir)
+		if err != nil {
+			return StartupObservation{}, fmt.Errorf("creating empty cache for %s: %w", s.Name, err)
 		}
+		cleanupDir = tDir
+		extraEnv = append(extraEnv, "XDG_CACHE_HOME="+tDir, format.EnvCacheDir+"="+filepath.Join(tDir, "microfat"))
 	}
 	if cleanupDir != "" {
 		defer func() { _ = os.RemoveAll(cleanupDir) }()
 	}
 
-	cmdEnv := append(os.Environ(), "MICROFAT_LOG=json")
-	cmdEnv = append(cmdEnv, extraEnv...)
-
+	ctx, cancel := context.WithTimeout(context.Background(), startupTimeout)
+	defer cancel()
 	// #nosec G204 -- startup benchmark execution of test binaries
-	cmd := exec.Command(s.Path, "--startup-only")
-	cmd.Env = cmdEnv
+	cmd := exec.CommandContext(ctx, s.Path, "--startup-only")
+	cmd.Env = startupEnvironment(os.Environ(), extraEnv)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
@@ -438,29 +371,46 @@ func runStartupIteration(s StartupScenario, benchDir string, iter int) StartupOb
 		Timestamp:         time.Now().UTC().Format(timestampLayout),
 		Iteration:         iter,
 		ConfigName:        s.Name,
+		RequestedMode:     s.ExecMode,
 		ExecMode:          s.ExecMode,
 		TotalWallDuration: wallDuration,
 	}
+	if s.IsCold {
+		obs.CacheState = "absent"
+	} else if s.WarmCache != "" {
+		obs.CacheState = "warm"
+	}
 
 	if err != nil {
-		return obs
+		return obs, fmt.Errorf("startup %s failed: %w; stderr: %s", s.Name, err, stderrBuf.Bytes())
 	}
-
-	telemetry, parseErr := parseDispatchTelemetry(stderrBuf.Bytes())
-	if parseErr == nil {
-		obs.LauncherInternalUs = telemetry.TotalLauncherUs
-		obs.DecompressionUs = telemetry.DecompressionDurationUs
-		obs.SelectedVariant = telemetry.SelectedVariant
-		obs.CgroupVersion = telemetry.CgroupVersion
-		if telemetry.ExecMode != "" && s.ExecMode != execModeColdCache && s.ExecMode != execModeWarmCache {
-			obs.ExecMode = telemetry.ExecMode
-		}
+	if strings.TrimSpace(stdoutBuf.String()) != "READY" {
+		return obs, fmt.Errorf("startup %s did not report READY: %q", s.Name, stdoutBuf.String())
 	}
-
-	return obs
+	if s.ExecMode == execModeNative {
+		return obs, nil
+	}
+	telemetry, err := parseDispatchTelemetry(stderrBuf.Bytes())
+	if err != nil {
+		return obs, fmt.Errorf("startup %s: %w", s.Name, err)
+	}
+	if telemetry.SelectedVariant == "" || telemetry.ExecMode == "" {
+		return obs, fmt.Errorf("startup %s has incomplete dispatch telemetry", s.Name)
+	}
+	if s.ExecMode != execModeAuto && telemetry.ExecMode != s.ExecMode {
+		return obs, fmt.Errorf("startup %s requested %s but dispatched %s", s.Name, s.ExecMode, telemetry.ExecMode)
+	}
+	obs.LauncherInternalUs = telemetry.TotalLauncherUs
+	obs.DecompressionUs = telemetry.DecompressionDurationUs
+	obs.SelectedVariant = telemetry.SelectedVariant
+	obs.CgroupVersion = telemetry.CgroupVersion
+	obs.ExecMode = telemetry.ExecMode
+	return obs, nil
 }
 
-func measureStartupScenarios(scenarios []StartupScenario, iterations int, benchDir string) ([]StartupSummary, []StartupObservation) {
+func measureStartupScenarios(
+	scenarios []StartupScenario, iterations int, benchDir string,
+) ([]StartupSummary, []StartupObservation, error) {
 	summaries := make([]StartupSummary, len(scenarios))
 	allObservations := make([]StartupObservation, 0, len(scenarios)*iterations)
 
@@ -471,7 +421,10 @@ func measureStartupScenarios(scenarios []StartupScenario, iterations int, benchD
 		decompressDurs := make([]time.Duration, iterations)
 
 		for j := range iterations {
-			obs := runStartupIteration(s, benchDir, j+1)
+			obs, err := runStartupIteration(s, benchDir, j+1)
+			if err != nil {
+				return nil, allObservations, err
+			}
 			allObservations = append(allObservations, obs)
 			wallDurs[j] = obs.TotalWallDuration
 			launcherDurs[j] = time.Duration(obs.LauncherInternalUs) * time.Microsecond
@@ -494,7 +447,7 @@ func measureStartupScenarios(scenarios []StartupScenario, iterations int, benchD
 		}
 	}
 
-	return summaries, allObservations
+	return summaries, allObservations, nil
 }
 
 func parseDispatchTelemetry(stderr []byte) (format.DispatchTelemetry, error) {
@@ -522,12 +475,13 @@ func exportStartupCSV(csvPath string, observations []StartupObservation) error {
 	defer func() { _ = f.Close() }()
 
 	w := csv.NewWriter(f)
-	defer w.Flush()
 
 	header := []string{
 		"timestamp",
 		"iteration",
 		"config_name",
+		"requested_mode",
+		"cache_state",
 		"exec_mode",
 		"selected_variant",
 		"total_wall_us",
@@ -547,6 +501,8 @@ func exportStartupCSV(csvPath string, observations []StartupObservation) error {
 			obs.Timestamp,
 			strconv.Itoa(obs.Iteration),
 			obs.ConfigName,
+			obs.RequestedMode,
+			obs.CacheState,
 			obs.ExecMode,
 			obs.SelectedVariant,
 			strconv.FormatInt(wallUs, 10),
@@ -560,6 +516,7 @@ func exportStartupCSV(csvPath string, observations []StartupObservation) error {
 		}
 	}
 
+	w.Flush()
 	return w.Error()
 }
 
@@ -583,7 +540,7 @@ func printStartupSummaryTables(summaries []StartupSummary) {
 			s.Scenario.Name, s.Scenario.Size, float64(s.Scenario.Size)/bytesInMegabyte, ratio, diffStr)
 	}
 
-	fmt.Println("\n### Table 2: Process Cold-Start Latency & Stub Overhead Breakdown (`--startup-only`)")
+	fmt.Println("\n### Table 2: Full Process Startup with Absent or Warm Extraction Cache (`--startup-only`)")
 	fmt.Println("| Configuration / Execution Mode | Mean Wall (ms) | StdDev (ms) | Median p50 (ms) | p95 (ms) | " +
 		"p99 (ms) | Stub Overhead (µs) | Decompress (µs) | Overhead vs Native v3 |")
 	fmt.Println("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
@@ -636,6 +593,10 @@ func findRepoRoot() string {
 }
 
 func resolveBinary(name string) string {
+	key := strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
+	if path := os.Getenv(key); path != "" {
+		return path
+	}
 	if root := findRepoRoot(); root != "" {
 		repoBin := filepath.Join(root, "bin", name)
 		if st, err := os.Stat(repoBin); err == nil && !st.IsDir() {

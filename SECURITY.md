@@ -75,12 +75,26 @@ their tested scope, not proof that a program is free of vulnerabilities.
   - `F_SEAL_SHRINK` and `F_SEAL_GROW` prevent resizing or truncation of the executable memory region.
   - `F_SEAL_SEAL` permanently locks the seal set, forbidding any further seals or unsealing.
   - These seals protect the backing file contents; they do not provide general process-memory isolation or prevent a privileged debugger from modifying private mappings.
-  - The launcher strictly treats unsealed descriptors as unsafe. If sealing is unsupported (`ENOSYS`, `EINVAL`) or blocked (`EPERM`), auto mode falls back cleanly to disk cache execution, while explicit memfd mode aborts immediately.
-- **Descriptor-Bound Cache Fallback & TOCTOU Defense**:
+  - The launcher strictly treats unsealed descriptors as unsafe and closes them on sealing failure.
+    After a cache miss, auto can fall back to verified disk materialization when memfd creation,
+    sealing or execution is unavailable. After a warm-cache execution failure, it tries sealed memfd
+    once and returns both failures if memfd fails; it does not retry the cache. Explicit memfd mode
+    bypasses cache and aborts on any memfd failure.
+- **Descriptor-Bound Cache Execution & TOCTOU Defense**:
+  - Auto mode first checks existing cache directories and entries without creating, repairing or
+    removing anything. Every hit must pass descriptor-bound size, effective-UID ownership, mode
+    and SHA-256 checks. `MICROFAT_VERIFY_CACHE` is ignored and cannot weaken verification.
+  - Missing directories/entries and corrupt safe regular entries are misses, left untouched before
+    sealed memfd execution. Symlinks, special files, foreign-owned entries and unsafe modes are
+    terminal errors. Explicit cache mode and a cold memfd fallback can materialize entries, but
+    only corrupt safe regular entries can be repaired.
   - New cache directories in `$XDG_CACHE_HOME/microfat` (or `/tmp/.microfat-<uid>`) are created with `0700` (`rwx------`). Existing directories must have the expected owner and no group/other write permission.
   - Cache entry opens use `O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK` relative to the validated
     cache directory descriptor. `O_NOFOLLOW` rejects a symlink in the final entry component; it is
     not a general promise that every user-supplied path forbids ancestor symlinks.
+  - A failed non-ENOENT open uses no-follow metadata inspection only to reject unsafe targets, never
+    to authorize a hit. If that metadata cannot be inspected, dispatch fails closed. Materialization
+    also checks existing replacement targets before creating a staging file.
   - Execution operates directly on the verified file descriptor via `/proc/self/fd/<fd>`, ensuring validation and execution bind to the exact same VFS inode and preventing pathname replacement from redirecting execution to a different inode.
 - **Resource Boundary Defense**: Cgroup v1/v2 information informs extraction estimates and soft Go-runtime tuning. This does not guarantee freedom from OOM kills, CPU throttling or noisy-neighbor interference.
 
@@ -94,8 +108,13 @@ their tested scope, not proof that a program is free of vulnerabilities.
 An important security distinction exists between cryptographic integrity hashing and digital signatures:
 
 - **What Microfat Guarantees (Integrity & Corruption Detection)**:
-  - **Bit-Flip & Network Corruption Detection**: Embedded SHA-256 digests detect truncation, transmission corruption, and storage degradation across all embedded payloads and metadata indices.
-  - **Tampering Detection Against Partial Modification**: If an attacker or untrusted process modifies an embedded variant without altering the trailer or index table, `microfat` detects the SHA-256 mismatch and aborts execution immediately with `ErrPayloadCorrupted`.
+  - **Bit-Flip & Network Corruption Detection**: Embedded SHA-256 digests detect corruption in
+    metadata and extracted payloads; `microfat verify` checks the packed artifact's embedded content.
+  - **Tampering Detection During Extraction**: If an embedded variant is modified without changing
+    its indexed digest, extraction detects the mismatch and aborts with `ErrPayloadCorrupted`.
+    A warm-cache hit instead checks the cached payload against that digest and does not read or
+    decompress the source payload/dictionary. Corruption found during extraction never triggers
+    a fallback that would hide the error.
   - **In-Memory Immutability**: Linux memory seals protect memfd backing contents. Descriptor-bound cache execution binds validation and execution to one inode; it does not make that inode immutable.
 - **What Microfat Does NOT Guarantee (Authenticity & Origin Trust)**:
   - Microfat does **not** replace cryptographic digital signatures or public-key infrastructure (PKI).
@@ -123,8 +142,14 @@ Cache mode assumes **trusted same-UID writers** and local filesystem semantics f
 atomic rename. The owner or a process holding an existing writable descriptor can modify the same
 inode after validation. Ownership/mode checks and an additional hash cannot establish immutability.
 Deployments requiring immutable extracted payload storage must request `MICROFAT_EXEC_MODE=memfd`;
-if creation or sealing is unavailable, that mode fails closed. Auto mode permits the weaker cache
-boundary on fallback. A hostile same-UID isolation design requires separate review.
+if creation or sealing is unavailable, that mode fails closed. Auto mode permits the cache boundary
+as its first choice on a valid warm hit and as a fallback after a cold memfd failure. A hostile
+same-UID isolation design requires separate review.
+
+Warm hits establish that the chosen cached executable matches the validated index; they do not
+revalidate unused compressed source bytes or the dictionary. This makes external authentication of
+the whole artifact before execution essential. Prewarming and explicit cache mode can write or
+repair safe corrupt regular entries; auto lookup alone never does so.
 
 The kernel and privileged administrators are trusted. The ambient environment is configuration,
 not authenticated provenance. Embedded hashes do not authenticate a hostile whole artifact: verify
@@ -169,6 +194,7 @@ listed boundaries; they are not a claim of protection against the out-of-scope a
 | Bounded trailer/index parsing and payload integrity | [format validation](internal/format/format.go), [bounded decoding](internal/codec/codec.go) | [malformed legacy JSON](tests/e2e/legacy_json_test.go), [corruption](tests/e2e/corruption_test.go), [format fuzzing](internal/format/format_fuzz_test.go) |
 | Nonblocking regular-file inputs before parsing/building | [input descriptor validation](internal/inputfile/input.go) | [FIFO CLI rejection](tests/e2e/input_safety_test.go), [input unit tests](internal/inputfile/input_test.go) |
 | Mandatory sealed memfd and explicit-mode failure | [execution](cmd/microfat-stub/exec_linux.go) | [sealing/fallback fault tests](cmd/microfat-stub/chaos_test.go), [executable memfd policy](cmd/microfat-stub/memfd_policy_linux_test.go) |
+| Cache-first auto lookup, mandatory hit checks and bounded fallback order | [dispatch](cmd/microfat-stub/exec_linux.go) | [dispatch fault tests](cmd/microfat-stub/cache_first_linux_test.go), [full/minimal launch cases](tests/e2e/cache_first_test.go) |
 | Validated cache directory/entry descriptors; read-only verification | [cache descriptor operations](internal/format/cache_unix.go), [cache management](internal/cache/cache_unix.go) | [cache security](tests/e2e/cache_security_test.go), [FIFO entries](tests/e2e/cache_fifo_test.go), [read-only checks](tests/e2e/cache_readonly_test.go) |
 | Consistency-checked executable location hints | [origin resolution](internal/builder/origin.go) | [origin regressions](internal/builder/origin_test.go), [stub discovery](internal/builder/stub_test.go) |
 | Authenticate verifier/helper and product archive before execution/extraction | [bootstrap](scripts/install.sh), [acquisition](internal/installrelease/client.go) | [bootstrap tampering](cmd/microfat-install/bootstrap_test.go), [real signature rejection](tests/e2e/release_signature_test.go) |

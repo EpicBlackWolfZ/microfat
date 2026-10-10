@@ -34,7 +34,9 @@ flowchart TD
 
     subgraph RuntimeDispatches ["Runtime Execution (cmd/microfat-stub)"]
         Fat -->|./fat-executable args...| Dispatch{"Meta-Command or Execution?"}
-        Dispatch -->|Standard Execution| RAM["memfd_create (In-RAM)"]
+        Dispatch -->|Standard auto Execution| ExistingCache{"Existing verified cache?"}
+        ExistingCache -->|Hit| CachedExec["Execute verified cache descriptor"]
+        ExistingCache -->|Miss| RAM["Verified sealed memfd"]
         Dispatch -->|--microfat:info| Info["Host & Binary Diagnostics"]
         Dispatch -->|--microfat:prewarm| Cache["Node Cache Prewarm"]
         Dispatch -->|--microfat:trim| InPlaceTrim["Trim in-place (-50% disk)"]
@@ -99,7 +101,7 @@ microfat detect --json
 
 ### `microfat doctor`
 
-Verify the local host runtime environment readiness for high-performance Microfat dispatch, checking CPU capabilities, in-memory execution (`memfd_create`), disk cache fallback permissions, and Linux container cgroup limits.
+Verify the local host runtime environment readiness for high-performance Microfat dispatch, checking CPU capabilities, in-memory execution (`memfd_create`), disk cache execution permissions, and Linux container cgroup limits.
 
 ```bash
 # Standard environment inspection
@@ -434,7 +436,9 @@ microfat trim bin/myapp --max-level v3 --policy safe_avx512 -o bin/myapp-safe
 
 ### `microfat prewarm <binary>`
 
-Pre-extract payload variants into the local node cache (`$XDG_CACHE_HOME/microfat`) to eliminate decompression latency on initial startup.
+Pre-extract payload variants into the local node cache (`$XDG_CACHE_HOME/microfat`) to avoid
+decompression on a verified warm hit. Default auto mode uses existing cache entries without an
+execution-mode override. Verification, launcher work and normal ELF startup still apply.
 
 ```bash
 # Prewarm selected compatible variant into cache
@@ -501,7 +505,7 @@ Every fat binary built with standard `microfat-stub` supports built-in meta-comm
 
 > [!NOTE]
 > **Minimal Stub Profile (`-tags minimal`)**:
-> In ultra-lean production deployments where launcher stub size must be minimized to $< 1.2\text{ MB}$, compile the stub with `go build -tags minimal ./cmd/microfat-stub` (or use `bin/microfat-stub-minimal`). The minimal stub retains zero-allocation binary table decoding and in-RAM dispatch, but strips interactive meta-command handlers (`--microfat:*`).
+> In ultra-lean production deployments where launcher stub size must be minimized to $< 1.2\text{ MB}$, compile the stub with `go build -tags minimal ./cmd/microfat-stub` (or use `bin/microfat-stub-minimal`). The minimal stub retains zero-allocation binary table decoding and cache-first auto/sealed memfd dispatch, but strips interactive meta-command handlers (`--microfat:*`).
 
 ---
 
@@ -522,12 +526,19 @@ Every fat binary built with standard `microfat-stub` supports built-in meta-comm
 | `MICROFAT_DISABLE_VARIANTS` | `string` | *(unset)* | Comma-separated list of variant levels to exclude from selection (e.g. `v4,v9.2`). |
 | `MICROFAT_POLICY` | `string` | *(unset)* | Preset dispatch policy name (`safe_avx512`, `no_downclock`). |
 | `MICROFAT_AVX512_DOWNCLOCK_PROTECTION` | `bool` | `0` | Enable Intel Skylake-X/Cascade Lake Xeon downclocking mitigation. |
-| `MICROFAT_EXEC_MODE` | `string` | *(unset: auto)* | Auto tries sealed memfd, then cache. Explicit `memfd` fails closed; `cache` uses verified disk materialization. |
+| `MICROFAT_EXEC_MODE` | `string` | *(unset: auto)* | Auto checks an existing verified cache entry, then sealed memfd on a miss; cold memfd denial can materialize cache. Explicit `memfd` bypasses cache and fails closed; `cache` materializes verified disk entries. |
 | `MICROFAT_CACHE_DIR` | `string` | *(unset)* | Custom node cache directory path (defaults to `$XDG_CACHE_HOME/microfat`). |
+| `MICROFAT_VERIFY_CACHE` | *(ignored)* | *(ignored)* | Cache size, owner, permissions and SHA-256 checks are mandatory on every hit; this variable cannot disable them. |
 | `MICROFAT_LOG` | `string` | `text` | Logging mode: `text` or `json` (structured JSON telemetry on stderr). |
 | `MICROFAT_DEBUG` | `bool` | `0` | Enable detailed microsecond startup and dispatch logging on stderr. |
 | `GOMEMLIMIT` | `string` | *(unset)* | If already set in the environment, Microfat **never** overrides it. |
 | `GOMAXPROCS` | `string` | *(unset)* | If already set in the environment, Microfat **never** overrides it. |
+
+In auto mode, cache lookup is read-only: absent or corrupt safe regular entries remain untouched
+before sealed memfd execution. Unsafe entries fail closed. A valid hit executes the verified
+descriptor without source payload/dictionary decompression. If that descriptor cannot execute,
+auto tries sealed memfd once and reports both failures if it fails, without another cache attempt.
+Extraction corruption is terminal. See the [complete dispatch and trust contract](architecture.md#7-cache-first-auto-dispatch--descriptor-bound-execution).
 
 ---
 
