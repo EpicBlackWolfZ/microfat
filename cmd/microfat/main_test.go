@@ -23,6 +23,7 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/builder"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
+	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"github.com/EpicBlackWolfZ/microfat/internal/testutil"
 
@@ -353,27 +354,30 @@ func TestCorruptIndexCLI(t *testing.T) {
 }
 
 func TestCLITrimAndInspectEdgeCases(t *testing.T) {
+	t.Parallel()
+
 	tempDir := t.TempDir()
 	stubPath := filepath.Join(tempDir, "stub")
-	_ = os.WriteFile(stubPath, []byte("#!/bin/sh\n"), 0o755)
+	require.NoError(t, os.WriteFile(stubPath, []byte("#!/bin/sh\n"), 0o755))
 	v1Path := filepath.Join(tempDir, "v1")
-	_ = os.WriteFile(v1Path, []byte("#!/bin/sh\n"), 0o755)
+	require.NoError(t, os.WriteFile(v1Path, []byte("#!/bin/sh\n"), 0o755))
 
 	// Fat binary with incompatible architecture (auto-detection fails)
+	targetArch, targetLevel := oppositeHostPackTarget(t)
 	incompatFat := filepath.Join(tempDir, "incompat.fat")
-	_, _ = pack.Pack(pack.Options{
+	_, err := pack.Pack(pack.Options{
 		StubPath:          stubPath,
 		OutputPath:        incompatFat,
-		TargetArch:        "unknown_arch_123",
+		TargetArch:        targetArch,
 		SkipELFValidation: true,
-		Variants:          map[string]string{"v1": v1Path},
+		Variants:          map[string]string{targetLevel: v1Path},
 	})
+	require.NoError(t, err)
+	readCLIPackIndex(t, incompatFat)
 
 	trimAutoIncompat := newTrimCmd()
 	trimAutoIncompat.SetArgs([]string{incompatFat})
-	if err := trimAutoIncompat.Execute(); err == nil {
-		t.Errorf("expected trim with auto-detection to fail on incompatible architecture")
-	}
+	require.ErrorIs(t, trimAutoIncompat.Execute(), microarch.ErrNoMatchingVariant)
 }
 
 func TestPackARM64CLI(t *testing.T) {
@@ -580,20 +584,22 @@ func TestCLIPrewarmCmd(t *testing.T) {
 	}
 
 	// 10. Prewarm with incompatible architecture binary (auto-detect fails)
+	targetArch, targetLevel := oppositeHostPackTarget(t)
 	incompatFat := filepath.Join(tempDir, "incompat_prewarm.fat")
-	_, _ = pack.Pack(pack.Options{
+	_, err = pack.Pack(pack.Options{
 		StubPath:          stubPath,
 		OutputPath:        incompatFat,
 		AppName:           "incompat",
-		TargetArch:        "unknown_arch_99",
+		TargetArch:        targetArch,
 		SkipELFValidation: true,
-		Variants:          map[string]string{"v1": v1Path},
+		Variants:          map[string]string{targetLevel: v1Path},
 	})
+	require.NoError(t, err)
+	readCLIPackIndex(t, incompatFat)
+
 	prewarmIncompat := newPrewarmCmd()
 	prewarmIncompat.SetArgs([]string{flagCacheDir, cacheDir, incompatFat})
-	if err := prewarmIncompat.Execute(); err == nil {
-		t.Errorf("expected error for incompatible architecture in prewarm")
-	}
+	require.ErrorIs(t, prewarmIncompat.Execute(), microarch.ErrNoMatchingVariant)
 }
 
 func TestCLIPgoPackAndManifestPack(t *testing.T) {

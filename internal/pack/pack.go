@@ -35,6 +35,7 @@ var (
 	ErrChecksumMismatch    = errors.New("variant payload checksum mismatch")
 	ErrSizeMismatch        = codec.ErrSizeMismatch
 	ErrInvalidELF          = errors.New("invalid ELF binary")
+	ErrUnsupportedArch     = errors.New("unsupported target architecture")
 )
 
 // VariantCompressionOptions configures compression parameters for a specific variant level.
@@ -329,8 +330,13 @@ func validateOptions(opts *Options) error {
 		opts.TargetOS = "linux"
 	}
 	if opts.TargetArch == "" {
-		opts.TargetArch = "amd64"
+		opts.TargetArch = microarch.ArchAMD64
 	}
+	arch, err := canonicalTargetArch(opts.TargetArch)
+	if err != nil {
+		return err
+	}
+	opts.TargetArch = arch
 	if opts.Permissions == 0 {
 		opts.Permissions = defaultFileMode
 	}
@@ -382,6 +388,17 @@ func validateOptions(opts *Options) error {
 		}
 	}
 	return nil
+}
+
+func canonicalTargetArch(arch string) (string, error) {
+	switch strings.ToLower(arch) {
+	case microarch.ArchAMD64, "x86_64", "x86-64":
+		return microarch.ArchAMD64, nil
+	case microarch.ArchARM64, "aarch64":
+		return microarch.ArchARM64, nil
+	default:
+		return "", fmt.Errorf("%w: %q (expected amd64 or arm64)", ErrUnsupportedArch, arch)
+	}
 }
 
 func sortVariantLevels(variants map[string]string, targetArch string) []string {
@@ -728,6 +745,10 @@ func validatePayloadABIs(opts *Options, levels []string) error {
 
 // ValidateELFBinary checks if the file at path is a valid 64-bit ELF binary matching targetOS and targetArch.
 func ValidateELFBinary(path string, targetOS, targetArch string) error {
+	arch, err := canonicalTargetArch(targetArch)
+	if err != nil {
+		return err
+	}
 	data, err := readBoundedInput(path, format.MaxPayloadSize)
 	if err != nil {
 		return err
@@ -741,13 +762,13 @@ func ValidateELFBinary(path string, targetOS, targetArch string) error {
 		return fmt.Errorf("%w (%s): expected 64-bit ELF, got class %v", ErrInvalidELF, path, f.Class)
 	}
 
-	switch targetArch {
-	case "amd64", "x86_64":
+	switch arch {
+	case microarch.ArchAMD64:
 		if f.Machine != elf.EM_X86_64 {
 			return fmt.Errorf("%w (%s): machine type %v does not match target architecture %s (expected EM_X86_64)",
 				ErrInvalidELF, path, f.Machine, targetArch)
 		}
-	case "arm64", "aarch64":
+	case microarch.ArchARM64:
 		if f.Machine != elf.EM_AARCH64 {
 			return fmt.Errorf("%w (%s): machine type %v does not match target architecture %s (expected EM_AARCH64)",
 				ErrInvalidELF, path, f.Machine, targetArch)
