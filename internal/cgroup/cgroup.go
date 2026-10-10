@@ -200,12 +200,15 @@ func ReadLimitsCustom(root string, procCgroupPath string) (Limits, error) {
 		return readCgroupV2(cleanRoot, v2RelPath)
 	}
 
-	// 2. Detect cgroup v1 (legacy hierarchy: memory/ and cpu/ subdirectories)
+	// 2. Detect cgroup v1 memory and CPU controllers independently, including direct mounts.
 	v1MemLimit := filepath.Join(cleanRoot, "memory", "memory.limit_in_bytes")
 	if _, err := os.Stat(v1MemLimit); err == nil {
 		return readCgroupV1(cleanRoot, v1RelPaths)
 	}
 	if _, err := os.Stat(filepath.Join(cleanRoot, "memory.limit_in_bytes")); err == nil {
+		return readCgroupV1(cleanRoot, v1RelPaths)
+	}
+	if _, err := os.Stat(filepath.Join(resolveCgroupV1CPUBase(cleanRoot), "cpu.cfs_quota_us")); err == nil {
 		return readCgroupV1(cleanRoot, v1RelPaths)
 	}
 
