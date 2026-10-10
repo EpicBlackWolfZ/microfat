@@ -375,26 +375,24 @@ func isPrefixOrExact(arg, flag string) bool {
 
 func extractTargetPath(arg, primaryFlag, aliasFlag string) (string, error) {
 	if after, ok := strings.CutPrefix(arg, primaryFlag+"="); ok {
-		trimmed := strings.TrimSpace(after)
-		if trimmed == "" {
+		if after == "" {
 			return "", fmt.Errorf("%s requires a destination path", primaryFlag)
 		}
-		return trimmed, nil
+		return after, nil
 	}
 	if aliasFlag != "" && strings.HasPrefix(arg, aliasFlag+"=") {
-		trimmed := strings.TrimSpace(strings.TrimPrefix(arg, aliasFlag+"="))
-		if trimmed == "" {
+		target := strings.TrimPrefix(arg, aliasFlag+"=")
+		if target == "" {
 			return "", fmt.Errorf("%s requires a destination path", aliasFlag)
 		}
-		return trimmed, nil
+		return target, nil
 	}
 	for _, a := range os.Args[2:] {
 		if !strings.HasPrefix(a, "--microfat:") {
-			trimmed := strings.TrimSpace(a)
-			if trimmed == "" {
+			if a == "" {
 				return "", fmt.Errorf("%s requires a destination path", primaryFlag)
 			}
-			return trimmed, nil
+			return a, nil
 		}
 	}
 	return "", fmt.Errorf("%s requires a destination path", primaryFlag)

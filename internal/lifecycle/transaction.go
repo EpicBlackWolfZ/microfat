@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const (
@@ -51,7 +50,7 @@ func Execute(tx Transaction) error {
 		return fmt.Errorf("%w: %q", ErrInvalidPublicationIntent, tx.Intent)
 	}
 
-	if tx.Intent == IntentCreateOnly && strings.TrimSpace(tx.DestPath) == "" {
+	if tx.Intent == IntentCreateOnly && tx.DestPath == "" {
 		return errors.New("destination path must not be empty for create-only intent")
 	}
 
