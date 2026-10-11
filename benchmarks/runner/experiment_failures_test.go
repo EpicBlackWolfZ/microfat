@@ -137,7 +137,7 @@ func TestTrialFailureEvidence(t *testing.T) {
 func TestMatchedRuntimeReadback(t *testing.T) {
 	t.Parallel()
 	c := schema.Configuration{Level: "v1", Mode: nativeMode, Tuning: tuningMatched, Environment: map[string]string{
-		"GOMAXPROCS": "2", "GOMEMLIMIT": "1GiB", "GOGC": "off"}}
+		"GOMAXPROCS": "2", "GOMEMLIMIT": "1GiB", gogcEnvironmentKey: "off"}}
 	d := map[string]string{"level": "v1", "gomaxprocs": "2", "gomemlimit": "1073741824", "gogc": "18446744073709551615"}
 	require.NoError(t, validateIdentity(c, d))
 	d["gogc"] = "100"

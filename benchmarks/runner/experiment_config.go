@@ -4,6 +4,7 @@ import (
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -21,6 +22,7 @@ import (
 )
 
 const (
+	gogcEnvironmentKey      = "GOGC"
 	minimalProfile          = "minimal"
 	defaultMatchedProcs     = 2
 	tuningMatched           = "matched"
@@ -174,6 +176,9 @@ func (c ExperimentConfig) validateTiming() error {
 	if time.Duration(c.Blocks)*time.Duration(c.DurationMS+c.WarmupMS)*maxConfigurations*time.Millisecond > maxRunDuration {
 		return errors.New("experiment exceeds six hour trial budget; shard the suite")
 	}
+	if !c.DisableObserver && c.SampleMS > system.MaxObserverIntervalMS {
+		return fmt.Errorf("sample_ms exceeds observer maximum of %d ms", system.MaxObserverIntervalMS)
+	}
 	return nil
 }
 
@@ -181,17 +186,8 @@ func (c ExperimentConfig) validateControls() error {
 	if c.Tuning != tuningMatched && c.Tuning != "on-off" {
 		return errors.New("tuning must be matched or on-off")
 	}
-	if c.GOMAXPROCS <= 0 || c.GOMEMLIMIT == "" || c.GOGC == "" {
-		return errors.New("matched tuning requires explicit runtime settings")
-	}
-	if _, err := cgroup.ParseByteSize(c.GOMEMLIMIT); err != nil {
-		return fmt.Errorf("GOMEMLIMIT: %w", err)
-	}
-	if c.GOGC != "off" {
-		value, err := strconv.Atoi(c.GOGC)
-		if err != nil || value < 0 {
-			return errors.New("GOGC must be nonnegative or off")
-		}
+	if _, err := c.matchedEnvironment(); err != nil {
+		return err
 	}
 	seen := make(map[string]bool)
 	for _, state := range c.CacheStates {
@@ -215,4 +211,37 @@ func (c ExperimentConfig) validateControls() error {
 		}
 	}
 	return nil
+}
+
+// matchedEnvironment turns friendly input into exact Go startup syntax. On-off
+// trials intentionally omit these controls so the launcher can apply tuning.
+func (c ExperimentConfig) matchedEnvironment() (map[string]string, error) {
+	if c.Tuning != tuningMatched {
+		return nil, nil
+	}
+	if c.GOMAXPROCS <= 0 || int64(c.GOMAXPROCS) > math.MaxInt32 || c.GOMEMLIMIT == "" || c.GOGC == "" {
+		return nil, errors.New("matched tuning requires explicit runtime settings with GOMAXPROCS in 1..2147483647")
+	}
+	memory, err := cgroup.ParseByteSize(c.GOMEMLIMIT)
+	if err != nil {
+		return nil, fmt.Errorf("GOMEMLIMIT: %w", err)
+	}
+	gc, err := canonicalGOGC(c.GOGC)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"MICROFAT_AUTOTUNE": "0", "GOMAXPROCS": strconv.Itoa(c.GOMAXPROCS),
+		"GOMEMLIMIT": strconv.FormatInt(memory, 10), gogcEnvironmentKey: gc}, nil
+}
+
+func canonicalGOGC(value string) (string, error) {
+	if value == "off" {
+		return value, nil
+	}
+	// Go's startup parser reads a signed 32-bit integer even on 64-bit hosts.
+	percent, err := strconv.ParseInt(value, 10, 32)
+	if err != nil || percent < 0 {
+		return "", errors.New("GOGC must be a nonnegative signed 32-bit integer or off")
+	}
+	return strconv.FormatInt(percent, 10), nil
 }

@@ -14,6 +14,9 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
 )
 
+// MaxObserverIntervalMS bounds the separate observer's sampling interval.
+const MaxObserverIntervalMS = 1000
+
 type ObserverConfig struct {
 	PID         int      `json:"pid"`
 	PhaseFile   string   `json:"phase_file"`
@@ -24,7 +27,7 @@ type ObserverConfig struct {
 // Observe runs in its own process so sampler allocations never enter target resource accounting.
 func Observe(ctx context.Context, cfg ObserverConfig, writer io.Writer) error {
 	const minimumInterval = 1
-	if cfg.PID <= 0 || cfg.IntervalMS < minimumInterval || cfg.IntervalMS > 1000 || !filepath.IsAbs(cfg.PhaseFile) {
+	if cfg.PID <= 0 || cfg.IntervalMS < minimumInterval || cfg.IntervalMS > MaxObserverIntervalMS || !filepath.IsAbs(cfg.PhaseFile) {
 		return errors.New("invalid observer configuration")
 	}
 	ticker := time.NewTicker(time.Duration(cfg.IntervalMS) * time.Millisecond)

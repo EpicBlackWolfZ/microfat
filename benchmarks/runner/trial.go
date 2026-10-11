@@ -235,7 +235,14 @@ func validateIdentity(config schema.Configuration, diagnostic map[string]string)
 				return errors.New("effective GOMEMLIMIT differs from matched configuration")
 			}
 		}
-		gc := config.Environment["GOGC"]
+		gc := config.Environment[gogcEnvironmentKey]
+		if gc != "" {
+			var err error
+			gc, err = canonicalGOGC(gc)
+			if err != nil {
+				return errors.New("invalid matched GOGC configuration")
+			}
+		}
 		if gc == "off" {
 			gc = "18446744073709551615" // runtime/metrics represents disabled GOGC as MaxUint64.
 		}
