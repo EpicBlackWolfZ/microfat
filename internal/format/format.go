@@ -652,7 +652,7 @@ func MarshalBinaryIndex(idx *Index) ([]byte, error) {
 	return buf, nil
 }
 
-// UnmarshalBinaryIndex deserializes a Format v2 compact binary index buffer.
+// UnmarshalBinaryIndex deserializes a Format v2 compact binary index buffer with lowercase SHA-256 digests.
 func UnmarshalBinaryIndex(data []byte) (*Index, error) {
 	if len(data) < minBinaryHeaderSize {
 		return nil, fmt.Errorf("%w: binary index too short (%d bytes)", ErrTruncatedIndex, len(data))
@@ -749,7 +749,7 @@ func UnmarshalBinaryIndex(data []byte) (*Index, error) {
 		CreatedUnix:      createdUnix,
 		DictionaryOffset: dictOffset,
 		DictionarySize:   dictSize,
-		DictionarySHA256: dictSHA,
+		DictionarySHA256: strings.ToLower(dictSHA),
 		DictionaryID:     dictID,
 		Variants:         variants,
 	}, nil
@@ -814,7 +814,7 @@ func decodeBinaryVariant(data []byte, offset int, i int) (VariantEntry, int, err
 		Offset:           vOffset,
 		CompressedSize:   compSize,
 		UncompressedSize: uncompSize,
-		SHA256:           shaStr,
+		SHA256:           strings.ToLower(shaStr),
 		Compression:      compStr,
 	}, offset, nil
 }
@@ -952,7 +952,7 @@ func skipJSONValue(data []byte, pos int) (int, error) {
 	return next, nil
 }
 
-// unmarshalJSONIndex validates JSON syntax and reads the legacy Format v1 manifest schema.
+// unmarshalJSONIndex validates JSON syntax and reads the legacy Format v1 manifest schema with lowercase SHA-256 digests.
 func unmarshalJSONIndex(data []byte) (*Index, error) {
 	if err := validateJSONSyntax(data); err != nil {
 		return nil, err
@@ -1059,7 +1059,7 @@ func parseJSONIndexField(key string, data []byte, pos int, idx *Index) (int, err
 		if err != nil {
 			return pos, err
 		}
-		idx.DictionarySHA256 = s
+		idx.DictionarySHA256 = strings.ToLower(s)
 		return nPos, nil
 	case "dictionary_id":
 		v, nPos, err := parseJSONInt64(data, pos)
@@ -1183,7 +1183,7 @@ func parseJSONVariantField(vKey string, data []byte, pos int, entry *VariantEntr
 		if err != nil {
 			return pos, err
 		}
-		entry.SHA256 = s
+		entry.SHA256 = strings.ToLower(s)
 		return snPos, nil
 	case "compression":
 		s, snPos, err := parseJSONString(data, pos)
