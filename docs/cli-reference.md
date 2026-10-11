@@ -374,9 +374,11 @@ Both `pgo-pack` and `pack --manifest` anchor the manifest directory before start
 the compiler. Per-variant `pgo` and top-level `default_pgo` paths are relative to
 that directory; automatic `default.pgo` discovery uses the package directory.
 Relative and absolute manifest arguments work from other working directories,
-including paths containing spaces. `pgo: off` disables profile discovery for that
-variant. Manifest-relative output placement and explicit `--stub` precedence
-apply as before.
+including paths containing spaces. Profile paths preserve leading and trailing
+whitespace in quoted values. The exact value `off` (case-insensitive) disables
+profile discovery; an empty value uses the default profile fallback. `pgo: off`
+disables profile discovery for that variant. Manifest-relative output placement
+and explicit `--stub` precedence apply as before.
 
 A manifest's `compression.dict_size` is retained unless `--dict-size` is explicitly
 supplied. Omitting the size from both sources uses the normal 112 KiB default.
