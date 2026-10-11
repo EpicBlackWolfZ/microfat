@@ -2075,7 +2075,7 @@ func TestTrimEmptyOutputPath(t *testing.T) {
 	t.Parallel()
 
 	trimCmd := newTrimCmd()
-	trimCmd.SetArgs([]string{"-o", "  ", "some_file"})
+	trimCmd.SetArgs([]string{"-o", "", "some_file"})
 	err := trimCmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "destination output path cannot be empty")
