@@ -1235,8 +1235,12 @@ func parseLinuxAuxvARM64(data []byte) ARM64Features {
 }
 
 func readLinuxAuxvARM64() ARM64Features {
-	// #nosec G304 -- reading linux system auxiliary vector
-	data, err := os.ReadFile("/proc/self/auxv")
+	return readLinuxAuxvARM64FromPath("/proc/self/auxv")
+}
+
+func readLinuxAuxvARM64FromPath(path string) ARM64Features {
+	// #nosec G304 -- called with the fixed Linux auxiliary vector path or controlled test fixtures
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return ARM64Features{}
 	}

@@ -2,6 +2,8 @@ package microarch
 
 import (
 	"encoding/binary"
+	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"testing"
@@ -27,6 +29,7 @@ const (
 	fixtureAllHigh  = fixtureMOPS | fixtureHBC
 	fixtureEntryLen = 16
 	fixtureWordLen  = 8
+	fixtureFileMode = 0o600
 	fixtureNMIName  = "nmi"
 	fixtureTHEName  = "the"
 )
@@ -167,6 +170,46 @@ func TestParseLinuxAuxvARM64NativeFlags(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tt.want, parseLinuxAuxvARM64(tt.data))
+		})
+	}
+}
+
+func TestReadLinuxAuxvARM64FromPath(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	validPath := filepath.Join(directory, "auxv")
+	data := encodeARM64Auxv(
+		arm64AuxvEntry{fixtureATHWCAP, fixtureGCS},
+		arm64AuxvEntry{fixtureATHWCAP2, fixtureBF16WFxT | fixtureSME | fixtureSME2 | fixtureAllHigh},
+	)
+	require.NoError(t, os.WriteFile(validPath, data, fixtureFileMode))
+	tests := []struct {
+		name string
+		path string
+		want ARM64Features
+	}{
+		{
+			name: "unavailable auxiliary vector file returns no inferred features",
+			path: filepath.Join(directory, "missing"),
+		},
+		{
+			name: "unreadable directory returns no inferred features",
+			path: directory,
+		},
+		{
+			name: "valid auxiliary vector file preserves authoritative flags",
+			path: validPath,
+			want: ARM64Features{
+				HasBF16: true, HasWFxT: true, HasSME: true, HasSME2: true,
+				HasMOPS: true, HasHBC: true, HasGCS: true,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, readLinuxAuxvARM64FromPath(tt.path))
 		})
 	}
 }
