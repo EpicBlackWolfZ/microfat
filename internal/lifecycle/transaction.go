@@ -14,6 +14,7 @@ const (
 	defaultDirMode     = 0o755
 	standardExecMask   = 0o755
 	ownerExecuteMask   = 0o100
+	chmodModeMask      = os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky
 )
 
 var (
@@ -226,6 +227,9 @@ func applyMetadata(staged *os.File, snap *SourceSnapshot, policy MetadataPolicy)
 	}
 
 	targetMode := snap.Mode.Perm()
+	if policy == PolicyStrict {
+		targetMode |= snap.Mode & os.ModeSticky
+	}
 	if policy == PolicyStrip {
 		targetMode &= standardExecMask
 		if targetMode&ownerExecuteMask == 0 {
@@ -247,9 +251,10 @@ func verifyReadback(staged *os.File, targetMode os.FileMode, snap *SourceSnapsho
 	if stagedFi.Size() == 0 {
 		return fmt.Errorf("%w: staged file is empty", ErrReadbackVerification)
 	}
-	if stagedFi.Mode().Perm() != targetMode {
+	stagedMode := stagedFi.Mode() & chmodModeMask
+	if stagedMode != targetMode {
 		return fmt.Errorf("%w: mode %v does not match target %v",
-			ErrReadbackVerification, stagedFi.Mode().Perm(), targetMode)
+			ErrReadbackVerification, stagedMode, targetMode)
 	}
 	if policy == PolicyStrict {
 		_, _, _, uid, gid, ok := fileStatMetadataFunc(stagedFi)

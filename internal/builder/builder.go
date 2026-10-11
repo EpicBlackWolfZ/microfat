@@ -200,7 +200,7 @@ func resolveAllVariantPGOs(m *Manifest) (map[string]string, error) {
 }
 
 func resolveVariantPGO(v VariantConfig, defaultPGO, manifestDir, pkgDir string) (string, error) {
-	pgoVal := strings.TrimSpace(v.PGO)
+	pgoVal := v.PGO
 	if strings.EqualFold(pgoVal, "off") {
 		return pgoOffFlag, nil
 	}
@@ -217,7 +217,7 @@ func resolveVariantPGO(v VariantConfig, defaultPGO, manifestDir, pkgDir string) 
 	}
 
 	// Fallback to top-level default_pgo
-	defVal := strings.TrimSpace(defaultPGO)
+	defVal := defaultPGO
 	if strings.EqualFold(defVal, "off") {
 		return pgoOffFlag, nil
 	}
