@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
@@ -426,7 +425,7 @@ func printHelp(idx *format.Index, hostInfo microarch.Info, selected *format.Vari
 	fmt.Printf("  MICROFAT_POLICY              Policy preset (e.g. safe_avx512, no_downclock)\n")
 	fmt.Printf("  MICROFAT_AVX512_DOWNCLOCK_PROTECTION  Enable Intel Skylake-X/Cascade Lake downclock mitigation (1/true)\n")
 	fmt.Printf("  MICROFAT_CACHE_DIR           Custom destination cache directory\n")
-	fmt.Printf("  MICROFAT_EXEC_MODE           Execution mode: memfd (default) or cache\n")
+	fmt.Printf("  MICROFAT_EXEC_MODE           Execution policy: auto (default, cache-first), memfd or cache\n")
 	fmt.Printf("  MICROFAT_CPU_POLICY          CPU tuning: static (default) or native Go adaptation\n\n")
 	fmt.Printf("All other arguments and flags are forwarded directly to the application.\n")
 }
@@ -439,25 +438,9 @@ func printInfo(
 	totalSize int64,
 	jsonOutput bool,
 ) error {
-	cpuPolicy := cgroup.ResolveCPUPolicy(os.Getenv(format.EnvCPUPolicy), cgroup.CPUPolicyStatic)
+	cgInfo, runtimeInfo := buildRuntimeInfo(os.Environ(), selected)
+	requestedMode := resolveRequestedExecMode()
 	if jsonOutput {
-		var cgInfo *format.CgroupInfo
-		if limits, err := readCgroupLimitsFunc(); err == nil && limits.CgroupVersion != cgroup.VersionUnknown {
-			cgInfo = &format.CgroupInfo{
-				Version:          limits.CgroupVersion,
-				MemoryLimitBytes: limits.MemoryLimitBytes,
-				CPUQuota:         limits.CPUQuota,
-			}
-			if cpuPolicy == cgroup.CPUPolicyStatic {
-				cgInfo.GOMAXPROCS = limits.CPUs
-			}
-			if limits.MemoryLimitBytes > 0 {
-				if memLimit, ok := cgroup.CalculateGOMEMLIMIT(
-					limits.MemoryLimitBytes, cgroup.DefaultMemoryRatio, cgroup.DefaultMinHeadroomBytes); ok {
-					cgInfo.GOMEMLIMIT = fmt.Sprintf("%dB", memLimit)
-				}
-			}
-		}
 		info := format.BinaryInfo{
 			AppName:          idx.AppName,
 			TargetOS:         idx.TargetOS,
@@ -468,7 +451,7 @@ func printInfo(
 			HostLevel:        hostInfo.Level,
 			SelectedVariant:  selected.Level,
 			SelectedSize:     selected.UncompressedSize,
-			ExecMode:         format.ExecModeMemfd,
+			ExecMode:         requestedMode,
 			PolicyApplied:    policyRes.PolicyApplied,
 			PolicyReason:     policyRes.OverrideReason,
 			DictionaryOffset: idx.DictionaryOffset,
@@ -476,6 +459,7 @@ func printInfo(
 			DictionarySHA256: idx.DictionarySHA256,
 			DictionaryID:     idx.DictionaryID,
 			Cgroup:           cgInfo,
+			Runtime:          runtimeInfo,
 			Variants:         idx.Variants,
 			HostFeatures:     hostInfo.Features,
 		}
@@ -500,29 +484,7 @@ func printInfo(
 	if policyRes.PolicyApplied != "" {
 		fmt.Printf("Policy Applied:    %s (%s)\n", policyRes.PolicyApplied, policyRes.OverrideReason)
 	}
-	fmt.Printf("Execution Mode:    Linux memfd_create (anonymous RAM, 0 disk I/O)\n")
-
-	// Print cgroup auto-tuning info
-	if limits, err := readCgroupLimitsFunc(); err == nil && limits.CgroupVersion != cgroup.VersionUnknown {
-		fmt.Printf("\nContainer Auto-Tuning (cgroup v%d):\n", limits.CgroupVersion)
-		if limits.MemoryLimitBytes > 0 {
-			memLimit, ok := cgroup.CalculateGOMEMLIMIT(
-				limits.MemoryLimitBytes, cgroup.DefaultMemoryRatio, cgroup.DefaultMinHeadroomBytes)
-			if ok {
-				fmt.Printf("  • Memory Ceiling:  %d bytes -> Auto GOMEMLIMIT: %dB (90%%)\n", limits.MemoryLimitBytes, memLimit)
-			}
-		} else {
-			fmt.Printf("  • Memory Ceiling:  unlimited\n")
-		}
-		switch {
-		case limits.CPUQuota > 0 && cpuPolicy == cgroup.CPUPolicyNative:
-			fmt.Printf("  • CPU CFS Quota:   %.2f cores -> native Go CPU policy\n", limits.CPUQuota)
-		case limits.CPUs > 0:
-			fmt.Printf("  • CPU CFS Quota:   %.2f cores -> Auto GOMAXPROCS: %d\n", limits.CPUQuota, limits.CPUs)
-		default:
-			fmt.Printf("  • CPU CFS Quota:   unlimited\n")
-		}
-	}
+	printRuntimeInfo(cgInfo, runtimeInfo, requestedMode)
 
 	fmt.Printf("\nEmbedded Variants (%d total):\n", len(idx.Variants))
 	for _, v := range idx.Variants {

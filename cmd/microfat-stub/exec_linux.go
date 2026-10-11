@@ -142,16 +142,11 @@ func executeVariant(
 		selfPath = selfFile.Name()
 	}
 
-	// Check if cache dispatch mode is explicitly requested via environment
-	requestedMode := os.Getenv(format.EnvExecMode)
-	if requestedMode == "" {
-		requestedMode = os.Getenv(format.EnvDispatchMode)
-	}
-
-	if strings.EqualFold(requestedMode, format.ExecModeCache) {
+	requestedMode := resolveRequestedExecMode()
+	if requestedMode == format.ExecModeCache {
 		return executeViaCache(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, nil, startTime)
 	}
-	if strings.EqualFold(requestedMode, format.ExecModeMemfd) {
+	if requestedMode == format.ExecModeMemfd {
 		return executeViaMemfd(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, startTime)
 	}
 
@@ -330,25 +325,7 @@ func buildAutoTunedEnviron(
 
 	env = populateCgroupEnviron(env, keyIndex, limits)
 
-	gcProfile, _ := cgroup.ParseGCProfile(os.Getenv(format.EnvGCProfile))
-	liveHeap, _ := cgroup.ParseByteSize(os.Getenv(format.EnvLiveHeapEstimate))
-
-	if execMode == format.ExecModeMemfd {
-		page := int64(os.Getpagesize())
-		if entry.UncompressedSize > 0 && entry.UncompressedSize <= format.MaxPayloadSize {
-			limits.RetainedExecutableBytes = (entry.UncompressedSize + page - 1) / page * page
-		}
-	}
-
-	plan := cgroup.ResolveTuningPlanWithProfile(
-		limits,
-		os.Getenv(format.EnvMemRatio),
-		cgroup.DefaultMemoryRatio,
-		cgroup.DefaultMinHeadroomBytes,
-		gcProfile,
-		liveHeap,
-	)
-	plan.ApplyCPUPolicy(cgroup.ResolveCPUPolicy(os.Getenv(format.EnvCPUPolicy), cgroup.CPUPolicyStatic))
+	limits, plan := resolveRuntimeTuning(limits, entry, execMode, keyIndex, env)
 
 	env = resolveBatchGCEnviron(env, keyIndex, &plan)
 
@@ -365,13 +342,7 @@ func buildAutoTunedEnviron(
 		env = upsertEnv(env, keyIndex, format.EnvCgroupGCProfile, string(plan.GCProfile))
 	}
 
-	// Check if user opted out of auto-tuning or requested dry-run simulation
-	autoTuneOpt := strings.TrimSpace(os.Getenv(format.EnvAutotune))
-	if autoTuneOpt == "0" || strings.EqualFold(autoTuneOpt, "false") {
-		return env, &limits
-	}
-	dryRunOpt := strings.TrimSpace(os.Getenv(format.EnvDryRun))
-	if dryRunOpt == "1" || strings.EqualFold(dryRunOpt, "true") {
+	if runtimeAutotuneStatus() != autotuneEnabled {
 		return env, &limits
 	}
 
@@ -381,10 +352,6 @@ func buildAutoTunedEnviron(
 }
 
 func resolveBatchGCEnviron(env []string, keyIndex map[string]int, plan *cgroup.TuningPlan) []string {
-	if index, exists := keyIndex["GOMEMLIMIT"]; exists {
-		_, value, _ := strings.Cut(env[index], "=")
-		plan.ResolveBatchGOGC(cgroup.RuntimeMemoryLimit(value))
-	}
 	if _, explicitGC := keyIndex["GOGC"]; !explicitGC && plan.GOGCSkippedReason != "" {
 		env = upsertEnv(env, keyIndex, format.EnvCgroupGOGCSkippedReason, plan.GOGCSkippedReason)
 	}
