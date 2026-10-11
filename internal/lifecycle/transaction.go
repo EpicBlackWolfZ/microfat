@@ -120,7 +120,7 @@ func Execute(tx Transaction) error {
 		return fmt.Errorf("closing staged file: %w", err)
 	}
 
-	if err := publishTransaction(inPlace, stagedPath, destPath, snap); err != nil {
+	if err := publishTransaction(inPlace, stagedPath, destPath, snap, tx.Opts); err != nil {
 		return err
 	}
 	committed = true
@@ -297,15 +297,18 @@ func verifyReadback(staged *os.File, targetMode os.FileMode, snap *SourceSnapsho
 	return nil
 }
 
-func publishTransaction(inPlace bool, stagedPath, destPath string, snap *SourceSnapshot) error {
+func publishTransaction(inPlace bool, stagedPath, destPath string, snap *SourceSnapshot, opts Options) error {
 	if inPlace {
 		currentFi, err := os.Stat(destPath)
 		if err != nil {
 			return fmt.Errorf("%w: verifying target before replacement: %w", ErrSourceModified, err)
 		}
-		dev, ino, _, _, _, ok := fileStatMetadataFunc(currentFi)
+		dev, ino, nlink, _, _, ok := fileStatMetadataFunc(currentFi)
 		if !ok || dev != snap.Dev || ino != snap.Ino || currentFi.Size() != snap.Size || !currentFi.ModTime().Equal(snap.ModTime) {
 			return fmt.Errorf("%w: %s was modified on disk during transformation", ErrSourceModified, destPath)
+		}
+		if nlink > 1 && !opts.BreakHardlinks {
+			return fmt.Errorf("%w: %s has %d links; pass --break-hardlinks to break link", ErrHardLinkDetected, destPath, nlink)
 		}
 		if err := renameFunc(stagedPath, destPath); err != nil {
 			return fmt.Errorf("replacing %s: %w", destPath, err)

@@ -131,6 +131,7 @@ All transformation operations (both CLI `microfat trim` and launcher stub meta-c
 
 3. **Hard-Link Protection**:
    - In-place mutation of files with multiple directory entries (`nlink > 1`) is strictly rejected by default (`ErrHardLinkDetected`) to prevent silently altering other paths that reference the same inode.
+   - Link count is checked before transformation and again before publication. If a hardlink appears during staging, the default refusal preserves the original bytes at the source and all aliases and removes the staged file.
    - Operators can pass `--break-hardlinks` (CLI) or `--microfat:break-hardlinks` (launcher) to deliberately sever the hard link, writing the derivative to a new inode while preserving untouched aliases at the original inode.
 
 4. **Explicit Metadata Policies (`--metadata-policy=strict|strip`)**:
@@ -138,7 +139,7 @@ All transformation operations (both CLI `microfat trim` and launcher stub meta-c
    - **`strip`**: Deliberately creates a standard caller-owned derivative (`0755` masked with source permissions) and strips non-policy extended metadata and ACLs.
 
 5. **Deployment Coordination & Integrity Boundary**:
-   - In-place operations recheck source identity (`dev`, `ino`, `size`, `modtime`) prior to final atomic rename.
+   - In-place operations recheck source identity (`dev`, `ino`, `size`, `modtime`) and hardlink policy prior to final atomic rename.
    - Note that Linux `rename` is an atomic directory update, not a kernel compare-and-swap (CAS). External deployers that do not participate in the `flock` protocol must be quiesced during maintenance windows.
    - Transformed derivatives contain new composite bytes and do not inherit external signatures; re-sign derivatives using your organization's deployment signing infrastructure before distribution. See [Security Policy](../SECURITY.md#6-payload-integrity-vs-producer-authenticity-hashing-vs-signing).
 
