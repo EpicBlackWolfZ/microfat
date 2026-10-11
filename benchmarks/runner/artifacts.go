@@ -36,12 +36,16 @@ type builtArtifacts struct {
 }
 
 func buildArtifacts(ctx context.Context, cfg ExperimentConfig, opts RunOptions, root string) (*builtArtifacts, error) {
+	matched, err := cfg.matchedEnvironment()
+	if err != nil {
+		return nil, err
+	}
 	if runtime.GOOS != "linux" {
 		return nil, errors.New("fat executable experiments require Linux")
 	}
 	ctx, cancel := context.WithTimeout(ctx, buildTimeout)
 	defer cancel()
-	version, _, err := process.Run(ctx, process.Spec{Path: opts.Go, Args: []string{"version"}, Dir: opts.Repository})
+	version, _, err := process.Run(ctx, process.Spec{Path: opts.Go, Args: []string{"version"}, Dir: opts.Repository, Env: cleanEnvironment()})
 	if err != nil || !strings.Contains(string(version), "go1.27.2 ") {
 		return nil, errors.New("benchmark builds require Go 1.27.2")
 	}
@@ -112,36 +116,39 @@ func buildArtifacts(ctx context.Context, cfg ExperimentConfig, opts RunOptions, 
 	}
 	artifact.Settings["format"], artifact.Settings["codec"], artifact.Settings["profile"] = strconv.Itoa(cfg.Format), cfg.Codec, cfg.Profile
 	built.Artifacts = append(built.Artifacts, artifact)
-	matched := map[string]string{"MICROFAT_AUTOTUNE": "0", "GOMAXPROCS": strconv.Itoa(cfg.GOMAXPROCS),
-		"GOMEMLIMIT": cfg.GOMEMLIMIT, "GOGC": cfg.GOGC}
-	built.Configurations = []schema.Configuration{
-		{ID: "native-generic", ArtifactID: "native-" + generic, Level: generic, Mode: nativeMode, Tuning: tuningMatched, Environment: matched},
-		{ID: "native-specialized", ArtifactID: "native-" + specialized, Level: specialized, Mode: nativeMode,
-			Tuning: tuningMatched, Environment: matched},
-		{ID: "fat-memfd", ArtifactID: "fat", Level: specialized, Mode: "memfd", Cache: "absent", Tuning: tuningMatched, Environment: matched},
-	}
-	for _, state := range cfg.CacheStates {
-		built.Configurations = append(built.Configurations, schema.Configuration{ID: "fat-cache-" + state,
-			ArtifactID: "fat", Level: specialized, Mode: "cache", Cache: state, Tuning: tuningMatched, Environment: matched})
-	}
-	if cfg.Tuning == "on-off" {
-		built.Configurations = nil
-		for _, toggle := range []string{"off", "on"} {
-			value := "0"
-			if toggle == "on" {
-				value = "1"
-			}
-			built.Configurations = append(built.Configurations, schema.Configuration{ID: "fat-memfd-tuning-" + toggle,
-				ArtifactID: "fat", Level: specialized, Mode: "memfd", Cache: "absent", Tuning: toggle,
-				Environment: map[string]string{"MICROFAT_AUTOTUNE": value}})
-		}
-	}
+	built.Configurations = artifactConfigurations(cfg, matched, generic, specialized)
 	if opts.BaseRepository != "" {
 		if err := addRevisionArtifacts(ctx, cfg, opts, root, generic, paths, built); err != nil {
 			return nil, err
 		}
 	}
 	return built, nil
+}
+
+func artifactConfigurations(cfg ExperimentConfig, matched map[string]string, generic, specialized string) []schema.Configuration {
+	configurations := []schema.Configuration{
+		{ID: "native-generic", ArtifactID: "native-" + generic, Level: generic, Mode: nativeMode, Tuning: tuningMatched, Environment: matched},
+		{ID: "native-specialized", ArtifactID: "native-" + specialized, Level: specialized, Mode: nativeMode,
+			Tuning: tuningMatched, Environment: matched},
+		{ID: "fat-memfd", ArtifactID: "fat", Level: specialized, Mode: "memfd", Cache: "absent", Tuning: tuningMatched, Environment: matched},
+	}
+	for _, state := range cfg.CacheStates {
+		configurations = append(configurations, schema.Configuration{ID: "fat-cache-" + state,
+			ArtifactID: "fat", Level: specialized, Mode: "cache", Cache: state, Tuning: tuningMatched, Environment: matched})
+	}
+	if cfg.Tuning == "on-off" {
+		configurations = nil
+		for _, toggle := range []string{"off", "on"} {
+			value := "0"
+			if toggle == "on" {
+				value = "1"
+			}
+			configurations = append(configurations, schema.Configuration{ID: "fat-memfd-tuning-" + toggle,
+				ArtifactID: "fat", Level: specialized, Mode: "memfd", Cache: "absent", Tuning: toggle,
+				Environment: map[string]string{"MICROFAT_AUTOTUNE": value}})
+		}
+	}
+	return configurations
 }
 
 func addRevisionArtifacts(ctx context.Context, cfg ExperimentConfig, opts RunOptions, root, generic string,

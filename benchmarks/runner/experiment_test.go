@@ -112,6 +112,7 @@ func TestExperimentEndToEnd(t *testing.T) {
 	require.NoError(t, testfixture.WriteExecutable(tool, []byte(script)))
 	cfg := DefaultExperimentConfig()
 	cfg.Blocks = 1
+	cfg.GOMEMLIMIT, cfg.GOGC = " 1.5gb ", "+0100"
 	options := RunOptions{Repository: repository, Fortio: tool, OutputDir: t.TempDir(), LogWriter: io.Discard}
 	result, err := RunExperiment(context.Background(), cfg, options)
 	require.NoError(t, err)
@@ -121,6 +122,10 @@ func TestExperimentEndToEnd(t *testing.T) {
 	verified, err := report.ReadBundle(result.Bundle)
 	require.NoError(t, err)
 	assert.Len(t, verified.Trials, len(verified.Configurations))
+	for _, configuration := range verified.Configurations {
+		assert.Equal(t, "1610612736", configuration.Environment["GOMEMLIMIT"])
+		assert.Equal(t, "100", configuration.Environment[gogcEnvironmentKey])
+	}
 	for _, trial := range verified.Trials {
 		assert.Equal(t, schema.OutcomeOK, trial.Outcome, trial.Reason)
 		assert.Positive(t, trial.Target.PID)
@@ -138,11 +143,27 @@ func TestExperimentEndToEnd(t *testing.T) {
 	cfg.SpecializedLevel = result.Experiment.Configurations[0].Level
 	cfg.Dictionary = false // A single distinct ISA payload cannot train an inter-variant dictionary.
 	cfg.Tuning, cfg.DisableObserver, cfg.ExecDiagnostics = "on-off", true, false
+	cfg.GOMAXPROCS, cfg.GOMEMLIMIT, cfg.GOGC = 0, "", ""
+	cfg.DurationMS, cfg.SampleMS = 1500, system.MaxObserverIntervalMS+1
+	t.Setenv("GOMEMLIMIT", "malformed-inherited-limit")
+	t.Setenv(gogcEnvironmentKey, "off")
+	t.Setenv("GOMAXPROCS", "1")
 	options.BaseRepository = ""
 	result, err = RunExperiment(context.Background(), cfg, options)
 	require.NoError(t, err)
 	assert.Len(t, result.Experiment.Configurations, 2)
+	for _, configuration := range result.Experiment.Configurations {
+		assert.NotContains(t, configuration.Environment, "GOMEMLIMIT")
+		assert.NotContains(t, configuration.Environment, gogcEnvironmentKey)
+		assert.NotContains(t, configuration.Environment, "GOMAXPROCS")
+	}
 	assert.Empty(t, result.Experiment.Trials[0].Samples)
+	for _, trial := range result.Experiment.Trials {
+		assert.Equal(t, "100", trial.Target.Effective["gogc"], "inherited GOGC must not affect on-off trials")
+		if trial.ConfigurationID == "fat-memfd-tuning-off" {
+			assert.Equal(t, "9223372036854775807", trial.Target.Effective["gomemlimit"])
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err = RunExperiment(ctx, cfg, options)
