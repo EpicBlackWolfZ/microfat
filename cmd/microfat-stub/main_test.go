@@ -409,10 +409,9 @@ func TestHelperFunctions(t *testing.T) {
 	}
 
 	os.Args = []string{testAppArg, "--microfat:trim-to", "  "}
-	_, err = extractTargetPath("--microfat:trim-to", "--microfat:trim-to", "")
-	if err == nil {
-		t.Errorf("expected error when target path is whitespace")
-	}
+	target, err = extractTargetPath("--microfat:trim-to", "--microfat:trim-to", "")
+	require.NoError(t, err)
+	require.Equal(t, "  ", target, "whitespace is valid destination path data")
 
 	err = trimTo("", nil, 0, "v1", lifecycle.DefaultOptions())
 	if err == nil {

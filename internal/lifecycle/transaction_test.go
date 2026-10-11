@@ -230,6 +230,47 @@ func TestExecute_FreshDestination_SuccessAndCollision(t *testing.T) {
 	assert.Equal(t, transformedContent, destDataAfter)
 }
 
+func TestExecute_WhitespaceOnlyDestinations(t *testing.T) {
+	// Relative whitespace-only names exercise destination validation before path cleaning.
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	original := []byte("original")
+	src := createTestBinary(t, tmpDir, "source", original)
+	transformed := []byte("transformed")
+	cases := []struct {
+		name string
+		path string
+	}{
+		{name: "Spaces", path: "  "},
+		{name: "Tab", path: "\t"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tx := lifecycle.Transaction{
+				SrcPath:  src,
+				DestPath: tc.path,
+				Intent:   lifecycle.IntentCreateOnly,
+				Opts:     lifecycle.DefaultOptions(),
+				Transform: func(staged *os.File) error {
+					_, err := staged.Write(transformed)
+					return err
+				},
+			}
+			require.NoError(t, lifecycle.Execute(tx))
+			require.ErrorIs(t, lifecycle.Execute(tx), lifecycle.ErrDestinationExists)
+			data, err := os.ReadFile(tc.path)
+			require.NoError(t, err)
+			assert.Equal(t, transformed, data)
+			data, err = os.ReadFile(src)
+			require.NoError(t, err)
+			assert.Equal(t, original, data)
+			staging, err := filepath.Glob(filepath.Join(tmpDir, ".microfat-tx-*.tmp"))
+			require.NoError(t, err)
+			assert.Empty(t, staging)
+		})
+	}
+}
+
 func TestExecute_InPlace_SuccessAndHardlinkProtection(t *testing.T) {
 	t.Parallel()
 

@@ -105,6 +105,11 @@ When executing in-place mutations (`--microfat:trim` or `--microfat:optimize`):
   ./app --microfat:optimize-to /path/to/extracted-elf
   ```
 
+Launcher destination commands (`--microfat:trim-to`, its `--microfat:specialize-to` alias, and
+`--microfat:optimize-to`) preserve leading and trailing whitespace in both `=PATH` and separate
+argument forms. Quote paths containing whitespace in the shell. Whitespace-only filenames are
+valid; an empty string is rejected, and an existing destination is checked at the requested name.
+
 Before any `trim`, `specialize`, `optimize`, or corresponding `-to` command, the launcher checks that the original deployment path still identifies its open running image. If the deployment was unlinked or replaced, the command fails without transforming the newer file. Restart from the intended deployment before transforming it. Read-only `--microfat:info` continues to describe the original image.
 
 ### Transactional Lifecycle & Metadata Policies

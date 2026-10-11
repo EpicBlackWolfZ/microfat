@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
@@ -45,7 +44,7 @@ func optimizeInPlace(
 func optimizeTo(
 	destPath string, selfFile *os.File, entry *format.VariantEntry, idx *format.Index, opts lifecycle.Options,
 ) error {
-	if strings.TrimSpace(destPath) == "" {
+	if destPath == "" {
 		return errors.New("destination path must not be empty")
 	}
 	return lifecycle.Execute(lifecycle.Transaction{
