@@ -349,12 +349,9 @@ func measureTrial(ctx context.Context, cfg ExperimentConfig, opts RunOptions, ge
 		if warm != nil {
 			files[warmOptions.RawPath], files["trials/"+trial.ID+"/warmup.stderr"] = warm.Raw, warm.Stderr
 			trial.Generator = warm.Process
+			trial.WarmupGenerator = &warm.Process
 			for name, metric := range warm.Resources {
 				trial.Metrics["warmup_generator_"+name] = metric
-			}
-			if evidenceErr := encodeExtra(files, "trials/"+trial.ID+"/warmup-process.json", warm.Process); evidenceErr != nil {
-				trial.Reason = "warmup evidence: " + errors.Join(err, evidenceErr).Error()
-				return
 			}
 		}
 		if err != nil {

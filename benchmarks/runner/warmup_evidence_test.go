@@ -3,7 +3,6 @@ package runner
 import (
 	"bytes"
 	"context"
-	json "encoding/json/v2"
 	"os"
 	"path/filepath"
 	"testing"
@@ -58,7 +57,7 @@ func TestWarmupFailureEvidence(t *testing.T) {
 			assert.NotContains(t, files, "trials/"+trial.ID+"/fortio.json")
 			assert.Equal(t, tc.raw, files["trials/"+trial.ID+"/warmup.json"])
 			assert.Equal(t, []byte(warmupFixtureStderr), files["trials/"+trial.ID+"/warmup.stderr"])
-			identity := assertWarmupProcessEvidence(t, trial, files, tool)
+			identity := assertWarmupProcessEvidence(t, trial, tool)
 			assertWarmupIdentityEqual(t, identity, trial.Generator)
 			assert.Contains(t, trial.Metrics, "warmup_generator_user_cpu_seconds")
 			assertWarmupFailureBundle(t, exp, trial, files)
@@ -69,6 +68,9 @@ func TestWarmupFailureEvidence(t *testing.T) {
 func TestWarmupStartFailureEvidence(t *testing.T) {
 	t.Parallel()
 	exp := testfixture.Experiment()
+	historical, err := schema.CanonicalV2(exp)
+	require.NoError(t, err)
+	assert.NotContains(t, string(historical), `"warmup_generator"`)
 	trial := exp.Trials[0]
 	trial.Outcome, trial.Metrics = schema.OutcomeFailed, make(map[string]schema.Measurement)
 	files := make(map[string][]byte)
@@ -80,8 +82,9 @@ func TestWarmupStartFailureEvidence(t *testing.T) {
 	assert.Nil(t, trial.Warmup)
 	assert.Nil(t, trial.Load)
 	assert.Empty(t, trial.Generator)
+	assert.Nil(t, trial.WarmupGenerator)
 	assert.Empty(t, trial.Metrics)
-	for _, name := range []string{"warmup.json", "warmup.stderr", "warmup-process.json"} {
+	for _, name := range []string{"warmup.json", "warmup.stderr"} {
 		assert.NotContains(t, files, "trials/"+trial.ID+"/"+name)
 	}
 	assertWarmupFailureBundle(t, exp, &trial, files)
@@ -138,7 +141,7 @@ func TestWarmupInterruptedEvidence(t *testing.T) {
 			assert.Nil(t, trial.Load)
 			assert.Equal(t, []byte("warmup running\n"), files["trials/"+trial.ID+"/warmup.json"])
 			assert.Equal(t, []byte(warmupFixtureStderr), files["trials/"+trial.ID+"/warmup.stderr"])
-			assertWarmupIdentityEqual(t, assertWarmupProcessEvidence(t, &trial, files, tool), trial.Generator)
+			assertWarmupIdentityEqual(t, assertWarmupProcessEvidence(t, &trial, tool), trial.Generator)
 			finalizeTrial(ctx, time.Now(), &trial, files)
 			assert.Equal(t, schema.OutcomeCancelled, trial.Outcome)
 			assert.Equal(t, ctx.Err().Error(), trial.Reason)
@@ -183,7 +186,7 @@ func TestValidWarmupEvidence(t *testing.T) {
 			assert.Equal(t, "trials/"+trial.ID+"/warmup.json", trial.Warmup.RawPath)
 			assert.Equal(t, tc.warmup, files[trial.Warmup.RawPath])
 			assert.Equal(t, []byte(warmupFixtureStderr), files["trials/"+trial.ID+"/warmup.stderr"])
-			identity := assertWarmupProcessEvidence(t, trial, files, tool)
+			identity := assertWarmupProcessEvidence(t, trial, tool)
 			if tc.successful == warmupFixtureCount {
 				assert.NotEqual(t, identity.PID, trial.Generator.PID, "steady state has its own generator process")
 				assert.Contains(t, trial.Generator.Arguments, "20ms")
@@ -230,14 +233,10 @@ func measureWarmupFixture(t *testing.T, ctx context.Context, tool string,
 	return &trial, files
 }
 
-func assertWarmupProcessEvidence(t *testing.T, trial *schema.ProcessTrial, files map[string][]byte,
-	tool string) schema.ProcessIdentity {
+func assertWarmupProcessEvidence(t *testing.T, trial *schema.ProcessTrial, tool string) schema.ProcessIdentity {
 	t.Helper()
-	path := "trials/" + trial.ID + "/warmup-process.json"
-	_, exists := files[path]
-	require.True(t, exists, "warmup process identity must be retained")
-	var identity schema.ProcessIdentity
-	require.NoError(t, json.Unmarshal(files[path], &identity))
+	require.NotNil(t, trial.WarmupGenerator, "warmup process identity must be retained")
+	identity := *trial.WarmupGenerator
 	assert.Positive(t, identity.PID)
 	assert.Equal(t, tool, identity.Executable)
 	assert.Contains(t, identity.Arguments, "10ms")
@@ -264,6 +263,12 @@ func assertWarmupFailureBundle(t *testing.T, exp *schema.ExperimentV2, trial *sc
 	assert.Equal(t, trial.Outcome, read.Trials[0].Outcome)
 	assert.Equal(t, trial.Reason, read.Trials[0].Reason)
 	assertWarmupIdentityEqual(t, trial.Generator, read.Trials[0].Generator)
+	if trial.WarmupGenerator != nil {
+		require.NotNil(t, read.Trials[0].WarmupGenerator)
+		assertWarmupIdentityEqual(t, *trial.WarmupGenerator, *read.Trials[0].WarmupGenerator)
+	} else {
+		assert.Nil(t, read.Trials[0].WarmupGenerator)
+	}
 	assert.Equal(t, trial.Warmup, read.Trials[0].Warmup)
 	verified, err := report.VerifyFiles(bundle)
 	require.NoError(t, err)

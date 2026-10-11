@@ -122,6 +122,7 @@ type ProcessTrial struct {
 	DurationNS       int64                  `json:"duration_ns"`
 	Target           ProcessIdentity        `json:"target"`
 	Generator        ProcessIdentity        `json:"generator"`
+	WarmupGenerator  *ProcessIdentity       `json:"warmup_generator,omitempty"`
 	Observer         ProcessIdentity        `json:"observer"`
 	Controls         []Control              `json:"controls"`
 	Metrics          map[string]Measurement `json:"metrics"`
