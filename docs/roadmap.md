@@ -1,6 +1,6 @@
 # Production roadmap
 
-Updated 2026-09-28 for the updater and native mount-layout qualification.
+Updated 2026-10-11 for release readiness and the remaining signed-candidate/public acceptance boundaries.
 GitHub issues define remaining scope,
 dependencies and acceptance criteria. Milestones group deliverable outcomes; they are not dates.
 
@@ -98,38 +98,50 @@ attestations and historical asset replacement are outside this milestone.
 | Codecov reporting while retaining the authoritative exact coverage gate | [#262](https://github.com/EpicBlackWolfZ/microfat/issues/262) |
 | Explicit verified update checks and generation-based self-update | [#204](https://github.com/EpicBlackWolfZ/microfat/issues/204) |
 | Source-built native mount, executable-hint and mounted-generation qualification | [#157](https://github.com/EpicBlackWolfZ/microfat/issues/157) |
+| Verified installer source implementation, generation transactions and ownership | [#203](https://github.com/EpicBlackWolfZ/microfat/issues/203) |
+| Authenticated Homebrew cask generator and native lifecycle qualification | [#205](https://github.com/EpicBlackWolfZ/microfat/issues/205) |
+| Source-built real-process concurrency/policy qualification and signed-candidate release gate | [#260](https://github.com/EpicBlackWolfZ/microfat/issues/260) |
+| F-only ARM64 QEMU descriptor-execution qualification | [#231](https://github.com/EpicBlackWolfZ/microfat/issues/231) |
+| Independent native Go CPU adaptation with explicit tuning precedence | [#258](https://github.com/EpicBlackWolfZ/microfat/issues/258) |
+| Cache-first auto dispatch with descriptor verification and non-mutating misses | [#44](https://github.com/EpicBlackWolfZ/microfat/issues/44) |
 
-These issues are closed and their implementations are merged. ABI metadata consistency does not
-prove that a target system provides a compatible loader or libc. The #203 implementation now supplies
+These source implementations are merged. Issues #203, #205 and #260 retain the acceptance boundaries
+below; they are not complete merely because their source CI passes. Installer source landed in
+[#276](https://github.com/EpicBlackWolfZ/microfat/pull/276), Homebrew tooling in
+[#282](https://github.com/EpicBlackWolfZ/microfat/pull/282), and runtime qualification in
+[#283](https://github.com/EpicBlackWolfZ/microfat/pull/283). ABI metadata consistency does not
+prove that a target system provides a compatible loader or libc. The #203 implementation supplies
 the [installation contract](design/installation-discovery-contract.md), authenticated bootstrap,
 generation transactions and native qualification jobs. Its first public bootstrap still requires
 published signed helper assets; implementation and snapshot validation do not establish release availability.
 
 ### Remaining scope
 
-The table is the remaining delivery scope, not a claim that all work is absent:
-existing integrity, lifecycle, release-verification and basic real seccomp fallback tests are foundations
-to preserve and extend.
+The remaining issues track acceptance of the integrated release and its public distribution.
+Native source qualification, unsigned packaging snapshots, authenticated candidate qualification,
+and public availability establish different facts and must retain separate evidence.
 
 | Scope | Issue | Dependency and completion boundary |
 | --- | --- | --- |
-| Verified user installer | [#203](https://github.com/EpicBlackWolfZ/microfat/issues/203) | Implementation covers bootstrap, transactions, ownership, repair/uninstall and physical-generation discovery. Retain the issue's acceptance boundary through review and native signed-draft qualification; the first helper release is not available merely because a snapshot passes. |
-| Official Linux Homebrew tap | [#205](https://github.com/EpicBlackWolfZ/microfat/issues/205) | Consume #203's layout/ownership contract and finalized verified release assets. Cover Linux amd64/arm64, byte preservation, real prefix/link discovery and release-ordered tap publication. |
-| ARM64 QEMU descriptor-execution qualification | [#231](https://github.com/EpicBlackWolfZ/microfat/issues/231) | The [F-only QEMU qualification](qemu-qualification.md) reuses #157 fixtures with raw-path and descriptor controls, required CI and explicit prerequisite skips. Keep #231 open until reviewed and merged. Native ARM64 and emulation evidence remain distinct. |
-| Real concurrent execution and policy-denied fallback qualification | [#260](https://github.com/EpicBlackWolfZ/microfat/issues/260) | Reuse #157's disposable mount fixtures, coordinate #231, and qualify the final #44 behavior on native amd64/arm64 with authenticated candidate artifacts. Extend real-process and policy evidence without assuming a cache algorithm defect. |
-| Independent CPU-tuning policy | [#258](https://github.com/EpicBlackWolfZ/microfat/issues/258) | Preserve native Go CPU adaptation independently of memory tuning in launcher/runtimeinit, with explicit precedence and isolated quota-change qualification. Existing defaults remain until deliberately changed. |
-| Cache-first auto execution | [#44](https://github.com/EpicBlackWolfZ/microfat/issues/44) | The PR implementation defines read-only hits, non-mutating misses and bounded fallback, retaining mandatory descriptor verification, sealed memfd and explicit modes. Failure regressions and cold/warm measurements with identical tuning accompany review. Await maintainer merge; keep #44 open until then and qualify the integrated behavior under #260. |
+| Verified user installer | [#203](https://github.com/EpicBlackWolfZ/microfat/issues/203) | Qualify the exact signed draft on native amd64/arm64, then verify the first published v0.3.0 helper/bootstrap path on a clean supported system without Go or preinstalled Cosign. Snapshot and historical-release checks do not prove that first public path. |
+| Official Linux Homebrew tap | [#205](https://github.com/EpicBlackWolfZ/microfat/issues/205) | The [tap bootstrap](https://github.com/EpicBlackWolfZ/homebrew-tap/pull/1) is merged with an exact reviewed tooling pin and native checks. After immutable v0.3.0 publication, authenticate the generated recipe, qualify both architectures, merge its PR and verify the documented public install command. No placeholder cask satisfies acceptance. |
+| Authenticated runtime candidate qualification | [#260](https://github.com/EpicBlackWolfZ/microfat/issues/260) | Require native amd64/arm64 evidence for the final integrated source and the exact authenticated signed candidate, including full/minimal launchers, cold/warm cache, actual isolated policy/resource failures, provenance and explicit skips. Source-built and QEMU results do not replace candidate evidence. |
 
 ### Delivery order and exit
 
-1. Complete #203 as the distribution foundation. Transactionality and ownership metadata belong to
-   the installer itself; deferring either to the updater or tap would leave a circular dependency.
-2. Reuse #157's [mount qualification fixtures](mount-layouts.md) for #231 and #260. Their source-built
-   native evidence does not replace emulator or authenticated-candidate qualification. #258 remains independent.
-3. Implement #205 against #203's established contract and #204's ownership detection. Review #44's explicit
-   failure tests and startup measurements, then finalize #260 against the merged runtime behavior.
-   Qualification harness development can begin earlier without implying final candidate acceptance.
-4. Qualify the integrated candidate and complete documentation and draft-release asset verification.
+1. Merge reviewed correctness fixes and require the full source CI, exact coverage, native qualification,
+   product-oriented snapshot checks, and branch-only `benchmarks.yml` `tier=release` qualification
+   on the integrated revision. A branch dispatch checks source benchmark/evidence and skips the tag-only
+   publisher. Update the release notes and tap tooling pin to the reviewed source; preserve environment
+   limits and unavailable checks explicitly.
+2. Stop at release readiness until publication is approved. Creating a `v*` tag starts both the draft
+   release pipeline and the benchmark pipeline, whose successful finalizer publishes the release.
+   The existing workflows do not provide a tag-based signed-candidate run isolated from that publication path.
+3. After approval, require the exact signed draft's installer and runtime gates on native amd64/arm64,
+   complete hosted benchmark evidence, and inventory revalidation before immutable publication.
+4. Verify the first public bootstrap/helper path. Authenticate and qualify the first public Homebrew
+   recipe before merging it and verifying its install command. Close #203, #205 and #260 only from
+   their own completed acceptance evidence, not from source CI or milestone readiness alone.
 
 The installer defaults to a user directory; system-wide writes are explicit. Homebrew controls its
 own upgrades and removal. Native macOS, new binary formats, speculative compression research and
