@@ -287,7 +287,7 @@ microfat pack --manifest pgo.yaml -o bin/myapp
 | `--stub` | *(none)* | `string` | `""` | Path to launcher stub binary. Takes precedence over automatic discovery; if omitted, evaluates strict precedence: manifest `stub:`, sibling companion stub, then absolute PATH directories matching `--stub-profile`. |
 | `--stub-profile` | *(none)* | `string` | `""` | Launcher stub profile: `full` (default, selects `microfat-stub`) or `minimal` (selects `microfat-stub-minimal`). |
 | `--output` | `-o` | `string` | `""` | Destination output path for the packaged fat executable. |
-| `--name` | *(none)* | `string` | `""` | Application name string embedded in manifest. |
+| `--name` | *(none)* | `string` | `""` | Valid UTF-8 application name embedded in manifest. |
 | `--os` | *(none)* | `string` | `"linux"` | Target operating system. |
 | `--arch` | *(none)* | `string` | `"amd64"` | Target architecture (`amd64` or `arm64`). |
 | `--variant` | `-v` | `stringArray` | `[]` | Variant mapping in `<level>=<path>` format (e.g. `-v v1=bin/v1 -v v3=bin/v3`). |
@@ -322,6 +322,14 @@ compression codecs and levels are resolved according to strict hierarchical prec
    - `balanced` (default when profile and algorithm are omitted): Sets `zstd:better`.
 5. **Launcher Stub Support**: The resulting binary can be executed with either the standard (full) launcher stub or the lightweight
    minimal launcher stub (built with `-tags minimal`).
+
+An inline CLI level overrides an inherited root manifest level.
+An inline per-variant level such as `algorithm: zstd:fastest` overrides inherited root or CLI levels.
+If the same variant also supplies `compression.level`, that separate level takes precedence over its inline level.
+An algorithm override without an inline or separate level retains an inherited separate level, when present.
+Accepted numeric Zstandard levels use the same setting regardless of leading zeros, a plus sign, or surrounding whitespace:
+values up to 1 select `fastest`, 2 selects `default`, 3 through 9 select `better`, and 10 or higher select `best`.
+These numbers select microfat's encoder presets.
 
 The following manifest fragment illustrates omitting algorithms while selecting profiles at root and variant scopes:
 

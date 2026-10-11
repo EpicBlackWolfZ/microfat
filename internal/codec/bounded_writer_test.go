@@ -76,11 +76,11 @@ func TestBoundedWriter(t *testing.T) {
 		require.Zero(t, n)
 	})
 
-	t.Run("Unspecified limit defaults to DefaultMaxPayloadSize", func(t *testing.T) {
+	t.Run("Zero limit is exact and negative limit uses the safety ceiling", func(t *testing.T) {
 		t.Parallel()
 		var buf bytes.Buffer
 		bw1 := newBoundedWriter(&buf, 0)
-		require.Equal(t, DefaultMaxPayloadSize, bw1.limit)
+		require.Equal(t, int64(0), bw1.limit)
 
 		bw2 := newBoundedWriter(&buf, -5)
 		require.Equal(t, DefaultMaxPayloadSize, bw2.limit)

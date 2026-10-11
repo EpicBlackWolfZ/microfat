@@ -20,6 +20,7 @@ const (
 	testPayloadSizeTiny  = 64 * 1024   // 64 KB
 	testCodecZstd        = "zstd"
 	testLevelFastest     = "fastest"
+	testLevelBest        = "best"
 )
 
 func generateTestData(size int) []byte {
@@ -668,6 +669,25 @@ func TestDecompress_NegativeAndOversizedBounds(t *testing.T) {
 			if err == nil || !errors.Is(err, codec.ErrSizeMismatch) {
 				t.Fatalf("expected ErrSizeMismatch for exceeding DefaultMaxPayloadSize, got %v", err)
 			}
+		})
+	}
+}
+
+func TestTrainDictionaryLargeSamples(t *testing.T) {
+	t.Parallel()
+	const sampleRepetitions = 256
+	payload := bytes.Repeat(generateDictionarySamples()[0], sampleRepetitions)
+	require.Greater(t, len(payload), testPayloadSizeLarge)
+	for _, level := range []string{testLevelFastest, "default", "better", testLevelBest} {
+		t.Run(level, func(t *testing.T) {
+			dict, err := codec.TrainDictionary([][]byte{payload, payload}, codec.DefaultDictSize, level)
+			require.NoError(t, err)
+			require.NotEmpty(t, dict)
+			c := codec.NewZstdCodec()
+			var compressed, output bytes.Buffer
+			require.NoError(t, c.CompressWithDict(&compressed, payload, level, dict))
+			require.NoError(t, c.DecompressWithDict(&output, &compressed, int64(len(payload)), dict))
+			require.Equal(t, payload, output.Bytes())
 		})
 	}
 }

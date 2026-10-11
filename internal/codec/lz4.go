@@ -101,14 +101,11 @@ func (c *LZ4Codec) Decompress(w io.Writer, r io.Reader, uncompressedSize int64) 
 		if errors.Is(copyErr, ErrSizeMismatch) {
 			return copyErr
 		}
-		return fmt.Errorf("%w: %v", ErrDecompressionFailed, copyErr)
+		return fmt.Errorf("%w: %w", ErrDecompressionFailed, copyErr)
 	}
 
-	if uncompressedSize > 0 && bw.written != uncompressedSize {
+	if bw.written != uncompressedSize {
 		return fmt.Errorf("%w: expected %d bytes, got %d", ErrSizeMismatch, uncompressedSize, bw.written)
-	}
-	if uncompressedSize == 0 && bw.written != 0 {
-		return fmt.Errorf("%w: expected 0 bytes, got %d", ErrSizeMismatch, bw.written)
 	}
 
 	return nil

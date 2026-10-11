@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 )
@@ -469,6 +470,9 @@ func assemblePackOptions(
 	}
 	if opts.Compression != "" {
 		packOpts.Compression = opts.Compression
+		if _, inlineLevel := codec.ParseCompressionSpec(opts.Compression); inlineLevel != "" {
+			packOpts.CompressionLevel = inlineLevel
+		}
 	}
 	if opts.CompressionLevel != "" {
 		packOpts.CompressionLevel = opts.CompressionLevel

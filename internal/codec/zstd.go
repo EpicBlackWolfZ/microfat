@@ -29,6 +29,11 @@ const (
 
 	// historySampleFractionDivisor is the portion of total sample bytes allocated for the dictionary history window.
 	historySampleFractionDivisor = 4
+
+	zstdDefaultNumericLevel = 2
+
+	// BuildDict encodes each training sample as one Zstandard block.
+	maxDictTrainingSampleSize = 128 * 1024
 )
 
 // ZstdCodec implements the Codec and DictCodec interfaces for Zstandard compression.
@@ -52,11 +57,11 @@ func (c *ZstdCodec) MapLevel(level string) (zstd.EncoderLevel, error) {
 	switch cleanLevel {
 	case "", "default", "standard":
 		return zstd.SpeedDefault, nil
-	case "fastest", "fast", "speed", "1":
+	case "fastest", "fast", "speed":
 		return zstd.SpeedFastest, nil
-	case "better", "3":
+	case "better":
 		return zstd.SpeedBetterCompression, nil
-	case "best", "max", "11", "19":
+	case "best", "max":
 		return zstd.SpeedBestCompression, nil
 	}
 
@@ -67,9 +72,9 @@ func (c *ZstdCodec) MapLevel(level string) (zstd.EncoderLevel, error) {
 	switch {
 	case num <= 1:
 		return zstd.SpeedFastest, nil
-	case num == 2 || num == 3:
+	case num == zstdDefaultNumericLevel:
 		return zstd.SpeedDefault, nil
-	case num >= 4 && num <= 9:
+	case num >= 3 && num <= 9:
 		return zstd.SpeedBetterCompression, nil
 	default:
 		return zstd.SpeedBestCompression, nil
@@ -146,14 +151,11 @@ func (c *ZstdCodec) DecompressWithDict(w io.Writer, r io.Reader, uncompressedSiz
 		if errors.Is(copyErr, ErrSizeMismatch) {
 			return copyErr
 		}
-		return fmt.Errorf("%w: %v", ErrDecompressionFailed, copyErr)
+		return fmt.Errorf("%w: %w", ErrDecompressionFailed, copyErr)
 	}
 
-	if uncompressedSize > 0 && bw.written != uncompressedSize {
+	if bw.written != uncompressedSize {
 		return fmt.Errorf("%w: expected %d bytes, got %d", ErrSizeMismatch, uncompressedSize, bw.written)
-	}
-	if uncompressedSize == 0 && bw.written != 0 {
-		return fmt.Errorf("%w: expected 0 bytes, got %d", ErrSizeMismatch, bw.written)
 	}
 
 	return nil
@@ -207,10 +209,21 @@ func TrainDictionary(samples [][]byte, targetDictSize int, level string) ([]byte
 		encLevel = zstd.SpeedDefault
 	}
 
+	// The upstream dictionary builder does not split oversized samples before
+	// passing them to its block encoder. Keep each sample within the block limit.
+	trainingSamples := make([][]byte, 0, len(samples))
+	for _, sample := range samples {
+		for len(sample) > maxDictTrainingSampleSize {
+			trainingSamples = append(trainingSamples, sample[:maxDictTrainingSampleSize])
+			sample = sample[maxDictTrainingSampleSize:]
+		}
+		trainingSamples = append(trainingSamples, sample)
+	}
+
 	dict, err := zstd.BuildDict(zstd.BuildDictOptions{
 		ID:       DefaultDictionaryID,
 		History:  hist,
-		Contents: samples,
+		Contents: trainingSamples,
 		Level:    encLevel,
 	})
 	if err != nil {
