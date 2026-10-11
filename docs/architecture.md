@@ -100,6 +100,10 @@ for trusted actors, parser/resource bounds and the regression tests behind each 
 | `CompLen` | `uint8` | Byte length | Length $N_{\text{comp}}$ of compression codec string. |
 | `Compression` | `[N]byte` | UTF-8 | Codec identifier (e.g. `"zstd"`, `"lz4"`, `"none"`). |
 
+Payload and dictionary SHA-256 fields in both formats accept lowercase, uppercase, or mixed-case hexadecimal.
+Readers normalize these digests to lowercase after verifying the original index bytes against the trailer hash.
+Verification and cache filenames use the normalized digest, so casing does not change integrity results or cache identity.
+
 ---
 
 ## 4. Shared Inter-Variant Dictionary Mechanics (`--dict`)
