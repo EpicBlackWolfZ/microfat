@@ -17,7 +17,8 @@ import (
 // While the Go compiler (src/internal/buildcfg/cfg.go) accepts GOARM64 target levels and emits specific
 // instructions (such as mandatory LSE atomics starting at v8.1), Microfat establishes a granular, forward-compatible
 // hardware capability contract for every ISA milestone (including v8.8 MOPS/NMI/HBC and v8.9 GCS/THE)
-// to guarantee that binaries built or specialized for these levels execute only on CPUs with verified hardware support.
+// to select only levels whose requirements have been observed. These complete feature structs test
+// the compatibility model, not native collection: NMI/THE are unobservable through the reviewed Linux ABI.
 type arm64LevelFixture struct {
 	Level            string
 	CompilerTarget   string
@@ -164,7 +165,7 @@ func getARM64CompatibilityFixtures() []arm64LevelFixture {
 				f.HasHBC = true
 				return f
 			},
-			SourceDoc: "Go compiler GOARM64=v8.8: v8.7 + Memory Operations (MOPS), NMI, and Hinted Conditional Branches",
+			SourceDoc: "Microfat v8.8 contract: v8.7 + MOPS, NMI and HBC; native NMI detection is unavailable",
 		},
 		{
 			Level:            microarch.ARM64v8_9,
@@ -182,7 +183,7 @@ func getARM64CompatibilityFixtures() []arm64LevelFixture {
 				f.HasTHE = true
 				return f
 			},
-			SourceDoc: "Go compiler GOARM64=v8.9: v8.8 + Guarded Control Stack (GCS) and Translation Hardening (THE)",
+			SourceDoc: "Microfat v8.9 contract: v8.8 + GCS and THE; native THE detection is unavailable",
 		},
 		{
 			Level:            microarch.ARM64v9_0,

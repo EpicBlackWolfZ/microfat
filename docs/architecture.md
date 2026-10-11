@@ -276,8 +276,8 @@ Microfat provides an ARM64 compatibility model based on the Arm Architecture Ref
 | `v8.5` | `GOARM64=v8.5` | `v8.4` + Data Independent Timing (`dit`), `flagm` | Apple M2/M3, modern server cores |
 | `v8.6` | `GOARM64=v8.6` | `v8.5` + Matrix Multiplication (`i8mm`), BFloat16 (`bf16`) | Apple M3/M4 |
 | `v8.7` | `GOARM64=v8.7` | `v8.6` + Enhanced WFIT/WFIS acceleration (`wfxt`) | Modern enterprise ARM silicon |
-| `v8.8` | `GOARM64=v8.8` | `v8.7` + Memory Operations (`mops`), `nmi`, `hbc` | Next-gen server cores |
-| `v8.9` | `GOARM64=v8.9` | `v8.8` + Guarded Control Stack (`gcs`), `the` | Next-gen hardened server silicon |
+| `v8.8` | `GOARM64=v8.8` | `v8.7` + Memory Operations (`mops`), `nmi`, `hbc` | Native automatic selection unavailable: `nmi` is unobservable |
+| `v8.9` | `GOARM64=v8.9` | `v8.8` + Guarded Control Stack (`gcs`), `the` | Native automatic selection unavailable: `nmi` and `the` are unobservable |
 | `v9.0` | `GOARM64=v9.0` | Scalable Vector Extension (`sve`), SVE BitPerm | AWS Graviton 4, Neoverse V2 |
 | `v9.1` | `GOARM64=v9.1` | `v9.0` + SVE2 baseline extensions | Enterprise HPC nodes |
 | `v9.2` | `GOARM64=v9.2` | `v9.0` + SVE2 + `i8mm` + `bf16` | AI & HPC cloud instances |
@@ -290,6 +290,23 @@ Microfat strictly distinguishes between three complementary layers:
 2. **Microfat ARM ISA Compatibility Model**: Microfat defines a granular, forward-compatible hardware capability contract derived from Arm Architecture Reference Manual Armv8-A / Armv9-A specifications for each milestone (including `v8.8` MOPS/NMI/HBC and `v8.9` GCS/THE).
 3. **Runtime CPU Probing (`auxv` / `AT_HWCAP`)**: The launcher stub never assumes compilation targets. It probes the host kernel via Linux Auxiliary Vectors (`AT_HWCAP`, `AT_HWCAP2`) or Darwin `sysctl` to dynamically match the highest satisfied tier, safely degrading execution if any prerequisite is missing.
 
+Accepting a compiler target or packing a variant does not establish that native detection can select
+it. Linux exposes `mops` and `hbc` through `AT_HWCAP2` bits 43 and 44, and `gcs` through
+`AT_HWCAP` bit 32. The collector reports those observed features, but the published Linux userspace
+interfaces do not provide a safe probe for this model's `nmi` or `the` requirements. They remain
+false. Consequently native automatic selection cannot satisfy `v8.8` or `v8.9`; diagnostics report
+the missing requirements and the launcher selects another compatible variant, or fails if none
+exists. Include a compatible fallback when packing these levels. The separate `v9.x` prerequisite
+branch is unchanged, and forcing a level still requires compatibility.
+
+The mappings follow the [Linux HWCAP definitions](https://github.com/torvalds/linux/blob/v6.19/arch/arm64/include/uapi/asm/hwcap.h),
+[ELF HWCAP ABI](https://docs.kernel.org/arch/arm64/elf_hwcaps.html), and
+[userspace feature-register ABI](https://docs.kernel.org/arch/arm64/cpu-feature-registers.html).
+Injected collector fixtures verify feature mappings and conservative selection; native ARM64 CI
+checks the running kernel's actual auxv against CLI diagnostics. A native pass with those bits
+absent does not qualify execution on hardware that provides MOPS, HBC or GCS. Emulator evidence
+is separate from native hardware evidence.
+
 ### Dual-Tier CPU Feature Probing Architecture
 
 1. **AMD64 Microarchitecture (Exclusive CPUID Authority)**:
@@ -298,7 +315,7 @@ Microfat strictly distinguishes between three complementary layers:
 
 2. **ARM64 Microarchitecture (Auxiliary Vectors & Fallback)**:
    - **Primary Layer**: Directly inspects Linux Auxiliary Vectors (`AT_HWCAP` & `AT_HWCAP2` via `golang.org/x/sys/cpu`) or Darwin `sysctl`.
-   - **Fallback Layer**: If running in restricted containers, chroots, or QEMU user emulation where auxiliary vectors are stripped, `internal/microarch` automatically falls back to parsing `/proc/cpuinfo` `Features:` token streams.
+   - **Supplemental Linux Layer**: Reads `/proc/self/auxv` for BF16, WFxT, SME, SME2, MOPS, HBC and GCS. Unavailable or missing entries leave these supplemental flags false. The baseline `golang.org/x/sys/cpu` collector has its own register or `/proc/cpuinfo` fallback; microfat adds no such fallback for supplemental flags and never promotes from a CPU model or target level.
 
 ---
 

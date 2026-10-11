@@ -170,12 +170,12 @@ func TestLinuxAuxvARM64ParsingEdgeCases(t *testing.T) {
 	binary.LittleEndian.PutUint64(auxvData[48:56], auxvAT_HWCAP2) // After AT_NULL (should be ignored)
 	binary.LittleEndian.PutUint64(auxvData[56:64], hwcap2SME|hwcap2SME2)
 
-	bf16, wfxt, sme, sme2 := parseLinuxAuxvARM64(auxvData)
-	if !bf16 || !wfxt {
-		t.Errorf("expected bf16 and wfxt to be true, got bf16=%v, wfxt=%v", bf16, wfxt)
+	features := parseLinuxAuxvARM64(auxvData)
+	if !features.HasBF16 || !features.HasWFxT {
+		t.Errorf("expected bf16 and wfxt to be true, got %+v", features)
 	}
-	if sme || sme2 {
-		t.Errorf("expected sme and sme2 to be false due to AT_NULL termination, got sme=%v, sme2=%v", sme, sme2)
+	if features.HasSME || features.HasSME2 {
+		t.Errorf("expected sme and sme2 to be false due to AT_NULL termination, got %+v", features)
 	}
 }
 

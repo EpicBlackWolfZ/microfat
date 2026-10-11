@@ -888,24 +888,25 @@ func TestParseLinuxAuxvARM64(t *testing.T) {
 	binary.LittleEndian.PutUint64(auxvData[16:24], 0)
 	binary.LittleEndian.PutUint64(auxvData[24:32], 0)
 
-	bf16, wfxt, sme, sme2 := parseLinuxAuxvARM64(auxvData)
-	if !bf16 || !wfxt || !sme || !sme2 {
-		t.Errorf("expected all auxv flags to be true, got bf16=%v, wfxt=%v, sme=%v, sme2=%v", bf16, wfxt, sme, sme2)
+	features := parseLinuxAuxvARM64(auxvData)
+	if !features.HasBF16 || !features.HasWFxT || !features.HasSME || !features.HasSME2 {
+		t.Errorf("expected all existing HWCAP2 flags to be true, got %+v", features)
 	}
 
 	// 2. Empty / truncated data
-	bf16, wfxt, sme, sme2 = parseLinuxAuxvARM64([]byte{1, 2, 3})
-	if bf16 || wfxt || sme || sme2 {
+	features = parseLinuxAuxvARM64([]byte{1, 2, 3})
+	if features != (ARM64Features{}) {
 		t.Errorf("expected all false for truncated auxv data")
 	}
 
 	// 3. Different tag
+	const auxvATRandom = 25
 	otherTagData := make([]byte, 16)
-	binary.LittleEndian.PutUint64(otherTagData[0:8], 16) // AT_HWCAP
+	binary.LittleEndian.PutUint64(otherTagData[0:8], auxvATRandom)
 	binary.LittleEndian.PutUint64(otherTagData[8:16], 0xFFFFFFFFFFFFFFFF)
-	bf16, wfxt, sme, sme2 = parseLinuxAuxvARM64(otherTagData)
-	if bf16 || wfxt || sme || sme2 {
-		t.Errorf("expected all false for non-HWCAP2 tag")
+	features = parseLinuxAuxvARM64(otherTagData)
+	if features != (ARM64Features{}) {
+		t.Errorf("expected all false for unrelated tag")
 	}
 }
 
@@ -999,15 +1000,15 @@ func TestCurrentARM64FeaturesAuxv(t *testing.T) {
 	origFunc := readLinuxAuxvARM64Func
 	defer func() { readLinuxAuxvARM64Func = origFunc }()
 
-	readLinuxAuxvARM64Func = func() (bool, bool, bool, bool) {
-		return true, true, true, true
+	readLinuxAuxvARM64Func = func() ARM64Features {
+		return ARM64Features{HasBF16: true, HasWFxT: true, HasSME: true, HasSME2: true}
 	}
 	f := currentARM64Features()
 	if !f.HasBF16 || !f.HasWFxT || !f.HasSME || !f.HasSME2 {
 		t.Errorf("expected mock auxv flags to be populated, got %+v", f)
 	}
 
-	_, _, _, _ = readLinuxAuxvARM64()
+	_ = readLinuxAuxvARM64()
 }
 
 func TestReadPolicyFromEnv(t *testing.T) {
