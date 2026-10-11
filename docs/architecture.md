@@ -215,6 +215,9 @@ materialization path. That path can create the cache or replace a corrupt safe r
 After a warm entry fails execution, a memfd failure returns both attempts in order (cache, then
 memfd), without another cache attempt. Payload/dictionary corruption or decompression errors found
 during extraction are terminal under all modes.
+On an auto miss, extraction-memory-budget rejection is also terminal: it occurs before memfd
+creation and leaves cache directories, permissions and existing entries untouched. A verified
+warm cache hit does not extract the source payload and therefore bypasses this extraction check.
 
 Explicit `memfd` skips cache discovery and requires creation, verification, sealing and execution
 to succeed. Explicit `cache` skips memfd and materializes/repairs only safe regular cache entries.

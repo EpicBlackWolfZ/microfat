@@ -178,8 +178,8 @@ func executeVariant(
 		return dispErr
 	}
 
-	// If fat binary payload or dictionary is corrupted, fail fast without attempting fallback
-	if isPayloadCorruptionOrDecompressionError(err) {
+	// Extraction preflight and integrity failures cannot benefit from materializing cache fallback.
+	if errors.Is(err, cgroup.ErrMemoryBudget) || isPayloadCorruptionOrDecompressionError(err) {
 		return err
 	}
 
