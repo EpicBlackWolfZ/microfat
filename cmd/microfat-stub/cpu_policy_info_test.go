@@ -49,7 +49,7 @@ func TestPrintInfoNativeCPUPolicy(t *testing.T) {
 				assert.NotContains(t, info.Cgroup, "gomaxprocs")
 				assert.Equal(t, float64(cpuCount), info.Cgroup["cpu_quota"])
 			} else {
-				assert.Contains(t, string(output), "4.00 cores -> native Go CPU policy")
+				assert.Contains(t, string(output), "4 cores -> native Go CPU policy")
 				assert.NotContains(t, string(output), "Auto GOMAXPROCS")
 			}
 		})

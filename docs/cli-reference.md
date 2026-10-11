@@ -503,6 +503,19 @@ Every fat binary built with standard `microfat-stub` supports built-in meta-comm
 ./myapp --microfat:help
 ```
 
+`info` reports the requested execution policy before application dispatch. Its JSON `exec_mode`
+is `auto`, `cache`, or `memfd`; `auto` lists separate prospective cache and memfd plans under
+`runtime.candidates`. Inspection does not choose an execution path, run the application, or populate
+the cache. The memfd plan accounts for page-rounded retained executable storage.
+
+Each candidate separates computed tuning from `effective_environment`, which describes the
+`GOMEMLIMIT`, `GOMAXPROCS`, and `GOGC` values that would reach the application. Inherited values,
+including explicitly empty values, take priority. Disabled tuning and dry-run retain the computed
+plan without injecting it. Cgroup observation statuses distinguish finite values from unknown
+observations; a zero numeric observation does not establish that resources are unlimited.
+The legacy `cgroup` tuning fields describe a computed plan only for an explicit cache or memfd policy;
+use each candidate's `effective_environment` to inspect its inherited or injected values.
+
 > [!NOTE]
 > **Minimal Stub Profile (`-tags minimal`)**:
 > In ultra-lean production deployments where launcher stub size must be minimized to $< 1.2\text{ MB}$, compile the stub with `go build -tags minimal ./cmd/microfat-stub` (or use `bin/microfat-stub-minimal`). The minimal stub retains zero-allocation binary table decoding and cache-first auto/sealed memfd dispatch, but strips interactive meta-command handlers (`--microfat:*`).

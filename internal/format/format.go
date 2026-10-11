@@ -388,19 +388,64 @@ type BinaryInfo struct {
 	DictionarySHA256 string         `json:"dictionary_sha256,omitempty"`
 	DictionaryID     uint32         `json:"dictionary_id,omitempty"`
 	Cgroup           *CgroupInfo    `json:"cgroup,omitempty"`
+	Runtime          *RuntimeInfo   `json:"runtime,omitempty"`
 	Variants         []VariantEntry `json:"variants"`
 	HostFeatures     []string       `json:"host_features"`
 }
 
 // CgroupInfo represents container cgroup telemetry and auto-tuning limits.
 type CgroupInfo struct {
-	Version          int     `json:"version"`
-	MemoryLimitBytes int64   `json:"memory_limit_bytes"`
-	CPUQuota         float64 `json:"cpu_quota"`
-	GOMEMLIMIT       string  `json:"gomemlimit,omitempty"`
-	GOMAXPROCS       int     `json:"gomaxprocs,omitempty,omitzero"`
-	GOGC             string  `json:"gogc,omitempty"`
-	GCProfile        string  `json:"gc_profile,omitempty"`
+	Version                    int     `json:"version"`
+	Status                     string  `json:"status,omitempty"`
+	Error                      string  `json:"error,omitempty"`
+	MemoryLimitBytes           int64   `json:"memory_limit_bytes"`
+	MemoryLimitStatus          string  `json:"memory_limit_status,omitempty"`
+	MemoryHighBytes            int64   `json:"memory_high_bytes,omitempty"`
+	MemoryHighStatus           string  `json:"memory_high_status,omitempty"`
+	EffectiveMemoryLimitBytes  int64   `json:"effective_memory_limit_bytes,omitempty"`
+	EffectiveMemoryLimitStatus string  `json:"effective_memory_limit_status,omitempty"`
+	CPUQuota                   float64 `json:"cpu_quota"`
+	CPUQuotaStatus             string  `json:"cpu_quota_status,omitempty"`
+	GOMEMLIMIT                 string  `json:"gomemlimit,omitempty"`
+	GOMAXPROCS                 int     `json:"gomaxprocs,omitempty,omitzero"`
+	GOGC                       string  `json:"gogc,omitempty"`
+	GCProfile                  string  `json:"gc_profile,omitempty"`
+}
+
+// RuntimeInfo describes prospective execution candidates; inspection does not execute a payload.
+type RuntimeInfo struct {
+	Autotune   string             `json:"autotune"`
+	CPUPolicy  string             `json:"cpu_policy"`
+	Candidates []RuntimeCandidate `json:"candidates"`
+}
+
+// RuntimeCandidate separates computed tuning from the environment a candidate would receive.
+type RuntimeCandidate struct {
+	ExecMode                string                             `json:"exec_mode"`
+	RetainedExecutableBytes int64                              `json:"retained_executable_bytes"`
+	Tuning                  RuntimeTuningInfo                  `json:"tuning"`
+	EffectiveEnvironment    map[string]RuntimeEnvironmentValue `json:"effective_environment"`
+}
+
+// RuntimeTuningInfo is a computed candidate plan, before opt-outs and inherited runtime overrides.
+type RuntimeTuningInfo struct {
+	Available         bool    `json:"available"`
+	GOMEMLIMIT        string  `json:"gomemlimit,omitempty"`
+	GOMEMLIMITBytes   int64   `json:"gomemlimit_bytes,omitempty"`
+	GOMAXPROCS        int     `json:"gomaxprocs,omitempty"`
+	GOMAXPROCSValue   string  `json:"gomaxprocs_value,omitempty"`
+	GOGC              string  `json:"gogc,omitempty"`
+	GCProfile         string  `json:"gc_profile,omitempty"`
+	AppliedRatio      float64 `json:"applied_ratio,omitempty"`
+	ConstrainingLimit string  `json:"constraining_limit,omitempty"`
+	GOGCSkippedReason string  `json:"gogc_skipped_reason,omitempty"`
+}
+
+// RuntimeEnvironmentValue preserves the distinction between an absent and an empty inherited variable.
+type RuntimeEnvironmentValue struct {
+	Present bool   `json:"present"`
+	Value   string `json:"value"`
+	Source  string `json:"source"`
 }
 
 // NormalizeVariant cleans up and standardizes variant level strings

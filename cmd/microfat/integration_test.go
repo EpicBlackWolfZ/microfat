@@ -138,9 +138,10 @@ func main() {
 
 	// 10. Run `--microfat:info`
 	infoCmd := exec.Command(fatBinPath, "--microfat:info")
+	infoCmd.Env = append(os.Environ(), "MICROFAT_EXEC_MODE=auto")
 	out, err = infoCmd.CombinedOutput()
 	require.NoErrorf(t, err, "running --microfat:info failed: %v (output: %s)", err, out)
-	if !strings.Contains(string(out), "Selected Variant:") || !strings.Contains(string(out), "memfd_create") {
+	if !strings.Contains(string(out), "Selected Variant:") || !strings.Contains(string(out), "Execution Policy:  auto (cache-first;") {
 		t.Errorf("unexpected info output: %s", string(out))
 	}
 
