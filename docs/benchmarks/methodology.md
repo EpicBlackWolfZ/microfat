@@ -91,6 +91,15 @@ raw outputs. The journal is removed after a verified bundle is published. It is 
 input, not a checksummed completed bundle. SIGINT/SIGTERM cancel children and publish the
 available trials; a hard kill leaves the journal for inspection.
 
+Each attempted warmup retains `warmup.json` (stdout), `warmup.stderr`, and
+`warmup-process.json` (the load child's PID, executable and arguments) under its trial
+directory when the child starts. Warmup resource usage uses the `warmup_generator_`
+metric prefix. The trial's `generator` identifies the last started load child; a
+steady-state child replaces the warmup identity. Process, timeout and parser failures
+retain their reason and diagnostics without attaching unparsed or invalid HTTP
+measurements. `warmup-error.txt` retains execution or parsing errors even if cancellation
+replaces the trial's reason. Valid parsed HTTP failure measurements remain available for inspection.
+
 For observer overhead calibration, repeat the same suite with `disable_observer: true`
 and `false`, counterbalancing run order across repetitions. Disabled-observer results are
 never release eligible. Compare fresh process trial medians; differences on a shared host

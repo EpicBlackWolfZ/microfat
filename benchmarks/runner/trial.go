@@ -343,14 +343,25 @@ func measureTrial(ctx context.Context, cfg ExperimentConfig, opts RunOptions, ge
 			return
 		}
 		warm, err := driver.Run(ctx, url+"/"+cfg.Workload)
+		if err != nil {
+			files["trials/"+trial.ID+"/warmup-error.txt"] = []byte(err.Error())
+		}
 		if warm != nil {
-			files[warmOptions.RawPath] = warm.Raw
-			trial.Warmup = &warm.HTTP
+			files[warmOptions.RawPath], files["trials/"+trial.ID+"/warmup.stderr"] = warm.Raw, warm.Stderr
+			trial.Generator = warm.Process
+			for name, metric := range warm.Resources {
+				trial.Metrics["warmup_generator_"+name] = metric
+			}
+			if evidenceErr := encodeExtra(files, "trials/"+trial.ID+"/warmup-process.json", warm.Process); evidenceErr != nil {
+				trial.Reason = "warmup evidence: " + errors.Join(err, evidenceErr).Error()
+				return
+			}
 		}
 		if err != nil {
 			trial.Reason = "warmup: " + err.Error()
 			return
 		}
+		trial.Warmup = &warm.HTTP
 	}
 	sampler.setPhase("steady_state")
 	if err := driver.Configure(options); err != nil {
