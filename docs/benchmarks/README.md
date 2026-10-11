@@ -137,7 +137,12 @@ Hosted v2 jobs run natively on amd64 and arm64. `scripts/benchmark-controls.sh <
 empty delegated subtree plus a manager leaf. `scripts/benchmark-enter.sh "$MICROFAT_BENCH_CGROUP_ROOT" <command>`
 moves only the new command into that leaf and immediately drops back to the runner user. This keeps child
 migrations inside a writable common ancestor without changing the workflow runner's own cgroup or its ownership.
-Cleanup removes only the empty benchmark-created groups.
+The prebuilt cleanup helper runs outside this delegation before evidence upload. A protected receipt binds
+its exact run, attempt, inode and owner. It requests graceful termination through PID file descriptors,
+waits for an empty subtree, and uses the validated subtree's `cgroup.kill` if work survives the bounded grace.
+It removes only owned empty groups and retains the receipt on failure. Native amd64/arm64 CI also proves
+cleanup with orphaned manager and workload processes while an unrelated process and sibling group survive.
+The original measurement/cancellation outcome and incomplete evidence remain visible.
 
 `task benchmark-kernel-v1` boots a networkless QEMU TCG guest. The kernel and matching modules package are locked
 in `benchmarks/kernel.lock.json`, checked against Ubuntu-signed metadata, and checked again after download.

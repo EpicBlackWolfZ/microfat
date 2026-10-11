@@ -88,6 +88,9 @@ jobs:
       - name: Verify successful hosted shard
         if: success() && env.BENCHMARK_TIER == 'release'
         run: go run ./internal/cmd/benchmark-evidence .work/benchmark-matrix --shard
+      - name: Drain owned delegation
+        if: always()
+        run: bash scripts/benchmark-cleanup.sh
       - name: Preserve sustained evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -96,13 +99,6 @@ jobs:
           path: .work/benchmark-matrix
           include-hidden-files: true
           retention-days: 14
-      - name: Remove delegation
-        if: always()
-        run: |
-          if [ -n "${MICROFAT_BENCH_CGROUP_ROOT:-}" ]; then
-            sudo rmdir "$MICROFAT_BENCH_CGROUP_ROOT/manager" "$MICROFAT_BENCH_CGROUP_ROOT"
-          fi
-
   calibration:
     name: Independent calibration (${{ matrix.repetition }})
     if: inputs.tier == 'calibration'

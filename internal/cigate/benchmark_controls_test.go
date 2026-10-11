@@ -25,9 +25,12 @@ set -euo pipefail
 IFS=$'\n\t'
 operation="${1}"
 shift
+if [[ "${operation}" == "${TEST_STATE}/evidence/benchmark-cleanup" ]]; then
+    exec "${operation}" "$@"
+fi
 if [[ "${operation}" == mkdir && ! -f "${TEST_STATE}/root" ]]; then
     case "${1}" in
-        /sys/fs/cgroup/microfat-ci-controls-test-1-[0-9]*) ;;
+        /sys/fs/cgroup/microfat-ci-123-1-[0-9]*) ;;
         *) printf 'unexpected root\n' > "${TEST_STATE}/violation"; exit 91;;
     esac
     printf '%s\n' "${1}" > "${TEST_STATE}/root"
@@ -72,6 +75,33 @@ const benchmarkControlsGo = `#!/bin/bash
 set -euo pipefail
 IFS=$'\n\t'
 test "${#}" = 4
+if [[ "${1}" == build ]]; then
+    test "${2}" = -o
+    test "${4}" = ./internal/cmd/benchmark-cleanup
+    if [[ "${TEST_FAILURE}" == build ]]; then exit "${TEST_EXIT}"; fi
+    cat > "${3}" <<'HELPER'
+#!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
+operation="${1}"
+root="${2}"
+test "${root}" = "$(cat "${TEST_STATE}/root")"
+if [[ "${operation}" == register ]]; then
+    if [[ "${TEST_FAILURE}" == register ]]; then exit "${TEST_EXIT}"; fi
+    printf 'protected receipt\n' > "${TEST_STATE}/receipt"
+else
+    test "${operation}" = cleanup
+    test -f "${TEST_STATE}/receipt"
+    status=0
+    sudo rmdir "${root}/manager" || status=$?
+    sudo rmdir "${root}" || status=$?
+    if [[ "${status}" == 0 ]]; then rm "${TEST_STATE}/receipt"; fi
+    exit "${status}"
+fi
+HELPER
+    chmod +x "${3}"
+    exit 0
+fi
 test "${1}" = run
 test "${2}" = ./internal/cmd/benchmark-tools
 test "${3}" = controls
@@ -113,7 +143,7 @@ func (f benchmarkControlsFixture) run(t *testing.T, failure string, failStdout b
 	cmd.Env = []string{
 		"PATH=" + f.tools + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"GO=" + filepath.Join(f.tools, "go"), "GITHUB_ENV=" + f.environment,
-		"GITHUB_RUN_ID=controls-test", "GITHUB_RUN_ATTEMPT=1", "TEST_STATE=" + f.state,
+		"GITHUB_RUN_ID=123", "GITHUB_RUN_ATTEMPT=1", "TEST_STATE=" + f.state,
 		"TEST_FAILURE=" + failure, fmt.Sprintf("TEST_EXIT=%d", benchmarkControlsFailure),
 	}
 	var stdout, stderr bytes.Buffer
@@ -152,23 +182,27 @@ func (f benchmarkControlsFixture) assertConfined(t *testing.T) {
 func TestBenchmarkControlsRollsBackEverySetupFailure(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name, failure string
-		status        int
-		configure     func(*testing.T, *benchmarkControlsFixture)
-		failStdout    bool
+		name, failure  string
+		status         int
+		configure      func(*testing.T, *benchmarkControlsFixture)
+		failStdout     bool
+		beforeDelegate bool
 	}{
+		{name: "build cleanup helper", failure: "build", status: benchmarkControlsFailure, beforeDelegate: true},
 		{name: "enable controllers", failure: "enable-controllers", status: benchmarkControlsFailure},
 		{name: "assign ownership", failure: "ownership", status: benchmarkControlsFailure},
 		{name: "create manager", failure: "manager-mkdir", status: benchmarkControlsFailure},
 		{name: "execute controls tool", failure: "tool", status: benchmarkControlsFailure},
-		{name: "create output directory", status: 1, configure: func(t *testing.T, f *benchmarkControlsFixture) {
+		{name: "register provenance", failure: "register", status: benchmarkControlsFailure},
+		{name: "create output directory", status: 1, beforeDelegate: true, configure: func(t *testing.T, f *benchmarkControlsFixture) {
 			require.NoError(t, os.WriteFile(filepath.Join(f.state, "evidence"), []byte("blocked"), 0o644))
 		}},
 		{name: "open controls output", status: 1, configure: func(t *testing.T, f *benchmarkControlsFixture) {
 			require.NoError(t, os.MkdirAll(f.output, 0o755))
 		}},
-		{name: "write controls output", status: 1, configure: func(_ *testing.T, f *benchmarkControlsFixture) {
-			f.output = "/dev/full"
+		{name: "write controls output", status: 1, configure: func(t *testing.T, f *benchmarkControlsFixture) {
+			require.NoError(t, os.Mkdir(filepath.Dir(f.output), 0o755))
+			require.NoError(t, os.Symlink("/dev/full", f.output))
 		}},
 		{name: "open environment export", status: 1, configure: func(t *testing.T, f *benchmarkControlsFixture) {
 			require.NoError(t, os.Mkdir(f.environment, 0o755))
@@ -186,6 +220,11 @@ func TestBenchmarkControlsRollsBackEverySetupFailure(t *testing.T) {
 			}
 			status, _, stderr := fixture.run(t, tc.failure, tc.failStdout)
 			assert.Equal(t, tc.status, status, stderr)
+			if tc.beforeDelegate {
+				assert.NoFileExists(t, filepath.Join(fixture.state, "operations"), "failed preparation must not create a delegation")
+				fixture.assertConfined(t)
+				return
+			}
 			operations := fixture.operations(t)
 			require.GreaterOrEqual(t, len(operations), 2)
 			assert.Equal(t, []string{"rmdir /manager", "rmdir root"}, operations[len(operations)-2:])
@@ -253,4 +292,22 @@ func TestBenchmarkControlsSuccessfulSetupHandsOffUsableEnvironment(t *testing.T)
 	require.NoError(t, err, "%s", exported)
 	assert.Equal(t, string(root)+"v2\n1\n", string(exported))
 	fixture.assertConfined(t)
+}
+
+func TestBenchmarkControlsRejectsNoncanonicalIdentityBeforeMutation(t *testing.T) {
+	t.Parallel()
+	for _, identity := range [][2]string{{"../other", "1"}, {"123", "01"}, {"0", "1"}, {"123", "x"}} {
+		t.Run(strings.Join(identity[:], ":"), func(t *testing.T) {
+			t.Parallel()
+			fixture := newBenchmarkControlsFixture(t)
+			cmd := exec.CommandContext(t.Context(), "bash", "../../scripts/benchmark-controls.sh", fixture.output)
+			cmd.Env = []string{"PATH=" + fixture.tools + string(os.PathListSeparator) + os.Getenv("PATH"),
+				"GITHUB_RUN_ID=" + identity[0], "GITHUB_RUN_ATTEMPT=" + identity[1]}
+			output, err := cmd.CombinedOutput()
+			require.Error(t, err, "%s", output)
+			assert.NoFileExists(t, filepath.Join(fixture.state, "operations"))
+			assert.NoDirExists(t, filepath.Join(fixture.state, "evidence"))
+			fixture.assertConfined(t)
+		})
+	}
 }
