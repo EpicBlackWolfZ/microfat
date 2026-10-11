@@ -133,11 +133,16 @@ const (
 	cpuidLeafExt1ECXABMBit  = 5
 	cpuidLeafExt1ECXLAHFBit = 0
 
+	// Linux arm64 UAPI: arch/arm64/include/uapi/asm/hwcap.h (Linux v6.19).
+	auxvAT_HWCAP  = 16
 	auxvAT_HWCAP2 = 26
+	hwcapGCS      = uint64(1) << 32
 	hwcap2BF16    = uint64(1) << 14
 	hwcap2SME     = uint64(1) << 23
 	hwcap2WFXT    = uint64(1) << 31
 	hwcap2SME2    = uint64(1) << 37
+	hwcap2MOPS    = uint64(1) << 43
+	hwcap2HBC     = uint64(1) << 44
 )
 
 var readLinuxAuxvARM64Func = readLinuxAuxvARM64
@@ -670,7 +675,9 @@ func EvaluateAMD64(f X86Features) string {
 // While the Go compiler (src/internal/buildcfg/cfg.go) accepts GOARM64 target levels and emits specific
 // instructions (such as mandatory LSE atomics starting at v8.1), Microfat establishes a granular, forward-compatible
 // hardware capability contract for every ISA milestone (including v8.8 MOPS/NMI/HBC and v8.9 GCS/THE)
-// to guarantee that binaries built or specialized for these levels execute only on CPUs with verified hardware support.
+// to select only levels whose requirements have been observed. NMI and THE have no safe probe in
+// the published Linux userspace ABI, so native automatic selection cannot satisfy v8.8 or v8.9.
+// Packing/ranking these levels remains supported; the separate v9.x prerequisite branch is unchanged.
 var arm64LevelRequirements = []LevelRequirement{
 	{
 		Level:            ARM64v8_0,
@@ -751,7 +758,7 @@ var arm64LevelRequirements = []LevelRequirement{
 		CheckFeatures: func(f ARM64Features) bool {
 			return f.HasMOPS && f.HasNMI && f.HasHBC
 		},
-		SourceDoc: "Go compiler GOARM64=v8.8: v8.7 + Memory Operations (MOPS), NMI, and Hinted Conditional Branches (HBC)",
+		SourceDoc: "Microfat v8.8 contract: v8.7 + MOPS, NMI and HBC; native NMI detection is unavailable",
 	},
 	{
 		Level:            ARM64v8_9,
@@ -760,7 +767,7 @@ var arm64LevelRequirements = []LevelRequirement{
 		CheckFeatures: func(f ARM64Features) bool {
 			return f.HasGCS && f.HasTHE
 		},
-		SourceDoc: "Go compiler GOARM64=v8.9: v8.8 + Guarded Control Stack (GCS) and Translation Hardening (THE)",
+		SourceDoc: "Microfat v8.9 contract: v8.8 + GCS and THE; native THE detection is unavailable",
 	},
 	{
 		Level:            ARM64v9_0,
@@ -1066,20 +1073,16 @@ func currentARM64Features() ARM64Features {
 	}
 
 	if runtime.GOOS == "linux" && readLinuxAuxvARM64Func != nil {
-		bf16, wfxt, sme, sme2 := readLinuxAuxvARM64Func()
-		if bf16 {
-			feat.HasBF16 = true
-		}
-		if wfxt {
-			feat.HasWFxT = true
-		}
-		if sme {
-			feat.HasSME = true
-		}
-		if sme2 {
-			feat.HasSME2 = true
-		}
+		auxv := readLinuxAuxvARM64Func()
+		feat.HasBF16 = auxv.HasBF16
+		feat.HasWFxT = auxv.HasWFxT
+		feat.HasSME = auxv.HasSME
+		feat.HasSME2 = auxv.HasSME2
+		feat.HasMOPS = auxv.HasMOPS
+		feat.HasHBC = auxv.HasHBC
+		feat.HasGCS = auxv.HasGCS
 	}
+	// Do not infer NMI/THE from other feature bits, CPU names or compiler target levels.
 
 	return feat
 }
@@ -1202,34 +1205,40 @@ func parseLinuxCPUInfoX86(r io.Reader) x86CPUModelInfo {
 	return info
 }
 
-func parseLinuxAuxvARM64(data []byte) (hasBF16, hasWFxT, hasSME, hasSME2 bool) {
+func parseLinuxAuxvARM64(data []byte) ARM64Features {
 	const (
 		entrySize    = 16
 		tagOffset    = 0
 		valOffset    = 8
 		valEndOffset = 16
 	)
+	var features ARM64Features
 	for i := 0; i+entrySize <= len(data); i += entrySize {
 		tag := binary.LittleEndian.Uint64(data[i+tagOffset : i+valOffset])
 		val := binary.LittleEndian.Uint64(data[i+valOffset : i+valEndOffset])
 		if tag == 0 {
 			break
 		}
-		if tag == auxvAT_HWCAP2 {
-			hasBF16 = (val & hwcap2BF16) != 0
-			hasWFxT = (val & hwcap2WFXT) != 0
-			hasSME = (val & hwcap2SME) != 0
-			hasSME2 = (val & hwcap2SME2) != 0
+		switch tag {
+		case auxvAT_HWCAP:
+			features.HasGCS = (val & hwcapGCS) != 0
+		case auxvAT_HWCAP2:
+			features.HasBF16 = (val & hwcap2BF16) != 0
+			features.HasWFxT = (val & hwcap2WFXT) != 0
+			features.HasSME = (val & hwcap2SME) != 0
+			features.HasSME2 = (val & hwcap2SME2) != 0
+			features.HasMOPS = (val & hwcap2MOPS) != 0
+			features.HasHBC = (val & hwcap2HBC) != 0
 		}
 	}
-	return hasBF16, hasWFxT, hasSME, hasSME2
+	return features
 }
 
-func readLinuxAuxvARM64() (hasBF16, hasWFxT, hasSME, hasSME2 bool) {
+func readLinuxAuxvARM64() ARM64Features {
 	// #nosec G304 -- reading linux system auxiliary vector
 	data, err := os.ReadFile("/proc/self/auxv")
 	if err != nil {
-		return false, false, false, false
+		return ARM64Features{}
 	}
 	return parseLinuxAuxvARM64(data)
 }

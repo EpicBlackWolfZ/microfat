@@ -635,6 +635,11 @@ jobs:
         run: |
           mkdir -p .work/runtime-qualification
           task test-runtime-fixtures MOUNT_BACKEND=sudo | tee .work/runtime-qualification/fixture-tests.log
+      - name: Check native ARM64 feature diagnostics against kernel auxv
+        if: matrix.arch == 'arm64'
+        run: |
+          go test -race -v ./tests/e2e -run '^TestNativeARM64HighFeatureDetection$' -count=1 \
+            | tee .work/runtime-qualification/arm64-features.log
       - name: Require complete native concurrency and policy qualification
         run: task qualify-runtime RUNTIME_TESTS=required RUNTIME_BACKEND=sudo
       - name: Preserve runtime qualification evidence
