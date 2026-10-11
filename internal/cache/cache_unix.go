@@ -184,6 +184,10 @@ func validateOpenedDescriptor(fd int, label string, expectedSize int64, expected
 		_ = unix.Close(fd)
 		return -1, err
 	}
+	if stat.Mode&unix.S_IXUSR == 0 {
+		_ = unix.Close(fd)
+		return -1, fmt.Errorf("%w: %s", ErrNotExecutable, label)
+	}
 
 	if stat.Size != expectedSize {
 		_ = unix.Close(fd)

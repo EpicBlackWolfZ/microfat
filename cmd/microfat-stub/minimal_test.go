@@ -14,8 +14,54 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
+	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"github.com/klauspost/compress/zstd"
+	"github.com/stretchr/testify/require"
 )
+
+func TestMinimalStub_SelectionFailure(t *testing.T) {
+	// Policy environment and launcher argv are process-wide, so keep this matrix serial.
+	dir := t.TempDir()
+	stub, payload, source := filepath.Join(dir, "stub"), filepath.Join(dir, "payload"), filepath.Join(dir, "source")
+	require.NoError(t, os.WriteFile(stub, []byte("launcher"), 0o700))
+	require.NoError(t, os.WriteFile(payload, []byte("verified payload"), 0o700))
+	host := microarch.Detect()
+	level := "v1"
+	if host.Arch == "arm64" {
+		level = "v8.0"
+	}
+	_, err := pack.Pack(pack.Options{
+		StubPath: stub, OutputPath: source, TargetArch: host.Arch,
+		SkipELFValidation: true, Variants: map[string]string{level: payload},
+	})
+	require.NoError(t, err)
+	cacheDir := filepath.Join(dir, "cache")
+	t.Setenv(format.EnvDisableVariants, level)
+	t.Setenv(format.EnvCacheDir, cacheDir)
+	oldArgs := os.Args
+	t.Cleanup(func() { os.Args = oldArgs })
+	for _, tc := range []struct {
+		name, arg, wantError string
+	}{
+		{"help", "--microfat:help", "meta-commands are disabled"},
+		{"info", "--microfat:info=json", "meta-commands are disabled"},
+		{"explicit prewarm", "--microfat:prewarm=all,json", "meta-commands are disabled"},
+		{"host prewarm", "--microfat:prewarm", "meta-commands are disabled"},
+		{"transform", "--microfat:trim", "meta-commands are disabled"},
+		{"ordinary argument", "ordinary", "selecting compatible CPU"},
+		{"no arguments", "", "selecting compatible CPU"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			os.Args = []string{source}
+			if tc.arg != "" {
+				os.Args = append(os.Args, tc.arg)
+			}
+			require.ErrorContains(t, runBinary(source), tc.wantError)
+			_, err := os.Stat(cacheDir)
+			require.ErrorIs(t, err, os.ErrNotExist, "selection failure must not create a cache")
+		})
+	}
+}
 
 func TestMinimalStub_MetaCommandRejection(t *testing.T) {
 	idx := &format.Index{

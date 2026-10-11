@@ -116,13 +116,18 @@ func getCompiledTestBinary(t *testing.T, arch, tier string) []byte {
 
 func createValidFatBinaryWithDict(t *testing.T, arch string, tiers []string, dict []byte) []byte {
 	t.Helper()
+	return createValidFatBinaryWithCodec(t, arch, tiers, dict, "none")
+}
+
+func createValidFatBinaryWithCodec(t *testing.T, arch string, tiers []string, dict []byte, algorithm string) []byte {
+	t.Helper()
 	baselineTier := "v1"
 	if arch == releasecheck.ArchARM64 {
 		baselineTier = "v8.0"
 	}
 	stubBytes := getCompiledTestBinary(t, arch, baselineTier)
 
-	c, err := codec.Get("none")
+	c, err := codec.Get(algorithm)
 	require.NoError(t, err)
 
 	var compVariantsBuf bytes.Buffer
@@ -144,7 +149,11 @@ func createValidFatBinaryWithDict(t *testing.T, arch string, tiers []string, dic
 		tierHash := hex.EncodeToString(h[:])
 
 		var compBuf bytes.Buffer
-		require.NoError(t, c.Compress(&compBuf, variantPayload, "fastest"))
+		if dc, ok := c.(codec.DictCodec); ok {
+			require.NoError(t, dc.CompressWithDict(&compBuf, variantPayload, "fastest", dict))
+		} else {
+			require.NoError(t, c.Compress(&compBuf, variantPayload, "fastest"))
+		}
 
 		vEntry := format.VariantEntry{
 			Level:            tier,
@@ -152,7 +161,7 @@ func createValidFatBinaryWithDict(t *testing.T, arch string, tiers []string, dic
 			CompressedSize:   int64(compBuf.Len()),
 			UncompressedSize: int64(len(variantPayload)),
 			SHA256:           tierHash,
-			Compression:      "none",
+			Compression:      algorithm,
 		}
 		variantEntries = append(variantEntries, vEntry)
 		compVariantsBuf.Write(compBuf.Bytes())

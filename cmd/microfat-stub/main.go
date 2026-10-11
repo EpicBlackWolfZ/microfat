@@ -96,7 +96,14 @@ func runImage(selfPath, imagePath string) error {
 	policy := microarch.ReadPolicyFromEnv()
 	policyRes, err := microarch.SelectVariantForHost(idx.TargetArch, hostInfo, idx.VariantLevels(), policy)
 	if err != nil {
-		return fmt.Errorf("selecting compatible CPU microarchitecture variant: %w", err)
+		selectionErr := fmt.Errorf("selecting compatible CPU microarchitecture variant: %w", err)
+		if len(os.Args) > 1 {
+			handled, metaErr := handleSelectionFailure(os.Args[1], selfFile, stat.Size(), idx, hostInfo, policyRes, selectionErr)
+			if handled {
+				return metaErr
+			}
+		}
+		return selectionErr
 	}
 
 	selectedLevel := policyRes.SelectedVariant

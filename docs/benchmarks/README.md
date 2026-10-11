@@ -48,7 +48,7 @@ JSON suite files override validated defaults. Unknown fields and out-of-range se
 | `payload_bytes`, `iterations`, `concurrency` | Request work and maximum in-flight requests |
 | `qps` | Requested total QPS; zero selects maximum-throughput mode |
 | `resolution_seconds` | Fortio histogram resolution; recorded with latency results |
-| `sample_ms` | Separate observer process sampling interval |
+| `sample_ms` | Separate observer process sampling interval, 10–1000 ms when enabled and no longer than `duration_ms` |
 | `disable_observer` | Disable telemetry only for observer overhead calibration; prevents release eligibility |
 | `format`, `profile`, `codec`, `dictionary` | Executable format 1/2, full/minimal, zstd/lz4/none, optional zstd dictionary |
 | `specialized_level` | Host-compatible ISA level; defaults to the detected level |
@@ -58,6 +58,13 @@ JSON suite files override validated defaults. Unknown fields and out-of-range se
 | `exec_diagnostics` | Additional traced execution pass, excluded from primary timing measurements |
 | `runner_identity` | Maintainer-declared identity of a qualified dedicated measurement host |
 | `target`, `generator` | Separate affinity masks and delegated cgroup settings |
+
+Matched `gomemlimit` accepts microfat's human-readable byte sizes, including fractions and surrounding
+whitespace; `G`, `GB`, and `GiB` all denote binary gigabytes. Child environments contain the canonical
+whole-byte count. Matched `gogc`
+accepts `off` or a nonnegative signed 32-bit integer and is serialized as canonical decimal text.
+`gomaxprocs` must be in 1..2147483647. These explicit controls are unused and omitted in `on-off` trials.
+With `disable_observer: true`, the 1000 ms observer maximum does not apply.
 
 Example resource settings, requiring actual delegated cgroups and CPU masks allowed by the host:
 

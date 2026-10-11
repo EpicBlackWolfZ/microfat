@@ -263,7 +263,9 @@ func TestLifecycleReleaseSmoke(t *testing.T) {
 		require.NoError(t, err)
 		statBefore, okBefore := fiBefore.Sys().(*syscall.Stat_t)
 
-		for _, optFlags := range [][]string{{"-o="}, {"--output="}, {"-o", ""}, {"--output", ""}} {
+		// pflag treats the shorthand spelling -o= as a literal "=" value.
+		// Use separate shorthand arguments to express an empty destination.
+		for _, optFlags := range [][]string{{"--output="}, {"-o", ""}, {"--output", ""}} {
 			cmdArgs := append([]string{"trim", cliCopyFat}, optFlags...)
 			cmd := exec.Command(cliPath, cmdArgs...)
 			var errBuf bytes.Buffer
@@ -294,5 +296,16 @@ func TestLifecycleReleaseSmoke(t *testing.T) {
 				t.Fatalf("binary modified in-place despite empty %s flag", flagDesc)
 			}
 		}
+
+		cmd := exec.Command(cliPath, "trim", cliCopyFat, "-o=")
+		cmd.Dir = cliSubDir
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		literalOutput, err := os.ReadFile(filepath.Join(cliSubDir, "="))
+		require.NoError(t, err)
+		require.NotEmpty(t, literalOutput)
+		afterData, err := os.ReadFile(cliCopyFat)
+		require.NoError(t, err)
+		require.Equal(t, goldenData, afterData)
 	})
 }

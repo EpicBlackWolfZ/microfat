@@ -35,6 +35,9 @@ func buildRuntimeInfo(baseEnv []string, entry *format.VariantEntry) (*format.Cgr
 		modes = []string{format.ExecModeCache, format.ExecModeMemfd}
 	}
 	for _, mode := range modes {
+		if entry == nil {
+			break
+		}
 		info.Candidates = append(info.Candidates,
 			buildRuntimeCandidate(baseEnv, entry, limits, mode, info.Autotune, cgInfo.Status == observationCollected))
 	}

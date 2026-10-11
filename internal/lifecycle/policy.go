@@ -11,13 +11,13 @@ import (
 type MetadataPolicy string
 
 const (
-	// PolicyStrict preserves file mode, ownership, and allowed extended attributes,
+	// PolicyStrict preserves file permissions, sticky mode, ownership, and allowed extended attributes,
 	// and strictly refuses transformations on inputs with capabilities, integrity
 	// claims (IMA/EVM), setuid/setgid bits, or unsupported xattrs.
 	PolicyStrict MetadataPolicy = "strict"
 
 	// PolicyStrip strips extended attributes, capabilities, integrity claims,
-	// and setuid/setgid bits, producing a clean executable with standard permissions.
+	// and all special mode bits, producing a clean executable with standard permissions.
 	PolicyStrip MetadataPolicy = "strip"
 
 	// DefaultPolicy is the default metadata policy for all transformations.

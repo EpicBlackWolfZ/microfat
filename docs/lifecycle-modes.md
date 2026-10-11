@@ -135,8 +135,8 @@ All transformation operations (both CLI `microfat trim` and launcher stub meta-c
    - Operators can pass `--break-hardlinks` (CLI) or `--microfat:break-hardlinks` (launcher) to deliberately sever the hard link, writing the derivative to a new inode while preserving untouched aliases at the original inode.
 
 4. **Explicit Metadata Policies (`--metadata-policy=strict|strip`)**:
-   - **`strict` (Default)**: Preserves source file ownership (`chown`), file permissions (`chmod`), and supported extended attributes (`user.*`, `security.selinux`). Strictly rejects files with `setuid`/`setgid` bits, executable capabilities (`security.capability`), or content-bound integrity metadata (`security.ima`, `security.evm`).
-   - **`strip`**: Deliberately creates a standard caller-owned derivative (`0755` masked with source permissions) and strips non-policy extended metadata and ACLs.
+   - **`strict` (Default)**: Preserves source file ownership (`chown`), file permissions and the sticky bit (`chmod`), and supported extended attributes (`user.*`, `security.selinux`). Strictly rejects files with `setuid`/`setgid` bits, executable capabilities (`security.capability`), or content-bound integrity metadata (`security.ima`, `security.evm`). Applied permissions and all special mode bits are verified before publication.
+   - **`strip`**: Deliberately creates a standard caller-owned derivative (`0755` masked with source permissions) and strips all special mode bits, non-policy extended metadata, and ACLs.
 
 5. **Deployment Coordination & Integrity Boundary**:
    - In-place operations recheck source identity (`dev`, `ino`, `size`, `modtime`) and hardlink policy prior to final atomic rename.

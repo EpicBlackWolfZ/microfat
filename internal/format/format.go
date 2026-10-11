@@ -380,6 +380,7 @@ type BinaryInfo struct {
 	HostLevel        string         `json:"host_level"`
 	SelectedVariant  string         `json:"selected_variant"`
 	SelectedSize     int64          `json:"selected_size"`
+	SelectionError   string         `json:"selection_error,omitempty"`
 	ExecMode         string         `json:"exec_mode"`
 	PolicyApplied    string         `json:"policy_applied,omitempty"`
 	PolicyReason     string         `json:"policy_reason,omitempty"`

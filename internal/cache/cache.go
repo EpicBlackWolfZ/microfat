@@ -15,6 +15,9 @@ var (
 
 	ErrUnsafeFile = errors.New("cache file has unexpected owner or unsafe permissions")
 
+	// ErrNotExecutable marks a safe regular entry that needs explicit materialization.
+	ErrNotExecutable = errors.New("cache file lacks owner execute permission")
+
 	// ErrSizeMismatch indicates that the cache file length does not match the expected uncompressed variant size.
 	ErrSizeMismatch = errors.New("cache file size mismatch")
 
