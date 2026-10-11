@@ -359,6 +359,11 @@ func measureTrial(ctx context.Context, cfg ExperimentConfig, opts RunOptions, ge
 			return
 		}
 		trial.Warmup = &warm.HTTP
+		trial.Warnings = append(trial.Warnings, warm.HTTP.Warnings...)
+		if warm.HTTP.Successful != warm.HTTP.Requests {
+			trial.Reason = "warmup: HTTP or transport errors"
+			return
+		}
 	}
 	sampler.setPhase("steady_state")
 	if err := driver.Configure(options); err != nil {
