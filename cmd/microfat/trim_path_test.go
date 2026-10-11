@@ -12,7 +12,7 @@ import (
 
 func TestTrimOutputPreservesPathBytes(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{" leading", "trailing ", "   ", "=literal"} {
+	for _, name := range []string{" leading", "trailing ", "   ", "=literal", "="} {
 		for _, equals := range []bool{false, true} {
 			t.Run(name+map[bool]string{false: "/separate", true: "/equals"}[equals], func(t *testing.T) {
 				t.Parallel()
@@ -54,7 +54,7 @@ func TestTrimOutputPreservesPathBytes(t *testing.T) {
 
 func TestTrimOutputRelativePathBytes(t *testing.T) {
 	// Working-directory changes are process-wide, so these raw flag-value cases run serially.
-	for _, name := range []string{" leading", "trailing ", "   ", "=literal"} {
+	for _, name := range []string{" leading", "trailing ", "   ", "=literal", "="} {
 		for _, equals := range []bool{false, true} {
 			t.Run(name+map[bool]string{false: "/separate", true: "/equals"}[equals], func(t *testing.T) {
 				t.Chdir(t.TempDir())
@@ -82,4 +82,20 @@ func TestTrimOutputRelativePathBytes(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestTrimOutputShortEqualsLiteral(t *testing.T) {
+	t.Chdir(t.TempDir())
+	stub, payload, source := "stub", "payload", "source"
+	require.NoError(t, os.WriteFile(stub, []byte("#!/bin/sh\n"), 0o700))
+	require.NoError(t, os.WriteFile(payload, []byte("payload"), 0o700))
+	_, err := pack.Pack(pack.Options{
+		StubPath: stub, OutputPath: source, TargetArch: testArchAMD64,
+		SkipELFValidation: true, Variants: map[string]string{"v1": payload},
+	})
+	require.NoError(t, err)
+	cmd := newTrimCmd()
+	cmd.SetArgs([]string{source, flagLevel, "v1", "-o="})
+	require.NoError(t, cmd.Execute())
+	readCLIPackIndex(t, "=")
 }
