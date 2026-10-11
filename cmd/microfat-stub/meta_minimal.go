@@ -12,6 +12,13 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 )
 
+func handleSelectionFailure(
+	arg string, selfFile *os.File, size int64, idx *format.Index,
+	host microarch.Info, policy microarch.PolicyResult, selectionErr error,
+) (bool, error) {
+	return handleMetaCommand(arg, "", selfFile, size, idx, host, nil, policy)
+}
+
 func handleMetaCommand(
 	arg1 string,
 	selfPath string,

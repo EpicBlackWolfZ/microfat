@@ -362,6 +362,11 @@ func readSharedDictBytes(f *os.File, idx *format.Index) ([]byte, error) {
 	if _, err := f.ReadAt(dictBytes, idx.DictionaryOffset); err != nil {
 		return nil, fmt.Errorf("reading shared dictionary: %w", err)
 	}
+	digest := sha256.Sum256(dictBytes)
+	actual := hex.EncodeToString(digest[:])
+	if actual != idx.DictionarySHA256 {
+		return nil, fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, actual)
+	}
 	return dictBytes, nil
 }
 

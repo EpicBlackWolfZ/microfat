@@ -53,6 +53,28 @@ func parseLifecycleOptions(args []string) (lifecycle.Options, error) {
 	return opts, nil
 }
 
+// Diagnostics and explicit prewarming inspect an artifact without executing a payload.
+func handleSelectionFailure(
+	arg string, selfFile *os.File, size int64, idx *format.Index,
+	host microarch.Info, policy microarch.PolicyResult, selectionErr error,
+) (bool, error) {
+	switch {
+	case arg == flagHelp:
+		printHelp(idx, host, nil, policy)
+		fmt.Printf("Selection Error: %v\n", selectionErr)
+		return true, nil
+	case isPrefixOrExact(arg, flagInfo):
+		jsonOutput := arg == flagInfo+"=json" || hasJSONFlag(os.Args[2:])
+		return true, printInfoWithSelectionError(idx, host, nil, policy, size, jsonOutput, selectionErr)
+	case isPrefixOrExact(arg, flagPrewarm):
+		jsonOutput := strings.HasSuffix(arg, "=json") || hasJSONFlag(os.Args[2:])
+		verify := strings.Contains(arg, "verify") || hasVerifyFlag(os.Args[2:])
+		return true, prewarmStub(selfFile, size, idx, "", arg, jsonOutput, verify)
+	default:
+		return false, nil
+	}
+}
+
 func handleMetaCommand(
 	arg1 string,
 	selfPath string,
@@ -181,6 +203,9 @@ func prewarmStub(
 	}
 	if parsedVerify {
 		verifyOnly = true
+	}
+	if len(targetLevels) == 0 {
+		return errors.New("no compatible selected variant; prewarm requires all or an explicit variant level")
 	}
 
 	resolveDir := resolveCacheDirFunc
@@ -402,7 +427,11 @@ func printHelp(idx *format.Index, hostInfo microarch.Info, selected *format.Vari
 	fmt.Printf("Application:   %s\n", idx.AppName)
 	fmt.Printf("Target Arch:   %s/%s\n", idx.TargetOS, idx.TargetArch)
 	fmt.Printf("Host CPU:      %s (%s level %s)\n", hostInfo.Arch, idx.TargetArch, hostInfo.Level)
-	fmt.Printf("Auto-Selected: %s\n", selected.Level)
+	if selected == nil {
+		fmt.Printf("Auto-Selected: unavailable\n")
+	} else {
+		fmt.Printf("Auto-Selected: %s\n", selected.Level)
+	}
 	if policyRes.PolicyApplied != "" {
 		fmt.Printf("Policy Override: %s (%s)\n", policyRes.PolicyApplied, policyRes.OverrideReason)
 	}
@@ -438,6 +467,21 @@ func printInfo(
 	totalSize int64,
 	jsonOutput bool,
 ) error {
+	return printInfoWithSelectionError(idx, hostInfo, selected, policyRes, totalSize, jsonOutput, nil)
+}
+
+func printInfoWithSelectionError(
+	idx *format.Index, hostInfo microarch.Info, selected *format.VariantEntry,
+	policyRes microarch.PolicyResult, totalSize int64, jsonOutput bool, selectionErr error,
+) error {
+	var selectedLevel, selectionMessage string
+	var selectedSize int64
+	if selected != nil {
+		selectedLevel, selectedSize = selected.Level, selected.UncompressedSize
+	}
+	if selectionErr != nil {
+		selectionMessage = selectionErr.Error()
+	}
 	cgInfo, runtimeInfo := buildRuntimeInfo(os.Environ(), selected)
 	requestedMode := resolveRequestedExecMode()
 	if jsonOutput {
@@ -449,8 +493,9 @@ func printInfo(
 			HostOS:           hostInfo.OS,
 			HostArch:         hostInfo.Arch,
 			HostLevel:        hostInfo.Level,
-			SelectedVariant:  selected.Level,
-			SelectedSize:     selected.UncompressedSize,
+			SelectedVariant:  selectedLevel,
+			SelectedSize:     selectedSize,
+			SelectionError:   selectionMessage,
 			ExecMode:         requestedMode,
 			PolicyApplied:    policyRes.PolicyApplied,
 			PolicyReason:     policyRes.OverrideReason,
@@ -480,7 +525,11 @@ func printInfo(
 	}
 	fmt.Printf("Host Platform:     %s/%s\n", hostInfo.OS, hostInfo.Arch)
 	fmt.Printf("Host CPU Level:    %s\n", hostInfo.Level)
-	fmt.Printf("Selected Variant:  %s (%d bytes uncompressed)\n", selected.Level, selected.UncompressedSize)
+	if selectionErr != nil {
+		fmt.Printf("Selected Variant:  unavailable\nSelection Error:   %s\n", selectionMessage)
+	} else {
+		fmt.Printf("Selected Variant:  %s (%d bytes uncompressed)\n", selectedLevel, selectedSize)
+	}
 	if policyRes.PolicyApplied != "" {
 		fmt.Printf("Policy Applied:    %s (%s)\n", policyRes.PolicyApplied, policyRes.OverrideReason)
 	}
@@ -489,7 +538,7 @@ func printInfo(
 	fmt.Printf("\nEmbedded Variants (%d total):\n", len(idx.Variants))
 	for _, v := range idx.Variants {
 		isSel := " "
-		if v.Level == selected.Level {
+		if v.Level == selectedLevel {
 			isSel = "*"
 		}
 		fmt.Printf(" %s %-6s [%s] (offset: %10d | comp: %10d B | uncomp: %10d B | sha256: %.12s...)\n",

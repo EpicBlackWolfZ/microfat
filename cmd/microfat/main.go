@@ -362,8 +362,7 @@ func newTrimCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("output") {
-				cleaned := strings.TrimSpace(strings.TrimPrefix(outputPath, "="))
-				if cleaned == "" {
+				if outputPath == "" {
 					return errors.New("destination output path cannot be empty")
 				}
 			}
@@ -431,7 +430,7 @@ func newTrimCmd() *cobra.Command {
 			destPath := srcPath
 			if cmd.Flags().Changed("output") {
 				intent = lifecycle.IntentCreateOnly
-				destPath = filepath.Clean(strings.TrimSpace(strings.TrimPrefix(outputPath, "=")))
+				destPath = filepath.Clean(outputPath)
 			} else {
 				realPath, err := filepath.EvalSymlinks(srcPath)
 				if err == nil && realPath != srcPath {

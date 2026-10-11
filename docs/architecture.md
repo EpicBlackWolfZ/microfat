@@ -211,6 +211,7 @@ Unset `MICROFAT_EXEC_MODE` and explicit `auto` use the same policy in full and m
 | Directory absent/unavailable, entry absent, or safe regular entry cannot open | Extract, verify, seal and execute memfd | Lookup leaves paths untouched |
 | Corrupt safe regular entry | Extract, verify, seal and execute memfd | Corrupt entry remains untouched |
 | Symlink, special file, foreign owner or unsafe entry mode | Reject dispatch | No repair, deletion or fallback |
+| Safe regular entry missing owner execute permission | Cache miss; try sealed memfd | Leave entry untouched; explicit prewarm/cache rematerializes it |
 | Entry metadata cannot be inspected after a non-ENOENT open failure | Reject dispatch | No repair, deletion or fallback |
 | Verified entry cannot execute | Try sealed memfd once | No cache rewrite or retry |
 

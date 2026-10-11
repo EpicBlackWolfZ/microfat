@@ -508,6 +508,11 @@ is `auto`, `cache`, or `memfd`; `auto` lists separate prospective cache and memf
 `runtime.candidates`. Inspection does not choose an execution path, run the application, or populate
 the cache. The memfd plan accounts for page-rounded retained executable storage.
 
+Help and info remain available when CPU compatibility or selection policy excludes every payload.
+JSON info then leaves `selected_variant` empty, reports `selection_error`, and omits prospective
+runtime candidates. Explicit `prewarm=all` or `prewarm=LEVEL` can stage payloads without a host-selected
+variant; plain prewarm and host-selected transformations still require compatible selection.
+
 Each candidate separates computed tuning from `effective_environment`, which describes the
 `GOMEMLIMIT`, `GOMAXPROCS`, and `GOGC` values that would reach the application. Inherited values,
 including explicitly empty values, take priority. Disabled tuning and dry-run retain the computed
