@@ -155,6 +155,10 @@ func TestValidWarmupEvidence(t *testing.T) {
 	fixture, err := os.ReadFile("../load/testdata/fortio-1.75.2.json")
 	require.NoError(t, err)
 	httpFailure := bytes.ReplaceAll(fixture, []byte(`"200"`), []byte(`"500"`))
+	partialHTTPFailure := bytes.Replace(fixture, []byte(`"200": 992`), []byte(`"200": 991, "500": 1`), 1)
+	transportFailure := bytes.ReplaceAll(fixture, []byte(`"200"`), []byte(`"-1"`))
+	partialTransportFailure := bytes.Replace(fixture, []byte(`"200": 992`), []byte(`"200": 991, "-1": 1`), 1)
+	slowWarmup := bytes.Replace(fixture, []byte(`"ActualQPS": 984.8895563616024`), []byte(`"ActualQPS": 1`), 1)
 	for _, tc := range []struct {
 		name, finish string
 		warmup, load []byte
@@ -162,7 +166,15 @@ func TestValidWarmupEvidence(t *testing.T) {
 		outcome      string
 	}{
 		{name: "successful load", warmup: fixture, load: fixture, successful: warmupFixtureCount, outcome: schema.OutcomeOK},
-		{name: "HTTP failure remains parsed", warmup: httpFailure, load: httpFailure, outcome: schema.OutcomeFailed},
+		{name: "all warmup HTTP requests fail", warmup: httpFailure, load: fixture, outcome: schema.OutcomeFailed},
+		{name: "partial warmup HTTP failure", warmup: partialHTTPFailure, load: fixture,
+			successful: warmupFixtureCount - 1, outcome: schema.OutcomeFailed},
+		{name: "all warmup transport requests fail", warmup: transportFailure, load: fixture, outcome: schema.OutcomeFailed},
+		{name: "partial warmup transport failure", warmup: partialTransportFailure, load: fixture,
+			successful: warmupFixtureCount - 1, outcome: schema.OutcomeFailed},
+		{name: "warning only warmup", warmup: slowWarmup, load: fixture, successful: warmupFixtureCount, outcome: schema.OutcomeOK},
+		{name: "steady state HTTP failure", warmup: fixture, load: httpFailure, successful: warmupFixtureCount,
+			outcome: schema.OutcomeFailed},
 		{name: "steady state execution failure", warmup: fixture, load: fixture, successful: warmupFixtureCount,
 			finish: "exit 1\n", outcome: schema.OutcomeFailed},
 	} {
@@ -170,11 +182,12 @@ func TestValidWarmupEvidence(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
 			warmPath, loadPath, state := filepath.Join(root, "warmup-output"), filepath.Join(root, "load-output"), filepath.Join(root, "state")
+			steadyStarted := filepath.Join(root, "steady-started")
 			require.NoError(t, os.WriteFile(warmPath, tc.warmup, evidenceFilePerm))
 			require.NoError(t, os.WriteFile(loadPath, tc.load, evidenceFilePerm))
 			tool := filepath.Join(root, "fortio")
 			script := "#!/bin/sh\nif [ ! -e '" + state + "' ]; then\n: > '" + state + "'\ncat '" + warmPath +
-				"'\nprintf '%s\\n' 'warmup diagnostic' >&2\nelse\ncat '" + loadPath +
+				"'\nprintf '%s\\n' 'warmup diagnostic' >&2\nelse\n: > '" + steadyStarted + "'\ncat '" + loadPath +
 				"'\nprintf '%s\\n' 'steady diagnostic' >&2\n" + tc.finish + "fi\n"
 			require.NoError(t, testfixture.WriteExecutable(tool, []byte(script)))
 			exp := testfixture.Experiment()
@@ -186,11 +199,24 @@ func TestValidWarmupEvidence(t *testing.T) {
 			assert.Equal(t, "trials/"+trial.ID+"/warmup.json", trial.Warmup.RawPath)
 			assert.Equal(t, tc.warmup, files[trial.Warmup.RawPath])
 			assert.Equal(t, []byte(warmupFixtureStderr), files["trials/"+trial.ID+"/warmup.stderr"])
+			assert.Contains(t, trial.Metrics, "warmup_generator_user_cpu_seconds")
+			for _, warning := range trial.Warmup.Warnings {
+				assert.Contains(t, trial.Warnings, warning, "warmup warnings must reach experiment and report gates")
+			}
 			identity := assertWarmupProcessEvidence(t, trial, tool)
 			if tc.successful == warmupFixtureCount {
+				require.FileExists(t, steadyStarted)
 				assert.NotEqual(t, identity.PID, trial.Generator.PID, "steady state has its own generator process")
 				assert.Contains(t, trial.Generator.Arguments, "20ms")
 			} else {
+				require.NoFileExists(t, steadyStarted, "failed warmup must stop before steady state starts")
+				assertWarmupIdentityEqual(t, identity, trial.Generator)
+				assert.Nil(t, trial.Load)
+				assert.NotContains(t, files, "trials/"+trial.ID+"/fortio.json")
+				assert.NotContains(t, files, "trials/"+trial.ID+"/fortio.stderr")
+				assert.NotContains(t, trial.Metrics, "throughput_qps")
+				assert.NotContains(t, trial.Metrics, "generator_user_cpu_seconds")
+				assert.Equal(t, "warmup: HTTP or transport errors", trial.Reason)
 				assert.Contains(t, trial.Warmup.Warnings, "HTTP or transport failures")
 			}
 			assert.Equal(t, tc.outcome, trial.Outcome)
@@ -212,6 +238,32 @@ func TestValidWarmupEvidence(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDisabledWarmupEvidence(t *testing.T) {
+	t.Parallel()
+	fixture, err := os.ReadFile("../load/testdata/fortio-1.75.2.json")
+	require.NoError(t, err)
+	root := t.TempDir()
+	rawPath, tool := filepath.Join(root, "output"), filepath.Join(root, "fortio")
+	require.NoError(t, os.WriteFile(rawPath, fixture, evidenceFilePerm))
+	require.NoError(t, testfixture.WriteExecutable(tool, []byte("#!/bin/sh\ncat '"+rawPath+"'\n")))
+	helper, err := os.Executable()
+	require.NoError(t, err)
+	cfg := warmupEvidenceConfig()
+	cfg.WarmupMS = 0
+	trial := testfixture.Experiment().Trials[0]
+	trial.Outcome, trial.Metrics = schema.OutcomeFailed, make(map[string]schema.Measurement)
+	files := make(map[string][]byte)
+	measureTrial(context.Background(), cfg, RunOptions{Helper: helper, Fortio: tool}, &system.Sandbox{}, nil,
+		"http://127.0.0.1:1", &trial, files)
+	assert.Equal(t, schema.OutcomeOK, trial.Outcome)
+	assert.Nil(t, trial.Warmup)
+	assert.Nil(t, trial.WarmupGenerator)
+	require.NotNil(t, trial.Load)
+	assert.Equal(t, warmupFixtureCount, trial.Load.Successful)
+	assert.Contains(t, trial.Generator.Arguments, "20ms")
+	assert.NotContains(t, files, "trials/"+trial.ID+"/warmup.json")
 }
 
 func warmupEvidenceConfig() ExperimentConfig {

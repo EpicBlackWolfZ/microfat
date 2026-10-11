@@ -100,6 +100,11 @@ while `warmup_generator` retains the warmup identity. Process, timeout and parse
 retain their reason and diagnostics without attaching unparsed or invalid HTTP
 measurements. `warmup-error.txt` retains execution or parsing errors even if cancellation
 replaces the trial's reason. Valid parsed HTTP failure measurements remain available for inspection.
+Any HTTP or transport failure during warmup fails the trial before steady-state load
+starts, even when other warmup requests succeed. Warmup warnings also reach trial and
+experiment warnings; warning-only warmups continue under the same policy as steady-state
+warnings. Failed warmups remain schema-valid bundle evidence and cannot qualify successful
+performance comparisons or hosted publication.
 
 For observer overhead calibration, repeat the same suite with `disable_observer: true`
 and `false`, counterbalancing run order across repetitions. Disabled-observer results are

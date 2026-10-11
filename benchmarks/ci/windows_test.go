@@ -20,7 +20,6 @@ func TestHostedObservedWindows(t *testing.T) {
 		"sum exceeds total":           func(t *schema.ProcessTrial) { t.Warmup.DurationSeconds = 20 },
 		"warmup unavailable":          func(t *schema.ProcessTrial) { t.Warmup = nil },
 		"warmup short":                func(t *schema.ProcessTrial) { t.Warmup.DurationSeconds = 1 },
-		"warmup errors":               func(t *schema.ProcessTrial) { t.Warmup.Successful-- },
 		"load unavailable":            func(t *schema.ProcessTrial) { t.Load = nil },
 		"samples unavailable":         func(t *schema.ProcessTrial) { t.Samples = nil },
 		"sample count mismatch":       func(t *schema.ProcessTrial) { t.SampleCount++ },
@@ -63,6 +62,43 @@ func TestHostedObservedWindows(t *testing.T) {
 		q := QualifyHosted(exp)
 		require.True(t, q.Publishable, q)
 	})
+}
+
+func TestHostedWarmupRequestFailures(t *testing.T) {
+	t.Parallel()
+	const requests = int64(2)
+	for _, tc := range []struct {
+		name, failureCode string
+		successful        int64
+		publishable       bool
+	}{
+		{name: "all HTTP failures", failureCode: "500"},
+		{name: "partial HTTP failures", failureCode: "500", successful: 1},
+		{name: "all transport failures", failureCode: "-1"},
+		{name: "partial transport failures", failureCode: "-1", successful: 1},
+		{name: "successful warmup", successful: requests, publishable: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			exp := hostedFixture()
+			trial := &exp.Trials[0]
+			trial.Warmup.Requests, trial.Warmup.Successful = requests, tc.successful
+			trial.Warmup.StatusCodes = map[string]int64{"200": tc.successful}
+			if failures := requests - tc.successful; failures > 0 {
+				trial.Warmup.StatusCodes[tc.failureCode] = failures
+			}
+			trial.Warmup.Buckets = []schema.HistogramBucket{{Start: 0, End: 1, Count: requests}}
+			require.NoError(t, schema.ValidateV2(exp), "request failures must remain valid measurements")
+			require.Equal(t, trial.Load.Requests, trial.Load.Successful, "steady-state control remains successful")
+			q := QualifyHosted(exp)
+			require.Equal(t, tc.publishable, q.Publishable, q)
+			if tc.publishable {
+				require.Empty(t, q.Reasons)
+			} else {
+				require.Equal(t, []string{trial.ID + ": warmup load ended early or contains request failures"}, q.Reasons)
+			}
+		})
+	}
 }
 
 func TestHostedOfflineObservedWindows(t *testing.T) {
