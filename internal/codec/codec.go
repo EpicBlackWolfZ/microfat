@@ -86,9 +86,9 @@ type boundedWriter struct {
 }
 
 // newBoundedWriter constructs a boundedWriter with the specified limit.
-// If limit <= 0 or limit > DefaultMaxPayloadSize, it falls back to DefaultMaxPayloadSize.
+// If limit < 0 or limit > DefaultMaxPayloadSize, it falls back to DefaultMaxPayloadSize.
 func newBoundedWriter(w io.Writer, limit int64) *boundedWriter {
-	if limit <= 0 || limit > DefaultMaxPayloadSize {
+	if limit < 0 || limit > DefaultMaxPayloadSize {
 		limit = DefaultMaxPayloadSize
 	}
 	return &boundedWriter{
@@ -213,10 +213,10 @@ func ParseCompressionSpec(spec string) (string, string) {
 func ResolveCompression(profile, algorithm, level string, payloadSize int64) (Codec, string, error) {
 	profile = strings.ToLower(strings.TrimSpace(profile))
 	algo, specLevel := ParseCompressionSpec(algorithm)
+	level = strings.TrimSpace(level)
 	if specLevel != "" && level == "" {
 		level = specLevel
 	}
-	level = strings.TrimSpace(level)
 
 	// Validate profile if specified
 	if profile != "" {

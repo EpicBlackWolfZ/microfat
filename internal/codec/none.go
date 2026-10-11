@@ -27,7 +27,7 @@ func (c *NoneCodec) Compress(w io.Writer, src []byte, _ string) error {
 	return nil
 }
 
-// Decompress reads raw bytes from r directly into w, verifying size if specified.
+// Decompress reads raw bytes from r directly into w, verifying the exact declared size.
 func (c *NoneCodec) Decompress(w io.Writer, r io.Reader, uncompressedSize int64) error {
 	if uncompressedSize < 0 {
 		return fmt.Errorf("%w: invalid negative uncompressed size %d", ErrSizeMismatch, uncompressedSize)
@@ -42,14 +42,11 @@ func (c *NoneCodec) Decompress(w io.Writer, r io.Reader, uncompressedSize int64)
 		if errors.Is(copyErr, ErrSizeMismatch) {
 			return copyErr
 		}
-		return fmt.Errorf("%w: %v", ErrDecompressionFailed, copyErr)
+		return fmt.Errorf("%w: %w", ErrDecompressionFailed, copyErr)
 	}
 
-	if uncompressedSize > 0 && bw.written != uncompressedSize {
+	if bw.written != uncompressedSize {
 		return fmt.Errorf("%w: expected %d bytes, got %d", ErrSizeMismatch, uncompressedSize, bw.written)
-	}
-	if uncompressedSize == 0 && bw.written != 0 {
-		return fmt.Errorf("%w: expected 0 bytes, got %d", ErrSizeMismatch, bw.written)
 	}
 
 	return nil

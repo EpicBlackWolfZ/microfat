@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/cache"
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
@@ -327,6 +328,9 @@ func validateOptions(opts *Options) error {
 	if opts.OutputPath == "" {
 		return errors.New("output path must not be empty")
 	}
+	if !utf8.ValidString(opts.AppName) {
+		return errors.New("application name must be valid UTF-8")
+	}
 	targetOS, err := NormalizeTargetOS(opts.TargetOS)
 	if err != nil {
 		return err
@@ -374,7 +378,9 @@ func validateOptions(opts *Options) error {
 		}
 	}
 
-	for lvl := range opts.VariantCompression {
+	normalizedCompression := make(map[string]VariantCompressionOptions, len(opts.VariantCompression))
+	seenCompressionLevels := make(map[string]string, len(opts.VariantCompression))
+	for lvl, comp := range opts.VariantCompression {
 		if strings.TrimSpace(lvl) == "" {
 			return fmt.Errorf("%w: variant compression level must not be empty", ErrInvalidVariant)
 		}
@@ -383,7 +389,14 @@ func validateOptions(opts *Options) error {
 			return fmt.Errorf("%w: unrecognized or invalid variant compression level %q for arch %s",
 				ErrInvalidVariant, lvl, opts.TargetArch)
 		}
+		if prev, exists := seenCompressionLevels[normLvl]; exists {
+			return fmt.Errorf("%w: compression override %q conflicts with %q (both normalize to %q)",
+				ErrDuplicateVariant, lvl, prev, normLvl)
+		}
+		seenCompressionLevels[normLvl] = lvl
+		normalizedCompression[normLvl] = comp
 	}
+	opts.VariantCompression = normalizedCompression
 
 	if !opts.SkipELFValidation {
 		if err := ValidateELFBinary(opts.StubPath, opts.TargetOS, opts.TargetArch); err != nil {
@@ -448,16 +461,17 @@ func writeVariantPayload(
 	compLevel := opts.CompressionLevel
 
 	normLvl := format.NormalizeVariant(lvl)
-	varComp, hasOverride := opts.VariantCompression[lvl]
-	if !hasOverride {
-		varComp, hasOverride = opts.VariantCompression[normLvl]
-	}
+	varComp, hasOverride := opts.VariantCompression[normLvl]
 	if hasOverride {
 		if varComp.Profile != "" {
 			profile = varComp.Profile
 		}
 		if varComp.Compression != "" {
 			compAlgo = varComp.Compression
+			// An explicit inline variant level outranks the inherited root level.
+			if _, inlineLevel := codec.ParseCompressionSpec(compAlgo); inlineLevel != "" {
+				compLevel = inlineLevel
+			}
 		}
 		if varComp.Level != "" {
 			compLevel = varComp.Level
