@@ -25,6 +25,7 @@ import (
 
 const cacheFirstCorruption = "corruption"
 const cacheFirstSymlink = "symlink"
+const cacheFirstAbsentDirectory = "absent directory"
 
 func cacheFirstFixture(t *testing.T) (*os.File, *format.VariantEntry, string, []byte) {
 	t.Helper()
@@ -112,13 +113,13 @@ func TestCacheFirstVerifiedHitPinsDescriptor(t *testing.T) {
 }
 
 func TestCacheFirstMissDoesNotMutate(t *testing.T) {
-	for _, state := range []string{"absent directory", "absent entry", "wrong size", "wrong digest", "directory denied"} {
+	for _, state := range []string{cacheFirstAbsentDirectory, "absent entry", "wrong size", "wrong digest", "directory denied"} {
 		t.Run(state, func(t *testing.T) {
 			f, entry, dir, payload := cacheFirstFixture(t)
 			path := filepath.Join(dir, entry.SHA256)
 			var corrupt []byte
 			switch state {
-			case "absent directory":
+			case cacheFirstAbsentDirectory:
 				dir = filepath.Join(dir, "absent")
 				resolveExistingCacheDirFunc = format.ResolveExistingCacheDirFD
 				t.Setenv(format.EnvCacheDir, dir)
@@ -144,7 +145,7 @@ func TestCacheFirstMissDoesNotMutate(t *testing.T) {
 				return nil
 			}
 			require.NoError(t, dispatchCacheFirst(f, entry))
-			if state == "absent directory" {
+			if state == cacheFirstAbsentDirectory {
 				_, err := os.Stat(dir)
 				require.ErrorIs(t, err, os.ErrNotExist)
 			} else if corrupt != nil {
