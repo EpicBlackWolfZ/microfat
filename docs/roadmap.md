@@ -132,14 +132,16 @@ and public availability establish different facts and must retain separate evide
 
 ### Delivery order and exit
 
-1. Merge reviewed correctness fixes and require the full source CI, exact coverage, native qualification,
-   product-oriented snapshot checks, and branch-only `benchmarks.yml` `tier=release` qualification
-   on the integrated revision. A branch dispatch checks source benchmark/evidence and skips the tag-only
+1. Merge reviewed correctness fixes and require the full source CI, exact coverage, native qualification
+   and product-oriented snapshot checks on the integrated revision. A branch-only `benchmarks.yml`
+   `tier=release` rehearsal can check source benchmark/evidence before staging; it skips the tag-only
    publisher. Update the release notes and tap tooling pin to the reviewed source; preserve environment
    limits and unavailable checks explicitly.
-2. Stop at release readiness until publication is approved. Creating a `v*` tag starts both the draft
-   release pipeline and the benchmark pipeline, whose successful finalizer publishes the release.
-   The existing workflows do not provide a tag-based signed-candidate run isolated from that publication path.
+2. For signed draft qualification before publication approval, set the exact tag in the repository
+   Actions variable `MICROFAT_DRAFT_ONLY_TAG` before pushing it. The release and benchmark pipelines
+   still qualify the candidate; that tag's automatic publication job is skipped. Without this hold,
+   a successful tag finalizer publishes the release. After approval, explicit `release-finalize.yml`
+   dispatch publishes only from the successful tag-bound evidence and complete draft inventory.
 3. After approval, require the exact signed draft's installer and runtime gates on native amd64/arm64,
    complete hosted benchmark evidence, and inventory revalidation before immutable publication.
 4. Verify the first public bootstrap/helper path. Authenticate and qualify the first public Homebrew
