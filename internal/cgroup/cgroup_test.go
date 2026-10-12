@@ -1788,7 +1788,6 @@ func TestReadLimitsCgroupV2_MemoryHighCorrupted(t *testing.T) {
 		{"EmptyFile", ""},
 		{"NonNumeric", "corrupted_text\n"},
 		{"NegativeValue", "-104857600\n"},
-		{"ZeroValue", "0\n"},
 	}
 
 	for _, tt := range tests {

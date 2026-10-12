@@ -118,15 +118,17 @@ type Limits struct {
 	RetainedExecutableBytes   int64   `json:"retained_executable_bytes,omitempty"`
 	CgroupVersion             int     `json:"cgroup_version"`
 	MemoryLimitBytes          int64   `json:"memory_limit_bytes"`           // Hard OOM ceiling (memory.max in v2, memory.limit_in_bytes in v1)
-	MemoryHighBytes           int64   `json:"memory_high_bytes,omitempty"`  // Throttle watermark (memory.high in v2, 0 if unset/v1)
+	MemoryHighBytes           int64   `json:"memory_high_bytes,omitempty"`  // Throttle watermark; MemoryHighFinite distinguishes zero
 	EffectiveMemoryLimitBytes int64   `json:"effective_memory_limit_bytes"` // Effective ceiling used for GOMEMLIMIT calculation
+	MemoryLimitFinite         bool    `json:"memory_limit_finite"`          // Distinguishes a finite zero ceiling from unset/unlimited
+	MemoryHighFinite          bool    `json:"memory_high_finite"`           // Distinguishes a finite zero watermark from unset/unlimited
 	CPUQuota                  float64 `json:"cpu_quota"`                    // 0 if unlimited
 	CPUs                      int     `json:"cpus"`                         // Computed GOMAXPROCS (0 if unlimited)
 }
 
 // TuningPlan contains computed Go runtime tuning parameters derived from container resource limits.
 type TuningPlan struct {
-	GOMEMLIMITBytes int64  `json:"gomemlimit_bytes"` // Calculated memory limit in bytes (0 if unset/unlimited)
+	GOMEMLIMITBytes int64  `json:"gomemlimit_bytes"` // Calculated bytes; GOMEMLIMITStr distinguishes finite zero from unset
 	GOMEMLIMITStr   string `json:"gomemlimit_str"`   // Formatted memory limit string (e.g. "966367641B", empty if unset)
 	// ConstrainingLimit is the active memory constraint: "max" or "high" (empty if unlimited; ties resolve to "max").
 	ConstrainingLimit string    `json:"constraining_limit,omitempty"`
@@ -234,17 +236,18 @@ func parseProcCgroup(procPath string) (string, bool, map[string]string, error) {
 
 	hasEntries := false
 	scanner := bufio.NewScanner(f)
+	scanner.Split(ScanProcCgroupLine)
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
 			continue
 		}
 		parts := strings.SplitN(line, ":", expectedCgroupParts)
 		if len(parts) != expectedCgroupParts {
 			continue
 		}
-		hierarchyID := parts[0]
-		controllers := parts[1]
+		hierarchyID := strings.TrimSpace(parts[0])
+		controllers := strings.TrimSpace(parts[1])
 		relPath := parts[2]
 
 		hasEntries = true
@@ -310,7 +313,7 @@ func readCgroupV2MemoryValue(dir, filename string) (int64, bool, error) {
 		return 0, false, fmt.Errorf("%w: empty %s in %s", ErrCgroupLimitCorrupted, filename, dir)
 	}
 	val, parseErr := strconv.ParseInt(memBytes, 10, 64)
-	if parseErr != nil || val <= 0 {
+	if parseErr != nil || val < 0 {
 		return 0, false, fmt.Errorf("%w: invalid %s value %q in %s", ErrCgroupLimitCorrupted, filename, memBytes, memPath)
 	}
 	return val, true, nil
@@ -435,11 +438,13 @@ func readCgroupV2(root, relPath string) (Limits, error) {
 	}
 	if hasMax {
 		limits.MemoryLimitBytes = minMem
+		limits.MemoryLimitFinite = true
 	}
 	if hasHigh {
 		limits.MemoryHighBytes = minHigh
+		limits.MemoryHighFinite = true
 	}
-	limits.EffectiveMemoryLimitBytes = CalculateEffectiveMemoryLimit(limits.MemoryLimitBytes, limits.MemoryHighBytes)
+	limits.EffectiveMemoryLimitBytes, _ = limits.EffectiveMemoryLimit()
 
 	minQuota, hasCPU, cpuErr := traverseCgroupV2CPU(targetDir, root)
 	if cpuErr != nil {
@@ -614,8 +619,8 @@ func readCgroupV1(root string, v1RelPaths map[string]string) (Limits, error) {
 
 	limits := Limits{CgroupVersion: VersionV1}
 
-	if hasMemPath && memRelPath != "" {
-		memBaseDir := resolveCgroupV1MemBase(root)
+	memBaseDir := resolveCgroupV1MemBase(root)
+	if hasMemPath && memRelPath != "" && cgroupV1ControllerAvailable(memBaseDir) {
 		targetMemDir, err := resolveTargetDirectory(memBaseDir, memRelPath)
 		if err != nil {
 			return Limits{CgroupVersion: VersionUnknown}, err
@@ -627,11 +632,12 @@ func readCgroupV1(root string, v1RelPaths map[string]string) (Limits, error) {
 		if hasMem {
 			limits.MemoryLimitBytes = minMem
 			limits.EffectiveMemoryLimitBytes = minMem
+			limits.MemoryLimitFinite = true
 		}
 	}
 
-	if hasCPUPath && cpuRelPath != "" {
-		cpuBaseDir := resolveCgroupV1CPUBase(root)
+	cpuBaseDir := resolveCgroupV1CPUBase(root)
+	if hasCPUPath && cpuRelPath != "" && cgroupV1ControllerAvailable(cpuBaseDir) {
 		targetCPUDir, err := resolveTargetDirectory(cpuBaseDir, cpuRelPath)
 		if err != nil {
 			return Limits{CgroupVersion: VersionUnknown}, err
@@ -651,10 +657,54 @@ func readCgroupV1(root string, v1RelPaths map[string]string) (Limits, error) {
 	return limits, nil
 }
 
+func cgroupV1ControllerAvailable(base string) bool {
+	_, err := os.Stat(base)
+	// Missing controllers are unavailable. Other errors must still reach the
+	// normal hierarchy/file checks, which fail closed instead of skipping them.
+	return !errors.Is(err, os.ErrNotExist)
+}
+
+// HasMemoryLimit reports a finite hard ceiling, including zero. Positive legacy
+// Limits literals remain supported when no explicit finite flag was supplied.
+func (l Limits) HasMemoryLimit() bool {
+	return l.MemoryLimitFinite || l.MemoryLimitBytes > 0
+}
+
+// HasMemoryHigh reports a finite throttle watermark, including zero.
+func (l Limits) HasMemoryHigh() bool {
+	return l.MemoryHighFinite || l.MemoryHighBytes > 0
+}
+
+// EffectiveMemoryLimit returns the tuning/extraction ceiling and whether it is
+// finite. The boolean must be checked before interpreting a zero byte value.
+func (l Limits) EffectiveMemoryLimit() (int64, bool) {
+	if l.HasMemoryLimit() && l.MemoryLimitBytes == 0 || l.HasMemoryHigh() && l.MemoryHighBytes == 0 {
+		return 0, true
+	}
+	if l.EffectiveMemoryLimitBytes > 0 {
+		return l.EffectiveMemoryLimitBytes, true
+	}
+	return CalculateEffectiveMemoryLimit(l.MemoryLimitBytes, l.MemoryHighBytes), l.HasMemoryLimit() || l.HasMemoryHigh()
+}
+
+// ConstrainingMemoryLimit identifies the finite raw boundary, preferring the
+// hard OOM ceiling when memory.max and memory.high are equal, including zero.
+func (l Limits) ConstrainingMemoryLimit() string {
+	switch {
+	case l.HasMemoryHigh() && (!l.HasMemoryLimit() || l.MemoryHighBytes < l.MemoryLimitBytes):
+		return LimitConstraintHigh
+	case l.HasMemoryLimit():
+		return LimitConstraintMax
+	default:
+		return LimitConstraintNone
+	}
+}
+
 // CalculateEffectiveMemoryLimit determines the effective memory ceiling from a hard limit (max) and throttle watermark (high).
 // If both are configured (> 0), it returns min(maxBytes, highBytes).
 // If only one is configured, it returns that limit.
 // If neither is configured, it returns 0 (unlimited).
+// Use Limits.EffectiveMemoryLimit when a finite zero boundary can be present.
 func CalculateEffectiveMemoryLimit(maxBytes, highBytes int64) int64 {
 	switch {
 	case maxBytes > 0 && highBytes > 0:
@@ -675,6 +725,7 @@ func CalculateEffectiveMemoryLimit(maxBytes, highBytes int64) int64 {
 // If both limits are configured and equal (maxBytes == highBytes), LimitConstraintMax ("max") is returned
 // because memory.max represents the kernel's hard OOM boundary, taking precedence as the primary ceiling.
 // Returns LimitConstraintNone ("") if neither limit is set.
+// Use Limits.ConstrainingMemoryLimit when a finite zero boundary can be present.
 func DetermineConstrainingLimit(maxBytes, highBytes int64) string {
 	switch {
 	case maxBytes > 0 && highBytes > 0:
@@ -985,9 +1036,12 @@ func ResolveTuningPlanWithProfile(
 		GCProfile:    profile,
 	}
 
-	effectiveLimit := limits.EffectiveMemoryLimitBytes
-	if effectiveLimit <= 0 {
-		effectiveLimit = CalculateEffectiveMemoryLimit(limits.MemoryLimitBytes, limits.MemoryHighBytes)
+	effectiveLimit, finite := limits.EffectiveMemoryLimit()
+	if finite && effectiveLimit == 0 {
+		// A kernel-valid zero boundary requires aggressive memory pacing. Do not
+		// silently promote it to an unlimited Go heap budget.
+		plan.GOMEMLIMITStr = "0B"
+		plan.ConstrainingLimit = limits.ConstrainingMemoryLimit()
 	}
 
 	effectiveLimit = RetainedMemoryLimit(effectiveLimit, limits.RetainedExecutableBytes)
@@ -996,7 +1050,7 @@ func ResolveTuningPlanWithProfile(
 		if memLimit, ok := CalculateGOMEMLIMIT(effectiveLimit, ratio, minHeadroomBytes); ok {
 			plan.GOMEMLIMITBytes = memLimit
 			plan.GOMEMLIMITStr = fmt.Sprintf("%dB", memLimit)
-			plan.ConstrainingLimit = DetermineConstrainingLimit(limits.MemoryLimitBytes, limits.MemoryHighBytes)
+			plan.ConstrainingLimit = limits.ConstrainingMemoryLimit()
 			if plan.ConstrainingLimit == LimitConstraintNone {
 				plan.ConstrainingLimit = LimitConstraintMax
 			}

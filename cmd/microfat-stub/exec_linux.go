@@ -361,10 +361,10 @@ func resolveBatchGCEnviron(env []string, keyIndex map[string]int, plan *cgroup.T
 func populateCgroupEnviron(env []string, keyIndex map[string]int, limits cgroup.Limits) []string {
 	env = upsertEnv(env, keyIndex, format.EnvCgroupVersion, strconv.Itoa(limits.CgroupVersion))
 	env = upsertEnv(env, keyIndex, format.EnvCgroupLimitBytes, strconv.FormatInt(limits.MemoryLimitBytes, 10))
-	if limits.MemoryHighBytes > 0 {
+	if limits.HasMemoryHigh() {
 		env = upsertEnv(env, keyIndex, format.EnvCgroupHighBytes, strconv.FormatInt(limits.MemoryHighBytes, 10))
 	}
-	if limits.EffectiveMemoryLimitBytes > 0 {
+	if _, finite := limits.EffectiveMemoryLimit(); finite {
 		env = upsertEnv(env, keyIndex, format.EnvCgroupEffectiveLimitBytes, strconv.FormatInt(limits.EffectiveMemoryLimitBytes, 10))
 	}
 	return upsertEnv(env, keyIndex, format.EnvCgroupCPUs, fmt.Sprintf("%.2f", limits.CPUQuota))

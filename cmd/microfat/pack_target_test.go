@@ -28,6 +28,7 @@ func TestCLIPackTargetArchitecture(t *testing.T) {
 		canonical string
 		level     string
 	}{
+		{name: "empty defaults to amd64", canonical: testArchAMD64, level: "v1"},
 		{name: "amd64 uppercase", arch: "AMD64", canonical: testArchAMD64, level: "v1"},
 		{name: "amd64 alias", arch: "x86-64", canonical: testArchAMD64, level: "v1"},
 		{name: "arm64 uppercase", arch: "ARM64", canonical: testArchARM64, level: arm64LevelV80},

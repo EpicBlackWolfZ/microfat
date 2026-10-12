@@ -339,7 +339,7 @@ func validateOptions(opts *Options) error {
 	if opts.TargetArch == "" {
 		opts.TargetArch = microarch.ArchAMD64
 	}
-	arch, err := canonicalTargetArch(opts.TargetArch)
+	arch, err := NormalizeTargetArch(opts.TargetArch)
 	if err != nil {
 		return err
 	}
@@ -406,7 +406,8 @@ func validateOptions(opts *Options) error {
 	return nil
 }
 
-func canonicalTargetArch(arch string) (string, error) {
+// NormalizeTargetArch canonicalizes supported architecture aliases and case variants.
+func NormalizeTargetArch(arch string) (string, error) {
 	switch strings.ToLower(arch) {
 	case microarch.ArchAMD64, "x86_64", "x86-64":
 		return microarch.ArchAMD64, nil
@@ -775,7 +776,7 @@ func ValidateELFBinary(path string, targetOS, targetArch string) error {
 	if err != nil {
 		return err
 	}
-	arch, err := canonicalTargetArch(targetArch)
+	arch, err := NormalizeTargetArch(targetArch)
 	if err != nil {
 		return err
 	}

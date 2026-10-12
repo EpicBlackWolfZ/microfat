@@ -604,6 +604,13 @@ func runDirectPack(
 	if err != nil {
 		return err
 	}
+	if targetArch == "" {
+		targetArch = microarch.ArchAMD64
+	}
+	targetArch, err = pack.NormalizeTargetArch(targetArch)
+	if err != nil {
+		return err
+	}
 	actualStubPath, err := builder.ResolveStubWithOptions(builder.ResolveStubOptions{
 		CLIStub:    flags.StubPath,
 		CLIProfile: flags.StubProfile,

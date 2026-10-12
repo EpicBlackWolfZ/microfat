@@ -180,12 +180,15 @@ func AutoTune(opts ...Option) Result {
 	// Kernel-derived executable storage is deducted from the original cgroup ceiling
 	// on each calculation. Existing GOMEMLIMIT still wins, including launcher tuning.
 	retained, retainedErr := retainedExecutableMemoryFunc()
-	if retainedErr != nil {
+	ceiling, finite := limits.EffectiveMemoryLimit()
+	if retainedErr != nil && (!finite || ceiling != 0) {
 		// No reliable storage estimate: preserve CPU tuning but omit a new memory budget.
 		limits.MemoryLimitBytes = 0
 		limits.MemoryHighBytes = 0
 		limits.EffectiveMemoryLimitBytes = 0
-	} else {
+		limits.MemoryLimitFinite = false
+		limits.MemoryHighFinite = false
+	} else if retainedErr == nil {
 		limits.RetainedExecutableBytes = retained
 	}
 
@@ -216,7 +219,7 @@ func resolveGOGCPlan(cfg *config, activeProfile Profile, plan *cgroup.TuningPlan
 	// an existing limit, query the runtime instead of trusting the environment.
 	if activeProfile == ProfileBatchETL && cfg.explicitGOGC == nil && getenvFunc("GOGC") == "" {
 		effectiveLimit := plan.GOMEMLIMITBytes
-		if getenvFunc("GOMEMLIMIT") != "" || effectiveLimit <= 0 {
+		if getenvFunc("GOMEMLIMIT") != "" || plan.GOMEMLIMITStr == "" {
 			effectiveLimit = currentMemoryLimitFunc()
 		}
 		plan.ResolveBatchGOGC(effectiveLimit)
@@ -254,7 +257,7 @@ func resolveProfileAndLiveHeap(cfg *config) (Profile, int64) {
 
 func applyTuningPlan(plan cgroup.TuningPlan, activeProfile Profile, activeLiveHeap int64, dryRun bool, res *Result) {
 	if dryRun {
-		if plan.GOMEMLIMITBytes > 0 {
+		if plan.GOMEMLIMITStr != "" {
 			res.GOMEMLIMIT = plan.GOMEMLIMITBytes
 		}
 		res.MemLimitApplied = false
@@ -286,7 +289,7 @@ func applyTuningPlan(plan cgroup.TuningPlan, activeProfile Profile, activeLiveHe
 	// Configure GOMEMLIMIT
 	if getenvFunc("GOMEMLIMIT") != "" {
 		res.MemLimitApplied = false
-	} else if plan.GOMEMLIMITBytes > 0 {
+	} else if plan.GOMEMLIMITStr != "" {
 		setMemoryLimitFunc(plan.GOMEMLIMITBytes)
 		res.GOMEMLIMIT = plan.GOMEMLIMITBytes
 		res.MemLimitApplied = true

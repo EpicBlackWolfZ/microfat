@@ -347,7 +347,9 @@ func TestExperimentValidation(t *testing.T) {
 		exp9 := validMockExperiment()
 		nonPosLimit := int64(0)
 		exp9.Environment.Host.Cgroup.MemoryMaxBytes = schema.NewFiniteLimit(nonPosLimit)
-		require.Error(t, schema.ValidateExperiment(exp9), "expected error for non-positive finite memory limit")
+		require.NoError(t, schema.ValidateExperiment(exp9), "zero is a valid finite memory boundary")
+		exp9.Environment.Host.Cgroup.MemoryMaxBytes = schema.NewFiniteLimit(int64(-1))
+		require.ErrorIs(t, schema.ValidateExperiment(exp9), schema.ErrInvalidLimitValue)
 
 		exp10 := validMockExperiment()
 		exp10.Environment.Host.Cgroup.CPUQuotaUs = schema.NewFiniteLimit(nonPosLimit)

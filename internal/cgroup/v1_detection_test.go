@@ -64,7 +64,9 @@ func TestReadLimitsCustomV1ControllerDetection(t *testing.T) {
 		cpuQuotaPath  = "cpu/cpu.cfs_quota_us"
 	)
 	wantCPU := Limits{CgroupVersion: VersionV1, CPUQuota: quotaCPUs, CPUs: quotaCPUs}
-	wantMemory := Limits{CgroupVersion: VersionV1, MemoryLimitBytes: testBytes1GB, EffectiveMemoryLimitBytes: testBytes1GB}
+	wantMemory := Limits{
+		CgroupVersion: VersionV1, MemoryLimitBytes: testBytes1GB, EffectiveMemoryLimitBytes: testBytes1GB, MemoryLimitFinite: true,
+	}
 	wantCombined := wantMemory
 	wantCombined.CPUQuota = quotaCPUs
 	wantCombined.CPUs = quotaCPUs

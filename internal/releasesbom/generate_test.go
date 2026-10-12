@@ -22,6 +22,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const fixtureOSLinux = "linux"
+
 func requireConverter(t *testing.T) {
 	t.Helper()
 	_, err := exec.LookPath("cdx-convert")
@@ -115,7 +117,7 @@ func buildArchiveFixture(t *testing.T, arch string) string {
 	baseline := payloads[contract.ExpectedTiers[arch][0]]
 	var fat bytes.Buffer
 	fat.Write(baseline)
-	index := &format.Index{Version: format.FormatVersion2, TargetArch: arch}
+	index := &format.Index{Version: format.FormatVersion2, TargetOS: fixtureOSLinux, TargetArch: arch}
 	for _, tier := range contract.ExpectedTiers[arch] {
 		payload := payloads[tier]
 		hash := sha256.Sum256(payload)
@@ -188,8 +190,9 @@ func TestRejectUnpinnedConvertersAndInvalidInputs(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "untrusted")
 	require.NoError(t, os.WriteFile(file, []byte("untrusted"), 0o700))
 	for _, test := range []struct{ system, arch, path string }{
-		{"darwin", releasecheck.ArchAMD64, file}, {"linux", "riscv64", file},
-		{"linux", releasecheck.ArchAMD64, file}, {"linux", "arm64", file}, {"linux", releasecheck.ArchAMD64, file + "-missing"},
+		{"darwin", releasecheck.ArchAMD64, file}, {fixtureOSLinux, "riscv64", file},
+		{fixtureOSLinux, releasecheck.ArchAMD64, file}, {fixtureOSLinux, "arm64", file},
+		{fixtureOSLinux, releasecheck.ArchAMD64, file + "-missing"},
 	} {
 		require.Error(t, verifyConverter(test.path, test.system, test.arch))
 	}

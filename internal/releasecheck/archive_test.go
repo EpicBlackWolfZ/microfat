@@ -78,7 +78,12 @@ var (
 
 func getCompiledTestBinary(t *testing.T, arch, tier string) []byte {
 	t.Helper()
-	key := arch + "_" + tier
+	return getCompiledTestBinaryForOS(t, arch, tier, testLinuxOS)
+}
+
+func getCompiledTestBinaryForOS(t *testing.T, arch, tier, goos string) []byte {
+	t.Helper()
+	key := goos + "_" + arch + "_" + tier
 	testBinaryMu.Lock()
 	defer testBinaryMu.Unlock()
 	if b, ok := testBinaryCache[key]; ok {
@@ -95,7 +100,7 @@ func getCompiledTestBinary(t *testing.T, arch, tier string) []byte {
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + os.Getenv("HOME"),
 		"CGO_ENABLED=0",
-		"GOOS=linux",
+		"GOOS=" + goos,
 		"GOARCH=" + arch,
 	}
 	if arch == releasecheck.ArchAMD64 {
@@ -169,6 +174,7 @@ func createValidFatBinaryWithCodec(t *testing.T, arch string, tiers []string, di
 
 	idx := &format.Index{
 		Version:          format.FormatVersion2,
+		TargetOS:         testLinuxOS,
 		TargetArch:       arch,
 		Variants:         variantEntries,
 		DictionaryOffset: dictOffset,
@@ -690,6 +696,7 @@ func TestValidateArchive_InspectFatBinary_Errors(t *testing.T) {
 		}
 		idx := &format.Index{
 			Version:    format.FormatVersion1,
+			TargetOS:   testLinuxOS,
 			TargetArch: releasecheck.ArchAMD64,
 			Variants:   variants,
 		}
@@ -819,6 +826,7 @@ func TestValidateArchive_ISABuildSettings_Mismatches(t *testing.T) {
 
 		idx := &format.Index{
 			Version:    format.FormatVersion2,
+			TargetOS:   testLinuxOS,
 			TargetArch: releasecheck.ArchAMD64,
 			Variants:   variantEntries,
 		}
@@ -912,16 +920,16 @@ func TestValidateISABuildSettings_DirectUnitTests(t *testing.T) {
 
 		bi := &buildinfo.BuildInfo{
 			Settings: []debug.BuildSetting{
-				{Key: "GOOS", Value: "linux"},
+				{Key: testGOOS, Value: testLinuxOS},
 			},
 		}
 		val, ok = releasecheck.GetBuildSetting(bi, "GOAMD64")
 		assert.False(t, ok)
 		assert.Empty(t, val)
 
-		val, ok = releasecheck.GetBuildSetting(bi, "GOOS")
+		val, ok = releasecheck.GetBuildSetting(bi, testGOOS)
 		assert.True(t, ok)
-		assert.Equal(t, "linux", val)
+		assert.Equal(t, testLinuxOS, val)
 	})
 
 	t.Run("RootExecutable_EdgeCases", func(t *testing.T) {
@@ -982,7 +990,7 @@ func TestValidateISABuildSettings_DirectUnitTests(t *testing.T) {
 		// Missing required GOAMD64 on non-baseline tier
 		err = releasecheck.ValidateEmbeddedVariantISA(releasecheck.ArchAMD64, "v2", &releasecheck.VariantFacts{
 			ELFHeader: &elf.FileHeader{Machine: elf.EM_X86_64},
-			BuildInfo: &buildinfo.BuildInfo{},
+			BuildInfo: &buildinfo.BuildInfo{Settings: []debug.BuildSetting{{Key: testGOOS, Value: testLinuxOS}}},
 		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "missing required GOAMD64 setting (expected v2)")
@@ -990,7 +998,7 @@ func TestValidateISABuildSettings_DirectUnitTests(t *testing.T) {
 		// Missing required GOARM64 on non-baseline tier
 		err = releasecheck.ValidateEmbeddedVariantISA(releasecheck.ArchARM64, "v8.2", &releasecheck.VariantFacts{
 			ELFHeader: &elf.FileHeader{Machine: elf.EM_AARCH64},
-			BuildInfo: &buildinfo.BuildInfo{},
+			BuildInfo: &buildinfo.BuildInfo{Settings: []debug.BuildSetting{{Key: testGOOS, Value: testLinuxOS}}},
 		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "missing required GOARM64 setting (expected v8.2)")
