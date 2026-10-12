@@ -7,13 +7,19 @@ import (
 	json "encoding/json/v2"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat/benchmarks/runner"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
+	"github.com/stretchr/testify/require"
 )
 
-const cmdBenchmark = "benchmark"
+const (
+	cmdBenchmark        = "benchmark"
+	benchmarkTrialsFlag = "--trials"
+)
 
 func TestBenchmarkCmd_JSONStreamHygiene(t *testing.T) {
 	t.Parallel()
@@ -27,7 +33,7 @@ func TestBenchmarkCmd_JSONStreamHygiene(t *testing.T) {
 	cmd.SetArgs([]string{
 		cmdBenchmark,
 		flagJSON,
-		"--trials", "1",
+		benchmarkTrialsFlag, "1",
 		"--trial-time", "20ms",
 		"--warmup", "10ms",
 	})
@@ -103,7 +109,7 @@ func TestBenchmarkCmd_HumanReadableOutputAndFile(t *testing.T) {
 	cmd.SetErr(&stderrBuf)
 	cmd.SetArgs([]string{
 		cmdBenchmark,
-		"--trials", "1",
+		benchmarkTrialsFlag, "1",
 		"--trial-time", "20ms",
 		"--warmup", "10ms",
 		"-o", outputPath,
@@ -152,7 +158,7 @@ func TestBenchmarkCmd_DefaultResultsPath(t *testing.T) {
 	cmd.SetErr(&stdoutBuf)
 	cmd.SetArgs([]string{
 		cmdBenchmark,
-		"--trials", "1",
+		benchmarkTrialsFlag, "1",
 		"--trial-time", "10ms",
 		"--warmup", "5ms",
 	})
@@ -196,11 +202,30 @@ func TestBenchmarkCmd_ExecutionFailure(t *testing.T) {
 	cmd.SetErr(&outBuf)
 	cmd.SetArgs([]string{
 		cmdBenchmark,
-		"--trials", "0",
+		benchmarkTrialsFlag, "0",
 	})
 
 	if err := cmd.Execute(); err == nil {
 		t.Error("expected error on zero trials")
+	}
+}
+
+func TestBenchmarkCmd_TrialEvidenceBudget(t *testing.T) {
+	t.Parallel()
+	for _, count := range []int{schema.MaxTrials + 1, int(^uint(0) >> 1)} {
+		t.Run(strconv.Itoa(count), func(t *testing.T) {
+			t.Parallel()
+			cmd := newRootCmd()
+			var output bytes.Buffer
+			cmd.SetOut(&output)
+			cmd.SetErr(&output)
+			path := filepath.Join(t.TempDir(), "evidence.json")
+			cmd.SetArgs([]string{cmdBenchmark, benchmarkTrialsFlag, strconv.Itoa(count), "--warmup", "0s", "--trial-time", "1ns", "-o", path})
+			require.ErrorIs(t, cmd.Execute(), runner.ErrInvalidTrialCount)
+			require.NotContains(t, output.String(), "Running trial")
+			_, err := os.Stat(path)
+			require.ErrorIs(t, err, os.ErrNotExist)
+		})
 	}
 }
 

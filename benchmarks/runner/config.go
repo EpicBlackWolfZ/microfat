@@ -4,10 +4,12 @@ package runner
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/workloads"
 )
 
@@ -21,7 +23,7 @@ const (
 // Sentinel runner configuration errors.
 var (
 	ErrNilWorkload       = errors.New("workload cannot be nil")
-	ErrInvalidTrialCount = errors.New("trials count must be greater than zero")
+	ErrInvalidTrialCount = errors.New("trials count outside evidence budget")
 	ErrInvalidDuration   = errors.New("trial duration must be positive")
 	ErrInvalidWarmup     = errors.New("warmup duration cannot be negative")
 )
@@ -48,8 +50,8 @@ func (c *Config) Validate() error {
 	if c.Workload == nil {
 		return ErrNilWorkload
 	}
-	if c.Trials <= 0 {
-		return ErrInvalidTrialCount
+	if c.Trials <= 0 || c.Trials > schema.MaxTrials {
+		return fmt.Errorf("%w: got %d, allowed 1..%d", ErrInvalidTrialCount, c.Trials, schema.MaxTrials)
 	}
 	if c.TrialDuration <= 0 {
 		return ErrInvalidDuration

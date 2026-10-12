@@ -57,7 +57,7 @@ func TestReleaseEligibilityAndDensity(t *testing.T) {
 	exp := testfixture.Experiment()
 	http := testfixture.HTTP()
 	for i := range exp.Trials {
-		exp.Trials[i].Controls = []schema.Control{{Name: "target.cpu.max", State: "applied"}}
+		exp.Trials[i].Controls = []schema.Control{{Name: "target.cpu.max", State: fixtureControlApplied}}
 		exp.Trials[i].SampleCount = 1
 		exp.Trials[i].Load = &http
 	}
@@ -72,15 +72,15 @@ func TestReleaseEligibilityAndDensity(t *testing.T) {
 	cfg.DisableObserver = true
 	assert.False(t, releaseEligible(cfg, exp))
 	trial := &schema.ProcessTrial{
-		Metrics:  map[string]schema.Measurement{"throughput_qps": schema.Measured(100, "requests/s", "steady_state", "fortio")},
-		Controls: []schema.Control{{Name: "target.cpu.max", State: "applied"}, {Name: "target.memory.max", State: "applied"}}}
-	cfg.Target.CPUQuotaUS, cfg.Target.MemoryBytes = 2*system.DefaultPeriod, 1024*1024*1024
-	addDensityMetrics(cfg, trial)
-	assert.Equal(t, 50.0, *trial.Metrics["throughput_per_quota_vcpu"].Value)
-	assert.Equal(t, 100.0, *trial.Metrics["throughput_per_limit_gib"].Value)
+		Metrics: map[string]schema.Measurement{"throughput_qps": schema.Measured(100, "requests/s", "steady_state", "fortio")},
+		Controls: []schema.Control{{Name: "target.cpu.max", Effective: "200000 100000", State: fixtureControlApplied},
+			{Name: fixtureTargetMemoryMax, Effective: "1073741824", State: fixtureControlApplied}}}
+	addDensityMetrics(trial)
+	assert.Equal(t, 50.0, *trial.Metrics[fixtureCPUDensity].Value)
+	assert.Equal(t, 100.0, *trial.Metrics[fixtureMemoryDensity].Value)
 	trial.Controls = nil
-	addDensityMetrics(cfg, trial)
-	assert.Nil(t, trial.Metrics["throughput_per_quota_vcpu"].Value)
+	addDensityMetrics(trial)
+	assert.Nil(t, trial.Metrics[fixtureCPUDensity].Value)
 }
 
 func TestTrialFailureEvidence(t *testing.T) {

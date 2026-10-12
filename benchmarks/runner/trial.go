@@ -392,7 +392,7 @@ func measureTrial(ctx context.Context, cfg ExperimentConfig, opts RunOptions, ge
 	trial.Load = &result.HTTP
 	trial.Warnings = append(trial.Warnings, result.HTTP.Warnings...)
 	trial.Metrics["throughput_qps"] = schema.Measured(result.HTTP.ActualQPS, "requests/s", "steady_state", "fortio")
-	addDensityMetrics(cfg, trial)
+	addDensityMetrics(trial)
 	trial.Metrics["request_errors"] = schema.Measured(float64(result.HTTP.Requests-result.HTTP.Successful), "count", "steady_state", "fortio")
 	for name, value := range result.HTTP.PercentilesSeconds {
 		trial.Metrics["latency_"+name] = schema.Measured(value, "s", "steady_state", "fortio-histogram")

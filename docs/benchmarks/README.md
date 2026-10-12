@@ -2,7 +2,8 @@
 
 The canonical benchmark pipeline builds identical ISA payloads for native execution and microfat packaging,
 runs a counterbalanced schedule, and retains raw Fortio output with resource observations and derived reports.
-The existing `microfat benchmark` baseline and v1 evidence remain supported.
+The existing `microfat benchmark` baseline and v1 evidence remain supported. Baseline runs accept
+1 through 10,000 trials; counts outside this evidence budget fail before workload setup.
 
 ## Run an experiment
 
@@ -95,6 +96,8 @@ It does not enable parent controllers, change host frequency policy, or flush gl
 controls produce explicit uncontrolled results. Resource-control failures are distinct from workload failures.
 
 CPU masks must be disjoint; inspect recorded sibling topology when selecting physically separate cores.
+Dedicated-host eligibility requires performance-governor and valid sibling-topology evidence for every CPU
+in both masks, with no target/generator sibling overlap reported by either side.
 Process separation alone cannot eliminate shared cache, memory-bandwidth, or kernel interference.
 
 ## Validation and revision comparisons
