@@ -108,16 +108,16 @@ func (d *Detector) parseProcCgroupSafe() (string, bool, map[string]string) {
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
 			continue
 		}
 		parts := strings.SplitN(line, ":", cgroupProcSplitParts)
 		if len(parts) != cgroupProcSplitParts {
 			continue
 		}
-		hID := parts[0]
-		ctrls := parts[1]
+		hID := strings.TrimSpace(parts[0])
+		ctrls := strings.TrimSpace(parts[1])
 		rel := parts[2]
 
 		if hID == cgroupV2HierarchyID && ctrls == "" {
@@ -193,7 +193,7 @@ func traverseCgroupV2MemoryMax(targetDir, root string) (int64, bool, error) {
 		if err == nil {
 			if valStr != cgroupMaxKeyword && valStr != "" {
 				parsed, pErr := strconv.ParseInt(valStr, 10, 64)
-				if pErr != nil || parsed <= 0 {
+				if pErr != nil || parsed < 0 {
 					return 0, false, fmt.Errorf("corrupted memory.max %q: %w", valStr, pErr)
 				}
 				if !hasMem || parsed < minMem {

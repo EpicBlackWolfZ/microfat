@@ -30,6 +30,10 @@ When running standard Go applications inside Docker or Kubernetes containers:
 
 Microfat uses `internal/cgroup` to inspect the container environment at startup:
 
+Membership paths retain their whitespace suffixes so limits come from the exact cgroup directory.
+On cgroup v1, a direct memory or CPU controller mount can supply its limits even when procfs also
+lists membership in another controller that is unavailable under the configured mount.
+
 ```mermaid
 flowchart TD
     Launcher["Launcher Startup"] --> Probe{"Inspect /sys/fs/cgroup"}
@@ -58,6 +62,12 @@ flowchart TD
 ### A. `GOMEMLIMIT` (Memory Limit)
 
 Given an effective cgroup memory ceiling $C$ and page-rounded retained memfd storage $S$, use $M = C - S$. Cache execution uses $S = 0$; cache pages still contribute to memory pressure. If storage exhausts the ceiling, no new runtime budget is injected.
+
+A kernel-valid `memory.max=0` or `memory.high=0` is a finite zero boundary. The hard ceiling and
+CPU quota remain independently available; the effective memory ceiling is zero. Cold extraction
+fails its budget check, while an existing verified warm cache can execute. Memory autotuning plans
+`GOMEMLIMIT=0B`, preserves explicit runtime settings, and keeps periodic GC enabled for the batch
+profile. This soft Go limit cannot make a zero kernel boundary sufficient for execution.
 
 $$\text{ratioBudget} = \lfloor M \times \text{ratio} \rfloor$$
 $$\text{headroomBudget} = \max(\lfloor M / 2 \rfloor, M - \text{minHeadroom})$$

@@ -25,11 +25,8 @@ func checkExtractionBudget(entry *format.VariantEntry, idx *format.Index) error 
 	if err != nil || limits.CgroupVersion == cgroup.VersionUnknown {
 		return nil
 	}
-	limit := limits.EffectiveMemoryLimitBytes
-	if limit <= 0 {
-		limit = cgroup.CalculateEffectiveMemoryLimit(limits.MemoryLimitBytes, limits.MemoryHighBytes)
-	}
-	if limit <= 0 || limit >= cgroup.UnlimitedCgroupV1MemoryThreshold {
+	limit, finite := limits.EffectiveMemoryLimit()
+	if !finite || limit >= cgroup.UnlimitedCgroupV1MemoryThreshold {
 		return nil
 	}
 	// Deliberately conservative decoder allowances tied to the configured codec limits.

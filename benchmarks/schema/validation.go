@@ -67,8 +67,8 @@ func ValidateExperiment(exp *Experiment) error {
 		return fmt.Errorf("cgroup memory limit validation: %w", err)
 	}
 	if exp.Environment.Host.Cgroup.MemoryMaxBytes.State == LimitStateFinite &&
-		*exp.Environment.Host.Cgroup.MemoryMaxBytes.Value <= 0 {
-		return fmt.Errorf("%w: finite cgroup memory max bytes must be positive", ErrInvalidLimitValue)
+		*exp.Environment.Host.Cgroup.MemoryMaxBytes.Value < 0 {
+		return fmt.Errorf("%w: finite cgroup memory max bytes must be nonnegative", ErrInvalidLimitValue)
 	}
 
 	if err := ValidateResourceLimit(exp.Environment.Host.Cgroup.CPUQuotaUs); err != nil {

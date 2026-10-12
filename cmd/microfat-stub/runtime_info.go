@@ -51,15 +51,16 @@ func buildRuntimeInfo(baseEnv []string, entry *format.VariantEntry) (*format.Cgr
 }
 
 func cgroupObservationInfo(limits cgroup.Limits, err error) *format.CgroupInfo {
+	_, finite := limits.EffectiveMemoryLimit()
 	info := &format.CgroupInfo{
 		Version:                    limits.CgroupVersion,
 		Status:                     observationCollected,
 		MemoryLimitBytes:           limits.MemoryLimitBytes,
-		MemoryLimitStatus:          numericObservationStatus(limits.MemoryLimitBytes > 0),
+		MemoryLimitStatus:          numericObservationStatus(limits.HasMemoryLimit()),
 		MemoryHighBytes:            limits.MemoryHighBytes,
-		MemoryHighStatus:           numericObservationStatus(limits.MemoryHighBytes > 0),
+		MemoryHighStatus:           numericObservationStatus(limits.HasMemoryHigh()),
 		EffectiveMemoryLimitBytes:  limits.EffectiveMemoryLimitBytes,
-		EffectiveMemoryLimitStatus: numericObservationStatus(limits.EffectiveMemoryLimitBytes > 0),
+		EffectiveMemoryLimitStatus: numericObservationStatus(finite),
 		CPUQuota:                   limits.CPUQuota,
 		CPUQuotaStatus:             numericObservationStatus(limits.CPUQuota > 0),
 	}
