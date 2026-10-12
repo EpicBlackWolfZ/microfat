@@ -11,7 +11,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
@@ -391,7 +390,7 @@ func MaterializeVariantAtFD(
 	if dirFD < 0 {
 		return "", fmt.Errorf("%w: invalid directory descriptor", format.ErrCacheWrite)
 	}
-	if strings.TrimSpace(dirPath) == "" {
+	if dirPath == "" {
 		return "", fmt.Errorf("%w: invalid empty cache directory path", format.ErrCacheWrite)
 	}
 	if entry == nil {
