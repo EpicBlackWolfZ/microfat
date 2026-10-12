@@ -29,6 +29,7 @@ const (
 	filePerms            = 0o644
 	execPerms            = 0o755
 	drainBufferSize      = 4096
+	releaseOSLinux       = "linux"
 )
 
 // VariantFacts contains facts extracted from a single variant inside a fat binary.
@@ -336,6 +337,9 @@ func inspectFatBinary(fatPath, expectedArch string, contract *ReleaseContract, f
 	if idx.TargetArch != expectedArch {
 		return fmt.Errorf("target arch mismatch: expected %s, got %s", expectedArch, idx.TargetArch)
 	}
+	if idx.TargetOS != releaseOSLinux {
+		return fmt.Errorf("target OS mismatch: expected %s, got %q", releaseOSLinux, idx.TargetOS)
+	}
 
 	expectedTiers, ok := contract.ExpectedTiers[expectedArch]
 	if !ok {
@@ -588,6 +592,26 @@ func getBuildSetting(bi *buildinfo.BuildInfo, key string) (string, bool) {
 	return "", false
 }
 
+func validateLinuxExecutableOS(header *elf.FileHeader, bi *buildinfo.BuildInfo) error {
+	if header.OSABI != elf.ELFOSABI_NONE && header.OSABI != elf.ELFOSABI_LINUX {
+		return fmt.Errorf("ELF OSABI %s is incompatible with Linux", header.OSABI)
+	}
+	found := false
+	for _, setting := range bi.Settings {
+		if setting.Key != "GOOS" {
+			continue
+		}
+		if setting.Value != releaseOSLinux {
+			return fmt.Errorf("GOOS setting mismatch: expected %s, got %q", releaseOSLinux, setting.Value)
+		}
+		found = true
+	}
+	if !found {
+		return fmt.Errorf("missing GOOS setting (expected %s)", releaseOSLinux)
+	}
+	return nil
+}
+
 func validateRootExecutableISA(expectedArch, req string, exe *ExecutableFacts) error {
 	if exe == nil {
 		return fmt.Errorf("missing executable facts for %s", req)
@@ -606,6 +630,9 @@ func validateRootExecutableISA(expectedArch, req string, exe *ExecutableFacts) e
 	}
 	if exe.BuildInfo == nil {
 		return fmt.Errorf("root executable %s is missing Go buildinfo", req)
+	}
+	if err := validateLinuxExecutableOS(exe.ELFHeader, exe.BuildInfo); err != nil {
+		return fmt.Errorf("root executable %s: %w", req, err)
 	}
 
 	val, found := getBuildSetting(exe.BuildInfo, expectedSettingKey)
@@ -634,6 +661,9 @@ func validateEmbeddedVariantISA(expectedArch, tier string, vf *VariantFacts) err
 	}
 	if vf.BuildInfo == nil {
 		return fmt.Errorf("embedded variant %s is missing Go buildinfo", tier)
+	}
+	if err := validateLinuxExecutableOS(vf.ELFHeader, vf.BuildInfo); err != nil {
+		return fmt.Errorf("embedded variant %s: %w", tier, err)
 	}
 
 	val, found := getBuildSetting(vf.BuildInfo, settingKey)
