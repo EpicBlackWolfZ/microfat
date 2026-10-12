@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
+	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 )
 
 const (
@@ -107,6 +108,7 @@ func (d *Detector) parseProcCgroupSafe() (string, bool, map[string]string) {
 	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
+	scanner.Split(cgroup.ScanProcCgroupLine)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {

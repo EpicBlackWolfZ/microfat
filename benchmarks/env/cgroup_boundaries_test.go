@@ -13,7 +13,7 @@ import (
 func TestDetectorMembershipWhitespace(t *testing.T) {
 	t.Parallel()
 	for _, version := range []string{cgroupVersionV1, cgroupVersionV2} {
-		for _, suffix := range []string{" ", "\t"} {
+		for _, suffix := range []string{" ", "\t", "\r"} {
 			for _, sibling := range []bool{false, true} {
 				t.Run(version+suffix+map[bool]string{false: " absent", true: " sibling"}[sibling], func(t *testing.T) {
 					t.Parallel()

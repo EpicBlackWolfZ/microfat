@@ -236,6 +236,7 @@ func parseProcCgroup(procPath string) (string, bool, map[string]string, error) {
 
 	hasEntries := false
 	scanner := bufio.NewScanner(f)
+	scanner.Split(ScanProcCgroupLine)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {

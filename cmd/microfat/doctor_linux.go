@@ -78,6 +78,8 @@ func probeCgroup() *CgroupReport {
 		Version:                   limits.CgroupVersion,
 		MemoryLimitBytes:          limits.MemoryLimitBytes,
 		MemoryHighBytes:           limits.MemoryHighBytes,
+		MemoryLimitFinite:         limits.HasMemoryLimit(),
+		MemoryHighFinite:          limits.HasMemoryHigh(),
 		EffectiveMemoryLimitBytes: limits.EffectiveMemoryLimitBytes,
 		ConstrainingLimit:         plan.ConstrainingLimit,
 		CPUQuota:                  limits.CPUQuota,

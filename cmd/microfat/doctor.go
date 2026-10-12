@@ -128,6 +128,8 @@ type CgroupReport struct {
 	Version                   int     `json:"version"`
 	MemoryLimitBytes          int64   `json:"memory_limit_bytes"`
 	MemoryHighBytes           int64   `json:"memory_high_bytes,omitempty"`
+	MemoryLimitFinite         bool    `json:"memory_limit_finite"`
+	MemoryHighFinite          bool    `json:"memory_high_finite"`
 	EffectiveMemoryLimitBytes int64   `json:"effective_memory_limit_bytes,omitempty"`
 	ConstrainingLimit         string  `json:"constraining_limit,omitempty"`
 	CPUQuota                  float64 `json:"cpu_quota"`
@@ -549,12 +551,12 @@ func printCacheSection(b *strings.Builder, cache *CacheReport) {
 func printCgroupSection(b *strings.Builder, cg *CgroupReport) {
 	if cg != nil && cg.Detected {
 		appendFormat(b, "%s Container Resource Limits (cgroup v%d)\n", glyphSuccess, cg.Version)
-		if cg.MemoryLimitBytes > 0 {
+		if cg.MemoryLimitFinite || cg.MemoryLimitBytes > 0 {
 			appendFormat(b, "    • Memory Limit:   %s\n", formatBytes(cg.MemoryLimitBytes))
 		} else {
 			appendLine(b, "    • Memory Limit:   unlimited")
 		}
-		if cg.MemoryHighBytes > 0 {
+		if cg.MemoryHighFinite || cg.MemoryHighBytes > 0 {
 			appendFormat(b, "    • Memory High:    %s\n", formatBytes(cg.MemoryHighBytes))
 		}
 		if cg.CPUQuota > 0 {
