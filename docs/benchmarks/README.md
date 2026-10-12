@@ -197,6 +197,14 @@ attempt; rerun all jobs when retrying a complete matrix so evidence from differe
 Maintainers initiate releases by pushing tags. If finalization fails, inspect both workflow results and
 rerun the failed publication job after correcting the cause; never publish a draft with missing evidence.
 
+For a draft-only qualification, set the repository Actions variable `MICROFAT_DRAFT_ONLY_TAG` to
+the exact tag before pushing it. The tag still stages and authenticates the signed draft, runs both
+native installer/runtime gates and the full hosted benchmark matrix, and retains the independently
+verified benchmark archive as an Actions artifact. Its automatic publication job is skipped. Other
+tags retain their existing behavior. Keep the hold in place until publication is approved, then use
+the explicit `release-finalize.yml` dispatch below with that successful tag run and attempt. A branch
+rehearsal cannot replace this tag-bound publication evidence.
+
 If archive delivery fails after successful measurements, dispatch `benchmark-evidence.yml`
 with its exact `source_run` and `source_attempt`. A fresh standard hosted runner resolves the original source
 from GitHub, requires all 12 measurement jobs and both compatibility jobs to have passed, downloads only that
