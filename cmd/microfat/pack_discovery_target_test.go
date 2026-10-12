@@ -48,7 +48,8 @@ func TestCLIPackArchitectureDiscovery(t *testing.T) {
 				t.Parallel()
 				dir := t.TempDir()
 				installedCLI := filepath.Join(dir, "microfat")
-				copyExecutableFile(t, cliPath, installedCLI)
+				// Reuse the completed inode so concurrent fork/exec cannot inherit fixture writers.
+				require.NoError(t, os.Link(cliPath, installedCLI))
 				stubDir := dir
 				if discovery == "PATH" {
 					stubDir = t.TempDir()
