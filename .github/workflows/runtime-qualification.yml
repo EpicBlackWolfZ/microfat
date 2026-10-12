@@ -35,7 +35,7 @@ jobs:
         with:
           cosign-release: 'v3.0.6'
       - name: Receive the producer's signed draft
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: signed-candidate-${{ github.run_id }}-${{ github.run_attempt }}
           path: .work/runtime-dist
@@ -50,7 +50,7 @@ jobs:
             RUNTIME_DIST="$PWD/.work/runtime-dist" RUNTIME_TAG="$RELEASE_TAG" RUNTIME_SOURCE="$RELEASE_SOURCE"
       - name: Preserve exact candidate evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: runtime-candidate-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
