@@ -1,6 +1,6 @@
 # Production roadmap
 
-Updated 2026-10-11 for release readiness and the remaining signed-candidate/public acceptance boundaries.
+Updated 2026-10-12 for the final audit corrections and remaining signed-candidate/public acceptance boundaries.
 GitHub issues define remaining scope,
 dependencies and acceptance criteria. Milestones group deliverable outcomes; they are not dates.
 
@@ -104,6 +104,9 @@ attestations and historical asset replacement are outside this milestone.
 | F-only ARM64 QEMU descriptor-execution qualification | [#231](https://github.com/EpicBlackWolfZ/microfat/issues/231) |
 | Independent native Go CPU adaptation with explicit tuning precedence | [#258](https://github.com/EpicBlackWolfZ/microfat/issues/258) |
 | Cache-first auto dispatch with descriptor verification and non-mutating misses | [#44](https://github.com/EpicBlackWolfZ/microfat/issues/44) |
+| Exact cgroup paths, independent v1 mounts and finite zero memory boundaries | [#340](https://github.com/EpicBlackWolfZ/microfat/issues/340), [#341](https://github.com/EpicBlackWolfZ/microfat/issues/341), [#342](https://github.com/EpicBlackWolfZ/microfat/issues/342) |
+| Independent Linux release validation, canonical launcher discovery and exact cache paths | [#343](https://github.com/EpicBlackWolfZ/microfat/issues/343), [#344](https://github.com/EpicBlackWolfZ/microfat/issues/344), [#348](https://github.com/EpicBlackWolfZ/microfat/issues/348) |
+| Bounded benchmark trials, complete selected-CPU evidence and effective-limit density | [#345](https://github.com/EpicBlackWolfZ/microfat/issues/345), [#346](https://github.com/EpicBlackWolfZ/microfat/issues/346), [#347](https://github.com/EpicBlackWolfZ/microfat/issues/347) |
 
 These source implementations are merged. Issues #203, #205 and #260 retain the acceptance boundaries
 below; they are not complete merely because their source CI passes. Installer source landed in
