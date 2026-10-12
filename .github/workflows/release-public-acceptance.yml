@@ -1,0 +1,145 @@
+name: Public release acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact published stable immutable release
+        type: string
+        required: true
+        default: v0.3.0
+      source:
+        description: Independently reviewed full release source SHA
+        type: string
+        required: true
+      homebrew:
+        description: Also verify the merged official public Homebrew tap
+        type: boolean
+        default: false
+      tap_source:
+        description: Reviewed full merged tap SHA (required with Homebrew)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    name: Clean public installer (${{ matrix.arch }})
+    runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        with:
+          version: '3.53.1'
+      - name: Authenticate complete public immutable inventory before qualification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SOURCE: ${{ inputs.source }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_SOURCE" =~ ^[0-9a-f]{40}$ ]]
+          mkdir -p .work/public-installer
+          task homebrew-prepare TAG="$RELEASE_TAG" OUTPUT="$PWD/.work/public-installer/acquisition"
+          jq -e --arg source "$RELEASE_SOURCE" '.source == $source' \
+            .work/public-installer/acquisition/verification.json
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source }}
+          path: .work/tagged-source
+          persist-credentials: false
+      - name: Exercise actual public bootstrap in fresh native Linux without Go or Cosign
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SOURCE: ${{ inputs.source }}
+          RELEASE_ARCH: ${{ matrix.arch }}
+        run: |
+          test "$(git -C .work/tagged-source rev-parse HEAD)" = "$RELEASE_SOURCE"
+          bash scripts/qualify-public-installer.sh "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_ARCH" \
+            "$PWD/.work/public-installer/acquisition/verification.json" \
+            "$PWD/.work/tagged-source/scripts/install.sh" "$PWD/.work/public-installer/qualification"
+      - name: Preserve public bootstrap evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: public-installer-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            .work/public-installer/acquisition/verification.json
+            .work/public-installer/acquisition/commands.jsonl
+            .work/public-installer/acquisition/dist/checksums.txt*
+            .work/public-installer/qualification/
+
+  homebrew:
+    name: Official public Homebrew (${{ matrix.arch }})
+    if: inputs.homebrew
+    runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        with:
+          version: '3.53.1'
+      - name: Authenticate public release and prepare disposable Homebrew lifecycle fixture
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SOURCE: ${{ inputs.source }}
+          TAP_SOURCE: ${{ inputs.tap_source }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_SOURCE" =~ ^[0-9a-f]{40}$ && "$TAP_SOURCE" =~ ^[0-9a-f]{40}$ ]]
+          mkdir -p .work/public-homebrew
+          task homebrew-prepare TAG="$RELEASE_TAG" OUTPUT="$PWD/.work/public-homebrew/acquisition"
+          jq -e --arg source "$RELEASE_SOURCE" '.source == $source' \
+            .work/public-homebrew/acquisition/verification.json
+          task qualify-homebrew OUTPUT="$PWD/.work/public-homebrew/qualification" \
+            CASK="$PWD/.work/public-homebrew/acquisition/microfat.rb"
+      - name: Verify documented official tap installation and lifecycle
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          TAP_SOURCE: ${{ inputs.tap_source }}
+        run: |
+          bash scripts/qualify-public-homebrew.sh "$PWD/.work/public-homebrew/qualification" \
+            "$RELEASE_TAG" "$TAP_SOURCE"
+      - name: Preserve exact public tap and lifecycle evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: public-homebrew-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            .work/public-homebrew/acquisition/verification.json
+            .work/public-homebrew/acquisition/commands.jsonl
+            .work/public-homebrew/acquisition/dist/checksums.txt*
+            .work/public-homebrew/qualification/commands.log
+            .work/public-homebrew/qualification/brew-logs/
+            .work/public-homebrew/qualification/published/verification.json
+            .work/public-homebrew/qualification/public-homebrew/

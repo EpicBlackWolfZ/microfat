@@ -77,6 +77,16 @@ new releases and v0.2.5 snapshots reject the historical schemas.
 
 Maintainers can dispatch [Published Release Audit](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/release-audit.yml) with a published immutable tag. It verifies the checksum signature against the exact tag workflow and source commit before executing downloaded products on native amd64 and ARM64 runners. The audit covers both formats, full/minimal launchers, codecs/dictionaries, automatic/memfd/cache dispatch, metadata operations and corrupt-payload rejection. Its retained evidence identifies the downloaded bytes; benchmark publication qualification remains a separate gate.
 
+[Public installation acceptance](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/release-public-acceptance.yml)
+checks the documented installation paths on native amd64 and arm64. The installer runs in fresh,
+nonroot Linux containers without Go or preinstalled Cosign, downloads the reviewed versioned
+bootstrap from its public URL, and verifies latest/pinned installation, matching product bytes,
+reinstallation, companion discovery, memfd/cache execution and conservative uninstall. After the
+authenticated Homebrew recipe is merged, enable its Homebrew checks with the exact tap commit.
+Those checks install from the official remote tap and retain product hashes, ownership and lifecycle
+results. Signed-draft helper qualification, published archive audits and these public-path checks
+retain separate evidence.
+
 ## 2. Archive Contents & Binary Roles
 
 Extracting `microfat_<version>_linux_<arch>.tar.gz` provides:
