@@ -12,15 +12,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const fixturePerformanceGovernor = "performance"
+
 func TestHardwareQualifications(t *testing.T) {
 	t.Parallel()
 	cfg := DefaultExperimentConfig()
 	cfg.Target.Affinity, cfg.Generator.Affinity = []int{1}, []int{3}
 	assert.Len(t, hostQualifications(nil, cfg), 2)
 	host := map[string]string{
-		"/sys/cpu1/cpufreq/scaling_governor": "performance", "/sys/cpu1/topology/thread_siblings_list": "1-2",
-		"/sys/cpu3/cpufreq/scaling_governor": "performance", "/sys/cpu3/topology/thread_siblings_list": "3-4",
-		"/sys/cpu2/cpufreq/scaling_governor": "performance", "/sys/cpu2/topology/thread_siblings_list": "1-2",
+		"/sys/cpu1/cpufreq/scaling_governor": fixturePerformanceGovernor, "/sys/cpu1/topology/thread_siblings_list": "1-2",
+		"/sys/cpu3/cpufreq/scaling_governor": fixturePerformanceGovernor, "/sys/cpu3/topology/thread_siblings_list": "3-4",
+		"/sys/cpu2/cpufreq/scaling_governor": fixturePerformanceGovernor, "/sys/cpu2/topology/thread_siblings_list": "1-2",
 	}
 	assert.Empty(t, hostQualifications(host, cfg))
 	cfg.Generator.Affinity = []int{2}
@@ -85,10 +87,10 @@ func TestSelectedCPUQualificationCompleteness(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			host := map[string]string{"/sys/cpu0/cpufreq/scaling_governor": "performance"}
+			host := map[string]string{"/sys/cpu0/cpufreq/scaling_governor": fixturePerformanceGovernor}
 			for _, cpu := range []int{1, 2, 3} {
 				prefix := "/sys/cpu" + strconv.Itoa(cpu)
-				host[prefix+"/cpufreq/scaling_governor"] = "performance"
+				host[prefix+"/cpufreq/scaling_governor"] = fixturePerformanceGovernor
 				host[prefix+"/topology/thread_siblings_list"] = strconv.Itoa(cpu) + "," + strconv.Itoa(cpu+4)
 			}
 			test.alter(host)
@@ -124,12 +126,12 @@ func qualifiedHostFixture(t *testing.T, cfg ExperimentConfig) *schema.Experiment
 		trial := template
 		trial.ScheduledTrial = scheduled
 		trial.Controls = []schema.Control{
-			{Name: "target.affinity", Requested: "1,2", Effective: "1,2", State: "applied"},
-			{Name: "generator.affinity", Requested: "3", Effective: "3", State: "applied"},
-			{Name: "target.cpu.max", Requested: "max 100000", Effective: "max 100000", State: "applied"},
-			{Name: "generator.cpu.max", Requested: "max 100000", Effective: "max 100000", State: "applied"},
-			{Name: "target.memory.max", Requested: "max", Effective: "max", State: "applied"},
-			{Name: "generator.memory.max", Requested: "max", Effective: "max", State: "applied"},
+			{Name: "target.affinity", Requested: "1,2", Effective: "1,2", State: fixtureControlApplied},
+			{Name: "generator.affinity", Requested: "3", Effective: "3", State: fixtureControlApplied},
+			{Name: "target.cpu.max", Requested: "max 100000", Effective: "max 100000", State: fixtureControlApplied},
+			{Name: "generator.cpu.max", Requested: "max 100000", Effective: "max 100000", State: fixtureControlApplied},
+			{Name: fixtureTargetMemoryMax, Requested: "max", Effective: "max", State: fixtureControlApplied},
+			{Name: "generator.memory.max", Requested: "max", Effective: "max", State: fixtureControlApplied},
 		}
 		trial.SampleCount = 1
 		load := testfixture.HTTP()

@@ -116,7 +116,8 @@ excluded from all primary performance comparisons.
 
 `packaging_ratio` is the sum of the uniquely built native payload file sizes divided by the
 whole fat executable size, including stub and metadata. Throughput per quota vCPU and per
-memory-limit GiB require the corresponding finite target limit to have been applied.
+memory-limit GiB require the corresponding finite target limit to have been applied. Their denominators
+use effective controller readback, including the effective CPU quota and period and page-rounded memory limit.
 They never substitute host CPU count or physical RAM. Phase counter deltas use the first
 and last available samples; a reset or single sample yields an unavailable value.
 
