@@ -75,7 +75,7 @@ new releases and v0.2.5 snapshots reject the historical schemas.
 
 ---
 
-Maintainers can dispatch [Published Release Audit](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/release-audit.yml) with a published immutable tag. It verifies the checksum signature against the exact tag workflow and source commit before executing downloaded products on native amd64 and ARM64 runners. The audit covers both formats, full/minimal launchers, codecs/dictionaries, automatic/memfd/cache dispatch, metadata operations and corrupt-payload rejection. Its retained evidence identifies the downloaded bytes; benchmark publication qualification remains a separate gate.
+Maintainers can dispatch [Published Release Audit](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/release-audit.yml) with a published immutable tag. It verifies the checksum signature against the exact tag workflow and source commit before executing downloaded products on native amd64 and ARM64 runners. The audit covers both formats, full/minimal launchers, codecs/dictionaries, automatic/memfd/cache dispatch, metadata operations and corrupt-payload rejection. Its retained evidence identifies the downloaded bytes. Go, gofmt and Cosign are available in this archive audit; clean bootstrap acceptance and benchmark publication qualification remain separate gates.
 
 [Public installation acceptance](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/release-public-acceptance.yml)
 checks the documented installation paths on native amd64 and arm64. The installer runs in fresh,
@@ -86,6 +86,14 @@ authenticated Homebrew recipe is merged, enable its Homebrew checks with the exa
 Those checks install from the official remote tap and retain product hashes, ownership and lifecycle
 results. Signed-draft helper qualification, published archive audits and these public-path checks
 retain separate evidence.
+
+The v0.3.0 then-private signed candidate passed native installer and runtime qualification on both architectures.
+Hosted evidence passed and v0.3.0 is published as an immutable release. Independently verified
+[public installation acceptance 38376089070, attempt 2](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38376089070/attempts/2)
+passed all four native installer/Homebrew jobs from qualification source `5f09b0185b1c51daa54a641d7241ac111c340555`,
+authenticating immutable product source `d3883d59674eb32351717f6d28744862d1cc45c9`.
+The [release acceptance record](releases/v0.3.0.md#release-acceptance) identifies the final source and
+candidate/publication results and the separate public installer/tap evidence and its scope.
 
 ## 2. Archive Contents & Binary Roles
 
@@ -124,15 +132,17 @@ Extracting `microfat_<version>_linux_<arch>.tar.gz` provides:
 ### Scenario A: Installing the `microfat` CLI
 
 The [official Homebrew tap](https://github.com/EpicBlackWolfZ/homebrew-tap) selects these same archives
-for Linux amd64 and arm64. Its first cask requires the public v0.3.0 release and a merged recipe PR;
-see [Homebrew commands](installation.md#homebrew-linux-amd64-and-arm64). The tap generator consumes
+for Linux amd64 and arm64. The authenticated v0.3.0 recipe and official remote installation passed
+on both native architectures. See [Homebrew commands](installation.md#homebrew-linux-amd64-and-arm64)
+and the [release acceptance record](releases/v0.3.0.md#release-acceptance). The tap generator consumes
 the authenticated release inventory directly, so GoReleaser's `meta: true` archive output does not
 need fabricated platform metadata or a second packaging pass.
 
 Use the [verified installer](installation.md) to authenticate the release and publish all three products
-as one owned generation. The first bootstrap needs published v0.3.0 helper assets; the guide also covers
-a trusted source helper and independently provisioned verifier. Historical v0.2.3 through v0.2.5 remain
-installable without changing their immutable archives.
+as one owned generation. Signed v0.3.0 helper assets are published; native public bootstrap acceptance
+passed in fresh nonroot containers without Go or preinstalled Cosign, using default user roots.
+The guide also covers a trusted source helper and independently provisioned verifier.
+Historical v0.2.3 through v0.2.5 remain installable without changing their immutable archives.
 
 The [verification contract](release-verification.md) defines the exact tag identity, independent verifier
 pins and authentication before extraction. No downloaded product authenticates itself. User paths are

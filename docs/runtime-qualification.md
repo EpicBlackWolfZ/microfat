@@ -193,7 +193,24 @@ Verified runtime evidence is attached as a separate supplemental archive and
 checksum, without changing the signed product inventory or benchmark archive
 contract. Historical release requirements remain unchanged.
 
-Implementation and green source CI alone do not complete #260. Its acceptance
-still requires merged gates and passing native results for both architectures
-against the same authenticated signed candidate. Release creation, publication
-and PR merge remain maintainer-controlled.
+Implementation and green source CI alone do not complete #260. The integrated v0.3.0 source passed
+signed-candidate qualification in
+[producer 38334917557, attempt 1](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38334917557/attempts/1).
+Then-private draft release `411193467`, subsequently published immutable, and annotated tag object `61b136c286cf1e8fa47251f9e2234f00f8dc0fc5`
+bind source `d3883d59674eb32351717f6d28744862d1cc45c9`. Each native architecture completed
+1,059/1,059 required cases with 4,051 execution observations and no skips against the same authenticated
+signed inventory. The retained summaries identify product digests, kernel, page size, policy and toolchain;
+the [release acceptance record](releases/v0.3.0.md#release-acceptance) records candidate provenance.
+The published runtime aggregate's entire SHA-256 and gzip CRC are verified; fourteen selected
+authentication/summary members match the qualified producer bytes exactly, and production validators
+passed against the immutable inventory. This extends the earlier private observer's selected-ZIP-member
+checks; it does not establish public bootstrap or remote tap acceptance.
+[Immutable publication](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38351256164/attempts/1) passed;
+the [published archive audit](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38359140179/attempts/1)
+completed successfully on both native architectures. Independently verified
+[public acceptance 38376089070, attempt 2](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38376089070/attempts/2)
+passed all four native installer/Homebrew jobs from qualification source `5f09b0185b1c51daa54a641d7241ac111c340555`,
+against immutable product source `d3883d59674eb32351717f6d28744862d1cc45c9` and tap recipe merge
+`87061d5bd8411a3e729ad5a6d25925ff76f669bb`. The acceptance requirements are complete; final issue
+closure follows the reviewed acceptance documentation merge. Source and QEMU results retain their own qualification scope.
+Release creation, publication and PR merge remain maintainer-controlled.

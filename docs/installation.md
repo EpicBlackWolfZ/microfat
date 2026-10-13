@@ -3,9 +3,10 @@
 ## Homebrew (Linux amd64 and arm64)
 
 The official shared repository is [EpicBlackWolfZ/homebrew-tap](https://github.com/EpicBlackWolfZ/homebrew-tap),
-which Homebrew addresses as `EpicBlackWolfZ/tap`. The first `microfat` cask is pending publication and
-authentication of v0.3.0 and maintainer merge of its generated recipe PR. These commands become usable
-only after that recipe is merged:
+which Homebrew addresses as `EpicBlackWolfZ/tap`.
+The authenticated v0.3.0 recipe and documented public install command passed on native amd64 and arm64.
+The [release acceptance record](releases/v0.3.0.md#release-acceptance) identifies the exact recipe and
+public checks. Install, upgrade, reinstall or remove the cask with:
 
 ```bash
 brew install --cask EpicBlackWolfZ/tap/microfat
@@ -34,6 +35,9 @@ or cross-release rollback guarantee is provided.
 Tap automation authenticates the release before proposing metadata. At installation, Homebrew verifies
 the archive against the reviewed recipe's fixed hash; the cask does not run an installer or Cosign.
 See [Homebrew release maintenance](homebrew.md) for the publication order, checks and recovery procedure.
+Public Homebrew acceptance passed in fresh disposable prefixes on provisioned native Linux hosts.
+Its first-release upgrade check covered the same version; cross-version upgrade and checksum-failure recovery use controlled fixtures. Those fixtures
+do not prove an upgrade between two published microfat releases.
 
 ## Verified installer requirements
 
@@ -43,10 +47,12 @@ Cosign, jq, Python or tar. Base requirements are Bash, curl with HTTPS support, 
 and coreutils (`uname`, `mktemp`, `sha256sum`, `chmod`, `rm`, `stat`). Temporary staging must permit execution
 and use an already existing parent with safe owned ancestors (root-owned sticky `/tmp` is supported).
 
-**First-release availability:** the bootstrap is implemented but needs the signed v0.3.0 helper assets
-to be published. A source checkout or unsigned snapshot alone does not make its public download path
-usable. Until publication, a trusted source build can use the native helper with an independently
-provisioned verifier as described below. The release workflow qualifies the signed draft before publication.
+Signed v0.3.0 helper assets are published. Public bootstrap acceptance passed in fresh nonroot native
+amd64/arm64 containers without Go or preinstalled Cosign, using default user roots. See the
+[release acceptance record](releases/v0.3.0.md#release-acceptance) for the candidate and public evidence.
+Custom/system roots and adversarial cases retain their separate source/candidate qualification scope.
+A trusted source build can also use the native helper with an independently provisioned verifier as
+described below. The release workflow qualified the exact signed candidate before publication.
 
 ## Bootstrap and version selection
 
@@ -56,17 +62,17 @@ script over HTTPS trusts that source and transport. For a stronger operator work
 first, compare its digest with an independently trusted provisioning record, review it, then run it.
 Do not treat a checksum fetched beside an untrusted script as an independent trust anchor.
 
-After the first helper release is published, the versioned checkout-free command will be:
+Install without a source checkout using the versioned bootstrap:
 
 ```bash
 curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
   https://raw.githubusercontent.com/EpicBlackWolfZ/microfat/v0.3.0/scripts/install.sh | bash -s --
 ```
 
-This command is unavailable until v0.3.0 is published. Append installer arguments after `--`, such as
+Append installer arguments after `--`, such as
 `--version 0.2.5`. To review first, download the same versioned URL with `curl --output microfat-install.sh`,
 compare `sha256sum microfat-install.sh` with your independent trust record, inspect the script, and run
-`bash microfat-install.sh`. From a reviewed checkout, after publication:
+`bash microfat-install.sh`. The same options work from a reviewed checkout:
 
 ```bash
 bash scripts/install.sh                         # discover and freeze latest stable
