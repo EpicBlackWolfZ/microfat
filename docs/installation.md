@@ -176,9 +176,13 @@ occurs before the command starts.
 
 Successful checks return 0 whether or not a newer release exists. Use `--json` and `update_available`
 for automation. An operational failure returns 1; invalid updater arguments return 2. Both checking
-and applying accept `--json`. Stdout contains one result object; diagnostics go to stderr. Unknown
-versions are null. `running_version` can differ from `current_version` when another process already
-activated a newer generation. `verification` is `not_performed`, `metadata_only`, or `artifact_verified`.
+and applying accept `--json`. Successful operations and operational failures write one result object
+to stdout when output can be written; diagnostics go to stderr. Usage errors (exit 2), including
+invalid flag combinations, positional arguments, and invalid stable-version syntax, leave stdout
+empty even with `--json`. Scripts must check the exit status before decoding stdout and handle exit 2
+using the stderr diagnostic. Unknown versions are null. `running_version` can differ from
+`current_version` when another process already activated a newer generation. `verification` is
+`not_performed`, `metadata_only`, or `artifact_verified`.
 `activated: true` means activation occurred even if a subsequent completion/durability/output error
 caused a failure status. Do not assume a nonzero exit means the old release is still active.
 

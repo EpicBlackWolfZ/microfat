@@ -348,11 +348,12 @@ variants:
 
 `microfat` packages fat binaries using either the standard full launcher stub or the lightweight minimal launcher stub:
 
-- **`full` Profile (`microfat-stub`, default)**: Includes interactive runtime meta-commands (`--microfat-info`, `--microfat-optimize`,
-  `--microfat-trim`, etc.), container resource auto-tuning, zero-allocation binary table decoding, and in-RAM/cache dispatch.
-- **`minimal` Profile (`microfat-stub-minimal`)**: Compiled with `-tags minimal` with meta-command handlers stripped for lean deployments
-  (< 1.2 MB footprint). Retains container resource auto-tuning, zero-allocation binary table decoding, and in-RAM/cache dispatch, but
-  explicitly rejects interactive meta-commands (`--microfat:*`).
+- **`full` Profile (`microfat-stub`, default)**: Includes interactive runtime meta-commands (`--microfat:info`, `--microfat:optimize`,
+  `--microfat:trim`, etc.), container resource auto-tuning, zero-allocation binary table decoding, and in-RAM/cache dispatch.
+- **`minimal` Profile (`microfat-stub-minimal`)**: Compiled with `-tags minimal` with meta-command handlers stripped for a reduced footprint.
+  Retains container resource auto-tuning, zero-allocation binary table decoding, in-RAM/cache dispatch, and environment controls such as
+  `MICROFAT_FORCE_LEVEL`, `MICROFAT_EXEC_MODE`, and `MICROFAT_GC_PROFILE`, but explicitly rejects interactive meta-commands (`--microfat:*`).
+  Stub size depends on architecture, Go toolchain, and build flags; measure the selected artifact rather than assuming a fixed size limit.
 
 **Resolution & Conflict Contract**:
 1. **Explicit `--stub <path>`**: Takes deliberate precedence over profile auto-discovery.
@@ -533,7 +534,7 @@ use each candidate's `effective_environment` to inspect its inherited or injecte
 
 > [!NOTE]
 > **Minimal Stub Profile (`-tags minimal`)**:
-> In ultra-lean production deployments where launcher stub size must be minimized to $< 1.2\text{ MB}$, compile the stub with `go build -tags minimal ./cmd/microfat-stub` (or use `bin/microfat-stub-minimal`). The minimal stub retains zero-allocation binary table decoding and cache-first auto/sealed memfd dispatch, but strips interactive meta-command handlers (`--microfat:*`).
+> To reduce launcher stub size, compile with `go build -tags minimal ./cmd/microfat-stub` (or use `bin/microfat-stub-minimal`). The minimal stub retains container resource auto-tuning, environment controls, zero-allocation binary table decoding, and cache-first auto/sealed memfd dispatch, but rejects interactive meta-commands (`--microfat:*`). Sizes vary with architecture, toolchain, and build flags; the published v0.3.0 Linux amd64 minimal stub is 3,748,000 bytes, compared with 3,977,376 bytes for the full stub.
 
 ---
 
@@ -646,7 +647,7 @@ microfat update --version 0.2.5 --allow-downgrade
 | Option | Meaning |
 | --- | --- |
 | `--check` | Read published stable release metadata; no artifact authentication or installation changes. |
-| `--json` | Emit one schema-versioned result on stdout, with diagnostics on stderr. |
+| `--json` | Emit one schema-versioned result for successful operations and operational failures; usage errors leave stdout empty. Diagnostics go to stderr. |
 | `--version VERSION` | Select an exact published stable release, optionally prefixed with `v`. |
 | `--allow-downgrade` | Permit a pinned older version; requires `--version`. |
 | `--system` | Explicit root-owned update, while already running as root. |
@@ -658,7 +659,9 @@ Stable releases before v0.2.3, prereleases, drafts, and unknown development vers
 The top-level `microfat --version` still prints build identity.
 
 Exit codes: 0 for successful checks, no-ops and updates; 1 for operational failure; 2 for invalid
-updater arguments. Both `current` and `update_available` checks return 0. JSON schema 1 reports:
+updater arguments. Both `current` and `update_available` checks return 0. Exit 2 leaves stdout empty even
+with `--json`; scripts must check the exit status before decoding stdout. Successful operations and
+operational failures emit a JSON result when output can be written. JSON schema 1 reports:
 
 | Field | Meaning |
 | --- | --- |

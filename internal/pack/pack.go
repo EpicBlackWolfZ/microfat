@@ -166,9 +166,10 @@ func sampleInput(path string, budget int) ([][]byte, error) {
 func prepareSharedDictionary(opts *Options, levels []string) ([]byte, string, error) {
 	enableDict := opts.EnableDict
 	if !enableDict && strings.EqualFold(strings.TrimSpace(opts.Profile), codec.ProfileSize) && len(levels) >= minVariantsForDict {
-		algo, _ := codec.ParseCompressionSpec(opts.Compression)
-		if algo == "" || algo == codec.AlgorithmZstd {
-			enableDict = true
+		var err error
+		enableDict, err = hasDictionaryCapableVariant(opts, levels)
+		if err != nil {
+			return nil, "", err
 		}
 	}
 
@@ -221,6 +222,23 @@ func prepareSharedDictionary(opts *Options, levels []string) ([]byte, string, er
 
 	h := sha256.Sum256(dict)
 	return dict, hex.EncodeToString(h[:]), nil
+}
+
+func hasDictionaryCapableVariant(opts *Options, levels []string) (bool, error) {
+	for _, lvl := range levels {
+		stat, err := os.Stat(opts.Variants[lvl])
+		if err != nil {
+			return false, fmt.Errorf("stat variant %s for dictionary selection: %w", lvl, err)
+		}
+		c, _, err := resolveVariantCompression(opts, lvl, stat.Size())
+		if err != nil {
+			return false, err
+		}
+		if _, ok := c.(codec.DictCodec); ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Pack stitches the stub and compressed variant binaries into a complete microfat fat executable.
@@ -457,31 +475,9 @@ func writeVariantPayload(
 	uncompressedSize := int64(len(variantBytes))
 	variantOffset := currentOffset
 
-	profile := opts.Profile
-	compAlgo := opts.Compression
-	compLevel := opts.CompressionLevel
-
-	normLvl := format.NormalizeVariant(lvl)
-	varComp, hasOverride := opts.VariantCompression[normLvl]
-	if hasOverride {
-		if varComp.Profile != "" {
-			profile = varComp.Profile
-		}
-		if varComp.Compression != "" {
-			compAlgo = varComp.Compression
-			// An explicit inline variant level outranks the inherited root level.
-			if _, inlineLevel := codec.ParseCompressionSpec(compAlgo); inlineLevel != "" {
-				compLevel = inlineLevel
-			}
-		}
-		if varComp.Level != "" {
-			compLevel = varComp.Level
-		}
-	}
-
-	c, resolvedLevel, err := codec.ResolveCompression(profile, compAlgo, compLevel, uncompressedSize)
+	c, resolvedLevel, err := resolveVariantCompression(opts, lvl, uncompressedSize)
 	if err != nil {
-		return format.VariantEntry{}, 0, fmt.Errorf("resolving compression for variant %s: %w", lvl, err)
+		return format.VariantEntry{}, 0, err
 	}
 
 	if len(dict) > 0 {
@@ -506,7 +502,7 @@ func writeVariantPayload(
 	}
 
 	entry := format.VariantEntry{
-		Level:            normLvl,
+		Level:            format.NormalizeVariant(lvl),
 		Offset:           variantOffset,
 		CompressedSize:   newOffset - variantOffset,
 		UncompressedSize: uncompressedSize,
@@ -514,6 +510,36 @@ func writeVariantPayload(
 		Compression:      c.Name(),
 	}
 	return entry, newOffset, nil
+}
+
+func resolveVariantCompression(opts *Options, lvl string, uncompressedSize int64) (codec.Codec, string, error) {
+	profile := opts.Profile
+	compAlgo := opts.Compression
+	compLevel := opts.CompressionLevel
+
+	normLvl := format.NormalizeVariant(lvl)
+	varComp, hasOverride := opts.VariantCompression[normLvl]
+	if hasOverride {
+		if varComp.Profile != "" {
+			profile = varComp.Profile
+		}
+		if varComp.Compression != "" {
+			compAlgo = varComp.Compression
+			// An explicit inline variant level outranks the inherited root level.
+			if _, inlineLevel := codec.ParseCompressionSpec(compAlgo); inlineLevel != "" {
+				compLevel = inlineLevel
+			}
+		}
+		if varComp.Level != "" {
+			compLevel = varComp.Level
+		}
+	}
+
+	c, resolvedLevel, err := codec.ResolveCompression(profile, compAlgo, compLevel, uncompressedSize)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolving compression for variant %s: %w", lvl, err)
+	}
+	return c, resolvedLevel, nil
 }
 
 func finalizeOutputFile(tmpFile *os.File, tmpPath, outputPath string, perms os.FileMode) error {

@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/install"
@@ -20,6 +23,10 @@ import (
 
 const failureCode = 1
 const usageCode = 2
+
+type argumentError struct{ error }
+
+func (e argumentError) Unwrap() error { return e.error }
 
 type options struct {
 	version, bin, store, staging, cosign, pin string
@@ -71,16 +78,52 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	if flags.NArg() != 0 {
 		return opts, errors.New("unexpected positional arguments")
 	}
+	return opts, validateOptions(opts)
+}
+
+func validateOptions(opts options) error {
 	if opts.uninstall && (opts.version != "" || opts.repair || opts.downgrade) {
-		return opts, errors.New("uninstall cannot select or repair a release")
+		return errors.New("uninstall cannot select or repair a release")
 	}
 	if opts.downgrade && opts.version == "" {
-		return opts, errors.New("--allow-downgrade requires --version")
+		return errors.New("--allow-downgrade requires --version")
 	}
 	if opts.releaseDir != "" && (opts.version == "" || opts.uninstall) {
-		return opts, errors.New("--release-dir requires --version and cannot be combined with --uninstall")
+		return errors.New("--release-dir requires --version and cannot be combined with --uninstall")
 	}
-	return opts, nil
+	if opts.helperVersion {
+		return nil
+	}
+	if opts.version != "" {
+		if _, err := installrelease.ParseVersion(opts.version); err != nil {
+			return err
+		}
+	}
+	if opts.system && (opts.bin == "" || opts.store == "") {
+		return errors.New("--system requires explicit --bin-dir and --store-dir")
+	}
+	if opts.uninstall {
+		return nil
+	}
+	return validateAcquisitionOptions(opts)
+}
+
+func validateAcquisitionOptions(opts options) error {
+	if opts.cosign == "" || opts.pin == "" {
+		return errors.New("use the verified bootstrap or supply --cosign and --cosign-sha256")
+	}
+	for _, path := range []struct{ name, value string }{
+		{"--cosign", opts.cosign}, {"--staging-dir", opts.staging}, {"--release-dir", opts.releaseDir},
+	} {
+		if path.value != "" && (!filepath.IsAbs(path.value) || filepath.Clean(path.value) != path.value) {
+			return fmt.Errorf("%s must be a clean absolute path", path.name)
+		}
+	}
+	digest, err := hex.DecodeString(opts.pin)
+	if err != nil || len(digest) != sha256.Size || opts.pin != strings.ToLower(opts.pin) {
+		return errors.New("invalid SHA-256 trust pin")
+	}
+	return nil
 }
 
 func run(ctx context.Context, args []string, env environment, stdout, stderr io.Writer) int {
@@ -94,6 +137,10 @@ func run(ctx context.Context, args []string, env environment, stdout, stderr io.
 	}
 	if err := execute(ctx, opts, env, stdout); err != nil {
 		_, _ = fmt.Fprintf(stderr, "microfat-install: %v\n", err)
+		var argumentErr argumentError
+		if errors.As(err, &argumentErr) {
+			return usageCode
+		}
 		return failureCode
 	}
 	return 0
@@ -108,7 +155,7 @@ func resolvePaths(opts options, env environment) (install.Paths, error) {
 		if env.uid != 0 || paths.Bin == "" || paths.Store == "" {
 			return paths, errors.New("--system requires root and explicit --bin-dir and --store-dir")
 		}
-		return paths, paths.Validate()
+		return paths, validatePaths(paths)
 	}
 	if env.uid == 0 {
 		return paths, errors.New("running as root requires explicit --system, --bin-dir and --store-dir; no sudo is invoked")
@@ -135,10 +182,20 @@ func resolvePaths(opts options, env environment) (install.Paths, error) {
 			paths.Store = filepath.Join(data, "microfat", "installations", "default")
 		}
 	}
-	return paths, paths.Validate()
+	return paths, validatePaths(paths)
+}
+
+func validatePaths(paths install.Paths) error {
+	if err := paths.Validate(); err != nil {
+		return argumentError{err}
+	}
+	return nil
 }
 
 func execute(ctx context.Context, opts options, env environment, stdout io.Writer) error {
+	if err := validateOptions(opts); err != nil {
+		return argumentError{err}
+	}
 	if opts.helperVersion {
 		_, err := fmt.Fprintln(stdout, "microfat-install", version.Info())
 		return err
@@ -156,9 +213,6 @@ func execute(ctx context.Context, opts options, env environment, stdout io.Write
 		_, outputErr := fmt.Fprintf(stdout, "Removed %d owned entrypoints; preserved %d modified entries.\nRetained generations: %s\n",
 			len(result.Removed), len(result.Preserved), paths.Store)
 		return errors.Join(removeErr, outputErr)
-	}
-	if opts.cosign == "" || opts.pin == "" {
-		return errors.New("use the verified bootstrap or supply --cosign and --cosign-sha256")
 	}
 	if opts.releaseDir != "" {
 		env.client, err = installrelease.NewLocalClient(opts.releaseDir)

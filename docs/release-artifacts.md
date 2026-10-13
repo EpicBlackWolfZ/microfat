@@ -102,7 +102,7 @@ Extracting `microfat_<version>_linux_<arch>.tar.gz` provides:
 ```text
 ├── microfat                   # Universal fat CLI (auto-dispatches optimal variant on host)
 ├── microfat-stub              # Standard launcher stub binary for packaging
-├── microfat-stub-minimal      # Minimal launcher stub binary (reduced footprint, reflection-free)
+├── microfat-stub-minimal      # Minimal launcher stub binary (reduced footprint)
 ├── README.md                  # Project overview and quick start
 ├── LICENSE                    # Apache 2.0 license
 ├── SECURITY.md                # Security policy and threat boundary
@@ -122,7 +122,8 @@ Extracting `microfat_<version>_linux_<arch>.tar.gz` provides:
 
 3. **`microfat-stub-minimal` (Minimal Launcher Stub)**:
    - A lightweight stub compiled with `-tags=minimal`.
-   - Strips non-essential reflection, diagnostics, and environment overrides to achieve the smallest possible ELF footprint.
+   - Removes interactive meta-command handlers (`--microfat:*`) for a reduced ELF footprint while retaining container resource auto-tuning and environment controls, including `MICROFAT_FORCE_LEVEL`, `MICROFAT_EXEC_MODE`, and `MICROFAT_GC_PROFILE`.
+   - Size varies with architecture, toolchain, and build flags. The published v0.3.0 Linux amd64 minimal stub is 3,748,000 bytes; its full counterpart is 3,977,376 bytes.
    - Recommended for extreme cold-start sensitivity or deeply constrained serverless/embedded Linux containers.
 
 ---
