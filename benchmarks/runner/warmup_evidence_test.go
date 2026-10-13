@@ -130,6 +130,7 @@ func TestWarmupInterruptedEvidence(t *testing.T) {
 			if interruption == "cancel" {
 				cancel()
 			}
+			<-ctx.Done()
 			select {
 			case <-finished:
 			case <-time.After(warmupFixtureLimit):
