@@ -42,7 +42,8 @@ const (
 		"Set $MICROFAT_CACHE_DIR or $TMPDIR to a writable tmpfs/volume."
 	HintCacheUnwritable = "Unable to write cached binary. " +
 		"Ensure $XDG_CACHE_HOME or $TMPDIR is writable, or mount a writable tmpfs."
-	HintDiskFull = "No space left on device. " +
+	HintPermissionDenied = "Permission denied. Check the permissions and security policy for the path named in the error."
+	HintDiskFull         = "No space left on device. " +
 		"Free disk space in cache directory or set $MICROFAT_CACHE_DIR to a volume with available space."
 	HintExecEACCES = "execve failed with EACCES. " +
 		"Possible causes include missing execute permissions, a 'noexec' filesystem mount, or security policy restrictions."
@@ -226,7 +227,7 @@ func diagnoseFallbackSyscall(err error) string {
 	case errors.Is(err, syscall.EMFILE), errors.Is(err, syscall.ENFILE):
 		return HintFileDescriptorLimit
 	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
-		return HintCacheUnwritable
+		return HintPermissionDenied
 	default:
 		return ""
 	}

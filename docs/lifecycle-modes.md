@@ -64,17 +64,30 @@ Verify the result and establish a new trusted digest/signature when distributing
 ### Mode 2: Trimmed Fat Binary (`--microfat:trim` / `microfat trim`)
 - **Best For**: Production container images where container memory and CPU auto-tuning are desired, but image layer size must be minimized.
 - **Containerfile Recipe**:
+  Place a statically linked universal `myapp` and the matching-architecture `microfat` CLI in the
+  build context. Trim in a writable builder stage, then copy the finished executable into the
+  shell-free, nonroot runtime image:
   ```dockerfile
+  FROM debian:bookworm-slim AS builder
+  WORKDIR /build
+  COPY microfat /usr/local/bin/microfat
+  COPY myapp /build/myapp
+
+  # Choose a level supported by every intended deployment host.
+  ARG MICROFAT_TARGET_LEVEL=v1
+  RUN microfat trim /build/myapp --level "${MICROFAT_TARGET_LEVEL}"
+
   FROM gcr.io/distroless/static-debian12:nonroot
-
-  # Copy the universal binary
-  COPY --from=builder /build/dist/myapp /usr/local/bin/myapp
-
-  # Trim unneeded variants during image build, locking to the target architecture
-  RUN /usr/local/bin/myapp --microfat:trim
-
+  COPY --from=builder /build/myapp /usr/local/bin/myapp
   ENTRYPOINT ["/usr/local/bin/myapp"]
   ```
+  The default `v1` targets Linux amd64; for ARM64 use an included level such as `v8.0` and matching
+  ARM64 inputs/images. Override with `--build-arg MICROFAT_TARGET_LEVEL=v3` only when every deployment
+  host supports that level and the input contains it. CLI `--level` selects the deployment target
+  explicitly, independently of the build host's CPU capabilities. Without an explicit level,
+  trimming selects for the build host, which can remove variants needed by deployment hosts.
+  Trimming preserves the launcher and resource auto-tuning. The final stage performs no
+  transformation; the application runs as UID 65532 without writing beside `/usr/local/bin/myapp`.
 
 ---
 

@@ -3,10 +3,12 @@ package format
 import (
 	"errors"
 	"fmt"
+	"os"
 	"syscall"
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDiagnoseError(t *testing.T) {
@@ -340,7 +342,7 @@ func TestDiagnoseError(t *testing.T) {
 			name:         "generic launcher_main fallback EACCES without sentinel",
 			stage:        StageLauncherMain,
 			err:          fmt.Errorf("creating directory: %w", syscall.EACCES),
-			expectedHint: HintCacheUnwritable,
+			expectedHint: HintPermissionDenied,
 		},
 		{
 			name:         "generic launcher_main unmapped error",
@@ -388,6 +390,24 @@ func TestDiagnoseError(t *testing.T) {
 			if actualHint != tc.expectedHint {
 				t.Errorf("DiagnoseError(%q, %v) = %q, expected %q", tc.stage, tc.err, actualHint, tc.expectedHint)
 			}
+		})
+	}
+}
+
+func TestDiagnoseLifecyclePermissionError(t *testing.T) {
+	t.Parallel()
+
+	for _, errno := range []syscall.Errno{syscall.EACCES, syscall.EPERM} {
+		t.Run(errno.Error(), func(t *testing.T) {
+			t.Parallel()
+
+			pathErr := &os.PathError{Op: "open", Path: "/deployment/.microfat-tx.tmp", Err: errno}
+			err := fmt.Errorf("failed to stage transformation payload: creating temporary file: %w", pathErr)
+			require.ErrorIs(t, err, errno)
+			require.Equal(t, HintPermissionDenied, DiagnoseError(StageLauncherMain, err))
+			require.Equal(t, HintPermissionDenied, DiagnoseError("custom_stage", err))
+			cacheErr := fmt.Errorf("%w: %w", ErrCacheWrite, pathErr)
+			require.Equal(t, HintCacheUnwritable, DiagnoseError(StageLauncherMain, cacheErr))
 		})
 	}
 }

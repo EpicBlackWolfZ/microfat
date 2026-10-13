@@ -19,6 +19,8 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/installrelease"
 )
 
+const fixtureVersion = "0.3.0"
+
 type fixtureClient struct {
 	t                      *testing.T
 	resolveErr, acquireErr error
@@ -28,7 +30,7 @@ type fixtureClient struct {
 func (c *fixtureClient) Resolve(_ context.Context, version string) (string, error) {
 	c.calls++
 	if version == "" {
-		version = "0.3.0"
+		version = fixtureVersion
 	}
 	return version, c.resolveErr
 }
@@ -138,7 +140,7 @@ func TestHelperLifecycle(t *testing.T) {
 	second, err := snapshot.Current()
 	require.NoError(t, err)
 	assert.Positive(t, second.Files["microfat"].Size, "snapshot must not expose mutable facts")
-	opts.uninstall, opts.cosign, opts.pin = true, "", ""
+	opts.uninstall, opts.cosign, opts.pin, opts.version, opts.downgrade = true, "", "", "", false
 	before = client.calls
 	output.Reset()
 	require.NoError(t, execute(t.Context(), opts, env, &output))
@@ -196,7 +198,7 @@ func TestHelperFailures(t *testing.T) {
 			if scenario == "corrupt-metadata" {
 				opts.repair = true
 				require.Error(t, execute(ctx, opts, env, io.Discard), "repair must pin the target")
-				opts.version = "0.3.0"
+				opts.version = fixtureVersion
 				require.NoError(t, execute(ctx, opts, env, io.Discard))
 			}
 		})
@@ -209,7 +211,7 @@ func (failingWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
 func TestRunAndOptions(t *testing.T) {
 	t.Parallel()
-	for _, args := range [][]string{{"positional"}, {"--unknown"}, {"--uninstall", "--version", "0.3.0"},
+	for _, args := range [][]string{{"positional"}, {"--unknown"}, {"--uninstall", "--version", fixtureVersion},
 		{"--uninstall", "--repair"}, {"--allow-downgrade"}} {
 		var stderr bytes.Buffer
 		assert.Equal(t, usageCode, run(t.Context(), args, environment{}, io.Discard, &stderr))
@@ -227,17 +229,163 @@ func TestRunAndOptions(t *testing.T) {
 		args = append(args, "--system")
 	}
 	assert.Zero(t, run(t.Context(), args, env, io.Discard, io.Discard))
-	assert.Equal(t, failureCode, run(t.Context(), nil, environment{}, io.Discard, io.Discard))
+	assert.Equal(t, failureCode, run(t.Context(), args, environment{}, io.Discard, io.Discard))
 	_, err := parseOptions([]string{"--uninstall", "--allow-downgrade"}, io.Discard)
 	require.Error(t, err)
 	assert.False(t, errors.Is(err, context.Canceled))
+	assert.ErrorIs(t, argumentError{context.Canceled}, context.Canceled)
+}
+
+func TestRunSemanticArgumentErrors(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"prerelease", "metadata-version", "leading-zero-version", "unsigned-version",
+		"relative-bin", "root-bin", "unclean-bin", "relative-store", "root-store", "unclean-store",
+		"equal-roots", "bin-ancestor", "store-ancestor", "relative-staging", "unclean-staging",
+		"relative-cosign", "unclean-cosign", "short-pin", "nonhex-pin", "uppercase-pin", "missing-cosign", "missing-pin",
+		"relative-release", "unclean-release", "system-missing-bin", "system-missing-store"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			env, opts, client := fixtureEnvironment(t)
+			opts.version = fixtureVersion
+			// An inspection would reject this unmanaged store. Argument validation must
+			// finish first, without reading installation state or acquiring a release.
+			require.NoError(t, os.Mkdir(opts.store, 0o755))
+			sentinel := filepath.Join(opts.store, "unmanaged")
+			require.NoError(t, os.WriteFile(sentinel, []byte("untouched"), 0o600))
+			originalBin, originalStore := opts.bin, opts.store
+			var expected string
+			switch scenario {
+			case "prerelease":
+				opts.version, expected = "0.3.0-rc1", "expected a stable version"
+			case "metadata-version":
+				opts.version, expected = "0.3.0+build", "expected a stable version"
+			case "leading-zero-version":
+				opts.version, expected = "0.03.0", "expected a stable version"
+			case "unsigned-version":
+				opts.version, expected = "0.2.2", "release signing policy"
+			case "relative-bin":
+				opts.bin = "relative-bin"
+			case "root-bin":
+				opts.bin = "/"
+			case "unclean-bin":
+				opts.bin += "/../bin"
+			case "relative-store":
+				opts.store = "relative-store"
+			case "root-store":
+				opts.store = "/"
+			case "unclean-store":
+				opts.store += "/../store"
+			case "equal-roots":
+				opts.bin, expected = opts.store, "must not overlap"
+			case "bin-ancestor":
+				opts.bin, expected = opts.staging, "must not overlap"
+			case "store-ancestor":
+				opts.store, expected = opts.staging, "must not overlap"
+			case "relative-staging":
+				opts.staging, expected = "relative-staging", "--staging-dir must be a clean absolute path"
+			case "unclean-staging":
+				opts.staging, expected = opts.staging+"/../staging", "--staging-dir must be a clean absolute path"
+			case "relative-cosign":
+				opts.cosign, expected = "cosign", "--cosign must be a clean absolute path"
+			case "unclean-cosign":
+				opts.cosign, expected = "/trusted/../cosign", "--cosign must be a clean absolute path"
+			case "short-pin":
+				opts.pin, expected = "aa", "invalid SHA-256 trust pin"
+			case "nonhex-pin":
+				opts.pin, expected = strings.Repeat("g", 64), "invalid SHA-256 trust pin"
+			case "uppercase-pin":
+				opts.pin, expected = strings.ToUpper(opts.pin), "invalid SHA-256 trust pin"
+			case "missing-cosign":
+				opts.cosign, expected = "", "supply --cosign and --cosign-sha256"
+			case "missing-pin":
+				opts.pin, expected = "", "supply --cosign and --cosign-sha256"
+			case "relative-release":
+				opts.releaseDir, expected = "release", "--release-dir must be a clean absolute path"
+			case "unclean-release":
+				opts.releaseDir, expected = "/release/../release", "--release-dir must be a clean absolute path"
+			case "system-missing-bin":
+				opts.system, opts.bin, expected = true, "", "--system requires explicit --bin-dir and --store-dir"
+			case "system-missing-store":
+				opts.system, opts.store, expected = true, "", "--system requires explicit --bin-dir and --store-dir"
+			}
+			if expected == "" {
+				expected = "installation roots must be clean absolute non-root paths"
+			}
+			var stdout, stderr bytes.Buffer
+			assert.Equal(t, usageCode, run(t.Context(), helperArguments(opts), env, &stdout, &stderr))
+			assert.Empty(t, stdout.String())
+			assert.Contains(t, stderr.String(), expected)
+			assert.Zero(t, client.calls)
+			data, err := os.ReadFile(sentinel)
+			require.NoError(t, err)
+			assert.Equal(t, "untouched", string(data))
+			entries, err := os.ReadDir(originalStore)
+			require.NoError(t, err)
+			require.Len(t, entries, 1)
+			assert.Equal(t, "unmanaged", entries[0].Name())
+			assert.NoDirExists(t, originalBin)
+		})
+	}
+}
+
+func TestRunOperationalFailuresKeepFailureCode(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"platform", "system-not-root", "root-policy", "home", "inspect", "resolve", "staging",
+		"acquire", "cancelled"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			env, opts, client := fixtureEnvironment(t)
+			ctx := t.Context()
+			var expectedCalls int
+			switch scenario {
+			case "platform":
+				env.goos = "darwin"
+			case "system-not-root":
+				opts.system, env.uid = true, 1000
+			case "root-policy":
+				opts.system, env.uid = false, 0
+			case "home":
+				opts.system, opts.bin, env.uid = false, "", 1000
+				env.home = func() (string, error) { return "", io.ErrUnexpectedEOF }
+			case "inspect":
+				require.NoError(t, os.Mkdir(opts.store, 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(opts.store, "unmanaged"), []byte("untouched"), 0o600))
+			case "resolve":
+				client.resolveErr, expectedCalls = io.ErrUnexpectedEOF, 1
+			case "staging":
+				opts.staging, expectedCalls = filepath.Join(opts.staging, "absent"), 1
+			case "acquire":
+				client.acquireErr, expectedCalls = errors.New("signature verification failed"), 2
+			case "cancelled":
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+				expectedCalls = 2
+			}
+			var stdout, stderr bytes.Buffer
+			assert.Equal(t, failureCode, run(ctx, helperArguments(opts), env, &stdout, &stderr))
+			assert.Empty(t, stdout.String())
+			assert.NotEmpty(t, stderr.String())
+			assert.Equal(t, expectedCalls, client.calls)
+			assert.NoFileExists(t, filepath.Join(opts.store, "current", "microfat"))
+		})
+	}
+}
+
+func helperArguments(opts options) []string {
+	args := []string{"--bin-dir", opts.bin, "--store-dir", opts.store, "--version", opts.version,
+		"--cosign", opts.cosign, "--cosign-sha256", opts.pin, "--staging-dir", opts.staging, "--release-dir", opts.releaseDir}
+	if opts.system {
+		args = append(args, "--system")
+	}
+	return args
 }
 
 func TestLocalReleaseDirectoryDoesNotFallBackToNetwork(t *testing.T) {
 	t.Parallel()
 	for _, directory := range []string{"relative-release", t.TempDir()} {
 		env, opts, client := fixtureEnvironment(t)
-		opts.version, opts.releaseDir = "0.3.0", directory
+		opts.version, opts.releaseDir = fixtureVersion, directory
 		require.Error(t, execute(t.Context(), opts, env, io.Discard))
 		assert.Zero(t, client.calls)
 		assert.NoDirExists(t, opts.store)
