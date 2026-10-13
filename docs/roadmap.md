@@ -1,14 +1,29 @@
 # Production roadmap
 
-Updated 2026-10-12 for the final audit corrections and remaining signed-candidate/public acceptance boundaries.
+Updated 2026-10-13: source/candidate qualification, hosted evidence, immutable publication,
+reviewed recipe merge and independently verified public installer/Homebrew acceptance passed.
 GitHub issues define remaining scope,
 dependencies and acceptance criteria. Milestones group deliverable outcomes; they are not dates.
 
 ## Current baseline
 
-[v0.2.5](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.2.5) is the latest published
-release, published on 2026-09-21. Both v0.2.4 and v0.2.5 milestones are closed. The v0.3.0 work
-already merged into `main` below is newer than that release; it is not yet a published v0.3.0.
+[v0.3.0](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.3.0) is the latest published
+release, published on 2026-10-13 at 05:25:54 UTC as immutable release `411193467`.
+Its source is `d3883d59674eb32351717f6d28744862d1cc45c9`; its
+[final main CI](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38320256153/attempts/4) passed: the full same-source
+attempt 3 supplied 23 successful checks, and the bounded retry completed native arm64 installer and `CI Complete`
+in attempt 4. Failed earlier attempts remain available.
+Its [then-private signed candidate](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38334917557/attempts/1)
+passed native installer and runtime qualification on amd64 and arm64.
+The authenticated recipe is merged in [tap PR #4](https://github.com/EpicBlackWolfZ/homebrew-tap/pull/4).
+Verified public installer/tap acceptance passed in the same fresh
+[38376089070, attempt 2](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38376089070/attempts/2)
+cohort, using qualification source `5f09b0185b1c51daa54a641d7241ac111c340555` against the immutable
+release source above. See its
+[release notes and acceptance record](releases/v0.3.0.md#release-acceptance).
+
+[v0.2.5](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.2.5) was published on
+2026-09-21. Both v0.2.4 and v0.2.5 milestones are closed.
 
 [v0.2.3](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.2.3) was published on
 2026-09-16. It includes the safety and hosted-measurement foundation, per-architecture fat CLI
@@ -86,7 +101,7 @@ attestations and historical asset replacement are outside this milestone.
 
 ## v0.3.0: installation and lifecycle contracts
 
-### Implemented on main
+### Integrated v0.3.0 source
 
 | Scope | Issues |
 | --- | --- |
@@ -108,29 +123,32 @@ attestations and historical asset replacement are outside this milestone.
 | Independent Linux release validation, canonical launcher discovery and exact cache paths | [#343](https://github.com/EpicBlackWolfZ/microfat/issues/343), [#344](https://github.com/EpicBlackWolfZ/microfat/issues/344), [#348](https://github.com/EpicBlackWolfZ/microfat/issues/348) |
 | Bounded benchmark trials, complete selected-CPU evidence and effective-limit density | [#345](https://github.com/EpicBlackWolfZ/microfat/issues/345), [#346](https://github.com/EpicBlackWolfZ/microfat/issues/346), [#347](https://github.com/EpicBlackWolfZ/microfat/issues/347) |
 
-These source implementations are merged. Issues #203, #205 and #260 retain the acceptance boundaries
-below; they are not complete merely because their source CI passes. Installer source landed in
+These source implementations are merged into the final integrated revision. Issues #203, #205 and
+#260 have completed the acceptance requirements below; final closure follows the reviewed documentation merge.
+Installer source landed in
 [#276](https://github.com/EpicBlackWolfZ/microfat/pull/276), Homebrew tooling in
 [#282](https://github.com/EpicBlackWolfZ/microfat/pull/282), and runtime qualification in
 [#283](https://github.com/EpicBlackWolfZ/microfat/pull/283). ABI metadata consistency does not
 prove that a target system provides a compatible loader or libc. The #203 implementation supplies
 the [installation contract](design/installation-discovery-contract.md), authenticated bootstrap,
-generation transactions and native qualification jobs. Its first public bootstrap still requires
-published signed helper assets; implementation and snapshot validation do not establish release availability.
+generation transactions and native qualification jobs. Published signed helpers and actual public-path
+acceptance now establish its release availability; source and snapshot results retain separate scope.
 
-### Remaining scope
+### Release acceptance
 
-The remaining issues track acceptance of the integrated release and its public distribution.
+The acceptance issues track the integrated release and its public distribution. The
+[release acceptance record](releases/v0.3.0.md#release-acceptance) binds the evidence to its source,
+producer attempt, signed inventory and reviewed tap recipe.
 Native source qualification, unsigned packaging snapshots, authenticated candidate qualification,
 and public availability establish different facts and must retain separate evidence.
 
-| Scope | Issue | Dependency and completion boundary |
+| Scope | Issue | Acceptance evidence and completion boundary |
 | --- | --- | --- |
-| Verified user installer | [#203](https://github.com/EpicBlackWolfZ/microfat/issues/203) | Qualify the exact signed draft on native amd64/arm64, then verify the first published v0.3.0 helper/bootstrap path on a clean supported system without Go or preinstalled Cosign. Snapshot and historical-release checks do not prove that first public path. |
-| Official Linux Homebrew tap | [#205](https://github.com/EpicBlackWolfZ/microfat/issues/205) | The [tap bootstrap](https://github.com/EpicBlackWolfZ/homebrew-tap/pull/1) is merged with an exact reviewed tooling pin and native checks. After immutable v0.3.0 publication, authenticate the generated recipe, qualify both architectures, merge its PR and verify the documented public install command. No placeholder cask satisfies acceptance. |
-| Authenticated runtime candidate qualification | [#260](https://github.com/EpicBlackWolfZ/microfat/issues/260) | Require native amd64/arm64 evidence for the final integrated source and the exact authenticated signed candidate, including full/minimal launchers, cold/warm cache, actual isolated policy/resource failures, provenance and explicit skips. Source-built and QEMU results do not replace candidate evidence. |
+| Verified user installer | [#203](https://github.com/EpicBlackWolfZ/microfat/issues/203) | Signed-candidate installer qualification passed with eight detection and four update observations per native architecture. Independently verified [public acceptance 38376089070/2](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38376089070/attempts/2) passed the actual versioned bootstrap on both architectures in fresh nonroot containers without Go or preinstalled Cosign: authenticated triad hashes, default latest/pinned/reinstall, full/minimal discovery, memfd/cache and conservative uninstall. Custom/system roots and adversarial cases retain source/candidate scope. Closure follows reviewed documentation merge. |
+| Official Linux Homebrew tap | [#205](https://github.com/EpicBlackWolfZ/microfat/issues/205) | The [final tooling pin](https://github.com/EpicBlackWolfZ/homebrew-tap/pull/3), immutable publication and authenticated [recipe PR #4](https://github.com/EpicBlackWolfZ/homebrew-tap/pull/4) are complete. Both native legs of [38376089070/2](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38376089070/attempts/2) passed the documented official remote install at tap `87061d5bd8411a3e729ad5a6d25925ff76f669bb`: authenticated product triads, full/minimal memfd/cache discovery, ownership/self-update refusal, reinstall, same-version upgrade and conservative uninstall. Controlled cross-version/recovery fixtures remain separate. Closure follows reviewed documentation merge. |
+| Authenticated runtime candidate qualification | [#260](https://github.com/EpicBlackWolfZ/microfat/issues/260) | Passed in [producer 38334917557, attempt 1](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38334917557/attempts/1) against then-private draft release `411193467`, subsequently published immutable: each native architecture completed 1,059/1,059 cases, 4,051 execution observations and no skips. The complete retained matrix binds the same source and signed inventory. The published aggregate's whole hash/gzip CRC and fourteen selected authentication/summary members were verified; native production validators passed. Independent review and public integration passed; closure follows reviewed documentation merge. Source-built and QEMU results retain their own scope. |
 
-### Delivery order and exit
+### Reusable release order and exit
 
 1. Merge reviewed correctness fixes and require the full source CI, exact coverage, native qualification
    and product-oriented snapshot checks on the integrated revision. A branch-only `benchmarks.yml`

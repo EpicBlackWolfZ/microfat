@@ -5,23 +5,57 @@ cask in the shared [EpicBlackWolfZ/homebrew-tap](https://github.com/EpicBlackWol
 repository. The Homebrew identifier is `EpicBlackWolfZ/tap`; future packages can coexist in the
 same repository. Only `Casks/microfat.rb` belongs to microfat's automatic update path.
 
-## First publication and ordering
+## v0.3.0 first-publication evidence
 
-The first cask targets v0.3.0. Merge the upstream tooling PR, review the exact upstream SHA in
-the tap's `microfat-tools.ref`, and merge the tap bootstrap PR. Neither bootstrap publishes a cask.
-Wait for the normal microfat release process to qualify, publish and finalize immutable v0.3.0
-assets. Do not create a release, move a tag or alter historical assets to unblock tap work.
+The authenticated recipe and official remote installation passed on native amd64 and arm64.
+The [release acceptance record](releases/v0.3.0.md#release-acceptance) binds each completed step to its
+exact source, producer attempt, signed inventory and reviewed recipe.
+
+| Step | Evidence |
+| --- | --- |
+| Reviewed tooling pin | [Tap PR #3](https://github.com/EpicBlackWolfZ/homebrew-tap/pull/3) merged as `ebc26cef337d3860ff4b6ab1b049e9f23bf84e91`; `microfat-tools.ref` pins `d3883d59674eb32351717f6d28744862d1cc45c9`. [Tap CI attempt 2](https://github.com/EpicBlackWolfZ/homebrew-tap/actions/runs/38320813164/attempts/2) passed. No cask was published by this pin. |
+| Immutable upstream publication | [Finalizer 38351256164, attempt 1](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38351256164/attempts/1) passed. [v0.3.0](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.3.0), release ID `411193467`, was published `2026-10-13T05:25:54Z` with eighteen assets and `draft=false`, `prerelease=false`, `immutable=true`. |
+| Generated recipe and native lifecycle | [Updater 38352077381, attempt 1](https://github.com/EpicBlackWolfZ/homebrew-tap/actions/runs/38352077381/attempts/1) passed both native architectures. Recipe SHA-256 `0f8dfea590d2186e42c94485ba23d721bef83d74bf993a9566b547e6e4a430c4` matches freshly authenticated generator output from the reviewed tooling pin. |
+| Reviewed recipe merge | Cask-only [PR #4](https://github.com/EpicBlackWolfZ/homebrew-tap/pull/4), final head `33c2dde4faab9a04dd4b2c841c57d94911efb1b3`, passed all four [CI checks](https://github.com/EpicBlackWolfZ/homebrew-tap/actions/runs/38352360124/attempts/2); merged `2026-10-13T07:42:41Z` as `87061d5bd8411a3e729ad5a6d25925ff76f669bb`. |
+| Official remote tap acceptance | Passed [public acceptance 38376089070, attempt 2](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38376089070/attempts/2) on both native architectures, using recipe merge `87061d5bd8411a3e729ad5a6d25925ff76f669bb`. Each leg passed 52 commands: 46 successes and six expected self-update refusals, with three authenticated product triads and twelve automatic full/minimal memfd/cache payload executions through install, reinstall and same-version upgrade, followed by conservative uninstall. Qualification source `5f09b0185b1c51daa54a641d7241ac111c340555` is separate from immutable product source `d3883d59674eb32351717f6d28744862d1cc45c9`. |
+
+The first-release public upgrade check is a same-version check. Cross-version upgrade and
+checksum-failure recovery use controlled fixtures; they do not prove an upgrade between published releases.
+Public checks use fresh disposable Homebrew prefixes on provisioned native hosts. The retained workload
+sentinel was inspected directly; ownership, removal and other preserved-data checks are recorded by
+reviewed script assertions and successful job logs. The release acceptance record retains failed
+qualification attempts separately from the successful cohort.
+
+## Release ordering
+
+Review and merge upstream tooling, then update the tap's exact `microfat-tools.ref` pin through a
+reviewed PR. A tooling pin does not publish a cask. Wait for the corresponding upstream release to
+complete its signed-candidate gates, publish and become immutable. Do not change historical public
+assets or move public tags to unblock tap work.
 
 The tap's **Update microfat** workflow runs hourly at minute 17. A maintainer can also dispatch
-it manually, optionally naming the exact latest eligible stable tag. Before v0.3.0 is public,
-a successful check reports that no eligible release exists and creates no recipe. GitHub may
+it on `main`, optionally naming the exact latest eligible stable tag through its `tag` input. Before
+the first eligible immutable public release, a successful check reports no eligible release and creates no recipe. GitHub may
 delay scheduled runs; manual dispatch is the retry path.
 
 After publication, the workflow authenticates and prepares the recipe, runs native Homebrew
 qualification on amd64 and arm64, then reauthenticates before opening a deterministic
-`chore/microfat-v<version>` PR. A maintainer approves generated PR workflows, checks **Tap CI Complete**,
+`chore/microfat-v<version>` PR. A maintainer approves any waiting generated PR workflows, checks **Tap CI Complete**,
 reviews the evidence and merges manually. Verify the documented install command from the public
 tap after merge. Only then update availability documentation and close #205 as complete.
+
+If an existing generated PR run requires approval, approve that run before monitoring its checks.
+Approval-required runs and event suppression by GITHUB_TOKEN are separate conditions; see
+[GitHub's trigger policy](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
+For a missing run, the tap supports explicit full CI on the recipe branch, for example:
+
+```bash
+gh workflow run ci.yml --repo EpicBlackWolfZ/homebrew-tap --ref chore/microfat-v0.3.0
+```
+
+Require completed checks at the recipe's final head: **Scripts and update policy**, native Homebrew
+amd64 and arm64, and **Tap CI Complete**. The protected required context is **Tap CI Complete**;
+manual dispatch does not replace review of its exact source and results.
 
 The ordinary tag release workflow has no tap credentials or tap write step. A tap failure leaves
 the already-published upstream release alone and keeps the previous tap version available.
@@ -59,8 +93,8 @@ are not persisted. Enable GitHub Actions PR creation in the tap repository setti
 GitHub App or upstream cross-repository secret is required. Protect `main` with the **Tap CI Complete**
 check and require pull requests; maintainers merge manually.
 
-GitHub requires a maintainer to approve workflows on PRs created with GITHUB_TOKEN. Do not replace
-that approval step with a privileged `pull_request_target` workflow or automatic approval. See
+If GitHub marks a generated PR workflow as requiring approval, a maintainer approves that run. Do not replace
+required approval with a privileged `pull_request_target` workflow or automatic approval. See
 [GitHub's token behavior](https://docs.github.com/en/actions/concepts/security/github_token).
 
 An identical current recipe is a no-op. A newer release creates or reuses its deterministic branch
