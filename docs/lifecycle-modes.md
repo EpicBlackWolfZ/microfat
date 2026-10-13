@@ -138,9 +138,13 @@ All transformation operations (both CLI `microfat trim` and launcher stub meta-c
    - Commands targeting a new destination (`-o <path>`, `--microfat:trim-to`, `--microfat:optimize-to`) enforce create-only semantics via `renameat2(..., RENAME_NOREPLACE)`.
    - If the destination already exists (regular file, symlink, FIFO, directory), the operation immediately aborts without overwriting or truncating the target.
 
-2. **Writer Serialization via Advisory Locks**:
-   - In-place transformations acquire an exclusive non-blocking advisory write lock (`flock(fd, LOCK_EX | LOCK_NB)`) on the source executable before snapshotting metadata and staging changes.
-   - Concurrent `microfat` mutations return `ErrConcurrentTransformation` immediately instead of producing interleaved or corrupted files.
+2. **Advisory Lock Scope**:
+   - In-place transformations snapshot and validate source metadata, then acquire an exclusive non-blocking advisory
+     lock (`flock(fd, LOCK_EX | LOCK_NB)`) on the inode opened through the target path before staging changes.
+   - If another mutation holds that inode's lock, lock acquisition immediately returns `ErrConcurrentTransformation`.
+   - Atomic rename publishes a replacement inode. A later transformation can snapshot and lock that replacement while
+     the earlier operation is still syncing the directory, so the later operation can begin before the earlier one returns.
+   - Source identity, size, modification time, and hardlink policy are rechecked before publication as described below.
 
 3. **Hard-Link Protection**:
    - In-place mutation of files with multiple directory entries (`nlink > 1`) is strictly rejected by default (`ErrHardLinkDetected`) to prevent silently altering other paths that reference the same inode.
