@@ -75,7 +75,8 @@ for product in microfat microfat-stub microfat-stub-minimal; do
     [[ ! -e ${brew_prefix}/bin/${product} && ! -L ${brew_prefix}/bin/${product} ]] || fail 'fixture still has an installed product'
 done
 run_recorded success brew-version.log "${brew_environment[@]}" "${brew_binary}" --version
-[[ $(< "${evidence_root}/brew-version.log") == 'Homebrew 7.0.2' ]] || fail 'unexpected Homebrew version'
+IFS= read -r brew_version < "${evidence_root}/brew-version.log" || fail 'missing Homebrew version'
+[[ ${brew_version} == 'Homebrew 7.0.2' ]] || fail 'unexpected Homebrew version'
 brew_source=$(git -C "${brew_prefix}/Homebrew" rev-parse HEAD)
 [[ ${brew_source} == 83c9802fb54c60a612d52b264808c099b39a0687 ]] || fail 'unexpected Homebrew source'
 actual_prefix=$("${brew_environment[@]}" "${brew_binary}" --prefix)
