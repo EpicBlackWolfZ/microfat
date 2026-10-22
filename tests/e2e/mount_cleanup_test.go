@@ -99,16 +99,25 @@ func TestMountCleanupWaitsForReaping(t *testing.T) {
 	require.NoError(t, cmd.Start())
 	reaping, done := make(chan struct{}), make(chan struct{})
 	var waitErr error
+	reaperStarted := false
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		if reaperStarted {
+			<-done
+			return
+		}
+		_ = cmd.Wait()
+	})
+	fd, err := unix.PidfdOpen(cmd.Process.Pid, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, unix.Close(fd)) })
+	reaperStarted = true
 	go func() {
 		time.Sleep(mountObserveInterval * 3)
 		close(reaping)
 		waitErr = cmd.Wait()
 		close(done)
 	}()
-	t.Cleanup(func() { _ = cmd.Process.Kill(); <-done })
-	fd, err := unix.PidfdOpen(cmd.Process.Pid, 0)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, unix.Close(fd)) })
 	ctx, cancel := context.WithTimeout(t.Context(), mountObserveTimeout)
 	defer cancel()
 	require.NoError(t, waitMountProcessesReaped(ctx, []int{fd}))
