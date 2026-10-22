@@ -27,7 +27,7 @@ func TestBuildAndPack_QuotedPGOPathPassedToGo(t *testing.T) {
 			stub := createDummyELF(t, dir, "stub", testArchAMD64)
 			pkgDir := filepath.Join(dir, "pkg")
 			require.NoError(t, os.Mkdir(pkgDir, 0o755))
-			require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module pgopath\ngo 1.27.2\n"), 0o644))
+			require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module pgopath\ngo 1.27.3\n"), 0o644))
 			require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
 			// Go accepts an empty profile. The trimmed control is deliberately invalid.
 			const profileName = " profile.pgo "

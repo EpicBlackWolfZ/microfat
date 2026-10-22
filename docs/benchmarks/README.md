@@ -7,7 +7,7 @@ The existing `microfat benchmark` baseline and v1 evidence remain supported. Bas
 
 ## Run an experiment
 
-Use Go 1.27.2 and install the pinned external tool explicitly:
+Use Go 1.27.3 and install the pinned external tool explicitly:
 
 ```bash
 task benchmark-tools

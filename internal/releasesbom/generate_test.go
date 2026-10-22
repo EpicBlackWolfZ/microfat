@@ -86,7 +86,7 @@ func buildArchiveFixture(t *testing.T, arch string) string {
 	app, dep := filepath.Join(dir, "app"), filepath.Join(dir, "dependency")
 	require.NoError(t, os.MkdirAll(app, 0o700))
 	require.NoError(t, os.MkdirAll(dep, 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(dep, "go.mod"), []byte("module example.com/dependency\n\ngo 1.27.2\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dep, "go.mod"), []byte("module example.com/dependency\n\ngo 1.27.3\n"), 0o600))
 	dependencySource := "package dependency\nfunc Value() string { return \"fixture\" }\n"
 	applicationSource := "package main\nimport \"example.com/dependency\"\nfunc main(){ println(dependency.Value()) }\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dep, "dep.go"), []byte(dependencySource), 0o600))
@@ -99,7 +99,7 @@ func buildArchiveFixture(t *testing.T, arch string) string {
 		if index == 1 {
 			version = "v1.1.0"
 		}
-		mod := "module example.com/app\n\ngo 1.27.2\n\nrequire example.com/dependency " + version +
+		mod := "module example.com/app\n\ngo 1.27.3\n\nrequire example.com/dependency " + version +
 			"\nreplace example.com/dependency => ../dependency\n"
 		require.NoError(t, os.WriteFile(filepath.Join(app, "go.mod"), []byte(mod), 0o600))
 		binary := filepath.Join(dir, "payload-"+tier)

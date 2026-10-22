@@ -106,8 +106,8 @@ func (c *controller) qualify(out io.Writer) error {
 		return err
 	}
 	c.summary.Toolchain = strings.TrimSpace(c.summary.Toolchain)
-	if !strings.HasPrefix(c.summary.Toolchain, "go version go1.27.2 ") {
-		return errors.New("Go 1.27.2 required")
+	if !strings.HasPrefix(c.summary.Toolchain, "go version go1.27.3 ") {
+		return errors.New("Go 1.27.3 required")
 	}
 	c.summary.Source, err = c.runner.Run([]string{"git", "rev-parse", "HEAD"}, nil, true)
 	if err != nil {
