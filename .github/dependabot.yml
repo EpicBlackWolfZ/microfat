@@ -1,6 +1,6 @@
 version: 2
 updates:
-  # Maintain Go dependencies
+  # Native Go module updates include transitive dependencies and go.sum integrity.
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
@@ -18,9 +18,16 @@ updates:
         patterns:
           - "*"
 
-  # Maintain GitHub Actions dependencies
+      go-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  # Maintain full action commit pins, including actions used by local composites.
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -33,5 +40,22 @@ updates:
       - "github-actions"
     groups:
       github-actions:
+        patterns:
+          - "*"
+
+  # Dependabot updates the image tag and its pinned manifest digest together.
+  - package-ecosystem: "docker"
+    directory: "/scripts/fixtures"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "UTC"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+    groups:
+      fixture-images:
         patterns:
           - "*"

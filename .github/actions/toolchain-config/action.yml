@@ -1,0 +1,44 @@
+name: Read toolchain pins
+description: Read the shared tool versions without installing executables
+outputs:
+  task:
+    description: Task version
+    value: ${{ steps.pins.outputs.task }}
+  goreleaser:
+    description: GoReleaser version
+    value: ${{ steps.pins.outputs.goreleaser }}
+  golangci-lint:
+    description: golangci-lint version
+    value: ${{ steps.pins.outputs.golangci-lint }}
+  govulncheck:
+    description: govulncheck module version
+    value: ${{ steps.pins.outputs.govulncheck }}
+  actionlint:
+    description: actionlint version
+    value: ${{ steps.pins.outputs.actionlint }}
+  gotestsum:
+    description: gotestsum version
+    value: ${{ steps.pins.outputs.gotestsum }}
+  codecov:
+    description: Codecov CLI version
+    value: ${{ steps.pins.outputs.codecov }}
+  cosign:
+    description: Cosign version
+    value: ${{ steps.pins.outputs.cosign }}
+runs:
+  using: composite
+  steps:
+    - id: pins
+      shell: bash
+      run: |
+        source .config/tool-versions.env
+        {
+          echo "task=$TASK_VERSION"
+          echo "goreleaser=$GORELEASER_VERSION"
+          echo "golangci-lint=$GOLANGCI_LINT_VERSION"
+          echo "govulncheck=$GOVULNCHECK_VERSION"
+          echo "actionlint=$ACTIONLINT_VERSION"
+          echo "gotestsum=$GOTESTSUM_VERSION"
+          echo "codecov=$CODECOV_VERSION"
+          echo "cosign=${COSIGN_LINUX_AMD64%@*}"
+        } >> "$GITHUB_OUTPUT"

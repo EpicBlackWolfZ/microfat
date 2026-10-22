@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/releasecheck"
 	"github.com/EpicBlackWolfZ/microfat/tests/e2e/testdata/mountfixture"
@@ -133,7 +134,7 @@ func validEvidence(t *testing.T, c Case) Evidence {
 func validSummary(t *testing.T) Summary {
 	t.Helper()
 	s := Summary{Schema: Schema, Status: Pass, Input: Source, Architecture: amd64, Source: testSource, Kernel: "Linux x86_64",
-		PageSize: 4096, Toolchain: "go version go1.27.3 linux/amd64", Expected: Cases(),
+		PageSize: 4096, Toolchain: "go version go" + microfat.GoVersion() + " linux/amd64", Expected: Cases(),
 		Products: map[string]string{"microfat": testHash, fullStub: testHash, minimalStub: testHash,
 			"reporter": testHash, "mount-runner": testHash}}
 	for _, c := range s.Expected {

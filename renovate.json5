@@ -1,0 +1,88 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  // Dependabot owns Go module dependencies, GitHub Actions and Dockerfiles.
+  // Restrict Renovate to the gaps in those native ecosystems.
+  enabledManagers: ['custom.regex'],
+  dependencyDashboard: true,
+  timezone: 'Europe/Vienna',
+  schedule: ['before 6am on monday'],
+  labels: ['dependencies'],
+  semanticCommits: 'enabled',
+  semanticCommitType: 'chore',
+  semanticCommitScope: 'deps',
+  automerge: false,
+  pinDigests: false,
+  customManagers: [
+    {
+      customType: 'regex',
+      description: 'Pinned developer and CI tools outside package manifests',
+      managerFilePatterns: ['/^\\.config/tool-versions\\.env$/'],
+      matchStrings: [
+        '# renovate: datasource=(?<datasource>go|github-releases|github-tags) depName=(?<depName>[^\\s]+)(?: versioning=(?<versioning>[^\\s]+))?\\r?\\n[A-Z][A-Z0-9_]*=v?(?<currentValue>\\d+\\.\\d+\\.\\d+(?:[-+][A-Za-z0-9.-]+)?)(?:\\r?\\n|$)',
+      ],
+      versioningTemplate: '{{#if versioning}}{{{versioning}}}{{else}}semver-coerced{{/if}}',
+      extractVersionTemplate: '^v?(?<version>.*)$',
+    },
+    {
+      customType: 'regex',
+      description: 'Release assets: update each version and its SHA-256 as one tuple',
+      managerFilePatterns: ['/^\\.config/tool-versions\\.env$/', '/^scripts/install\\.sh$/'],
+      matchStrings: [
+        '# renovate: datasource=(?<datasource>github-release-attachments) depName=(?<depName>[^\\s]+)\\r?\\n[ \\t]*(?:readonly )?[A-Za-z_][A-Za-z0-9_]*=[\'"]?(?<currentValue>v?\\d+\\.\\d+\\.\\d+)@(?<currentDigest>[a-f0-9]{64})[\'"]?(?:\\r?\\n|$)',
+      ],
+      versioningTemplate: 'semver-coerced',
+    },
+    {
+      customType: 'regex',
+      description: 'Homebrew source: keep the release tag and exact source commit together',
+      managerFilePatterns: ['/^\\.config/tool-versions\\.env$/'],
+      matchStrings: [
+        '# renovate: datasource=github-tags depName=Homebrew/brew\\r?\\nHOMEBREW_SOURCE=v?(?<currentValue>\\d+\\.\\d+\\.\\d+)@(?<currentDigest>[a-f0-9]{40})(?:\\r?\\n|$)',
+      ],
+      depNameTemplate: 'Homebrew/brew',
+      datasourceTemplate: 'github-tags',
+      versioningTemplate: 'semver-coerced',
+      extractVersionTemplate: '^v?(?<version>.*)$',
+    },
+    {
+      customType: 'regex',
+      description: 'The go.mod directive is the sole executable Go toolchain pin',
+      managerFilePatterns: ['/^go\\.mod$/'],
+      matchStrings: ['(?:^|\\n)go (?<currentValue>\\d+\\.\\d+\\.\\d+)(?:\\r?\\n|$)'],
+      depNameTemplate: 'go',
+      datasourceTemplate: 'golang-version',
+      versioningTemplate: 'semver',
+    },
+    {
+      customType: 'regex',
+      description: 'Fortio module version, exact source commit and source URL advance together',
+      managerFilePatterns: ['/^benchmarks/tools\\.lock\\.json$/'],
+      matchStrings: [
+        '"version": "(?<currentValue>v\\d+\\.\\d+\\.\\d+)",\\s*"source_commit": "(?<currentDigest>[a-f0-9]{40})",\\s*"source": "https://github\\.com/fortio/fortio/tree/v\\d+\\.\\d+\\.\\d+"',
+      ],
+      depNameTemplate: 'fortio.org/fortio',
+      datasourceTemplate: 'go',
+      versioningTemplate: 'semver',
+      autoReplaceStringTemplate: '"version": "{{{newValue}}}",\n    "source_commit": "{{{newDigest}}}",\n    "source": "https://github.com/fortio/fortio/tree/{{{newValue}}}"',
+    },
+  ],
+  packageRules: [
+    {
+      matchDatasources: ['github-release-attachments'],
+      pinDigests: true,
+    },
+    {
+      matchPackageNames: ['fortio.org/fortio'],
+      pinDigests: true,
+    },
+    {
+      matchPackageNames: ['Homebrew/brew'],
+      pinDigests: true,
+    },
+    {
+      description: 'Stay on the supported Go 1.27 series; review language upgrades explicitly',
+      matchDatasources: ['golang-version'],
+      allowedVersions: '>=1.27.3 <1.28.0',
+    },
+  ],
+}

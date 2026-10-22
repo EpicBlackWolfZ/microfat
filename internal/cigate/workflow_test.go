@@ -1,6 +1,7 @@
 package cigate
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +12,31 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
+
+func TestWorkflowsReadGoVersionFromCheckedOutModule(t *testing.T) {
+	t.Parallel()
+	paths, err := filepath.Glob("../../.github/workflows/*.yml")
+	require.NoError(t, err)
+	require.NotEmpty(t, paths)
+	for _, path := range paths {
+		w := readWorkflow(t, filepath.Base(path))
+		for name, job := range w.Jobs {
+			modulePath := ""
+			for _, step := range job.Steps {
+				if strings.HasPrefix(step.Uses, "actions/checkout@") {
+					root, _ := step.With["path"].(string)
+					if modulePath == "" || root == "" {
+						modulePath = filepath.Join(root, "go.mod")
+					}
+				}
+				if strings.HasPrefix(step.Uses, "actions/setup-go@") {
+					require.Equal(t, modulePath, fmt.Sprint(step.With["go-version-file"]), "%s/%s", path, name)
+					require.NotContains(t, step.With, "go-version", "%s/%s", path, name)
+				}
+			}
+		}
+	}
+}
 
 type workflow struct {
 	On          map[string]yaml.Node   `yaml:"on"`
@@ -169,9 +195,35 @@ func checkJobBoundaries(t *testing.T, job workflowJob, pin *regexp.Regexp) {
 		if step.Uses == "" {
 			continue
 		}
+		if step.Uses == "./.github/actions/toolchain-config" {
+			require.FileExists(t, "../../.github/actions/toolchain-config/action.yml")
+			continue // Local code is bound to the checkout commit.
+		}
 		assert.Regexp(t, pin, step.Uses, "actions must use full commit pins")
 		if strings.HasPrefix(step.Uses, "actions/checkout@") {
 			assert.Equal(t, false, step.With["persist-credentials"], "untrusted subprocesses must not inherit checkout credentials")
 		}
 	}
+}
+
+func TestSharedToolchainAction(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile("../../.github/actions/toolchain-config/action.yml")
+	require.NoError(t, err)
+	var action struct {
+		Outputs map[string]struct{ Value string }
+		Runs    struct {
+			Using string
+			Steps []workflowStep
+		}
+	}
+	require.NoError(t, yaml.Unmarshal(data, &action))
+	require.Equal(t, "composite", action.Runs.Using)
+	require.Len(t, action.Runs.Steps, 1)
+	step := action.Runs.Steps[0]
+	require.Equal(t, "pins", step.ID)
+	require.Empty(t, step.Uses)
+	require.Contains(t, step.Run, "source .config/tool-versions.env")
+	require.Equal(t, "${{ steps.pins.outputs.codecov }}", action.Outputs["codecov"].Value)
+	require.Contains(t, step.Run, `echo "codecov=$CODECOV_VERSION"`)
 }

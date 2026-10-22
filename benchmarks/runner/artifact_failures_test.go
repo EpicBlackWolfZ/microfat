@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/internal/testfixture"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
 	"github.com/stretchr/testify/require"
@@ -46,20 +47,31 @@ func fixtureCompiler(t *testing.T, behavior string) string {
 	binary, err := os.Executable()
 	require.NoError(t, err)
 	path := filepath.Join(t.TempDir(), "go")
-	script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'go version go1.27.3 linux/amd64'; exit 0; fi\n" +
+	script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'go version go" + microfat.GoVersion() + " linux/amd64'; exit 0; fi\n" +
 		"while [ \"$#\" -gt 0 ]; do if [ \"$1\" = -o ]; then shift; output=$1; fi; shift; done\n" +
 		"case \"$output\" in\n" + behavior + "\n*/head-packer) cp /bin/false \"$output\"; exit 0;;\nesac\ncp '" + binary + "' \"$output\"\n"
 	require.NoError(t, testfixture.WriteExecutable(path, []byte(script)))
 	return path
 }
 
-func TestArtifactBuildRejectsOutdatedGoPatch(t *testing.T) {
+func TestArtifactBuildRejectsWrongGoVersion(t *testing.T) {
 	t.Parallel()
-	compiler := filepath.Join(t.TempDir(), "go")
-	script := "#!/bin/sh\nprintf '%s\\n' 'go version go1.27.1 linux/amd64'\n"
-	require.NoError(t, testfixture.WriteExecutable(compiler, []byte(script)))
-	_, err := buildArtifacts(context.Background(), DefaultExperimentConfig(), RunOptions{Go: compiler}, t.TempDir())
-	require.ErrorContains(t, err, "benchmark builds require Go 1.27.3")
+	for _, tc := range []struct{ name, version string }{
+		{"old patch", "go version go1.27.1 linux/amd64"},
+		{"other release", "go version go1.26.1 linux/amd64"},
+		{"unexpected text", "unexpected go" + microfat.GoVersion() + " text"},
+		{"wrapped output", "wrapped go version go" + microfat.GoVersion() + " linux/amd64"},
+		{"missing platform", "go version go" + microfat.GoVersion()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			compiler := filepath.Join(t.TempDir(), "go")
+			script := "#!/bin/sh\nprintf '%s\\n' '" + tc.version + "'\n"
+			require.NoError(t, testfixture.WriteExecutable(compiler, []byte(script)))
+			_, err := buildArtifacts(context.Background(), DefaultExperimentConfig(), RunOptions{Go: compiler}, t.TempDir())
+			require.ErrorContains(t, err, "benchmark builds require Go "+microfat.GoVersion())
+		})
+	}
 }
 
 func TestArtifactBuildFailures(t *testing.T) {

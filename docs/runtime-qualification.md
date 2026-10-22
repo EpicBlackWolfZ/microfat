@@ -8,7 +8,7 @@ outside the E2E suite's eager product builds.
 
 ## Run locally
 
-Use Go 1.27.3 and Task 3.53.1:
+Use Go from `go.mod` and Task from `.config/tool-versions.env`:
 
 ```bash
 task qualify-runtime

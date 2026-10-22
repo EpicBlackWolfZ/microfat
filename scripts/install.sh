@@ -7,12 +7,16 @@ microfat_bootstrap() (
     IFS=$'\n\t'
 
     readonly helper_version='0.3.0'
-    readonly cosign_version='v3.0.6'
+    # renovate: datasource=github-release-attachments depName=sigstore/cosign
+    readonly cosign_amd64='v3.1.4@424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa'
+    # renovate: datasource=github-release-attachments depName=sigstore/cosign
+    readonly cosign_arm64='v3.1.4@ade83b7aac62e131cacfe96d958948b2150cc9efec46a570a2649b8e27dedad2'
     readonly repository='https://github.com/EpicBlackWolfZ/microfat'
     readonly issuer='https://token.actions.githubusercontent.com'
     readonly metadata_limit=1048576
     readonly executable_limit=268435456
-    local arch cosign='' pin='' staging_parent='' stage='' arg checksum_line expected='' actual asset verifier_info owner mode links parent
+    local arch cosign='' pin='' cosign_pin='' cosign_version staging_parent='' stage='' arg checksum_line expected='' actual
+    local asset verifier_info owner mode links parent
     local -a forwarded=()
 
     fail() { printf 'microfat bootstrap: %s\n' "$*" >&2; exit 1; }
@@ -96,12 +100,14 @@ microfat_bootstrap() (
         [[ ${cosign} == /* && -f ${cosign} && ! -L ${cosign} && ${pin} =~ ^[0-9a-f]{64}$ ]] ||
             fail 'verifier override requires an absolute regular file and independent lowercase SHA-256 pin'
     elif [[ ${arch} == amd64 ]]; then
-        pin=c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
+        cosign_pin=${cosign_amd64}
+        pin=${cosign_pin#*@}
     else
-        pin=bedac92e8c3729864e13d4a17048007cfafa79d5deca993a43a90ffe018ef2b8
+        cosign_pin=${cosign_arm64}
+        pin=${cosign_pin#*@}
     fi
-    # Pins are taken from sigstore/cosign-installer action.yml at the reviewed
-    # immutable revision 6f9f17788090df1f26f669e9d70d6ae9567deba6.
+    cosign_version=${cosign_pin%@*}
+    # Release attachment hashes are pinned alongside their exact version.
     if [[ -n ${staging_parent} ]]; then
         safe_staging_parent "${staging_parent}"
         stage=$(mktemp -d "${staging_parent}/microfat-bootstrap.XXXXXXXXXX")

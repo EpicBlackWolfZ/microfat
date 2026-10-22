@@ -247,7 +247,7 @@ func TestCancelledScheduleAndCheckpointFailure(t *testing.T) {
 func TestHTTPFailuresRemainMeasurements(t *testing.T) {
 	t.Parallel()
 	// Synthetic adapter output exercises failure accounting, never performance claims.
-	raw, err := os.ReadFile("../load/testdata/fortio-1.75.2.json")
+	raw, err := testfixture.FortioOutput("../load/testdata/fortio-1.75.2.json")
 	require.NoError(t, err)
 	raw = bytes.ReplaceAll(raw, []byte(`"200"`), []byte(`"500"`))
 	root := t.TempDir()

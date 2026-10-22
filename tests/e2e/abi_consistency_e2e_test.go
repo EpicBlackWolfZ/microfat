@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -746,7 +747,8 @@ func TestABI_GenuineMismatchPackagingMatrix(t *testing.T) {
 	dir := t.TempDir()
 	pkgDir := filepath.Join(dir, "mixedpkg")
 	require.NoError(t, os.MkdirAll(pkgDir, defaultFilePerm))
-	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module mixedfixture\ngo 1.27.3\n"), privateFilePerm))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"),
+		[]byte("module mixedfixture\ngo "+microfat.GoVersion()+"\n"), privateFilePerm))
 	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(`package main
 import "fmt"
 func main() { fmt.Println("genuine mixed payload") }

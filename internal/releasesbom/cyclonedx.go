@@ -14,6 +14,7 @@ import (
 	"time"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/internal/releasecheck"
 )
 
@@ -21,9 +22,10 @@ const (
 	archiveRef        = "archive-root"
 	projectURL        = "https://github.com/EpicBlackWolfZ/microfat"
 	generatorName     = "microfat-release-sbom"
-	converterVersion  = "13.1.0"
 	projectLicenseSHA = "ae380bc0d675e1d3bdf12ef3fe0c958f07365cf7bf20656ae95fce881e293f53"
 )
+
+var converterVersion = strings.TrimPrefix(strings.Split(microfat.ToolPin("CDXGEN_LINUX_AMD64"), "@")[0], "v")
 
 // Metadata identifies the generator build, separately from the archived product.
 type Metadata struct {

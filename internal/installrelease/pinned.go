@@ -5,20 +5,24 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/internal/install"
 )
 
-// These independent pins match the reviewed bootstrap trust anchor, sourced
-// from sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6.
-const CosignVersion = "v3.0.6"
+// CosignVersion returns the reviewed verifier release from the shared tool pins.
+// Platform versions advance together, as checked by the shared pin contracts.
+func CosignVersion() string {
+	version, _, _ := strings.Cut(microfat.ToolPin("COSIGN_LINUX_AMD64"), "@")
+	return version
+}
 
 func cosignPin(arch string) (string, error) {
 	switch arch {
-	case "amd64":
-		return "c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74", nil
-	case "arm64":
-		return "bedac92e8c3729864e13d4a17048007cfafa79d5deca993a43a90ffe018ef2b8", nil
+	case "amd64", "arm64":
+		_, digest, _ := strings.Cut(microfat.ToolPin("COSIGN_LINUX_"+strings.ToUpper(arch)), "@")
+		return digest, nil
 	default:
 		return "", errors.New("unsupported verifier architecture")
 	}
@@ -38,7 +42,7 @@ func (c *Client) PrepareVerifier(ctx context.Context, arch, staging string, over
 		return Cosign{}, err
 	}
 	path := filepath.Join(staging, "cosign")
-	address := "https://github.com/sigstore/cosign/releases/download/" + CosignVersion + "/cosign-linux-" + arch
+	address := "https://github.com/sigstore/cosign/releases/download/" + CosignVersion() + "/cosign-linux-" + arch
 	if err := c.download(ctx, address, path, maxDownloadBytes); err != nil {
 		return Cosign{}, err
 	}

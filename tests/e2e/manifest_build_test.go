@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,7 +19,8 @@ func main() { fmt.Println("manifest payload") }
 func writeManifestPackage(t *testing.T, dir string) {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(dir, defaultFilePerm))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module manifestfixture\ngo 1.27.3\n"), privateFilePerm))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"),
+		[]byte("module manifestfixture\ngo "+microfat.GoVersion()+"\n"), privateFilePerm))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte(manifestSource), privateFilePerm))
 }
 

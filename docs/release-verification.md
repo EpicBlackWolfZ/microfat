@@ -11,13 +11,11 @@ bootstrap source. An HTTPS script command trusts that source and transport. To p
 download/review the script first and compare it with a digest from a separate trusted provisioning
 record. Do not accept a checksum beside an unauthenticated script as an independent anchor.
 
-`scripts/install.sh` embeds Cosign v3.0.6 architecture pins from the reviewed
-[sigstore/cosign-installer revision](https://github.com/sigstore/cosign-installer/blob/6f9f17788090df1f26f669e9d70d6ae9567deba6/action.yml):
-
-| Architecture | SHA-256 |
-| --- | --- |
-| amd64 | `c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74` |
-| arm64 | `bedac92e8c3729864e13d4a17048007cfafa79d5deca993a43a90ffe018ef2b8` |
+`scripts/install.sh` embeds the reviewed Cosign release and architecture-specific SHA-256 pins.
+They match `COSIGN_LINUX_AMD64` and `COSIGN_LINUX_ARM64` in
+[the shared tool definitions](../.config/tool-versions.env), which are also embedded in the native helper.
+Renovate updates each exact version and asset checksum together; tests require the standalone bootstrap
+and native helper to use the same pins. See [dependency updates](dependency-updates.md).
 
 It checks the verifier before execution. It does not trust a PATH Cosign. An override requires both
 `--cosign /absolute/regular/executable` and `--cosign-sha256 INDEPENDENT_DIGEST`; partial pins, symlinks,

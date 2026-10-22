@@ -23,7 +23,7 @@ func testOptions() Options {
 
 func TestPinnedOutputParser(t *testing.T) {
 	t.Parallel()
-	data, err := os.ReadFile("testdata/fortio-1.75.2.json")
+	data, err := testfixture.FortioOutput("testdata/fortio-1.76.0.json")
 	require.NoError(t, err)
 	result, err := Parse(data, testOptions())
 	require.NoError(t, err)
@@ -77,9 +77,11 @@ func fakeTool(t *testing.T, version, action string) string {
 
 func TestExternalDriver(t *testing.T) {
 	t.Parallel()
-	fixture, err := filepath.Abs("testdata/fortio-1.75.2.json")
+	data, err := testfixture.FortioOutput("testdata/fortio-1.76.0.json")
 	require.NoError(t, err)
-	driver := &Fortio{Path: fakeTool(t, Version, "cat '"+fixture+"'"),
+	fixture := filepath.Join(t.TempDir(), "output.json")
+	require.NoError(t, os.WriteFile(fixture, data, 0o600))
+	driver := &Fortio{Path: fakeTool(t, Version(), "cat '"+fixture+"'"),
 		Wrap: func(spec process.Spec) process.Spec { return spec }}
 	ctx, cancel := context.WithTimeout(context.Background(), loadGrace)
 	defer cancel()
@@ -117,7 +119,7 @@ func TestExternalDriver(t *testing.T) {
 
 func TestDriverCancellation(t *testing.T) {
 	t.Parallel()
-	driver := &Fortio{Path: fakeTool(t, Version, "sleep 60")}
+	driver := &Fortio{Path: fakeTool(t, Version(), "sleep 60")}
 	require.NoError(t, driver.Configure(testOptions()))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -135,7 +137,7 @@ func TestDriverCancellation(t *testing.T) {
 }
 
 func FuzzFortioJSON(f *testing.F) {
-	data, err := os.ReadFile("testdata/fortio-1.75.2.json")
+	data, err := testfixture.FortioOutput("testdata/fortio-1.76.0.json")
 	if err != nil {
 		f.Fatal(err)
 	}

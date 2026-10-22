@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/EpicBlackWolfZ/microfat"
 )
 
 func Run(ctx context.Context, options Options, progress io.Writer, environment []string, execute Execute) error {
@@ -43,8 +45,8 @@ func Run(ctx context.Context, options Options, progress io.Writer, environment [
 	if err != nil {
 		return err
 	}
-	if !strings.HasPrefix(version, "go version go1.27.3 ") {
-		return errors.New("Go 1.27.3 required")
+	if !strings.HasPrefix(version, "go version go"+microfat.GoVersion()+" ") {
+		return errors.New("Go " + microfat.GoVersion() + " required")
 	}
 	hashes := make(map[string]string)
 	for _, name := range []string{cliName, fullStub, minimalStub} {

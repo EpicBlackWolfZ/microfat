@@ -7,14 +7,17 @@ The existing `microfat benchmark` baseline and v1 evidence remain supported. Bas
 
 ## Run an experiment
 
-Use Go 1.27.3 and install the pinned external tool explicitly:
+Use the Go patch in `go.mod` and install the pinned external tool explicitly:
 
 ```bash
 task benchmark-tools
 task benchmark BENCHMARK_CONFIG=benchmarks/config/smoke.json
 ```
 
-The setup command checks the Fortio module checksum and source commit in `benchmarks/tools.lock.json`.
+The setup command authenticates Fortio with Go's public checksum database and checks its immutable source commit
+against `benchmarks/tools.lock.json`. It records both downloaded module checksums and source provenance in
+`.work/benchmark-tools/module.json`. The lock is embedded in the benchmark adapter, so its version and source
+identity have one source of truth. Fortio is built with the Go patch declared by the root `go.mod`.
 Experiments do not install tools. Override `MICROFAT_BENCH_FORTIO` to use another local build of the pinned version;
 the experiment records the executable hash and build information.
 

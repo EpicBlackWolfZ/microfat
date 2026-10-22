@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
@@ -214,8 +215,9 @@ func inlinePlatformELF(t *testing.T, module string) []byte {
 	copy(data[platformInfoOffset:], platformInfoMagic)
 	data[platformInfoOffset+14] = 8
 	data[platformInfoOffset+15] = 2
-	data = binary.AppendUvarint(data, uint64(len("go1.27.3")))
-	data = append(data, "go1.27.3"...)
+	goVersion := "go" + microfat.GoVersion()
+	data = binary.AppendUvarint(data, uint64(len(goVersion)))
+	data = append(data, goVersion...)
 	framed := "\x30\x77\xaf\x0c\x92\x74\x08\x02\x41\xe1\xc1\x07\xe6\xd6\x18\xe6" + module +
 		"\xf9\x32\x43\x31\x86\x18\x20\x72\x00\x82\x42\x10\x41\x16\xd8\xf2"
 	data = binary.AppendUvarint(data, uint64(len(framed)))

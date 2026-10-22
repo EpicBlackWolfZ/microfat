@@ -20,10 +20,10 @@ visible; they cannot become zero latency or disappear from the pair set.
 
 ## HTTP load and latency
 
-Fortio 1.75.2 runs externally with explicit QPS, concurrency, uniform pacing, disabled catch-up, percentile list,
+The pinned Fortio release runs externally with explicit QPS, concurrency, uniform pacing, disabled catch-up, percentile list,
 and histogram resolution. Its raw JSON is preserved. The adapter records its variable-width histogram and
 uncorrected service-time observations, not fabricated per-request samples or a claimed HDR correction.
-These semantics follow the pinned [Fortio source](https://github.com/fortio/fortio/tree/v1.75.2), especially
+These semantics follow the [Fortio source identity in the tool lock](../../benchmarks/tools.lock.json), especially
 `periodic/periodic.go` and `stats/stats.go`.
 
 Request completion rate and requested rate are distinct. Rate shortfall, generator saturation, errors, and

@@ -105,10 +105,12 @@ func TestExperimentEndToEnd(t *testing.T) {
 	// Real target build/exec with a saved tool-output fixture exercises orchestration, not performance.
 	repository, err := filepath.Abs("../..")
 	require.NoError(t, err)
-	fixture, err := filepath.Abs("../load/testdata/fortio-1.75.2.json")
+	data, err := testfixture.FortioOutput("../load/testdata/fortio-1.76.0.json")
 	require.NoError(t, err)
+	fixture := filepath.Join(t.TempDir(), "output.json")
+	require.NoError(t, os.WriteFile(fixture, data, evidenceFilePerm))
 	tool := filepath.Join(t.TempDir(), "fortio")
-	script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo " + load.Version + "; else cat '" + fixture + "'; fi\n"
+	script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo " + load.Version() + "; else cat '" + fixture + "'; fi\n"
 	require.NoError(t, testfixture.WriteExecutable(tool, []byte(script)))
 	cfg := DefaultExperimentConfig()
 	cfg.Blocks = 1

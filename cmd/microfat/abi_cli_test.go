@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -286,7 +287,7 @@ func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
 		pkgDir := filepath.Join(tmpDir, "samplepkg")
 		require.NoError(t, os.MkdirAll(pkgDir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplepkg\ngo 1.27.3\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplepkg\ngo "+microfat.GoVersion()+"\n"), 0o644))
 
 		outPath := filepath.Join(tmpDir, "out.fat")
 		manifestPath := filepath.Join(tmpDir, "manifest.yaml")
@@ -313,7 +314,7 @@ func TestCLI_PackCmd_DirectPackFlagBranches(t *testing.T) {
 		pkgDir := filepath.Join(tmpDir, "samplepkg")
 		require.NoError(t, os.MkdirAll(pkgDir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplepkg\ngo 1.27.3\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplepkg\ngo "+microfat.GoVersion()+"\n"), 0o644))
 
 		outPath := filepath.Join(tmpDir, "out.fat")
 		manifestPath := filepath.Join(tmpDir, "manifest.yaml")

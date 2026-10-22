@@ -28,7 +28,7 @@ const (
 
 func TestWarmupFailureEvidence(t *testing.T) {
 	t.Parallel()
-	fixture, err := os.ReadFile("../load/testdata/fortio-1.75.2.json")
+	fixture, err := testfixture.FortioOutput("../load/testdata/fortio-1.75.2.json")
 	require.NoError(t, err)
 	invalid := bytes.Replace(fixture, []byte(`"ActualDuration": 1007219534`), []byte(`"ActualDuration": 0`), 1)
 	require.NotEqual(t, fixture, invalid)
@@ -153,7 +153,7 @@ func TestWarmupInterruptedEvidence(t *testing.T) {
 
 func TestValidWarmupEvidence(t *testing.T) {
 	t.Parallel()
-	fixture, err := os.ReadFile("../load/testdata/fortio-1.75.2.json")
+	fixture, err := testfixture.FortioOutput("../load/testdata/fortio-1.75.2.json")
 	require.NoError(t, err)
 	httpFailure := bytes.ReplaceAll(fixture, []byte(`"200"`), []byte(`"500"`))
 	partialHTTPFailure := bytes.Replace(fixture, []byte(`"200": 992`), []byte(`"200": 991, "500": 1`), 1)
@@ -243,7 +243,7 @@ func TestValidWarmupEvidence(t *testing.T) {
 
 func TestDisabledWarmupEvidence(t *testing.T) {
 	t.Parallel()
-	fixture, err := os.ReadFile("../load/testdata/fortio-1.75.2.json")
+	fixture, err := testfixture.FortioOutput("../load/testdata/fortio-1.75.2.json")
 	require.NoError(t, err)
 	root := t.TempDir()
 	rawPath, tool := filepath.Join(root, "output"), filepath.Join(root, "fortio")

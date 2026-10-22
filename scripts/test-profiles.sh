@@ -12,7 +12,7 @@ esac
 test_packages=(./... ./tests/e2e/testdata/mount_runner)
 if [[ "${1:-test}" == coverage-unit ]]; then
     # Keep the full production statement universe while staging black-box tests later.
-    test_packages=(./cmd/... ./internal/... ./runtimeinit/... ./benchmarks/... ./tests/e2e/testdata/mount_runner)
+    test_packages=(. ./cmd/... ./internal/... ./runtimeinit/... ./benchmarks/... ./tests/e2e/testdata/mount_runner)
 fi
 run_tests() {
     local profile="${1}"
@@ -32,9 +32,9 @@ if [[ "${1:-test}" == coverage || "${1:-test}" == coverage-unit ]]; then
     "${GO}" test ./internal/coveragegate ./internal/cmd/coverage
     # Source blocks shared between profiles are counted once by the Go merger.
     run_tests default -race -covermode=atomic -coverprofile="${TEST_ARTIFACT_DIR}/default.out" \
-        -coverpkg=./cmd/...,./internal/...,./runtimeinit/...,./benchmarks/... "${test_packages[@]}"
+        -coverpkg=.,./cmd/...,./internal/...,./runtimeinit/...,./benchmarks/... "${test_packages[@]}"
     run_tests minimal -race -tags minimal -covermode=atomic -coverprofile="${TEST_ARTIFACT_DIR}/minimal.out" \
-        -coverpkg=./cmd/...,./internal/...,./runtimeinit/...,./benchmarks/... "${test_packages[@]}"
+        -coverpkg=.,./cmd/...,./internal/...,./runtimeinit/...,./benchmarks/... "${test_packages[@]}"
     "${GO}" run ./internal/cmd/coverage "${COVERAGE_FILE}" "${TEST_ARTIFACT_DIR}/default.out" "${TEST_ARTIFACT_DIR}/minimal.out"
 else
     run_tests default -race "${test_packages[@]}"

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -317,13 +318,19 @@ type expectedUpload struct {
 }
 
 func validateWorkflowCodecovSteps(job workflowJob) error {
-	// Job-level CLI version pin
-	cliVersion := job.Env["CODECOV_CLI_VERSION"]
+	// The exact CLI release is shared by local setup and CI.
+	cliVersion := microfat.ToolPin("CODECOV_VERSION")
 	if cliVersion == "" || cliVersion == "latest" {
-		return errors.New("job must pin CODECOV_CLI_VERSION to an exact release, not latest or empty")
+		return errors.New("shared pins must select an exact Codecov CLI release, not latest or empty")
 	}
 	if !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(cliVersion) {
-		return fmt.Errorf("job CODECOV_CLI_VERSION must follow semver (e.g. v11.3.1), got %q", cliVersion)
+		return fmt.Errorf("shared Codecov CLI version must follow semver, got %q", cliVersion)
+	}
+
+	if !slices.ContainsFunc(job.Steps, func(step workflowStep) bool {
+		return step.ID == "toolchain" && step.Uses == "./.github/actions/toolchain-config" && step.If == ""
+	}) {
+		return errors.New("job must read shared tool pins with the toolchain step")
 	}
 
 	// Verify required coverage command invocation
@@ -405,8 +412,8 @@ func validateWorkflowCodecovSteps(job workflowJob) error {
 		if step.With["disable_search"] != true {
 			return fmt.Errorf("step %s must set disable_search: true for exclusive file selection", step.ID)
 		}
-		if fmt.Sprint(step.With["version"]) != "${{ env.CODECOV_CLI_VERSION }}" {
-			return fmt.Errorf("step %s must set version: ${{ env.CODECOV_CLI_VERSION }}", step.ID)
+		if fmt.Sprint(step.With["version"]) != "${{ steps.toolchain.outputs.codecov }}" {
+			return fmt.Errorf("step %s must set version: ${{ steps.toolchain.outputs.codecov }}", step.ID)
 		}
 		if step.ContinueOnError == nil || !*step.ContinueOnError {
 			return fmt.Errorf("step %s must set continue-on-error: true for telemetry error bounding", step.ID)
@@ -493,9 +500,14 @@ func TestCodecovWorkflowNegativeContracts(t *testing.T) {
 	t.Run("rejects unpinned CLI", func(t *testing.T) {
 		t.Parallel()
 		mut := baseJob
-		mut.Env = mapsCloneString(baseJob.Env)
-		mut.Env["CODECOV_CLI_VERSION"] = "latest"
-		require.ErrorContains(t, validateWorkflowCodecovSteps(mut), "not latest or empty")
+		mut.Steps = slices.Clone(baseJob.Steps)
+		for i, step := range mut.Steps {
+			if step.ID == "codecov_unified" {
+				mut.Steps[i].With = mapsClone(step.With)
+				mut.Steps[i].With["version"] = "latest"
+			}
+		}
+		require.ErrorContains(t, validateWorkflowCodecovSteps(mut), "steps.toolchain.outputs.codecov")
 	})
 
 	t.Run("rejects lowered CI threshold", func(t *testing.T) {
@@ -547,17 +559,6 @@ func mapsClone[K comparable, V any](m map[K]V) map[K]V {
 		return nil
 	}
 	r := make(map[K]V, len(m))
-	for k, v := range m {
-		r[k] = v
-	}
-	return r
-}
-
-func mapsCloneString(m map[string]string) map[string]string {
-	if m == nil {
-		return nil
-	}
-	r := make(map[string]string, len(m))
 	for k, v := range m {
 		r[k] = v
 	}

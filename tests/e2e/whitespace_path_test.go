@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -272,7 +273,7 @@ import "fmt"
 func main() { fmt.Println("WS_MANIFEST_OK") }
 `
 	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(mainSource), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplews\ngo 1.27.3\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplews\ngo "+microfat.GoVersion()+"\n"), 0o644))
 
 	manifestContent := `name: ws-manifest-app
 package: ` + pkgDir + `

@@ -19,15 +19,16 @@ All participants in the `microfat` community are expected to adhere to the [Code
 
 ## 3. Development Prerequisites & Setup
 
-- **Go Toolchain**: Go **1.27.3 minimum**, matching `go.mod`; CI and qualification builds pin **1.27.3**.
-- **Task**: [Task](https://taskfile.dev/) **v3.53.1**, pinned in CI.
+- **Go Toolchain**: use the exact patch in `go.mod`; CI and qualification builds read that requirement directly.
+- **Tool versions**: [`.config/tool-versions.env`](.config/tool-versions.env) pins Task, GoReleaser, linters, scanners,
+  signing tools and SBOM converters for local setup and CI. See [dependency updates](docs/dependency-updates.md).
 - **Git**: Working copy cloned from `https://github.com/EpicBlackWolfZ/microfat`.
 - **Required for `task all`**:
-  - `golangci-lint` (v2.14.0+)
-  - `shellcheck` (v0.11.0)
+  - `golangci-lint` (use the shared pin)
+  - `shellcheck` (use the shared pin)
   - `govulncheck`
 - **Additional tools**: `gotestsum` is optional for test presentation; `goreleaser` is required for `task snapshot`.
-- **Release SBOM tests and packaging**: install pinned standalone cdxgen `cdx-convert` **v13.1.0**
+- **Release SBOM tests and packaging**: install pinned standalone cdxgen `cdx-convert` from the shared pins
   with `bash scripts/install-cdxgen.sh "$HOME/.local/bin"` and add that directory to `PATH`.
   CI and the release gate set `MICROFAT_SBOM_TESTS=required`, which fails when the tool is missing.
   Run `MICROFAT_SBOM_TESTS=required task test` to require the real AMD64/ARM64 SBOM tests locally.
@@ -35,10 +36,10 @@ All participants in the `microfat` community are expected to adhere to the [Code
 
 Missing mandatory linters or scanners fail the task; no weaker fallback is substituted.
 
-Install the Go 1.27.3 binary on `PATH` and verify it with `GOTOOLCHAIN=local go version`.
+Install the Go version declared in `go.mod` on `PATH` and verify it with `GOTOOLCHAIN=local go version`.
 Tests and qualification subprocesses use the installed toolchain with automatic switching
 disabled. If a repository-local `.go/bin/go` is present, update it too, or select the patched
-binary explicitly with `task all GO=/absolute/path/to/go1.27.3/bin/go`.
+binary explicitly with `task all GO=/absolute/path/to/pinned-go/bin/go`.
 
 ### Quickstart
 
@@ -48,7 +49,8 @@ git clone https://github.com/EpicBlackWolfZ/microfat.git
 cd microfat
 
 # Install the exact Task version using Go module checksum verification
-go install github.com/go-task/task/v3/cmd/task@v3.53.1
+source .config/tool-versions.env
+go install github.com/go-task/task/v3/cmd/task@v${TASK_VERSION}
 export PATH="$(go env GOPATH)/bin:$PATH"
 
 # Verify dependencies, run full linting, vulnerability scans, and test suite
@@ -133,7 +135,7 @@ The full local and release commands retain their existing complete test and cove
 The local statement coverage gate (`task coverage-unit COVERAGE_THRESHOLD=95` in CI, `task coverage` locally) is **authoritative**. A combined statement coverage below 95% fails CI immediately with an exact rational calculation (no display rounding passes). Codecov integration serves as an auxiliary telemetry and diagnostic system; it does not replace or weaken the local gate.
 
 - **Isolated Report Uploads**: In CI, coverage reports and test results are uploaded via five distinct, isolated steps (`unified`, `default-profile`, `minimal-profile`, and per-profile JUnit test results for Test Analytics). All uploads explicitly set `disable_search: true` to prevent unintended file inclusion and ensure exclusive file selection.
-- **Codecov CLI Pinning**: The Codecov CLI executable is pinned to official release `v11.3.1` (via job-level `CODECOV_CLI_VERSION`) rather than floating at `latest`, maintaining cryptographic signature verification.
+- **Codecov CLI Pinning**: The Codecov CLI executable is pinned in `.config/tool-versions.env` rather than floating at `latest`, maintaining cryptographic signature verification.
 - **Telemetry Error Bounding**: Upload actions specify `continue-on-error: true`, `fail_ci_if_error: false`, and tight `timeout-minutes: 3` so that external network outages do not fail an otherwise passing test suite. Conversely, a below-95% local gate failure always fails the job.
 - **Dynamic Status Checks & Disabled Carryforward**: Codecov project status uses `target: auto` with zero threshold filtered to `unified` to detect regressions against the base commit. Patch status targets `95%` filtered to `unified`. `carryforward` is disabled across all normal coverage flags so missing uploads remain visibly missing rather than substituting stale measurements. Codecov statuses remain non-required during rollout without setting `informational: true`.
 - **Validation**: Developers can validate `codecov.yml` online using `task codecov-validate`.

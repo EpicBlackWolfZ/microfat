@@ -60,7 +60,7 @@ A `microfat` fat binary consists of contiguous segments:
   - Line length limit <= 140 characters (`lll`).
   - No naked returns (`nakedret`).
 - **Shell Script Static Analysis & Hardening**:
-  - Pinned toolchain: **ShellCheck v0.11.0**.
+  - Pinned toolchain: **ShellCheck**, with version and asset hash in `.config/tool-versions.env`.
   - Strict baseline enforced across all tracked `*.sh` scripts: `#!/usr/bin/env bash`, `set -euo pipefail`, and `IFS=$'\n\t'`.
   - Zero-warning tolerance under `.shellcheckrc` optional rules (`check-unassigned-uppercase`, `quote-safe-variables`, `check-extra-masked-returns`, `check-set-e-suppressed`, `require-variable-braces`).
   - No broad or global rule disables (`SC1090` must remain enabled).
@@ -75,8 +75,9 @@ A `microfat` fat binary consists of contiguous segments:
 
 ## 4. Development Commands & Workflows
 
-All development operations use pinned Task v3.53.1 through the root `Taskfile.yml`. Bootstrap with
-`go install github.com/go-task/task/v3/cmd/task@v3.53.1`; CI pins the installer action and version.
+All development operations use pinned Task through the root `Taskfile.yml`. Bootstrap with
+`source .config/tool-versions.env && go install github.com/go-task/task/v3/cmd/task@v${TASK_VERSION}`;
+CI reads the same tool pins and pins installer actions by commit.
 Mandatory linters and scanners must fail when missing. Do not restore Make wrappers or Python helpers.
 
 ```bash

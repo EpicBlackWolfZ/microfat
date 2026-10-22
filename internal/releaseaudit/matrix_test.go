@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/process"
 	"github.com/stretchr/testify/require"
 )
@@ -42,7 +43,7 @@ func (f *productFake) execute(_ context.Context, spec process.Spec) (Result, err
 		require.Equal(f.t, "verify-blob", spec.Args[0])
 	case "go":
 		if spec.Args[0] == "version" {
-			result.Stdout = "go version go1.27.3 linux/" + f.options.Arch
+			result.Stdout = "go version go" + microfat.GoVersion() + " linux/" + f.options.Arch
 		} else {
 			require.Equal(f.t, "build", spec.Args[0])
 			require.Contains(f.t, spec.Args, "-buildvcs=false")

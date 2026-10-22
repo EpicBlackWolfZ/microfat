@@ -33,9 +33,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read shared tool versions
+        id: toolchain
+        uses: ./.github/actions/toolchain-config
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.3'
+          go-version-file: go.mod
           cache: false
       - name: Resolve immutable measurement provenance
         env:
@@ -53,7 +57,7 @@ jobs:
       - name: Install pinned Task
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
-          version: '3.53.1'
+          version: ${{ steps.toolchain.outputs.task }}
 
       - run: task build
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
