@@ -128,6 +128,10 @@ func finish() {
 		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
 			panic(err)
 		}
+		// Go may handle the signal on another thread after Kill returns.
+		// Do not let a normal main return race with signal termination.
+		time.Sleep(probeLifetime)
+		panic("SIGTERM did not terminate the signal fixture")
 	}
 	if len(os.Args) > 1 && os.Args[1] == "--exit-42" {
 		os.Exit(payloadExitCode)
