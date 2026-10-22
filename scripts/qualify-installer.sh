@@ -3,6 +3,9 @@
 # Optional VERSION RELEASE_DIR adds a signed draft; no release assets are changed.
 set -euo pipefail
 IFS=$'\n\t'
+# shellcheck source=../.config/tool-versions.env
+source "$(dirname -- "${BASH_SOURCE[0]}")/../.config/tool-versions.env"
+: "${COSIGN_LINUX_AMD64:?missing shared Cosign pin}" "${COSIGN_LINUX_ARM64:?missing shared Cosign pin}"
 
 helper=${1:?absolute trusted helper path required}
 output=${2:?absolute evidence directory required}
@@ -18,14 +21,16 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 host=$(uname -m)
 case "${host}" in
-    x86_64) arch=amd64; pin=c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74 ;;
-    aarch64|arm64) arch=arm64; pin=bedac92e8c3729864e13d4a17048007cfafa79d5deca993a43a90ffe018ef2b8 ;;
+    x86_64) arch=amd64; cosign_pin=${COSIGN_LINUX_AMD64} ;;
+    aarch64|arm64) arch=arm64; cosign_pin=${COSIGN_LINUX_ARM64} ;;
     *) printf 'Native Linux amd64 or arm64 required.\n' >&2; exit 1 ;;
 esac
+cosign_version=${cosign_pin%@*}
+pin=${cosign_pin#*@}
 cosign="${private}/cosign"
 curl --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' \
     --connect-timeout 15 --max-time 180 --max-filesize 268435456 \
-    --output "${cosign}" "https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-linux-${arch}"
+    --output "${cosign}" "https://github.com/sigstore/cosign/releases/download/${cosign_version}/cosign-linux-${arch}"
 actual=$(sha256sum < "${cosign}")
 [[ ${actual%% *} == "${pin}" ]]
 chmod 700 "${cosign}"

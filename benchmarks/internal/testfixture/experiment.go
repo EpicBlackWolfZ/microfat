@@ -3,10 +3,27 @@ package testfixture
 
 import (
 	"fmt"
+	"os"
+	"regexp"
 	"strings"
 
+	"github.com/EpicBlackWolfZ/microfat/benchmarks"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
 )
+
+var fortioVersion = regexp.MustCompile(`("Version"\s*:\s*")[^"]*(")`)
+
+// FortioOutput adapts a saved capture's version for synthetic orchestration tests.
+// The original capture and its measurements remain untouched; live integration
+// tests independently validate the actual pinned release's output format.
+func FortioOutput(path string) ([]byte, error) {
+	data, err := os.ReadFile(path) // #nosec G304 G703 -- caller-selected test fixture input.
+	if err != nil {
+		return nil, err
+	}
+	version := strings.TrimPrefix(benchmarks.PinnedFortio().Version, "v")
+	return fortioVersion.ReplaceAll(data, []byte("${1}"+version+"${2}")), nil
+}
 
 const (
 	Blocks       = 5

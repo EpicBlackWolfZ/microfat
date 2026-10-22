@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/internal/builder"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
@@ -29,7 +30,7 @@ func TestBuildAndPack_RealCompilation_InspectBuildSettings(t *testing.T) {
 	pkgDir := filepath.Join(tmpDir, "pkg")
 	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module testpkg\ngo 1.27.2\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module testpkg\ngo "+microfat.GoVersion()+"\n"), 0o644))
 
 	outFile := filepath.Join(tmpDir, "bin", "real_amd64_fat")
 
@@ -99,7 +100,7 @@ func TestBuildAndPack_RealCompilation_ARM64_InspectBuildSettings(t *testing.T) {
 	pkgDir := filepath.Join(tmpDir, "pkg")
 	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module arm64pkg\ngo 1.27.2\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module arm64pkg\ngo "+microfat.GoVersion()+"\n"), 0o644))
 
 	outFile := filepath.Join(tmpDir, "bin", "real_arm64_fat")
 
@@ -165,7 +166,7 @@ func TestBuildAndPack_WrongArtifactMetadata_Rejection(t *testing.T) {
 	pkgDir := filepath.Join(tmpDir, "pkg")
 	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module fake\ngo 1.27.2\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module fake\ngo "+microfat.GoVersion()+"\n"), 0o644))
 
 	// Pre-existing output file
 	outFile := filepath.Join(tmpDir, "bin", "preserved_output.bin")
@@ -305,7 +306,7 @@ func TestBuildAndPack_SameLengthModificationRejection(t *testing.T) {
 	pkgDir := filepath.Join(tmpDir, "pkg")
 	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samelengthpkg\ngo 1.27.2\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samelengthpkg\ngo "+microfat.GoVersion()+"\n"), 0o644))
 
 	binDir := filepath.Join(tmpDir, "bin")
 	require.NoError(t, os.MkdirAll(binDir, 0o755))
@@ -387,7 +388,7 @@ func TestBuildAndPack_CancellationBetweenVariants(t *testing.T) {
 	pkgDir := filepath.Join(tmpDir, "pkg")
 	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module cancelpkg\ngo 1.27.2\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module cancelpkg\ngo "+microfat.GoVersion()+"\n"), 0o644))
 
 	binDir := filepath.Join(tmpDir, "bin")
 	require.NoError(t, os.MkdirAll(binDir, 0o755))

@@ -12,15 +12,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/benchmarks"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/process"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/system"
 )
 
 const (
-	Version              = "1.75.2"
-	ModuleSum            = "h1:TzBLdqgF9XOyBG4zt/uK8V2QoRbYRPvXM/Ju196nsGA="
-	SourceCommit         = "630bfb3db6cf663b4e01524f9e9be945e44f8a20"
 	MaxDuration          = 120 * time.Second
 	MaxConcurrency       = 128
 	MaxQPS               = 1000000
@@ -30,6 +28,12 @@ const (
 	saturationRatio      = 0.95
 	minimumTailSamples   = 10000
 )
+
+// Version is the release identified by the embedded benchmark tool lock.
+func Version() string { return strings.TrimPrefix(benchmarks.PinnedFortio().Version, "v") }
+
+// SourceCommit is the immutable source identified by the embedded benchmark tool lock.
+func SourceCommit() string { return benchmarks.PinnedFortio().SourceCommit }
 
 type Options struct {
 	Duration    time.Duration
@@ -97,8 +101,8 @@ func (f *Fortio) CheckVersion(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("Fortio version: %w", err)
 	}
-	if strings.TrimSpace(string(out)) != Version {
-		return fmt.Errorf("expected Fortio %s, got %q", Version, out)
+	if strings.TrimSpace(string(out)) != Version() {
+		return fmt.Errorf("expected Fortio %s, got %q", Version(), out)
 	}
 	return nil
 }
@@ -190,7 +194,7 @@ func Parse(data []byte, opts Options) (schema.HTTPResult, error) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return result, fmt.Errorf("Fortio JSON: %w", err)
 	}
-	if raw.Version != Version {
+	if raw.Version != Version() {
 		return result, fmt.Errorf("unexpected Fortio JSON version %q", raw.Version)
 	}
 	result = schema.HTTPResult{Requests: raw.DurationHistogram.Count, Successful: raw.RetCodes["200"],

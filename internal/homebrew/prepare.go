@@ -150,8 +150,8 @@ func (c client) prepare(ctx context.Context, tag, output string, auth authentica
 		return evidence, err
 	}
 	evidence = Evidence{ReleaseID: r.ID, Tag: tag, Source: commit.SHA, Checksums: checksums, Assets: hashes,
-		Products: products, Recipe: digest(cask), GoVersion: runtime.Version(), CosignVersion: installrelease.CosignVersion,
-		HomebrewCommit: BrewCommit}
+		Products: products, Recipe: digest(cask), GoVersion: runtime.Version(), CosignVersion: installrelease.CosignVersion(),
+		HomebrewCommit: BrewCommit()}
 	data, err := json.MarshalIndent(evidence, "", "  ")
 	if err != nil {
 		return evidence, err

@@ -39,15 +39,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Read shared tool versions
+        id: toolchain
+        uses: ./.github/actions/toolchain-config
+
       - name: Set up Go
         if: matrix.language == 'go'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.2'
+          go-version-file: go.mod
           cache: true
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -56,13 +60,13 @@ jobs:
         if: matrix.build-mode == 'manual' && matrix.language == 'go'
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
-          version: '3.53.1'
+          version: ${{ steps.toolchain.outputs.task }}
 
       - name: Run Build for CodeQL
         if: matrix.build-mode == 'manual' && matrix.language == 'go'
         run: task build
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           category: "/language:${{ matrix.language }}"

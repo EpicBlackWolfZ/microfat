@@ -11,26 +11,30 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat"
+	"github.com/EpicBlackWolfZ/microfat/benchmarks"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/system"
 	"github.com/stretchr/testify/require"
 )
 
-const testLock = `{"fortio":{"module":"fortio.org/fortio","version":"v1.75.2","module_sum":"h1:module",
-"go_mod_sum":"h1:mod","source_commit":"source","toolchain":"go1.27.2"}}`
-const testModule = `{"Path":"fortio.org/fortio","Version":"v1.75.2","Sum":"h1:module","GoModSum":"h1:mod","Origin":{"Hash":"source"}}`
-const testGoVersion = "go version go1.27.2 linux/amd64"
+const testLock = `{"fortio":{"module":"fortio.org/fortio","version":"v1.76.0",
+"source_commit":"67ce9fa2a3a62fdb2f7a0d2b50acda1f7002d32b","source":"https://github.com/fortio/fortio/tree/v1.76.0"}}`
+const testModule = `{"Path":"fortio.org/fortio","Version":"v1.76.0","Sum":"h1:module","GoModSum":"h1:mod",
+"Origin":{"Hash":"67ce9fa2a3a62fdb2f7a0d2b50acda1f7002d32b"}}`
+
+var testGoVersion = "go version go" + microfat.GoVersion() + " linux/amd64"
+
 const kernelSuccess = "MICROFAT_KERNEL_RESULT=0\n"
 
 func TestFortioIdentity(t *testing.T) {
 	t.Parallel()
 	version, err := fortioVersion([]byte(testLock), testGoVersion+"\n")
 	require.NoError(t, err)
-	require.Equal(t, "v1.75.2", version)
+	require.Equal(t, "v1.76.0", version)
 	require.NoError(t, verifyFortio([]byte(testLock), []byte(testModule)))
 	for _, replacement := range []struct{ old, new string }{
-		{"fortio.org/fortio", "example.org/other"}, {"v1.75.2", "v1.75.2-rc1"},
-		{"go1.27.2", "go1.26.1"}, {"go1.27.2", "go1.27.1"},
-		{"h1:module", ""}, {"h1:mod", ""}, {"source", ""},
+		{"fortio.org/fortio", "example.org/other"}, {"v1.76.0", "v1.76.0-rc1"},
+		{"67ce9fa2a3a62fdb2f7a0d2b50acda1f7002d32b", ""}, {"https://github.com/", "https://example.org/"},
 	} {
 		t.Run("lock "+replacement.old, func(t *testing.T) {
 			t.Parallel()
@@ -41,7 +45,7 @@ func TestFortioIdentity(t *testing.T) {
 		})
 	}
 	for _, invalid := range []string{"{", "{}", "null"} {
-		_, err := readPin([]byte(invalid))
+		_, err := benchmarks.ReadFortioPin([]byte(invalid))
 		require.Error(t, err)
 	}
 	for _, invalid := range []string{"", "go version go1.27.10 linux/amd64", "go version go1.26.1 linux/amd64",
@@ -161,7 +165,7 @@ func TestCommands(t *testing.T) {
 			case baselineCommand:
 				require.Equal(t, "previous\n", out.String())
 			case "version":
-				require.Equal(t, "v1.75.2\n", out.String())
+				require.Equal(t, "v1.76.0\n", out.String())
 			case controlsCommand:
 				require.JSONEq(t, `{"target":{"affinity":[1],"cgroup_root":"/cgroup","memory_root":"","version":"v2",
 				"cpu_quota_us":100000,"cpu_period_us":100000,"memory_bytes":2147483648},"generator":{"affinity":[3],

@@ -198,7 +198,7 @@ func identifyTools(opts RunOptions, built *builtArtifacts) error {
 			return err
 		}
 		if id == "fortio" {
-			artifact.SourceSHA = load.SourceCommit
+			artifact.SourceSHA = load.SourceCommit()
 		} else {
 			artifact.SourceSHA = artifact.Settings["vcs.revision"]
 			if artifact.SourceSHA == "" {

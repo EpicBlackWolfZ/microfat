@@ -64,13 +64,13 @@ the already-published upstream release alone and keeps the previous tap version 
 
 `internal/homebrew` and `internal/cmd/homebrew-release` are maintained and tested with the upstream
 release contract. The tap pins their source by full commit SHA, separately from the selected
-product release. Dependency/action/tool updates require review. Qualification pins Homebrew 7.0.2
-at `83c9802fb54c60a612d52b264808c099b39a0687`.
+product release. Dependency/action/tool updates require review. Qualification uses the exact Homebrew
+release and source commit in `HOMEBREW_SOURCE` in [the shared tool definitions](../.config/tool-versions.env).
 
 The production generator accepts only exact stable public immutable releases from
 `EpicBlackWolfZ/microfat`, starting at v0.3.0. It freezes the release ID, tag and source commit,
 downloads the complete expected inventory into new private staging, and authenticates an
-independently SHA-pinned Cosign v3.0.6. Signature verification uses the exact official release
+independently SHA-pinned Cosign from the shared tool definitions. Signature verification uses the exact official release
 workflow/tag identity, GitHub issuer and source SHA. See [release verification](release-verification.md).
 
 All twelve payload hashes must match the signed checksum document. Both architecture archives,
@@ -107,7 +107,7 @@ proposal prevent ordinary stale candidates from replacing a newer cask.
 
 ## Local commands and evidence
 
-Use Go 1.27.2 and Task v3.53.1 from a reviewed checkout:
+Use Go from `go.mod` and Task from `.config/tool-versions.env` from a reviewed checkout:
 
 ```bash
 task homebrew-check

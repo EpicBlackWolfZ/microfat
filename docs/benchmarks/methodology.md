@@ -2,7 +2,7 @@
 
 ## Comparability
 
-Build every target ISA from identical source, Go 1.27.2, modules, tags, and optimization settings. Reuse the exact
+Build every target ISA from identical source, Go 1.27.3, modules, tags, and optimization settings. Reuse the exact
 native payload bytes inside each fat artifact. Capture hashes, full source revisions, dirty-tree state, build info,
 the load tool identity, suite configuration, and environment. Verify the running target's ISA, execution mode,
 selected payload digest, and effective runtime settings before sustained measurement.
@@ -20,10 +20,10 @@ visible; they cannot become zero latency or disappear from the pair set.
 
 ## HTTP load and latency
 
-Fortio 1.75.2 runs externally with explicit QPS, concurrency, uniform pacing, disabled catch-up, percentile list,
+The pinned Fortio release runs externally with explicit QPS, concurrency, uniform pacing, disabled catch-up, percentile list,
 and histogram resolution. Its raw JSON is preserved. The adapter records its variable-width histogram and
 uncorrected service-time observations, not fabricated per-request samples or a claimed HDR correction.
-These semantics follow the pinned [Fortio source](https://github.com/fortio/fortio/tree/v1.75.2), especially
+These semantics follow the [Fortio source identity in the tool lock](../../benchmarks/tools.lock.json), especially
 `periodic/periodic.go` and `stats/stats.go`.
 
 Request completion rate and requested rate are distinct. Rate shortfall, generator saturation, errors, and

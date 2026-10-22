@@ -98,12 +98,13 @@ func TestPinnedVerifierAndBootstrapContract(t *testing.T) {
 	for _, arch := range []string{"amd64", fixtureARM64} {
 		pin, err := cosignPin(arch)
 		require.NoError(t, err)
-		for _, name := range []string{"install.sh", "qualify-installer.sh"} {
-			data, err := os.ReadFile(filepath.Join("..", "..", "scripts", name))
-			require.NoError(t, err)
-			assert.Contains(t, string(data), CosignVersion)
-			assert.Contains(t, string(data), pin)
-		}
+		data, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install.sh"))
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "readonly cosign_"+arch+"='"+CosignVersion()+"@"+pin+"'")
+		data, err = os.ReadFile(filepath.Join("..", "..", "scripts", "qualify-installer.sh"))
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "/.config/tool-versions.env")
+		assert.Contains(t, string(data), "${COSIGN_LINUX_"+strings.ToUpper(arch)+"}")
 	}
 	_, err := cosignPin("other")
 	require.Error(t, err)
@@ -126,7 +127,7 @@ func TestPinnedVerifierAndBootstrapContract(t *testing.T) {
 	for _, scenario := range []string{"arch", "download", "digest", "existing"} {
 		t.Run(scenario, func(t *testing.T) {
 			stage, arch := t.TempDir(), "amd64"
-			address := "https://github.com/sigstore/cosign/releases/download/" + CosignVersion + "/cosign-linux-amd64"
+			address := "https://github.com/sigstore/cosign/releases/download/" + CosignVersion() + "/cosign-linux-amd64"
 			client := testClient(t, map[string][]byte{address: []byte("wrong bytes")})
 			if scenario == "arch" {
 				arch = "other"

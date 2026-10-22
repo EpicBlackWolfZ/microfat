@@ -48,9 +48,13 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Read shared tool versions
+        id: toolchain
+        uses: ./.github/actions/toolchain-config
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.2'
+          go-version-file: go.mod
           cache: false
       - name: Select immutable baseline
         env:
@@ -70,7 +74,7 @@ jobs:
       - name: Install pinned Task
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
-          version: '3.53.1'
+          version: ${{ steps.toolchain.outputs.task }}
 
       - run: task benchmark-tools build
       - name: Prepare hosted resource controls
@@ -113,15 +117,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read shared tool versions
+        id: toolchain
+        uses: ./.github/actions/toolchain-config
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.2'
+          go-version-file: go.mod
           cache: false
       - run: git worktree add --detach .work/benchmark-base HEAD
       - name: Install pinned Task
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
-          version: '3.53.1'
+          version: ${{ steps.toolchain.outputs.task }}
 
       - run: task benchmark-tools
       - name: Measure unchanged revision
@@ -149,14 +157,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read shared tool versions
+        id: toolchain
+        uses: ./.github/actions/toolchain-config
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.2'
+          go-version-file: go.mod
           cache: false
       - name: Install pinned Task
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
-          version: '3.53.1'
+          version: ${{ steps.toolchain.outputs.task }}
 
       - run: task build
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -186,14 +198,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read shared tool versions
+        id: toolchain
+        uses: ./.github/actions/toolchain-config
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.2'
+          go-version-file: go.mod
           cache: false
       - name: Install pinned Task
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
-          version: '3.53.1'
+          version: ${{ steps.toolchain.outputs.task }}
 
       - run: task benchmark-tools benchmark-matrix
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -214,14 +230,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read shared tool versions
+        id: toolchain
+        uses: ./.github/actions/toolchain-config
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.2'
+          go-version-file: go.mod
           cache: false
       - name: Install pinned Task
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
-          version: '3.53.1'
+          version: ${{ steps.toolchain.outputs.task }}
 
       - run: task build
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -262,7 +282,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.2'
+          go-version-file: source/go.mod
           cache: false
       - name: Attach evidence and publish complete immutable release
         working-directory: source

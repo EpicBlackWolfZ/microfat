@@ -9,8 +9,10 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/ci"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/compare"
+	"github.com/EpicBlackWolfZ/microfat/benchmarks/load"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/report"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/runner"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/schema"
@@ -93,10 +95,10 @@ func newExperimentRunCmd() *cobra.Command {
 		}}
 	cmd.Flags().StringVar(&configPath, "config", "", "Versioned experiment suite JSON")
 	cmd.Flags().StringVar(&output, "output-dir", "results/benchmarks", "Parent directory for immutable evidence bundles")
-	cmd.Flags().StringVar(&fortio, "fortio", os.Getenv("MICROFAT_BENCH_FORTIO"), "Path to pinned Fortio 1.75.2")
+	cmd.Flags().StringVar(&fortio, "fortio", os.Getenv("MICROFAT_BENCH_FORTIO"), "Path to pinned Fortio "+load.Version())
 	cmd.Flags().StringVar(&repository, "repository", ".", "Source repository used for native and fat builds")
 	cmd.Flags().StringVar(&baseRepository, "base-repository", "", "Base checkout for counterbalanced packer/stub revision comparison")
-	cmd.Flags().StringVar(&goTool, "go", "go", "Go 1.27.2 executable")
+	cmd.Flags().StringVar(&goTool, "go", "go", "Go "+microfat.GoVersion()+" executable")
 	return cmd
 }
 

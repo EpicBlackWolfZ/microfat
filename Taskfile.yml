@@ -6,6 +6,10 @@ set:
 - nounset
 - pipefail
 vars:
+  GOLANGCI_LINT_VERSION:
+    sh: '. .config/tool-versions.env; printf "%s" "$GOLANGCI_LINT_VERSION"'
+  SHELLCHECK_VERSION:
+    sh: '. .config/tool-versions.env; version=${SHELLCHECK_LINUX_AMD64%@*}; printf "%s" "${version#v}"'
   GO_DEFAULT:
     sh: |
       if [ -x .go/bin/go ]; then
@@ -165,7 +169,7 @@ tasks:
     desc: Apply Go and linter fixes, then format
     preconditions:
     - sh: command -v golangci-lint >/dev/null
-      msg: Install golangci-lint v2.14.0 before running fix
+      msg: 'Install golangci-lint {{.GOLANGCI_LINT_VERSION}} before running fix'
     cmds:
     - |-
       {{.TASK_ENV}}
@@ -301,17 +305,17 @@ tasks:
     desc: Run golangci-lint without weaker fallback checks
     preconditions:
     - sh: command -v golangci-lint >/dev/null
-      msg: Install golangci-lint v2.14.0; Go lint cannot be skipped
+      msg: 'Install golangci-lint {{.GOLANGCI_LINT_VERSION}}; Go lint cannot be skipped'
     cmds:
     - |-
       {{.TASK_ENV}}
       golangci-lint run ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter
   lint-shell:
-    desc: Run ShellCheck v0.11.0 on all tracked shell scripts
+    desc: Run pinned ShellCheck on all tracked shell scripts
     preconditions:
     - sh: |
-        shellcheck --version | grep -Fx 'version: 0.11.0' >/dev/null
-      msg: Install ShellCheck v0.11.0; shell lint cannot be skipped
+        shellcheck --version | grep -Fx 'version: {{.SHELLCHECK_VERSION}}' >/dev/null
+      msg: 'Install ShellCheck v{{.SHELLCHECK_VERSION}}; shell lint cannot be skipped'
     cmds:
     - |-
       {{.TASK_ENV}}

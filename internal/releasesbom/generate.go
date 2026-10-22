@@ -10,8 +10,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/process"
 	"github.com/EpicBlackWolfZ/microfat/internal/releasecheck"
 	"github.com/EpicBlackWolfZ/microfat/internal/sbom"
@@ -83,7 +85,7 @@ func convertDocument(ctx context.Context, data []byte, convert Converter) ([]byt
 	return sbom.CompleteSPDX(catalog, converted)
 }
 
-// Convert runs the exact reviewed standalone cdx-convert v13.1.0 binary. It needs
+// Convert runs the standalone cdx-convert pinned in the shared tool definitions. It needs
 // neither Python/BLINT nor a separately installed Node runtime.
 func Convert(ctx context.Context, data []byte) ([]byte, error) {
 	path, err := exec.LookPath("cdx-convert")
@@ -103,13 +105,14 @@ func verifyConverter(path, operatingSystem, arch string) error {
 		return fmt.Errorf("release SBOM conversion requires a pinned Linux tool")
 	}
 	pins := map[string]string{
-		"amd64": "e87137134bf53346f6ea864a2c481c070177c0ab28c303a26d4e79065ae6d266",
-		"arm64": "4832f37aa1b4aac12b0c3d6ad446a3b9e6324d51ae1921b90c670f494d47dfc9",
+		"amd64": microfat.ToolPin("CDXGEN_LINUX_AMD64"),
+		"arm64": microfat.ToolPin("CDXGEN_LINUX_ARM64"),
 	}
 	expected, ok := pins[arch]
 	if !ok {
 		return fmt.Errorf("unsupported converter architecture %s", arch)
 	}
+	_, expected, _ = strings.Cut(expected, "@")
 	// #nosec G304 -- path was resolved from the caller's tool PATH and must match a fixed digest.
 	file, err := os.Open(path)
 	if err != nil {

@@ -11,15 +11,26 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/internal/installrelease"
 )
 
 const Repository = "EpicBlackWolfZ/microfat"
 const TapRepository = "EpicBlackWolfZ/homebrew-tap"
 const CaskPath = "Casks/microfat.rb"
-const BrewVersion = "7.0.2"
-const BrewCommit = "83c9802fb54c60a612d52b264808c099b39a0687"
 const firstVersion = "0.3.0"
+
+// BrewVersion identifies the reviewed Homebrew release used by qualification.
+func BrewVersion() string {
+	version, _, _ := strings.Cut(microfat.ToolPin("HOMEBREW_SOURCE"), "@")
+	return strings.TrimPrefix(version, "v")
+}
+
+// BrewCommit identifies the immutable upstream source used by qualification.
+func BrewCommit() string {
+	_, commit, _ := strings.Cut(microfat.ToolPin("HOMEBREW_SOURCE"), "@")
+	return commit
+}
 
 //go:embed cask.rb.tmpl
 var caskTemplate string

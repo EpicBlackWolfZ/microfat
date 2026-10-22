@@ -88,14 +88,14 @@ func newBrewFixture(t *testing.T) brewFixture {
 		b.env = append(b.env, key+"="+value)
 	}
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "home"), 0o700))
-	b.command(true, "git", "clone", "--quiet", "--depth=1", "--branch", homebrew.BrewVersion,
+	b.command(true, "git", "clone", "--quiet", "--depth=1", "--branch", homebrew.BrewVersion(),
 		"https://github.com/Homebrew/brew.git", filepath.Dir(filepath.Dir(b.brew)))
 	actual := strings.TrimSpace(b.command(true, "git", "-C", filepath.Join(b.prefix, "Homebrew"), "rev-parse", "HEAD"))
-	require.Equal(t, homebrew.BrewCommit, actual)
+	require.Equal(t, homebrew.BrewCommit(), actual)
 	require.NoError(t, os.MkdirAll(filepath.Join(b.prefix, "bin"), 0o755))
 	require.NoError(t, os.Symlink("../Homebrew/bin/brew", filepath.Join(b.prefix, "bin", "brew")))
 	b.brew = filepath.Join(b.prefix, "bin", "brew")
-	require.Contains(t, b.command(true, b.brew, "--version"), homebrew.BrewVersion)
+	require.Contains(t, b.command(true, b.brew, "--version"), homebrew.BrewVersion())
 	require.Equal(t, b.prefix, strings.TrimSpace(b.command(true, b.brew, "--prefix")))
 	require.NoError(t, os.MkdirAll(filepath.Join(b.tap, "Casks"), 0o700))
 	b.command(true, "git", "init", "--quiet", "--initial-branch=main", b.tap)
@@ -338,5 +338,5 @@ func TestHomebrewQualification(t *testing.T) {
 	require.DirExists(t, filepath.Join(b.root, "payload-cache"))
 	b.command(true, b.brew, "untap", brewTestTap)
 	t.Logf("native %s Homebrew %s (%s); controlled fixtures are not signed releases", runtime.GOARCH,
-		homebrew.BrewVersion, homebrew.BrewCommit)
+		homebrew.BrewVersion(), homebrew.BrewCommit())
 }

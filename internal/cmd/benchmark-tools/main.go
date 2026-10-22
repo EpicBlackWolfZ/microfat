@@ -12,12 +12,12 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/EpicBlackWolfZ/microfat"
+	"github.com/EpicBlackWolfZ/microfat/benchmarks"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/system"
 )
 
 const (
-	fortioModule    = "fortio.org/fortio"
-	goToolchain     = "go1.27.2"
 	minimumCPUs     = 2
 	benchmarkMemory = 2 * 1024 * 1024 * 1024
 	baselineCommand = "baseline"
@@ -29,44 +29,20 @@ const (
 
 var stableVersion = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
 
-type fortioPin struct {
-	Module       string `json:"module"`
-	Version      string `json:"version"`
-	ModuleSum    string `json:"module_sum"`
-	GoModSum     string `json:"go_mod_sum"`
-	SourceCommit string `json:"source_commit"`
-	Toolchain    string `json:"toolchain"`
-}
-
-func readPin(data []byte) (fortioPin, error) {
-	var lock struct {
-		Fortio fortioPin `json:"fortio"`
-	}
-	if err := json.Unmarshal(data, &lock); err != nil {
-		return fortioPin{}, fmt.Errorf("decode tool lock: %w", err)
-	}
-	pin := lock.Fortio
-	if pin.Module != fortioModule || pin.Toolchain != goToolchain || !stableVersion.MatchString(pin.Version) ||
-		pin.ModuleSum == "" || pin.GoModSum == "" || pin.SourceCommit == "" {
-		return fortioPin{}, errors.New("incomplete or unsupported Fortio lock")
-	}
-	return pin, nil
-}
-
 func fortioVersion(lock []byte, version string) (string, error) {
-	pin, err := readPin(lock)
+	pin, err := benchmarks.ReadFortioPin(lock)
 	if err != nil {
 		return "", err
 	}
 	fields := strings.Fields(version)
-	if len(fields) != 4 || fields[0] != "go" || fields[1] != "version" || fields[2] != pin.Toolchain {
-		return "", fmt.Errorf("Go 1.27.2 required; got %q", version)
+	if len(fields) != 4 || fields[0] != "go" || fields[1] != "version" || fields[2] != "go"+microfat.GoVersion() {
+		return "", fmt.Errorf("Go %s required; got %q", microfat.GoVersion(), version)
 	}
 	return pin.Version, nil
 }
 
 func verifyFortio(lock, downloaded []byte) error {
-	pin, err := readPin(lock)
+	pin, err := benchmarks.ReadFortioPin(lock)
 	if err != nil {
 		return err
 	}
@@ -78,8 +54,8 @@ func verifyFortio(lock, downloaded []byte) error {
 		return fmt.Errorf("decode downloaded module: %w", err)
 	}
 	if module.Error != "" || module.Path != pin.Module || module.Version != pin.Version ||
-		module.Sum != pin.ModuleSum || module.GoModSum != pin.GoModSum || module.Origin.Hash != pin.SourceCommit {
-		return errors.New("Fortio module identity, checksums or source commit differ from lock")
+		!strings.HasPrefix(module.Sum, "h1:") || !strings.HasPrefix(module.GoModSum, "h1:") || module.Origin.Hash != pin.SourceCommit {
+		return errors.New("Fortio module identity or source commit differ from lock, or authenticated checksums are missing")
 	}
 	return nil
 }

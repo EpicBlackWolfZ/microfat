@@ -9,12 +9,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/EpicBlackWolfZ/microfat/internal/sbom"
 )
+
+var converterVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
 
 // ValidateModernCycloneDXBytes independently compares a schema-valid modern BOM
 // with hashes and build information extracted from the actual release archive.
@@ -384,12 +387,22 @@ func checkModernMetadata(meta *cdx.Metadata) error {
 	if meta == nil || meta.Timestamp == "" || meta.Tools == nil || meta.Tools.Components == nil {
 		return fmt.Errorf("modern SBOM generator metadata is missing")
 	}
-	tools := map[string]string{}
+	tools := map[string]cdx.Component{}
 	for _, tool := range *meta.Tools.Components {
-		tools[tool.Name] = tool.Version
+		tools[tool.Name] = tool
 	}
-	if tools["microfat-release-sbom"] == "" || tools["cdxgen cdx-convert"] != "13.1.0" {
-		return fmt.Errorf("modern SBOM generator or pinned converter identity is missing")
+	converter := tools["cdxgen cdx-convert"]
+	if strings.TrimSpace(tools["microfat-release-sbom"].Version) == "" || !converterVersionPattern.MatchString(converter.Version) {
+		return fmt.Errorf("modern SBOM generator or converter identity is missing")
 	}
-	return nil
+	// Audit the identity recorded in the authenticated artifact. Generation pins
+	// the installed converter separately, so tool updates preserve historical SBOMs.
+	if converter.ExternalReferences != nil {
+		for _, ref := range *converter.ExternalReferences {
+			if ref.Type == cdx.ERTypeVCS && ref.URL == "https://github.com/cdxgen/cdxgen/tree/v"+converter.Version {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("modern SBOM converter source identity is missing")
 }

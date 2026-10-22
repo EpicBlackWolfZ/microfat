@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,7 +29,8 @@ func TestExternalCLIPackagingExample(t *testing.T) {
 	require.True(t, found)
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte(code), privateFilePerm))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/external-pack\n\ngo 1.27.2\n"), privateFilePerm))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"),
+		[]byte("module example.com/external-pack\n\ngo "+microfat.GoVersion()+"\n"), privateFilePerm))
 	outputPath := filepath.Join(dir, "example.fat")
 	const timeout = 30 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)

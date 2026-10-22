@@ -15,7 +15,8 @@ brew reinstall --cask microfat
 brew uninstall --cask microfat
 ```
 
-Use a current Homebrew with Linux cask support; native qualification is pinned to Homebrew 7.0.2.
+Use a current Homebrew with Linux cask support; native qualification uses the exact release and source
+commit in `HOMEBREW_SOURCE` in [the shared tool definitions](../.config/tool-versions.env).
 macOS and other architectures are rejected by the cask's platform requirements. Native macOS support
 remains [#17](https://github.com/EpicBlackWolfZ/microfat/issues/17).
 
@@ -80,7 +81,7 @@ bash scripts/install.sh --version 0.2.5         # choose a supported stable vers
 bash scripts/install.sh --bin-dir "$HOME/tools/bin" --store-dir "$HOME/tools/microfat-store"
 ```
 
-The bootstrap authenticates pinned Cosign v3.0.6 before executing it, verifies the helper's signed
+The bootstrap authenticates the pinned Cosign release before executing it, verifies the helper's signed
 checksums under the exact official v0.3.0 workflow identity, and checks the helper bytes. The helper
 then authenticates the separately selected product archive before bounded extraction.
 See the [complete trust policy](release-verification.md). Drafts and prereleases are never selected

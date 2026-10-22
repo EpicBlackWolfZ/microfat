@@ -458,8 +458,9 @@ builds:
 
 ## Development & Developer Workflow
 
-All daily development operations use [Task v3.53.1](https://taskfile.dev/) through the root `Taskfile.yml`.
-Install the pinned version with `go install github.com/go-task/task/v3/cmd/task@v3.53.1` and put
+All daily development operations use [Task](https://taskfile.dev/) through the root `Taskfile.yml`.
+Install the version in [the shared tool pins](.config/tool-versions.env) with
+`source .config/tool-versions.env && go install github.com/go-task/task/v3/cmd/task@v${TASK_VERSION}` and put
 `$(go env GOPATH)/bin` on PATH. See [contributor setup](CONTRIBUTING.md#3-development-prerequisites--setup)
 for required validation tools.
 

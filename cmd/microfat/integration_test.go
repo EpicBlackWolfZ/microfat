@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 
 	"github.com/stretchr/testify/require"
@@ -287,7 +288,7 @@ func main() {
 	if err := os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte(srcCode), 0o644); err != nil {
 		t.Fatalf("failed to write main.go: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module myapp\ngo 1.27.2\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module myapp\ngo "+microfat.GoVersion()+"\n"), 0o644); err != nil {
 		t.Fatalf("failed to write go.mod: %v", err)
 	}
 

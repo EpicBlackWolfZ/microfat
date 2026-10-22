@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/internal/builder"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
@@ -611,7 +612,7 @@ func TestCLIPgoPackAndManifestPack(t *testing.T) {
 	pkgDir := filepath.Join(tempDir, "samplepkg")
 	_ = os.MkdirAll(pkgDir, 0o755)
 	_ = os.WriteFile(filepath.Join(pkgDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644)
-	_ = os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplepkg\ngo 1.27.2\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(pkgDir, "go.mod"), []byte("module samplepkg\ngo "+microfat.GoVersion()+"\n"), 0o644)
 
 	manifestPath := filepath.Join(tempDir, "manifest.yaml")
 	manifestContent := `

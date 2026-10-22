@@ -49,7 +49,7 @@ A `microfat` fat binary consists of contiguous segments:
 ## 3. Go Toolchain & Quality Invariants
 
 - **Go Version & Toolchain Integrity**:
-  - Always target and strictly operate on **Go 1.27**, with **Go 1.27.2 minimum** (`go 1.27.2` in `go.mod`).
+  - Always target and strictly operate on **Go 1.27.3** (`go 1.27.3` in `go.mod`).
   - **NEVER downgrade `go.mod` or test toolchain directives** (e.g., to Go 1.26) to bypass local sandbox network restrictions or proxy 403 fetch errors.
   - If the Go toolchain needs to be fetched or updated, run the command with `BypassSandbox: true` instead of altering project version definitions.
 - **Module Path**: `github.com/EpicBlackWolfZ/microfat`
@@ -60,7 +60,7 @@ A `microfat` fat binary consists of contiguous segments:
   - Line length limit <= 140 characters (`lll`).
   - No naked returns (`nakedret`).
 - **Shell Script Static Analysis & Hardening**:
-  - Pinned toolchain: **ShellCheck v0.11.0**.
+  - Pinned toolchain: **ShellCheck**, with version and asset hash in `.config/tool-versions.env`.
   - Strict baseline enforced across all tracked `*.sh` scripts: `#!/usr/bin/env bash`, `set -euo pipefail`, and `IFS=$'\n\t'`.
   - Zero-warning tolerance under `.shellcheckrc` optional rules (`check-unassigned-uppercase`, `quote-safe-variables`, `check-extra-masked-returns`, `check-set-e-suppressed`, `require-variable-braces`).
   - No broad or global rule disables (`SC1090` must remain enabled).
@@ -75,8 +75,9 @@ A `microfat` fat binary consists of contiguous segments:
 
 ## 4. Development Commands & Workflows
 
-All development operations use pinned Task v3.53.1 through the root `Taskfile.yml`. Bootstrap with
-`go install github.com/go-task/task/v3/cmd/task@v3.53.1`; CI pins the installer action and version.
+All development operations use pinned Task through the root `Taskfile.yml`. Bootstrap with
+`source .config/tool-versions.env && go install github.com/go-task/task/v3/cmd/task@v${TASK_VERSION}`;
+CI reads the same tool pins and pins installer actions by commit.
 Mandatory linters and scanners must fail when missing. Do not restore Make wrappers or Python helpers.
 
 ```bash

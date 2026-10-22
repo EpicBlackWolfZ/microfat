@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/benchmarks/load"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/stretchr/testify/require"
 )
@@ -28,10 +29,15 @@ func TestPackedCLIBenchmarkHelpers(t *testing.T) {
 	require.NoError(t, packBinary(cliPath, stubPath, "benchmark-cli", packed, map[string]string{base: cliPath}))
 	repository, err := filepath.Abs("../..")
 	require.NoError(t, err)
-	fixture := filepath.Join(repository, "benchmarks/load/testdata/fortio-1.75.2.json")
+	data, err := os.ReadFile(filepath.Join(repository, "benchmarks/load/testdata/fortio-1.76.0.json"))
+	require.NoError(t, err)
+	// Adapt only the version for this synthetic orchestration regression.
+	data = bytes.Replace(data, []byte(`"Version": "1.76.0"`), []byte(`"Version": "`+load.Version()+`"`), 1)
+	fixture := filepath.Join(root, "output.json")
+	require.NoError(t, os.WriteFile(fixture, data, privateFilePerm))
 	tool := filepath.Join(root, "fortio")
 	// Saved load-tool output keeps this required test independent of downloads.
-	script := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = version ]; then echo 1.75.2; else sleep 0.1; cat %q; fi\n", fixture)
+	script := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = version ]; then echo %s; else sleep 0.1; cat %q; fi\n", load.Version(), fixture)
 	require.NoError(t, os.WriteFile(tool, []byte(script), defaultFilePerm))
 	config := filepath.Join(root, "suite.json")
 	require.NoError(t, os.WriteFile(config, []byte(`{"version":"v1","name":"packed-cli-functional",

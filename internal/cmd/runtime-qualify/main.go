@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/internal/releaseaudit"
 	"github.com/EpicBlackWolfZ/microfat/internal/releasecheck"
 	"github.com/EpicBlackWolfZ/microfat/internal/runtimequalify"
@@ -34,7 +35,7 @@ func run(ctx context.Context, args []string, out io.Writer, execute releaseaudit
 	flags.StringVar(&options.Dist, "dist", "", "authenticated candidate input directory")
 	flags.StringVar(&options.Tag, "tag", "", "exact candidate tag")
 	flags.StringVar(&options.Source, "source", "", "full candidate source SHA")
-	flags.StringVar(&options.Go, "go", "go", "Go 1.27.2 executable")
+	flags.StringVar(&options.Go, "go", "go", "Go "+microfat.GoVersion()+" executable")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}

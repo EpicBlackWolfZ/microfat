@@ -1,12 +1,25 @@
 package homebrew
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestQualificationToolPin(t *testing.T) {
+	t.Parallel()
+	require.Regexp(t, `^[0-9]+\.[0-9]+\.[0-9]+$`, BrewVersion())
+	require.Regexp(t, sourcePattern, BrewCommit())
+	script, err := os.ReadFile(filepath.Join("..", "..", "scripts", "qualify-public-homebrew.sh"))
+	require.NoError(t, err)
+	require.Contains(t, string(script), "/.config/tool-versions.env")
+	require.Contains(t, string(script), "${HOMEBREW_SOURCE%@*}")
+	require.Contains(t, string(script), "${HOMEBREW_SOURCE#*@}")
+}
 
 func fixtureRecipe(t *testing.T, version string) []byte {
 	t.Helper()
