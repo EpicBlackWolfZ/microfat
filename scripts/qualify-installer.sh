@@ -3,8 +3,9 @@
 # Optional VERSION RELEASE_DIR adds a signed draft; no release assets are changed.
 set -euo pipefail
 IFS=$'\n\t'
-# shellcheck source=.config/tool-versions.env
+# shellcheck source=../.config/tool-versions.env
 source "$(dirname -- "${BASH_SOURCE[0]}")/../.config/tool-versions.env"
+: "${COSIGN_LINUX_AMD64:?missing shared Cosign pin}" "${COSIGN_LINUX_ARM64:?missing shared Cosign pin}"
 
 helper=${1:?absolute trusted helper path required}
 output=${2:?absolute evidence directory required}

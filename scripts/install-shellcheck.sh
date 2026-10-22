@@ -2,8 +2,9 @@
 # Install the reviewed Linux x86-64 ShellCheck build for CI lint/release gates.
 set -euo pipefail
 IFS=$'\n\t'
-# shellcheck source=.config/tool-versions.env
+# shellcheck source=../.config/tool-versions.env
 source "$(dirname -- "${BASH_SOURCE[0]}")/../.config/tool-versions.env"
+: "${SHELLCHECK_LINUX_AMD64:?missing shared ShellCheck pin}"
 SHELLCHECK_VERSION=${SHELLCHECK_LINUX_AMD64%@*}
 SHELLCHECK_SHA256=${SHELLCHECK_LINUX_AMD64#*@}
 SHELLCHECK_DEST="${1:?pass an existing writable executable directory}"

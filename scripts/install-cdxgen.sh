@@ -2,8 +2,9 @@
 # Install the reviewed standalone cdxgen converter; no Python, BLINT or Node setup.
 set -euo pipefail
 IFS=$'\n\t'
-# shellcheck source=.config/tool-versions.env
+# shellcheck source=../.config/tool-versions.env
 source "$(dirname -- "${BASH_SOURCE[0]}")/../.config/tool-versions.env"
+: "${CDXGEN_LINUX_AMD64:?missing shared cdxgen pin}" "${CDXGEN_LINUX_ARM64:?missing shared cdxgen pin}"
 CDXGEN_DEST="${1:?usage: install-cdxgen.sh DESTINATION_DIRECTORY}"
 case "$(uname -sm)" in
     'Linux x86_64')

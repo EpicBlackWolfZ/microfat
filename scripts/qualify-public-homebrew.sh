@@ -3,8 +3,9 @@
 # qualification. Operate only inside that qualification's disposable prefix.
 set -euo pipefail
 IFS=$'\n\t'
-# shellcheck source=.config/tool-versions.env
+# shellcheck source=../.config/tool-versions.env
 source "$(dirname -- "${BASH_SOURCE[0]}")/../.config/tool-versions.env"
+: "${HOMEBREW_SOURCE:?missing shared Homebrew pin}"
 expected_brew_version=${HOMEBREW_SOURCE%@*}
 expected_brew_version=${expected_brew_version#v}
 expected_brew_commit=${HOMEBREW_SOURCE#*@}
