@@ -6,8 +6,9 @@ IFS=$'\n\t'
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DIR="$(mktemp -d)"
 trap 'rm -rf "${TEST_DIR}"' EXIT
-mkdir -p "${TEST_DIR}/scripts" "${TEST_DIR}/.work" "${TEST_DIR}/new directory"
+mkdir -p "${TEST_DIR}/scripts" "${TEST_DIR}/.config" "${TEST_DIR}/.work" "${TEST_DIR}/new directory"
 cp "${ROOT}/Taskfile.yml" "${TEST_DIR}/Taskfile.yml"
+cp "${ROOT}/.config/tool-versions.env" "${TEST_DIR}/.config/tool-versions.env"
 cp "${ROOT}/scripts/format-go.sh" "${TEST_DIR}/scripts/format-go.sh"
 cd "${TEST_DIR}"
 git init -q
