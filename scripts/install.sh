@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# This bootstrap is pinned to the first helper release, independently of the
+# This bootstrap pins a reviewed helper release, independently of the
 # product --version. It becomes usable once those signed assets are published.
 # Effects require both the complete function definition and invocation group.
 microfat_bootstrap() (
     set -euo pipefail
     IFS=$'\n\t'
 
-    readonly helper_version='0.3.0'
+    readonly helper_version='0.3.1'
     # renovate: datasource=github-release-attachments depName=sigstore/cosign
     readonly cosign_amd64='v3.1.4@424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa'
     # renovate: datasource=github-release-attachments depName=sigstore/cosign

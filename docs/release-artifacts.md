@@ -54,7 +54,8 @@ complement the independent checksum and signature authentication described in th
 [verification contract](release-verification.md).
 
 CycloneDX expresses archive/executable/variant containment through nested components and
-linked modules through dependency edges. The pinned cdxgen **cdx-convert v13.1.0** tool receives
+linked modules through dependency edges. The cdxgen **cdx-convert** tool, pinned in
+[the shared tool definitions](../.config/tool-versions.env), receives
 a flattened conversion view; Go verifies that conversion preserves all components, hashes,
 package identifiers, metadata and dependencies, then supplies explicit SPDX containment,
 creator-tool and declared-license relationships. The standalone converter requires neither

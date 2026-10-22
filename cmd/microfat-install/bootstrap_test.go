@@ -54,7 +54,7 @@ case "${url}" in
  */checksums.txt) source=checksums ;;
  */checksums.txt.sig) source=signature ;;
  */cosign-linux-*) source=verifier ;;
- */microfat-install_0.3.0_linux_*) source=helper ;;
+ */microfat-install_0.3.1_linux_*) source=helper ;;
  *) exit 23 ;;
 esac
 /bin/cp "${TEST_ROOT}/${source}" "${out}"
@@ -80,7 +80,7 @@ esac
 			if scenario == "unsupported" {
 				uname = "riscv64"
 			}
-			checksum := fmt.Sprintf("%x  microfat-install_0.3.0_linux_%s\n", sha256.Sum256([]byte(helper)), arch)
+			checksum := fmt.Sprintf("%x  microfat-install_0.3.1_linux_%s\n", sha256.Sum256([]byte(helper)), arch)
 			switch scenario {
 			case "missing-checksum":
 				checksum = strings.ReplaceAll(checksum, "microfat-install", "unrelated")
@@ -127,12 +127,14 @@ esac
 				assert.Contains(t, string(installed), "--bin-dir\n/custom bin\n")
 				verified, err := os.ReadFile(filepath.Join(root, "verified"))
 				require.NoError(t, err)
-				assert.Contains(t, string(verified), "release.yml@refs/tags/v0.3.0")
+				assert.Contains(t, string(verified), "release.yml@refs/tags/v0.3.1")
 				assert.Contains(t, string(verified), "https://token.actions.githubusercontent.com")
 				requests, err := os.ReadFile(filepath.Join(root, "requests"))
 				require.NoError(t, err)
 				assert.Contains(t, string(requests), "--proto-redir\n=https\n")
 				assert.Contains(t, string(requests), "--max-filesize\n1048576\n")
+				assert.Contains(t, string(requests), "/releases/download/v0.3.1/microfat-install_0.3.1_linux_"+arch)
+				assert.NotContains(t, string(requests), "/releases/download/v0.2.5/", "product selection must not change helper identity")
 			} else {
 				require.Error(t, err, "%s", output)
 				if scenario == "noexec-staging" {

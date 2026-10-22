@@ -23,11 +23,12 @@ relative paths, mismatching bytes and nonexecutable tools fail. Ambient `COSIGN_
 options are removed before verification. Same-UID and privileged malicious writers remain outside
 this boundary.
 
-The bootstrap is fixed to helper release v0.3.0. It authenticates that release's checksum file with
-Cosign, verifies `microfat-install_0.3.0_linux_<arch>`, and executes only the authenticated helper.
-The helper version is independent of the requested product release. This avoids a circular dependency
-when installing historical archives. The first public bootstrap is usable only after its helper release
-is published; an unsigned snapshot proves packaging, not publisher authentication.
+The v0.3.1 bootstrap is fixed to helper release v0.3.1. It authenticates that release's checksum file with
+Cosign, verifies `microfat-install_0.3.1_linux_<arch>`, and executes only the authenticated helper.
+The immutable v0.3.0 bootstrap retains its original v0.3.0 helper pin. Each bootstrap's helper version
+is independent of the requested product release, so the v0.3.1 helper can install historical archives.
+A versioned bootstrap is usable only after its pinned helper release is published; an unsigned
+snapshot proves packaging, not publisher authentication.
 
 ## Exact product release policy
 
@@ -95,5 +96,6 @@ not claim fresh artifact authentication.
 
 Native updater qualification distinguishes controlled forward-version fixtures from real signed
 historical downloads. The signed-draft gate executes the updater from authenticated candidate bytes,
-performs explicit historical downgrades, and restores the candidate through the authenticated helper.
-Historical CLIs have no updater command. This evidence is separate from publishing the candidate.
+performs explicit downgrades to v0.2.5 and the immediately prior v0.3.0 release, and restores the
+candidate through the authenticated helper after each downgrade. Historical v0.2.x CLIs have no
+updater command. This evidence is separate from publishing the candidate.

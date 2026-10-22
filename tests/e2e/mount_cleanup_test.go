@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -57,10 +58,87 @@ func assertFixtureTimeoutCleanup(t *testing.T, req mountfixture.Request, args []
 		descriptors = append(descriptors, observeMountProcess(t, filepath.Join(req.Root, "cache", name), token))
 	}
 	require.ErrorIs(t, <-result, context.DeadlineExceeded)
-	for _, fd := range descriptors {
-		require.ErrorIs(t, unix.PidfdSendSignal(fd, 0, nil, 0), unix.ESRCH,
-			"timed-out fixture process must be terminated and reaped, including detached descendants")
+	// The outer bootstrap may return before asynchronous PID-namespace teardown
+	// finishes reaping descendants. Retain their verified pidfds until every
+	// process is gone; persistent orphans still fail this bounded check.
+	ctx, cancel := context.WithTimeout(context.Background(), mountCleanupTimeout)
+	defer cancel()
+	require.NoError(t, waitMountProcessesReaped(ctx, descriptors),
+		"timed-out fixture process must be terminated and reaped, including detached descendants")
+}
+
+func waitMountProcessesReaped(ctx context.Context, descriptors []int) error {
+	ticker := time.NewTicker(mountObserveInterval)
+	defer ticker.Stop()
+	for {
+		complete := true
+		for _, fd := range descriptors {
+			err := unix.PidfdSendSignal(fd, 0, nil, 0)
+			if errors.Is(err, unix.ESRCH) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			complete = false
+		}
+		if complete {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
 	}
+}
+
+func TestMountCleanupWaitsForReaping(t *testing.T) {
+	t.Parallel()
+	cmd := exec.Command("sleep", "0.01")
+	require.NoError(t, cmd.Start())
+	reaping, done := make(chan struct{}), make(chan struct{})
+	var waitErr error
+	go func() {
+		time.Sleep(mountObserveInterval * 3)
+		close(reaping)
+		waitErr = cmd.Wait()
+		close(done)
+	}()
+	t.Cleanup(func() { _ = cmd.Process.Kill(); <-done })
+	fd, err := unix.PidfdOpen(cmd.Process.Pid, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, unix.Close(fd)) })
+	ctx, cancel := context.WithTimeout(t.Context(), mountObserveTimeout)
+	defer cancel()
+	require.NoError(t, waitMountProcessesReaped(ctx, []int{fd}))
+	select {
+	case <-reaping:
+	default:
+		t.Fatal("cleanup returned before the exited fixture was reaped")
+	}
+	<-done
+	require.NoError(t, waitErr)
+}
+
+func TestMountCleanupRejectsUnreapedProcess(t *testing.T) {
+	t.Parallel()
+	cmd := exec.Command("sleep", "0.01")
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	fd, err := unix.PidfdOpen(cmd.Process.Pid, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, unix.Close(fd)) })
+	ctx, cancel := context.WithTimeout(t.Context(), mountObserveInterval*3)
+	defer cancel()
+	require.ErrorIs(t, waitMountProcessesReaped(ctx, []int{fd}), context.DeadlineExceeded)
+	require.NoError(t, unix.PidfdSendSignal(fd, 0, nil, 0), "an unreaped process must remain identifiable")
+}
+
+func TestMountCleanupRejectsInvalidDescriptor(t *testing.T) {
+	t.Parallel()
+	require.ErrorIs(t, waitMountProcessesReaped(t.Context(), []int{-1}), unix.EBADF)
+	require.NoError(t, waitMountProcessesReaped(t.Context(), nil))
 }
 
 func observeMountProcess(t *testing.T, path, token string) int {

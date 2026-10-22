@@ -22,6 +22,7 @@ import (
 
 const updateQualification = "MICROFAT_UPDATE_TESTS"
 const updateFixtureVersion = "0.3.0"
+const updateCandidateVersion = "0.3.1"
 
 type updateCLIResult struct {
 	Status       string  `json:"status"`
@@ -36,10 +37,15 @@ type updateCLIResult struct {
 
 func updateLaunchers(t *testing.T) (map[string]string, string) {
 	t.Helper()
+	return updateLaunchersForVersion(t, updateFixtureVersion)
+}
+
+func updateLaunchersForVersion(t *testing.T, version string) (map[string]string, string) {
+	t.Helper()
 	dir := t.TempDir()
 	cli := filepath.Join(dir, "cli")
 	require.NoError(t, compileBinaryWithFlags(cliPackagePath, cli, []string{envBaselineAMD64, "GOARM64=v8.0"},
-		"-ldflags=-X github.com/EpicBlackWolfZ/microfat/internal/version.Version="+updateFixtureVersion))
+		"-ldflags=-X github.com/EpicBlackWolfZ/microfat/internal/version.Version="+version))
 	minimal := filepath.Join(dir, "minimal")
 	require.NoError(t, compileBinaryWithFlags(stubPackagePath, minimal, []string{envBaselineAMD64, "GOARM64=v8.0"}, "-tags=minimal"))
 	level := updateTier()
@@ -117,7 +123,11 @@ func TestUpdatePublishedRelease(t *testing.T) {
 	if os.Getenv(updateQualification) != "required" {
 		t.Skip("native authenticated updater qualification is opt-in and mandatory in installer CI")
 	}
-	launchers, minimal := updateLaunchers(t)
+	// This source-built updater exercises real signed older releases. The tag
+	// workflow separately qualifies the exact signed candidate's updater.
+	t.Logf("source-built updater fixture v%s; authenticated published targets v0.2.5 and v%s",
+		updateCandidateVersion, updateFixtureVersion)
+	launchers, minimal := updateLaunchersForVersion(t, updateCandidateVersion)
 	verifier, err := exec.LookPath("cosign")
 	require.NoError(t, err)
 	verifier, err = filepath.EvalSymlinks(verifier)
@@ -127,60 +137,70 @@ func TestUpdatePublishedRelease(t *testing.T) {
 	data, err := os.ReadFile(verifier)
 	require.NoError(t, err)
 	pin := fmt.Sprintf("%x", sha256.Sum256(data)) // independently provisioned by the pinned CI installer
-	for profile, cli := range launchers {
-		modes := []string{execModeMemfd, execModeCache}
-		if profile == execModeNative {
-			modes = []string{execModeMemfd}
-		}
-		for _, mode := range modes {
-			t.Run(profile+"/"+mode, func(t *testing.T) {
-				bin, store, old := managedLayoutFixture(t, cli, minimal)
-				executable := filepath.Join(bin, "microfat")
-				before, err := os.Readlink(filepath.Join(store, "current"))
-				require.NoError(t, err)
-				check, stderr, err := updateCommand(t, executable, mode, "--check", "--version", "0.2.5")
-				require.NoError(t, err, stderr)
-				assert.Equal(t, "metadata_only", check.Verification)
-				assert.False(t, check.Available)
-				after, err := os.Readlink(filepath.Join(store, "current"))
-				require.NoError(t, err)
-				assert.Equal(t, before, after)
-				args := []string{"--version", "0.2.5", "--allow-downgrade", "--cosign", verifier, "--cosign-sha256", pin, "--staging-dir", t.TempDir()}
-				if profile == execModeNative {
-					// Exercise automatic independently pinned verifier acquisition with no PATH tools.
-					args = []string{"--version", "0.2.5", "--allow-downgrade", "--staging-dir", t.TempDir()}
-				}
-				if os.Geteuid() == 0 {
-					args = append(args, "--system")
-				}
-				result, stderr, err := updateCommand(t, executable, mode, args...)
-				require.NoError(t, err, stderr)
-				assert.True(t, result.Activated)
-				assert.Equal(t, "artifact_verified", result.Verification)
-				require.NotNil(t, result.Current)
-				assert.Equal(t, "0.2.5", *result.Current)
-				assert.FileExists(t, filepath.Join(old, "microfat"))
-				verifyUpdatedGeneration(t, store)
-				t.Logf("authenticated target v0.2.5; host=%s; toolchain=%s; launcher=%s; mode=%s", runtime.GOARCH, runtime.Version(), profile, mode)
-				command := exec.CommandContext(t.Context(), executable, "--version")
-				output, err := command.CombinedOutput()
-				require.NoError(t, err, string(output))
-				assert.Contains(t, string(output), "0.2.5")
-				for _, stubProfile := range []string{launcherFullProfile, launcherMinimalProfile} {
-					packed := filepath.Join(t.TempDir(), "payload")
-					args := []string{"pack", "--arch", currentHostArch, "--name", "updated-companion",
-						"-v", updateTier() + "=" + goldenVariantBins[updateTier()], "-o", packed}
-					if stubProfile == launcherMinimalProfile {
-						args = append(args, "--stub", filepath.Join(bin, "microfat-stub-minimal"))
+	for _, target := range []string{"0.2.5", updateFixtureVersion} {
+		for profile, cli := range launchers {
+			modes := []string{execModeMemfd, execModeCache}
+			if profile == execModeNative {
+				modes = []string{execModeMemfd}
+			}
+			for _, mode := range modes {
+				t.Run(target+"/"+profile+"/"+mode, func(t *testing.T) {
+					bin, store, old := managedLayoutFixture(t, cli, minimal)
+					writeManagedGeneration(t, store, filepath.Base(old), updateCandidateVersion, cli, stubPath, minimal, nil)
+					executable := filepath.Join(bin, "microfat")
+					before, err := os.Readlink(filepath.Join(store, "current"))
+					require.NoError(t, err)
+					check, stderr, err := updateCommand(t, executable, mode, "--check", "--version", target)
+					require.NoError(t, err, stderr)
+					assert.Equal(t, "metadata_only", check.Verification)
+					assert.False(t, check.Available)
+					require.NotNil(t, check.Running)
+					assert.Equal(t, updateCandidateVersion, *check.Running)
+					require.NotNil(t, check.Target)
+					assert.Equal(t, target, *check.Target)
+					after, err := os.Readlink(filepath.Join(store, "current"))
+					require.NoError(t, err)
+					assert.Equal(t, before, after)
+					args := []string{"--version", target, "--allow-downgrade", "--cosign", verifier, "--cosign-sha256", pin, "--staging-dir", t.TempDir()}
+					if profile == execModeNative {
+						// Exercise automatic independently pinned verifier acquisition with no PATH tools.
+						args = []string{"--version", target, "--allow-downgrade", "--staging-dir", t.TempDir()}
 					}
-					command := exec.CommandContext(t.Context(), executable, args...)
-					command.Env = append(os.Environ(), "MICROFAT_EXEC_MODE="+mode, "PATH=/nonexistent")
+					if os.Geteuid() == 0 {
+						args = append(args, "--system")
+					}
+					result, stderr, err := updateCommand(t, executable, mode, args...)
+					require.NoError(t, err, stderr)
+					assert.True(t, result.Activated)
+					assert.Equal(t, "artifact_verified", result.Verification)
+					require.NotNil(t, result.Running)
+					assert.Equal(t, updateCandidateVersion, *result.Running)
+					require.NotNil(t, result.Current)
+					assert.Equal(t, target, *result.Current)
+					assert.FileExists(t, filepath.Join(old, "microfat"))
+					verifyUpdatedGeneration(t, store)
+					t.Logf("authenticated target v%s; host=%s; toolchain=%s; launcher=%s; mode=%s", target,
+						runtime.GOARCH, runtime.Version(), profile, mode)
+					command := exec.CommandContext(t.Context(), executable, "--version")
 					output, err := command.CombinedOutput()
 					require.NoError(t, err, string(output))
-					output, err = exec.CommandContext(t.Context(), packed).CombinedOutput()
-					require.NoError(t, err, string(output))
-				}
-			})
+					assert.Contains(t, string(output), target)
+					for _, stubProfile := range []string{launcherFullProfile, launcherMinimalProfile} {
+						packed := filepath.Join(t.TempDir(), "payload")
+						args := []string{"pack", "--arch", currentHostArch, "--name", "updated-companion",
+							"-v", updateTier() + "=" + goldenVariantBins[updateTier()], "-o", packed}
+						if stubProfile == launcherMinimalProfile {
+							args = append(args, "--stub", filepath.Join(bin, "microfat-stub-minimal"))
+						}
+						command := exec.CommandContext(t.Context(), executable, args...)
+						command.Env = append(os.Environ(), "MICROFAT_EXEC_MODE="+mode, "PATH=/nonexistent")
+						output, err := command.CombinedOutput()
+						require.NoError(t, err, string(output))
+						output, err = exec.CommandContext(t.Context(), packed).CombinedOutput()
+						require.NoError(t, err, string(output))
+					}
+				})
+			}
 		}
 	}
 }
