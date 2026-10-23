@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "method": "independent Python stdlib manual v2/MF47 parser plus system libzstd; no Go encoder/decoder calls, builds, executions or performance timers",
+  "producer_revision": "e32e294ece6b7bc17eaa832ec4eac811fd4069d9",
+  "raw_report_sha256": "4cce55ce7062763eb46f80de1663cbe0f8b5df1a67dd0788ca79eec9b4f46539",
+  "system_libzstd_version": "1.5.7",
+  "counts": {
+    "stub_identity": 1,
+    "source_files": 24,
+    "source_bytes": 650430867,
+    "baseline_complete_files": 16,
+    "baseline_frame_hashes": 48,
+    "baseline_exact_bytes": 48,
+    "baseline_dictionary_identities": 8,
+    "container_pool_integrities": 56,
+    "container_exact_bytes": 168,
+    "container_spans": 16275,
+    "container_complete_files": 56
+  },
+  "groups": [
+    {
+      "family": "actionlint",
+      "profile": "stripped",
+      "baselines": 2,
+      "containers": 7,
+      "exact_payloads": 27
+    },
+    {
+      "family": "actionlint",
+      "profile": "unstripped",
+      "baselines": 2,
+      "containers": 7,
+      "exact_payloads": 27
+    },
+    {
+      "family": "fortio",
+      "profile": "stripped",
+      "baselines": 2,
+      "containers": 7,
+      "exact_payloads": 27
+    },
+    {
+      "family": "fortio",
+      "profile": "unstripped",
+      "baselines": 2,
+      "containers": 7,
+      "exact_payloads": 27
+    },
+    {
+      "family": "govulncheck",
+      "profile": "stripped",
+      "baselines": 2,
+      "containers": 7,
+      "exact_payloads": 27
+    },
+    {
+      "family": "govulncheck",
+      "profile": "unstripped",
+      "baselines": 2,
+      "containers": 7,
+      "exact_payloads": 27
+    },
+    {
+      "family": "task",
+      "profile": "stripped",
+      "baselines": 2,
+      "containers": 7,
+      "exact_payloads": 27
+    },
+    {
+      "family": "task",
+      "profile": "unstripped",
+      "baselines": 2,
+      "containers": 7,
+      "exact_payloads": 27
+    }
+  ],
+  "result": "all72actualfilesand216payloadbytecomparisonsPASS",
+  "runtime_scope": "offline exact reconstruction only; custom containers are not runnable fat artifacts"
+}
