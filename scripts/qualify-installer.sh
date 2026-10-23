@@ -37,7 +37,7 @@ chmod 700 "${cosign}"
 fixture_home="${private}/home space"
 mkdir "${fixture_home}"
 common=(--cosign "${cosign}" --cosign-sha256 "${pin}" --staging-dir "${private}")
-versions=(0.2.3 0.2.4 0.2.5)
+versions=(0.2.3 0.2.4 0.2.5 0.3.0)
 if [[ -n ${candidate} ]]; then versions+=("${candidate}"); fi
 for version in "${versions[@]}"; do
     args=(--version "${version}")
@@ -68,16 +68,19 @@ for version in "${versions[@]}"; do
     done
     if [[ -n ${candidate} && ${version} == "${candidate}" ]]; then
         # Execute the updater inside externally authenticated candidate bytes.
-        # Historical CLIs have no update command; restore with the trusted helper.
+        # Retain the older archive contract and the immediately prior release.
+        # Restore the candidate with the trusted helper after each downgrade.
         for mode in memfd cache; do
-            PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" MICROFAT_EXEC_MODE="${mode}" \
-                "${bin}/microfat" update --check --version 0.2.5 --json \
-                > "${output}/updater-${mode}-check.json"
-            PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" MICROFAT_EXEC_MODE="${mode}" \
-                "${bin}/microfat" update --version 0.2.5 --allow-downgrade \
-                --cosign "${cosign}" --cosign-sha256 "${pin}" --staging-dir "${private}" --json \
-                > "${output}/updater-${mode}-signed-downgrade.json"
-            PATH=/nonexistent HOME="${fixture_home}" XDG_DATA_HOME='' "${helper}" "${common[@]}" "${args[@]}"
+            for previous in 0.2.5 0.3.0; do
+                PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" MICROFAT_EXEC_MODE="${mode}" \
+                    "${bin}/microfat" update --check --version "${previous}" --json \
+                    > "${output}/updater-${mode}-${previous}-check.json"
+                PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" MICROFAT_EXEC_MODE="${mode}" \
+                    "${bin}/microfat" update --version "${previous}" --allow-downgrade \
+                    --cosign "${cosign}" --cosign-sha256 "${pin}" --staging-dir "${private}" --json \
+                    > "${output}/updater-${mode}-${previous}-signed-downgrade.json"
+                PATH=/nonexistent HOME="${fixture_home}" XDG_DATA_HOME='' "${helper}" "${common[@]}" "${args[@]}"
+            done
         done
     fi
 done
