@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "auditor": "independent jq recomputation from immutable raw confirmation report",
+  "producer_revision": "fbf5947dd3b19e356bc4fa1dee3d478274d09ff8",
+  "request_sha256": "e12ecd0fab49f9417976894aa7a84f86ea890c406edee97f63916e4b38050392",
+  "episodes": 1200,
+  "unique_episode_ids": 1200,
+  "launch_count": 4000,
+  "valid_episode_arithmetic_and_dispatch": true,
+  "failures": 0,
+  "group_sample_sizes": [
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100
+  ],
+  "dispatch_counts": [
+    {
+      "mode": "cache",
+      "count": 2000
+    },
+    {
+      "mode": "memfd",
+      "count": 2000
+    }
+  ],
+  "groups": [
+    {
+      "family": "actionlint",
+      "scenario": "disappearing-1x3",
+      "arm": "deployment-selected-prewarm",
+      "attempts": 100,
+      "violations": 0
+    },
+    {
+      "family": "actionlint",
+      "scenario": "disappearing-1x3",
+      "arm": "never-prewarm",
+      "attempts": 100,
+      "violations": 4
+    },
+    {
+      "family": "actionlint",
+      "scenario": "one-off",
+      "arm": "deployment-selected-prewarm",
+      "attempts": 100,
+      "violations": 0
+    },
+    {
+      "family": "actionlint",
+      "scenario": "one-off",
+      "arm": "never-prewarm",
+      "attempts": 100,
+      "violations": 2
+    },
+    {
+      "family": "actionlint",
+      "scenario": "recurring-2x3",
+      "arm": "deployment-selected-prewarm",
+      "attempts": 100,
+      "violations": 0
+    },
+    {
+      "family": "actionlint",
+      "scenario": "recurring-2x3",
+      "arm": "never-prewarm",
+      "attempts": 100,
+      "violations": 12
+    },
+    {
+      "family": "fortio",
+      "scenario": "disappearing-1x3",
+      "arm": "deployment-selected-prewarm",
+      "attempts": 100,
+      "violations": 0
+    },
+    {
+      "family": "fortio",
+      "scenario": "disappearing-1x3",
+      "arm": "never-prewarm",
+      "attempts": 100,
+      "violations": 100
+    },
+    {
+      "family": "fortio",
+      "scenario": "one-off",
+      "arm": "deployment-selected-prewarm",
+      "attempts": 100,
+      "violations": 0
+    },
+    {
+      "family": "fortio",
+      "scenario": "one-off",
+      "arm": "never-prewarm",
+      "attempts": 100,
+      "violations": 100
+    },
+    {
+      "family": "fortio",
+      "scenario": "recurring-2x3",
+      "arm": "deployment-selected-prewarm",
+      "attempts": 100,
+      "violations": 0
+    },
+    {
+      "family": "fortio",
+      "scenario": "recurring-2x3",
+      "arm": "never-prewarm",
+      "attempts": 100,
+      "violations": 100
+    }
+  ]
+}
