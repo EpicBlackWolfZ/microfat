@@ -300,6 +300,7 @@ microfat pack --manifest pgo.yaml -o bin/myapp
 | `--profile` | *(none)* | `string` | `""` | Compression profile preset: `latency`, `balanced`, `size`. |
 | `--compression` | *(none)* | `string` | `""` | Compression algorithm: `zstd`, `lz4`, `none` (e.g. `zstd:11`). |
 | `--compression-level` | *(none)* | `string` | `""` | Compression level override: `fastest`, `default`, `better`, `best`, or number. |
+| `--variant-compression` | *(none)* | `stringArray` | `[]` | Override one supplied variant with `<level>=<codec>[:<compression-level>]`; repeat for multiple variants. Available for direct `pack`, `pack --manifest`, and `pgo-pack`. |
 | `--dict`, `--zstd-dict` | *(none)* | `bool` | `false` | Enable shared Zstandard inter-variant dictionary compression. |
 | `--dict-size` | *(none)* | `int` | `114688` | Target shared dictionary size in bytes (default: 112 KB). |
 | `--format-version` | *(none)* | `int` | `2` | Binary format version: `2` (compact binary table, default) or `1` (legacy JSON, deprecated). |
@@ -344,31 +345,79 @@ does not read `SOURCE_DATE_EPOCH` itself.
 
 #### Compression Precedence and Profile Resolution Contract
 
-When packaging multiple microarchitecture variants into a fat binary (via `microfat pack`, `pack --manifest`, or `pgo-pack`),
-compression codecs and levels are resolved according to strict hierarchical precedence:
+Use repeated `--variant-compression <level>=<codec>[:<compression-level>]` flags to mix
+`none`, `lz4`, and `zstd` in one executable:
 
-1. **Explicit Variant Algorithm Override**: A per-variant `compression.algorithm` specification in the manifest
-   (e.g. `compression: {algorithm: lz4}` or `compression: {algorithm: zstd, level: best}`) takes highest precedence for that variant.
-2. **Explicit CLI Algorithm Override**: The `--compression` command-line flag (e.g. `--compression=zstd` or `--compression=lz4`)
-   overrides root manifest algorithm settings and profile defaults across all packaged variants.
-3. **Explicit Root Manifest Algorithm**: A root manifest `compression.algorithm` entry in a declarative manifest applies to all variants
-   unless specifically overridden by a per-variant `compression.algorithm` field.
-4. **Compression Profile Resolution**: If the compression algorithm is omitted (empty `""`), the compression profile (`--profile` on CLI
-   or `compression.profile` in manifest) resolves the target codec:
-   - `latency`: When the compression algorithm is omitted, the latency profile selects `none` for positive uncompressed payload sizes
-     smaller than 512 KiB (524,288 bytes), and `lz4` for payloads at or above 512 KiB.
-   - `size`: Sets `zstd:best` (maximum compression ratio).
-   - `balanced` (default when profile and algorithm are omitted): Sets `zstd:better`.
-5. **Launcher Stub Support**: The resulting binary can be executed with either the standard (full) launcher stub or the lightweight
-   minimal launcher stub (built with `-tags minimal`).
+```bash
+microfat pack --stub bin/microfat-stub \
+  -v v1=dist/app_v1 -v v2=dist/app_v2 -v v3=dist/app_v3 \
+  --variant-compression v1=none \
+  --variant-compression v2=lz4:fastest \
+  --variant-compression amd64_v3=zstd:best -o bin/myapp
 
-An inline CLI level overrides an inherited root manifest level.
-An inline per-variant level such as `algorithm: zstd:fastest` overrides inherited root or CLI levels.
-If the same variant also supplies `compression.level`, that separate level takes precedence over its inline level.
-An algorithm override without an inline or separate level retains an inherited separate level, when present.
-Accepted numeric Zstandard levels use the same setting regardless of leading zeros, a plus sign, or surrounding whitespace:
-values up to 1 select `fastest`, 2 selects `default`, 3 through 9 select `better`, and 10 or higher select `best`.
-These numbers select microfat's encoder presets.
+# The same overrides apply when the manifest builds the variants.
+microfat pgo-pack --manifest pgo.yaml --variant-compression v3=zstd:best -o bin/myapp-pgo
+```
+
+Variant keys accept the same normalized aliases as `--variant`, including `V3`,
+`amd64_v3`, and `arm64-v8.2`. Each key must belong to the selected architecture and
+refer to a supplied direct or manifest variant. Repeated keys, including different
+aliases for the same variant, are rejected. Missing keys/codecs, extra separators,
+unknown codecs, unsupported levels and a trailing empty `:` are rejected before
+compilation or packaging. `none` accepts no inline compression level.
+
+Codec names and named compression levels are case-insensitive. The level mappings
+match the existing codec encoders:
+
+| Codec | Accepted compression levels |
+| :--- | :--- |
+| `zstd` | `fastest`/`fast`/`speed`; `default`/`standard`; `better`; `best`/`max`. Integers up to 1 select `fastest`, 2 selects `default`, 3–9 select `better`, and 10 or above select `best`. |
+| `lz4` | `fastest`/`fast`/`default` select fast mode; `better` selects level 5; `best`/`max` select level 9. Integers up to 0 select fast mode, 1–8 select that level, and 9 or above select level 9. |
+| `none` | No level; payload bytes are stored uncompressed. |
+
+Numeric levels accept leading zeros, a plus or minus sign, and surrounding
+whitespace. Zstandard numbers select microfat encoder presets.
+
+Algorithm, compression level and profile are resolved separately for each variant:
+
+1. The algorithm comes from `--variant-compression`, then the manifest variant's
+   `compression.algorithm`, then global `--compression`, then root manifest
+   `compression.algorithm`. The first supplied algorithm wins.
+2. A variant CLI inline level overrides that variant's manifest level. A
+   **codec-only** variant CLI override preserves its manifest's separate
+   `compression.level` and `compression.profile` fields. It replaces the entire
+   `compression.algorithm` field, including any inline level in that field.
+3. Without a variant CLI inline level, the variant's separate `compression.level`
+   outranks an inline level in its effective variant algorithm. Either outranks
+   the global level. A codec-only variant algorithm inherits the global level
+   when the variant has no separate level.
+4. The global level comes from `--compression-level`, then an inline level in
+   `--compression`, then root manifest `compression.level`, then an inline level
+   in the effective root algorithm. A global codec-only override also replaces
+   the root algorithm's inline level while retaining a separate root level.
+5. The profile comes from the manifest variant's `compression.profile`, then
+   global `--profile`, then root manifest `compression.profile`, then `balanced`.
+   When the algorithm is absent, `latency` selects `none` for positive payload
+   sizes below 512 KiB (524,288 bytes), otherwise `lz4`; `size` and `balanced`
+   select `zstd`. An omitted Zstandard level defaults to `best` with `size` or
+   `better` with `balanced`; `latency` uses the codec default.
+
+For example, a manifest variant with `compression: {algorithm: zstd, level: best}`
+and `--variant-compression v3=lz4` uses LZ4 level 9. Adding `:fastest` to that CLI
+override selects LZ4 fast mode. A global `--compression=lz4` does not replace a
+manifest variant's explicit algorithm.
+
+Both Format v1 and v2 and the full and minimal launcher stubs support mixed codecs
+in `memfd` and `cache` execution modes. `--dict` (or manifest `compression.dict`)
+forces shared Zstandard dictionary training across the supplied payloads and
+requires at least two variants; only Zstandard frames consume the dictionary.
+The root `size` profile attempts automatic dictionary training when at least two
+variants are supplied and at least one resolves to Zstandard. If every variant
+resolves to `none` or `lz4`, no dictionary is trained automatically. Automatic
+training failure emits a warning and falls back to independent frames; explicit
+dictionary requests fail on training errors. Codec overrides leave dictionary
+settings in place, and explicit dictionary requests retain dictionary metadata
+even when all variants use `none` or `lz4`.
 
 The following manifest fragment illustrates omitting algorithms while selecting profiles at root and variant scopes:
 
@@ -449,7 +498,12 @@ variants:
 ```
 
 #### Flags
-Accepts all manifest and compiler flags matching `microfat pack` (`--manifest`, `-o`, `--stub`, `--stub-profile`, `--concurrency`, `--profile`, `--compression`, `--dict`, `--keep-intermediates`, `--go-binary`, `--skip-elf-validation`).
+Accepts the manifest and compiler flags matching `microfat pack`: `--manifest`,
+`-o`, `--stub`, `--stub-profile`, `--concurrency`, `--profile`, `--compression`,
+`--compression-level`, repeated `--variant-compression`, `--dict`/`--zstd-dict`,
+`--dict-size`, `--format-version`, `--keep-intermediates`, `--go-binary`, and
+`--skip-elf-validation`. Per-variant CLI compression overrides follow the same
+precedence contract above for `pgo-pack` and `pack --manifest`.
 
 > [!NOTE]
 > **Authoritative Target Policy**: `GOOS`, `GOARCH`, `GOAMD64`, and `GOARM64` are reserved target variables. Ambient values for these variables are sanitized during compilation. Contradictory values declared in manifest `env` (at root or variant level) are rejected before compilation begins. In addition, every compiled Go artifact is validated via `debug/buildinfo` prior to packaging to ensure binary settings match declared variant levels.

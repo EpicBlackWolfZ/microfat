@@ -28,26 +28,27 @@ const (
 
 // BuildOptions contains configuration parameters for building and packaging PGO variants.
 type BuildOptions struct {
-	ManifestPath      string
-	OutputPath        string
-	StubPath          string
-	StubProfile       string
-	Concurrency       int
-	KeepIntermediates bool
-	GoBinary          string
-	SkipELFValidation bool
-	AllowMixedABI     bool
-	ABIReportCallback func(report *pack.ArtifactABIReport)
-	Profile           string
-	Compression       string
-	CompressionLevel  string
-	EnableDict        bool
-	DictSize          int
-	FormatVersion     int
-	CreatedUnix       *int64 // Optional creation metadata for Pack; nil retains wall-clock time.
-	Stdout            io.Writer
-	Stderr            io.Writer
-	WarnFunc          pack.WarnFunc
+	ManifestPath       string
+	OutputPath         string
+	StubPath           string
+	StubProfile        string
+	Concurrency        int
+	KeepIntermediates  bool
+	GoBinary           string
+	SkipELFValidation  bool
+	AllowMixedABI      bool
+	ABIReportCallback  func(report *pack.ArtifactABIReport)
+	Profile            string
+	Compression        string
+	CompressionLevel   string
+	VariantCompression map[string]pack.VariantCompressionOptions
+	EnableDict         bool
+	DictSize           int
+	FormatVersion      int
+	CreatedUnix        *int64 // Optional creation metadata for Pack; nil retains wall-clock time.
+	Stdout             io.Writer
+	Stderr             io.Writer
+	WarnFunc           pack.WarnFunc
 }
 
 // BuildResult contains metadata about the compiled and packaged fat binary.
@@ -486,21 +487,7 @@ func assemblePackOptions(
 		packOpts.DictSize = opts.DictSize
 	}
 
-	if len(m.Variants) > 0 {
-		varCompMap := make(map[string]pack.VariantCompressionOptions, len(m.Variants))
-		for _, v := range m.Variants {
-			if v.Compression != nil {
-				varCompMap[v.Level] = pack.VariantCompressionOptions{
-					Profile:     v.Compression.Profile,
-					Compression: v.Compression.Algorithm,
-					Level:       v.Compression.Level,
-				}
-			}
-		}
-		if len(varCompMap) > 0 {
-			packOpts.VariantCompression = varCompMap
-		}
-	}
+	packOpts.VariantCompression = assembleVariantCompression(m.Variants, opts.VariantCompression)
 
 	if opts.WarnFunc != nil {
 		packOpts.WarnFunc = opts.WarnFunc
@@ -529,4 +516,41 @@ func assemblePackOptions(
 	}
 
 	return packOpts
+}
+
+func assembleVariantCompression(
+	variants []VariantConfig,
+	overrides map[string]pack.VariantCompressionOptions,
+) map[string]pack.VariantCompressionOptions {
+	merged := make(map[string]pack.VariantCompressionOptions, len(variants)+len(overrides))
+	for _, variant := range variants {
+		if variant.Compression != nil {
+			merged[format.NormalizeVariant(variant.Level)] = pack.VariantCompressionOptions{
+				Profile:     variant.Compression.Profile,
+				Compression: variant.Compression.Algorithm,
+				Level:       variant.Compression.Level,
+			}
+		}
+	}
+	for level, override := range overrides {
+		level = format.NormalizeVariant(level)
+		compression := merged[level]
+		if override.Profile != "" {
+			compression.Profile = override.Profile
+		}
+		if override.Compression != "" {
+			compression.Compression = override.Compression
+			if _, inlineLevel := codec.ParseCompressionSpec(override.Compression); inlineLevel != "" {
+				compression.Level = inlineLevel
+			}
+		}
+		if override.Level != "" {
+			compression.Level = override.Level
+		}
+		merged[level] = compression
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
 }

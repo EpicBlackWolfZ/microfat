@@ -559,7 +559,7 @@ func newPackCmd() *cobra.Command {
 	var flags builder.BuildOptions
 	var (
 		appName, targetOS, targetArch string
-		rawVariants                   []string
+		rawVariants, rawCompression   []string
 	)
 
 	cmd := &cobra.Command{
@@ -581,9 +581,9 @@ Set SOURCE_DATE_EPOCH to signed integer Unix seconds to supply reproducible crea
 					"[microfat] Warning: ELF platform, architecture and declared ABI validation explicitly skipped via --skip-elf-validation")
 			}
 			if flags.ManifestPath != "" {
-				return runManifestPack(cmd, flags)
+				return runManifestPack(cmd, flags, rawCompression)
 			}
-			return runDirectPack(cmd, flags, appName, targetOS, targetArch, rawVariants)
+			return runDirectPack(cmd, flags, appName, targetOS, targetArch, rawVariants, rawCompression)
 		},
 	}
 
@@ -597,7 +597,7 @@ Set SOURCE_DATE_EPOCH to signed integer Unix seconds to supply reproducible crea
 		"Variant mapping in <level>=<path> format (e.g. -v v1=bin/v1 -v v3=bin/v3 for amd64, or -v v8.0=bin/v80 -v v8.2=bin/v82 for arm64)")
 	cmd.Flags().IntVarP(&flags.Concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (when using --manifest)")
 
-	bindManifestBuildFlags(cmd, &flags)
+	bindManifestBuildFlags(cmd, &flags, &rawCompression)
 	return cmd
 }
 
@@ -610,8 +610,12 @@ func explicitDictionarySize(cmd *cobra.Command, size int) int {
 	return 0
 }
 
-func runManifestPack(cmd *cobra.Command, flags builder.BuildOptions) error {
+func runManifestPack(cmd *cobra.Command, flags builder.BuildOptions, rawCompression []string) error {
 	m, err := builder.LoadManifest(flags.ManifestPath)
+	if err != nil {
+		return err
+	}
+	flags.VariantCompression, err = manifestVariantCompression(m, rawCompression)
 	if err != nil {
 		return err
 	}
@@ -635,7 +639,7 @@ func runDirectPack(
 	cmd *cobra.Command,
 	flags builder.BuildOptions,
 	appName, targetOS, targetArch string,
-	rawVariants []string,
+	rawVariants, rawCompression []string,
 ) error {
 	targetOS, err := pack.NormalizeTargetOS(targetOS)
 	if err != nil {
@@ -645,6 +649,18 @@ func runDirectPack(
 		targetArch = microarch.ArchAMD64
 	}
 	targetArch, err = pack.NormalizeTargetArch(targetArch)
+	if err != nil {
+		return err
+	}
+	variants, err := parseRawVariants(rawVariants)
+	if err != nil {
+		return err
+	}
+	levels := make([]string, 0, len(variants))
+	for level := range variants {
+		levels = append(levels, level)
+	}
+	flags.VariantCompression, err = parseVariantCompression(rawCompression, targetArch, levels)
 	if err != nil {
 		return err
 	}
@@ -668,11 +684,6 @@ func runDirectPack(
 		return errors.New("required flag(s) \"variant\" not set (or specify --manifest)")
 	}
 
-	variants, err := parseRawVariants(rawVariants)
-	if err != nil {
-		return err
-	}
-
 	opts := pack.DefaultOptions()
 	opts.StubPath = actualStubPath
 	opts.OutputPath = flags.OutputPath
@@ -684,6 +695,7 @@ func runDirectPack(
 		opts.TargetArch = targetArch
 	}
 	opts.Variants = variants
+	opts.VariantCompression = flags.VariantCompression
 	opts.CreatedUnix = flags.CreatedUnix
 	opts.SkipELFValidation = flags.SkipELFValidation
 	opts.AllowMixedABI = flags.AllowMixedABI
@@ -747,12 +759,14 @@ func manifestBuildOptions(cmd *cobra.Command, flags builder.BuildOptions) builde
 	return flags
 }
 
-func bindManifestBuildFlags(cmd *cobra.Command, flags *builder.BuildOptions) {
+func bindManifestBuildFlags(cmd *cobra.Command, flags *builder.BuildOptions, rawCompression *[]string) {
 	cmd.Flags().StringVar(&flags.StubProfile, "stub-profile", "", "Launcher stub profile: full (default) or minimal")
 	cmd.Flags().StringVar(&flags.Profile, "profile", "", "Compression profile preset: latency, balanced, size")
 	cmd.Flags().StringVar(&flags.Compression, "compression", "", "Compression algorithm: lz4, zstd, none (e.g. lz4 or zstd:11)")
 	cmd.Flags().StringVar(&flags.CompressionLevel, "compression-level", "",
 		"Compression level override: fastest, default, better, best, or number")
+	cmd.Flags().StringArrayVar(rawCompression, "variant-compression", nil,
+		"Per-variant override in level=codec[:level] format (repeat for each variant; e.g. v1=none or v3=zstd:best)")
 	cmd.Flags().BoolVar(&flags.EnableDict, "dict", false, "Enable shared Zstandard dictionary compression across variants")
 	cmd.Flags().BoolVar(&flags.EnableDict, "zstd-dict", false, "Alias for --dict")
 	cmd.Flags().IntVar(&flags.DictSize, "dict-size", codec.DefaultDictSize,
@@ -769,6 +783,7 @@ func bindManifestBuildFlags(cmd *cobra.Command, flags *builder.BuildOptions) {
 
 func newPgoPackCmd() *cobra.Command {
 	var flags builder.BuildOptions
+	var rawCompression []string
 
 	cmd := &cobra.Command{
 		Use:   "pgo-pack --manifest <manifest-file> [-o <output>]",
@@ -801,6 +816,10 @@ Set SOURCE_DATE_EPOCH to signed integer Unix seconds to supply reproducible crea
 			if err != nil {
 				return err
 			}
+			flags.VariantCompression, err = manifestVariantCompression(m, rawCompression)
+			if err != nil {
+				return err
+			}
 
 			opts := manifestBuildOptions(cmd, flags)
 
@@ -828,7 +847,7 @@ Set SOURCE_DATE_EPOCH to signed integer Unix seconds to supply reproducible crea
 	cmd.Flags().StringVar(&flags.StubPath, "stub", "", "Path to microfat launcher stub binary (overrides manifest)")
 	cmd.Flags().IntVarP(&flags.Concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (defaults to NumCPU)")
 
-	bindManifestBuildFlags(cmd, &flags)
+	bindManifestBuildFlags(cmd, &flags, &rawCompression)
 	return cmd
 }
 
