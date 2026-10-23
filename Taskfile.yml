@@ -87,6 +87,12 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  research-heldout-corpus:
+    desc: Build checksum-pinned independent research corpus (CORPUS_OUTPUT=new directory, CORPUS_ARCH=amd64|arm64)
+    cmds:
+    - |
+      export GO={{.GO | shellQuote}}
+      bash scripts/research-heldout-corpus.sh {{.CORPUS_OUTPUT | default "" | shellQuote}} {{.CORPUS_ARCH | default "amd64" | shellQuote}}
   test-runtime-fixtures:
     desc: Require native fat CLI inspection, timeout and detached-child cleanup regressions
     cmds:

@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "family": "fortio",
+      "module": "fortio.org/fortio",
+      "version": "v1.76.0",
+      "package": ".",
+      "readiness_args": [
+        "version"
+      ],
+      "module_sum": "h1:CSeuqtbKDwX34cTsjcV0VDYjCCJeQ/sYTPDtIakFmrs=",
+      "go_mod_sum": "h1:y7Z/DzCk4cHbl2WHAU3RA45Eo1oLG5bpd5PZ1tLg0QU=",
+      "source_commit": "67ce9fa2a3a62fdb2f7a0d2b50acda1f7002d32b"
+    },
+    {
+      "family": "task",
+      "module": "github.com/go-task/task/v3",
+      "version": "v3.54.0",
+      "package": "./cmd/task",
+      "readiness_args": [
+        "--version"
+      ],
+      "module_sum": "h1:xDgD9BNHIDnHhemB3gumYb+ozUoa6oCFMIz44GGosj8=",
+      "go_mod_sum": "h1:oOHzpL1r0bga9Xq1dC/8kucE1Y4fxSMTlKKFpNi6mFc=",
+      "source_commit": "b5aef1c287a9be8038347a17646bdf4bc7185bce"
+    },
+    {
+      "family": "actionlint",
+      "module": "github.com/rhysd/actionlint",
+      "version": "v1.7.12",
+      "package": "./cmd/actionlint",
+      "readiness_args": [
+        "-version"
+      ],
+      "module_sum": "h1:vQ4GeJN86C0QH+gTUQcs8McmK62OLT3kmakPMtEWYnY=",
+      "go_mod_sum": "h1:krOUhujIsJusovkaYzQ/VNH8PFexjNKqU0q5XI/4w+g=",
+      "source_commit": "914e7df21a07ef503a81201c76d2b11c789d3fca"
+    },
+    {
+      "family": "govulncheck",
+      "module": "golang.org/x/vuln",
+      "version": "v1.9.0",
+      "package": "./cmd/govulncheck",
+      "readiness_args": [
+        "-version"
+      ],
+      "module_sum": "h1:12VaqnI9kJfqwRoPptxoqsUhQtdfrSbdksT7X/KY/sc=",
+      "go_mod_sum": "h1:E/Frwm0xp49fTyBW+6CQHdkvobknbwUM49yEpMGUauw=",
+      "source_commit": "e672cbe8fbc8c76e28fcb6db0efd9ce354e0dac5"
+    }
+  ]
+}
