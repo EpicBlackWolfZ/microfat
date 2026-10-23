@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "issue": 161,
+  "measured_date_utc": "2026-10-23",
+  "corpus_source_revision": "ada376b4ffffaa3354becbfb70c1896934caf277",
+  "runner_source_commit": "327a5dd649dcd435db5dcd235bf667c1677d758a",
+  "runner_source_patch": "measured-runner.patch",
+  "runner_source_patch_sha256": "f9dd56035ade9afa55d345751b84c17fe175ae01651f2b7153a9d31f57514a81",
+  "runner_source_note": "The campaigns ran before this commit was created. These exact Go source bytes were unchanged when committed. The raw report source_revision identifies the corpus, not the experiment runner.",
+  "runner_go_sources_sha256": {
+    "experiments/research161/main.go": "6838208a81b6715477d4fee00522e541c89b1d4831eb1aada6b54f2e85af2e39",
+    "experiments/research161/samples.go": "b750634f38983d03be64bbac79957ebb307d61e89d7e00e40fe732dfbf58fb58",
+    "experiments/research161/experiment.go": "9e29aa51c12258b150b9aed5b9a7aa091a7e356b68e92379bb7fdea23100ba82"
+  },
+  "corpus_manifest_sha256": "4cb12d170692bb9de301796f89cc74f589e24f0789fb6081edda1653ea08f20e",
+  "raw_report_sha256": {
+    "demo.json": "f98d3a63527fc5641703c09c1d9c6022c17b968113d602b7d49ba799e67757ed",
+    "microfat.json": "fc1d629e36be2ff6a2e4599c5ad23f0880b9742590d4fe34a3488ef96da3b8e6"
+  },
+  "corpus_build": {
+    "go_version": "go1.27.3",
+    "goos": "linux",
+    "goarch": "amd64",
+    "tiers": ["v1", "v2", "v3"],
+    "gomaxprocs": 4,
+    "goflags": "-p=4",
+    "build_commands_per_tier": [
+      "GOAMD64=<tier> go build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' -o <corpus>/microfat-<tier> ./cmd/microfat",
+      "GOAMD64=<tier> go build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' -o <corpus>/demo-<tier> ./examples/demo"
+    ],
+    "task_note": "These commands were run serially through a temporary pinned-Task corpus target. The retained corpus manifest records resulting exact input bytes and SHA256 values."
+  },
+  "measurement_commands": [
+    "GOMAXPROCS=2 GOFLAGS=-p=2 NO_COLOR=1 task research-161 GO=<Go1.27.3>/bin/go MANIFEST=<corpus>/manifest.json FAMILY=demo STUB=<tools>/microfat-stub OUTPUT=<new-output>/demo SIZES=32768,114688 LEVEL=better",
+    "GOMAXPROCS=2 GOFLAGS=-p=2 NO_COLOR=1 task research-161 GO=<Go1.27.3>/bin/go MANIFEST=<corpus>/manifest.json FAMILY=microfat STUB=<tools>/microfat-stub OUTPUT=<new-output>/microfat SIZES=32768,114688 LEVEL=better"
+  ],
+  "controls": "Team measurements serialized; inherited host controls, no imposed affinity, quota, pressure or RSS ceiling.",
+  "evidence_boundary": "Deterministic full-artifact size and exact integrity screen on two supplied stripped families. One-shot wall and allocation diagnostics; no process-start, application, p99, CPU-time, peak-RSS or held-out confirmation claim."
+}

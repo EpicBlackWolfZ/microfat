@@ -87,6 +87,18 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  research-161:
+    desc: Screen dictionary sampling on a pinned ELF corpus (MANIFEST, FAMILY, STUB, OUTPUT required)
+    cmds:
+    - |-
+      {{.GO | shellQuote}} run ./experiments/research161 \
+        --manifest {{.MANIFEST | default "" | shellQuote}} \
+        --family {{.FAMILY | default "" | shellQuote}} \
+        --stub {{.STUB | default "" | shellQuote}} \
+        --output {{.OUTPUT | default "" | shellQuote}} \
+        --sizes {{.SIZES | default "32768,114688" | shellQuote}} \
+        --level {{.LEVEL | default "better" | shellQuote}} \
+        --arch {{.ARCH | default .HOST_ARCH | shellQuote}}
   test-runtime-fixtures:
     desc: Require native fat CLI inspection, timeout and detached-child cleanup regressions
     cmds:

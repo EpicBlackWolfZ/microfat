@@ -1,0 +1,595 @@
+{
+  "schema_version": 1,
+  "issue": 161,
+  "manifest_sha256": "4cb12d170692bb9de301796f89cc74f589e24f0789fb6081edda1653ea08f20e",
+  "source_revision": "ada376b4ffffaa3354becbfb70c1896934caf277",
+  "corpus_go_version": "go1.27.3",
+  "runner_go_version": "go1.27.3",
+  "codec_version": "v1.20.3",
+  "family": "microfat",
+  "target_arch": "amd64",
+  "compression_level": "better",
+  "gomaxprocs": 2,
+  "stub_sha256": "04b34fc12f9b05ad04e3b2de98fa16ec352861daa30af43de08528bac306eb56",
+  "stub_bytes": 4030624,
+  "inputs": [
+    {
+      "family": "microfat",
+      "level": "v1",
+      "path": "/tmp/microfat-research-pocs-20261023/corpus/microfat-v1",
+      "sha256": "11c5a13b332ccbce8dc6f74c9abcaa07f8e32e6e29d1e2bfa736e46fac71d2cd",
+      "bytes": 11514083
+    },
+    {
+      "family": "microfat",
+      "level": "v2",
+      "path": "/tmp/microfat-research-pocs-20261023/corpus/microfat-v2",
+      "sha256": "7554e87864642473fdd4a42a8953a2fbbca60a58d761027a33b3b9a5f2d87f0d",
+      "bytes": 11509987
+    },
+    {
+      "family": "microfat",
+      "level": "v3",
+      "path": "/tmp/microfat-research-pocs-20261023/corpus/microfat-v3",
+      "sha256": "dabbb42c127d11fbdaa268cfe362cddd93a61a59082275d93e54a85526b11e3f",
+      "bytes": 11501795
+    }
+  ],
+  "results": [
+    {
+      "id": "none",
+      "history_budget_bytes": 0,
+      "sample_bytes": 0,
+      "sample_count": 0,
+      "unique_sample_count": 0,
+      "core_sample_count": 0,
+      "history_bytes": 0,
+      "history_sha256": "",
+      "dictionary_bytes": 0,
+      "dictionary_sha256": "",
+      "train_wall_ns_diagnostic": 0,
+      "train_and_assemble_wall_ns_diagnostic": 308340838,
+      "train_and_assemble_allocated_bytes_diagnostic": 324666744,
+      "payloads": [
+        {
+          "level": "v1",
+          "compressed_bytes": 4716424,
+          "compress_wall_ns_diagnostic": 77228989,
+          "decode_wall_ns_diagnostic": 16192676,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v2",
+          "compressed_bytes": 4721030,
+          "compress_wall_ns_diagnostic": 79004265,
+          "decode_wall_ns_diagnostic": 15581487,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v3",
+          "compressed_bytes": 4720151,
+          "compress_wall_ns_diagnostic": 77771978,
+          "decode_wall_ns_diagnostic": 15859457,
+          "byte_exact_and_sha256_verified": true
+        }
+      ],
+      "index_and_trailer_bytes": 409,
+      "artifact_bytes": 18188638,
+      "artifact_sha256": "479e89e831be0c4148b69ee62a6484ab136ea52c6c2f52657be9b4d5f430ba8b",
+      "artifact_verified": true
+    },
+    {
+      "id": "current-32768",
+      "history_budget_bytes": 32768,
+      "sample_bytes": 393216,
+      "sample_count": 96,
+      "unique_sample_count": 95,
+      "core_sample_count": 0,
+      "history_bytes": 32768,
+      "history_sha256": "3209cfe77f25678d81e8921d02ecc7f85b88c128934c86b22e75688ee2676762",
+      "dictionary_bytes": 32919,
+      "dictionary_sha256": "d7431de6a98a52a3439f51fa2dbd354d2fa61aa3e04938245fe290ceec962c4f",
+      "train_wall_ns_diagnostic": 10097932,
+      "train_and_assemble_wall_ns_diagnostic": 354379623,
+      "train_and_assemble_allocated_bytes_diagnostic": 345553024,
+      "payloads": [
+        {
+          "level": "v1",
+          "compressed_bytes": 4708026,
+          "compress_wall_ns_diagnostic": 87750561,
+          "decode_wall_ns_diagnostic": 19678196,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v2",
+          "compressed_bytes": 4711725,
+          "compress_wall_ns_diagnostic": 89774285,
+          "decode_wall_ns_diagnostic": 19632417,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v3",
+          "compressed_bytes": 4712190,
+          "compress_wall_ns_diagnostic": 82207086,
+          "decode_wall_ns_diagnostic": 19975195,
+          "byte_exact_and_sha256_verified": true
+        }
+      ],
+      "index_and_trailer_bytes": 473,
+      "artifact_bytes": 18195957,
+      "artifact_sha256": "caf8c0feb24c764a8285e658496abf15c98fd3760502f0cb27c32ed80896b23c",
+      "artifact_verified": true
+    },
+    {
+      "id": "balanced-32768",
+      "history_budget_bytes": 32768,
+      "sample_bytes": 393216,
+      "sample_count": 96,
+      "unique_sample_count": 95,
+      "core_sample_count": 0,
+      "history_bytes": 32768,
+      "history_sha256": "066d765f818bd0d3a90177511d784359e26e36f4fa593550af6c966e6860a4e8",
+      "dictionary_bytes": 32918,
+      "dictionary_sha256": "9aba81f74a18fb1049f992bc57143769dd4a9a7dc97ed740ac9c8c5adfcbd5d0",
+      "train_wall_ns_diagnostic": 10655641,
+      "train_and_assemble_wall_ns_diagnostic": 346869633,
+      "train_and_assemble_allocated_bytes_diagnostic": 345981520,
+      "payloads": [
+        {
+          "level": "v1",
+          "compressed_bytes": 4716035,
+          "compress_wall_ns_diagnostic": 86033366,
+          "decode_wall_ns_diagnostic": 19207937,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v2",
+          "compressed_bytes": 4717734,
+          "compress_wall_ns_diagnostic": 83289213,
+          "decode_wall_ns_diagnostic": 19382387,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v3",
+          "compressed_bytes": 4718151,
+          "compress_wall_ns_diagnostic": 83256282,
+          "decode_wall_ns_diagnostic": 19198478,
+          "byte_exact_and_sha256_verified": true
+        }
+      ],
+      "index_and_trailer_bytes": 473,
+      "artifact_bytes": 18215935,
+      "artifact_sha256": "c532708227b47de646513779968da204d2af52ecb0dc9d95b8d1855bf171d774",
+      "artifact_verified": true
+    },
+    {
+      "id": "deduplicated-32768",
+      "history_budget_bytes": 32768,
+      "sample_bytes": 393216,
+      "sample_count": 96,
+      "unique_sample_count": 95,
+      "core_sample_count": 0,
+      "history_bytes": 32768,
+      "history_sha256": "066d765f818bd0d3a90177511d784359e26e36f4fa593550af6c966e6860a4e8",
+      "dictionary_bytes": 32918,
+      "dictionary_sha256": "9aba81f74a18fb1049f992bc57143769dd4a9a7dc97ed740ac9c8c5adfcbd5d0",
+      "train_wall_ns_diagnostic": 10591291,
+      "train_and_assemble_wall_ns_diagnostic": 352327789,
+      "train_and_assemble_allocated_bytes_diagnostic": 346086160,
+      "payloads": [
+        {
+          "level": "v1",
+          "compressed_bytes": 4716035,
+          "compress_wall_ns_diagnostic": 87252642,
+          "decode_wall_ns_diagnostic": 19360897,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v2",
+          "compressed_bytes": 4717734,
+          "compress_wall_ns_diagnostic": 85667507,
+          "decode_wall_ns_diagnostic": 19957105,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v3",
+          "compressed_bytes": 4718151,
+          "compress_wall_ns_diagnostic": 83217903,
+          "decode_wall_ns_diagnostic": 20508674,
+          "byte_exact_and_sha256_verified": true
+        }
+      ],
+      "index_and_trailer_bytes": 473,
+      "artifact_bytes": 18215935,
+      "artifact_sha256": "c532708227b47de646513779968da204d2af52ecb0dc9d95b8d1855bf171d774",
+      "artifact_verified": true
+    },
+    {
+      "id": "frequency-32768",
+      "history_budget_bytes": 32768,
+      "sample_bytes": 393216,
+      "sample_count": 96,
+      "unique_sample_count": 95,
+      "core_sample_count": 0,
+      "history_bytes": 32768,
+      "history_sha256": "0c50ad6f7b6c776a462ee9b50bcfa79c246a967308d04f79fa5ca558fce07b6e",
+      "dictionary_bytes": 32919,
+      "dictionary_sha256": "0f639cf3736657757c79b53cc73a7dcc76fffdcf5d208417b620b0ff39d24cba",
+      "train_wall_ns_diagnostic": 10373512,
+      "train_and_assemble_wall_ns_diagnostic": 347987350,
+      "train_and_assemble_allocated_bytes_diagnostic": 346332040,
+      "payloads": [
+        {
+          "level": "v1",
+          "compressed_bytes": 4715915,
+          "compress_wall_ns_diagnostic": 84180310,
+          "decode_wall_ns_diagnostic": 19560057,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v2",
+          "compressed_bytes": 4717772,
+          "compress_wall_ns_diagnostic": 85254338,
+          "decode_wall_ns_diagnostic": 19569617,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v3",
+          "compressed_bytes": 4717955,
+          "compress_wall_ns_diagnostic": 83804351,
+          "decode_wall_ns_diagnostic": 19558637,
+          "byte_exact_and_sha256_verified": true
+        }
+      ],
+      "index_and_trailer_bytes": 473,
+      "artifact_bytes": 18215658,
+      "artifact_sha256": "5ac02d2453bb324b689ce1454280ca36d1b770a790855acdc102b0860255371f",
+      "artifact_verified": true
+    },
+    {
+      "id": "core-accessory-32768",
+      "history_budget_bytes": 32768,
+      "sample_bytes": 393216,
+      "sample_count": 96,
+      "unique_sample_count": 95,
+      "core_sample_count": 0,
+      "history_bytes": 32768,
+      "history_sha256": "0c50ad6f7b6c776a462ee9b50bcfa79c246a967308d04f79fa5ca558fce07b6e",
+      "dictionary_bytes": 32919,
+      "dictionary_sha256": "0f639cf3736657757c79b53cc73a7dcc76fffdcf5d208417b620b0ff39d24cba",
+      "train_wall_ns_diagnostic": 10655131,
+      "train_and_assemble_wall_ns_diagnostic": 351091712,
+      "train_and_assemble_allocated_bytes_diagnostic": 346383424,
+      "payloads": [
+        {
+          "level": "v1",
+          "compressed_bytes": 4715915,
+          "compress_wall_ns_diagnostic": 86600484,
+          "decode_wall_ns_diagnostic": 19840005,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v2",
+          "compressed_bytes": 4717772,
+          "compress_wall_ns_diagnostic": 84820099,
+          "decode_wall_ns_diagnostic": 19940905,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v3",
+          "compressed_bytes": 4717955,
+          "compress_wall_ns_diagnostic": 83591772,
+          "decode_wall_ns_diagnostic": 19429207,
+          "byte_exact_and_sha256_verified": true
+        }
+      ],
+      "index_and_trailer_bytes": 473,
+      "artifact_bytes": 18215658,
+      "artifact_sha256": "5ac02d2453bb324b689ce1454280ca36d1b770a790855acdc102b0860255371f",
+      "artifact_verified": true
+    },
+    {
+      "id": "section-32768",
+      "history_budget_bytes": 32768,
+      "sample_bytes": 393216,
+      "sample_count": 96,
+      "unique_sample_count": 88,
+      "core_sample_count": 4,
+      "history_bytes": 32768,
+      "history_sha256": "1195142126b304358724e3217ee172031e1125eebc3776586934c1c91de54d3f",
+      "dictionary_bytes": 32909,
+      "dictionary_sha256": "f962e8ecd2d8799bf5223afc0d64e3827ff1c92a2d50384d0831083585e267ad",
+      "train_wall_ns_diagnostic": 9800603,
+      "train_and_assemble_wall_ns_diagnostic": 349506236,
+      "train_and_assemble_allocated_bytes_diagnostic": 352153840,
+      "payloads": [
+        {
+          "level": "v1",
+          "compressed_bytes": 4715975,
+          "compress_wall_ns_diagnostic": 85227897,
+          "decode_wall_ns_diagnostic": 19270828,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v2",
+          "compressed_bytes": 4717482,
+          "compress_wall_ns_diagnostic": 84968548,
+          "decode_wall_ns_diagnostic": 19687637,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v3",
+          "compressed_bytes": 4717261,
+          "compress_wall_ns_diagnostic": 84441069,
+          "decode_wall_ns_diagnostic": 19527137,
+          "byte_exact_and_sha256_verified": true
+        }
+      ],
+      "index_and_trailer_bytes": 473,
+      "artifact_bytes": 18214724,
+      "artifact_sha256": "1e80fe2171e78ef4811ae88c213c89250f0cd49fff3810e03e3b6ed087203247",
+      "artifact_verified": true
+    },
+    {
+      "id": "current-114688",
+      "history_budget_bytes": 114688,
+      "sample_bytes": 393216,
+      "sample_count": 96,
+      "unique_sample_count": 95,
+      "core_sample_count": 0,
+      "history_bytes": 98304,
+      "history_sha256": "df3937a7bb46237b4a7efee8ece9372c4390aeac9124aaa125248fde14ef4bc5",
+      "dictionary_bytes": 98450,
+      "dictionary_sha256": "d9c8794ae3c185a8236398992ab7a3906ad79a471f68da581b207a2b3731cb42",
+      "train_wall_ns_diagnostic": 7844408,
+      "train_and_assemble_wall_ns_diagnostic": 350284445,
+      "train_and_assemble_allocated_bytes_diagnostic": 354893648,
+      "payloads": [
+        {
+          "level": "v1",
+          "compressed_bytes": 4679780,
+          "compress_wall_ns_diagnostic": 85851626,
+          "decode_wall_ns_diagnostic": 19549766,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v2",
+          "compressed_bytes": 4685919,
+          "compress_wall_ns_diagnostic": 86782353,
+          "decode_wall_ns_diagnostic": 19781586,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v3",
+          "compressed_bytes": 4688920,
+          "compress_wall_ns_diagnostic": 84377850,
+          "decode_wall_ns_diagnostic": 20065845,
+          "byte_exact_and_sha256_verified": true
+        }
+      ],
+      "index_and_trailer_bytes": 473,
+      "artifact_bytes": 18184166,
+      "artifact_sha256": "927de50e3edb50a0a4ba62c9904983b17eded2f7e0259182f0acd74b21df78ea",
+      "artifact_verified": true
+    },
+    {
+      "id": "balanced-114688",
+      "history_budget_bytes": 114688,
+      "sample_bytes": 393216,
+      "sample_count": 96,
+      "unique_sample_count": 95,
+      "core_sample_count": 0,
+      "history_bytes": 98304,
+      "history_sha256": "a077715c0c3625e940b904e9977d2d058cc3ad4bf076863fa40fd0c8ab077893",
+      "dictionary_bytes": 98459,
+      "dictionary_sha256": "21ee100e1d0ffcf07db43f0915604240070bbb28ce29bea5fc2539ea23b7f382",
+      "train_wall_ns_diagnostic": 9052186,
+      "train_and_assemble_wall_ns_diagnostic": 354304763,
+      "train_and_assemble_allocated_bytes_diagnostic": 354496304,
+      "payloads": [
+        {
+          "level": "v1",
+          "compressed_bytes": 4701478,
+          "compress_wall_ns_diagnostic": 86090315,
+          "decode_wall_ns_diagnostic": 19241458,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v2",
+          "compressed_bytes": 4702856,
+          "compress_wall_ns_diagnostic": 84333700,
+          "decode_wall_ns_diagnostic": 20121005,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v3",
+          "compressed_bytes": 4703089,
+          "compress_wall_ns_diagnostic": 88412609,
+          "decode_wall_ns_diagnostic": 19859786,
+          "byte_exact_and_sha256_verified": true
+        }
+      ],
+      "index_and_trailer_bytes": 473,
+      "artifact_bytes": 18236979,
+      "artifact_sha256": "811e871e66db5d7886b9992bc5d22c6972929d277522ffe3846d697c76525e3f",
+      "artifact_verified": true
+    },
+    {
+      "id": "deduplicated-114688",
+      "history_budget_bytes": 114688,
+      "sample_bytes": 393216,
+      "sample_count": 96,
+      "unique_sample_count": 95,
+      "core_sample_count": 0,
+      "history_bytes": 98304,
+      "history_sha256": "a077715c0c3625e940b904e9977d2d058cc3ad4bf076863fa40fd0c8ab077893",
+      "dictionary_bytes": 98459,
+      "dictionary_sha256": "21ee100e1d0ffcf07db43f0915604240070bbb28ce29bea5fc2539ea23b7f382",
+      "train_wall_ns_diagnostic": 8998015,
+      "train_and_assemble_wall_ns_diagnostic": 349212517,
+      "train_and_assemble_allocated_bytes_diagnostic": 354582144,
+      "payloads": [
+        {
+          "level": "v1",
+          "compressed_bytes": 4701478,
+          "compress_wall_ns_diagnostic": 86773963,
+          "decode_wall_ns_diagnostic": 20165965,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v2",
+          "compressed_bytes": 4702856,
+          "compress_wall_ns_diagnostic": 84369289,
+          "decode_wall_ns_diagnostic": 19244258,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v3",
+          "compressed_bytes": 4703089,
+          "compress_wall_ns_diagnostic": 83870311,
+          "decode_wall_ns_diagnostic": 19376678,
+          "byte_exact_and_sha256_verified": true
+        }
+      ],
+      "index_and_trailer_bytes": 473,
+      "artifact_bytes": 18236979,
+      "artifact_sha256": "811e871e66db5d7886b9992bc5d22c6972929d277522ffe3846d697c76525e3f",
+      "artifact_verified": true
+    },
+    {
+      "id": "frequency-114688",
+      "history_budget_bytes": 114688,
+      "sample_bytes": 393216,
+      "sample_count": 96,
+      "unique_sample_count": 95,
+      "core_sample_count": 0,
+      "history_bytes": 98304,
+      "history_sha256": "3bd893707f3114259665e0f751e1f7be3b66ad95bb8552a90295bb8ef8961027",
+      "dictionary_bytes": 98452,
+      "dictionary_sha256": "8a546e96a61a11e8af5ffc9d26e305c7237ffd6b677b0ff9b2cb82f1b205dc35",
+      "train_wall_ns_diagnostic": 8957736,
+      "train_and_assemble_wall_ns_diagnostic": 349565696,
+      "train_and_assemble_allocated_bytes_diagnostic": 354879984,
+      "payloads": [
+        {
+          "level": "v1",
+          "compressed_bytes": 4700411,
+          "compress_wall_ns_diagnostic": 84338620,
+          "decode_wall_ns_diagnostic": 19636446,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v2",
+          "compressed_bytes": 4701759,
+          "compress_wall_ns_diagnostic": 85259488,
+          "decode_wall_ns_diagnostic": 19086297,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v3",
+          "compressed_bytes": 4702331,
+          "compress_wall_ns_diagnostic": 86664183,
+          "decode_wall_ns_diagnostic": 19850846,
+          "byte_exact_and_sha256_verified": true
+        }
+      ],
+      "index_and_trailer_bytes": 473,
+      "artifact_bytes": 18234050,
+      "artifact_sha256": "0ff1548dd24a1d5f3033388dfe8a4656cd0f1166eba59ee268d24fa025aa71da",
+      "artifact_verified": true
+    },
+    {
+      "id": "core-accessory-114688",
+      "history_budget_bytes": 114688,
+      "sample_bytes": 393216,
+      "sample_count": 96,
+      "unique_sample_count": 95,
+      "core_sample_count": 0,
+      "history_bytes": 98304,
+      "history_sha256": "3bd893707f3114259665e0f751e1f7be3b66ad95bb8552a90295bb8ef8961027",
+      "dictionary_bytes": 98452,
+      "dictionary_sha256": "8a546e96a61a11e8af5ffc9d26e305c7237ffd6b677b0ff9b2cb82f1b205dc35",
+      "train_wall_ns_diagnostic": 9248104,
+      "train_and_assemble_wall_ns_diagnostic": 353150716,
+      "train_and_assemble_allocated_bytes_diagnostic": 354927528,
+      "payloads": [
+        {
+          "level": "v1",
+          "compressed_bytes": 4700411,
+          "compress_wall_ns_diagnostic": 88165269,
+          "decode_wall_ns_diagnostic": 19317357,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v2",
+          "compressed_bytes": 4701759,
+          "compress_wall_ns_diagnostic": 85805416,
+          "decode_wall_ns_diagnostic": 19143378,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v3",
+          "compressed_bytes": 4702331,
+          "compress_wall_ns_diagnostic": 84520619,
+          "decode_wall_ns_diagnostic": 19592217,
+          "byte_exact_and_sha256_verified": true
+        }
+      ],
+      "index_and_trailer_bytes": 473,
+      "artifact_bytes": 18234050,
+      "artifact_sha256": "0ff1548dd24a1d5f3033388dfe8a4656cd0f1166eba59ee268d24fa025aa71da",
+      "artifact_verified": true
+    },
+    {
+      "id": "section-114688",
+      "history_budget_bytes": 114688,
+      "sample_bytes": 393216,
+      "sample_count": 96,
+      "unique_sample_count": 88,
+      "core_sample_count": 4,
+      "history_bytes": 98304,
+      "history_sha256": "17ac7307204018f684210f683ffd165628b4aeea0704327eaa6454b6dbd6f111",
+      "dictionary_bytes": 98448,
+      "dictionary_sha256": "d0e250b0ef6db1c2b9c52fefaca42d165ddceaac7a81b61001aa2ce0c877e83e",
+      "train_wall_ns_diagnostic": 8619726,
+      "train_and_assemble_wall_ns_diagnostic": 363004689,
+      "train_and_assemble_allocated_bytes_diagnostic": 352963392,
+      "payloads": [
+        {
+          "level": "v1",
+          "compressed_bytes": 4713324,
+          "compress_wall_ns_diagnostic": 86819833,
+          "decode_wall_ns_diagnostic": 19566397,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v2",
+          "compressed_bytes": 4714915,
+          "compress_wall_ns_diagnostic": 91281981,
+          "decode_wall_ns_diagnostic": 20017146,
+          "byte_exact_and_sha256_verified": true
+        },
+        {
+          "level": "v3",
+          "compressed_bytes": 4714720,
+          "compress_wall_ns_diagnostic": 89813505,
+          "decode_wall_ns_diagnostic": 19737586,
+          "byte_exact_and_sha256_verified": true
+        }
+      ],
+      "index_and_trailer_bytes": 473,
+      "artifact_bytes": 18272504,
+      "artifact_sha256": "1411622988c7eb06c010e8ebf84b5d68af97f2bb76e03efa17eb93a61ce07222",
+      "artifact_verified": true
+    }
+  ],
+  "smallest_verified_artifact": "current-114688",
+  "limitations": [
+    "A bounded in-memory size screen; all inputs and complete artifacts are retained in memory.",
+    "Wall time and allocation counters are one-shot diagnostics, excluding input I/O and publication; they are not process-start p99.",
+    "No peak RSS, pack CPU, cgroup stress, launch execution, held-out validation or production-default decision is claimed.",
+    "Requested history budgets match; actual history is capped at one quarter of training bytes. Dictionary headers add bytes.",
+    "Section sampling changes training contents; other alternatives isolate history selection with uniform contents.",
+    "No dictionary is a required candidate. Warm verified-cache launches do not decompress."
+  ]
+}
