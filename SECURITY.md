@@ -157,7 +157,7 @@ publisher identity and exact artifact bytes externally **before first execution*
 The [release verification contract](docs/release-verification.md) specifies exact publisher/version
 matching, verifier bootstrap, historical identities and offline/transparency behavior.
 
-The v0.3.0 installer authenticates its pinned verifier and native helper before execution, then
+The verified installer authenticates its pinned verifier and native helper before execution, then
 authenticates the selected product archive before extraction. It requires explicit ownership of
 the generation store and never adopts manual or package-manager files through a force flag.
 Activation uses one pointer; old generations are retained for delayed readers. Managed companion

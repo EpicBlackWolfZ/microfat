@@ -1,14 +1,22 @@
 # Production roadmap
 
-Updated 2026-10-13: source/candidate qualification, hosted evidence, immutable publication,
-reviewed recipe merge and independently verified public installer/Homebrew acceptance passed.
+Updated 2026-10-23: v0.3.1 passed source/candidate qualification and hosted evidence gates and
+was published immutable. Independently reviewed public archive and clean native bootstrap checks
+passed, the authenticated v0.3.1 Homebrew recipe is merged, and final combined public installer/tap
+acceptance passed on both native architectures.
 GitHub issues define remaining scope,
 dependencies and acceptance criteria. Milestones group deliverable outcomes; they are not dates.
 
 ## Current baseline
 
-[v0.3.0](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.3.0) is the latest published
-release, published on 2026-10-13 at 05:25:54 UTC as immutable release `411193467`.
+[v0.3.1](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.3.1) is the latest published
+release, published on 2026-10-23 at 05:04:02 UTC as immutable release `421362795` from source
+`94cb9f6ad26c14931ea28e53a8969f09790eff80`. Its
+[acceptance record](releases/v0.3.1.md#release-acceptance) separates source CI, signed-candidate
+qualification, hosted measurements, publication and public installer/tap results.
+
+[v0.3.0](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.3.0) was published on
+2026-10-13 at 05:25:54 UTC as immutable release `411193467`.
 Its source is `d3883d59674eb32351717f6d28744862d1cc45c9`; its
 [final main CI](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38320256153/attempts/4) passed: the full same-source
 attempt 3 supplied 23 successful checks, and the bounded retry completed native arm64 installer and `CI Complete`
@@ -47,6 +55,7 @@ added ShellCheck. They are merged into `main`; they are not new work to implemen
 | [v0.2.4](https://github.com/EpicBlackWolfZ/microfat/milestone/12) | Correct existing runtime, packaging, verification and documentation defects | Tooling migrations and new distribution features |
 | [v0.2.5](https://github.com/EpicBlackWolfZ/microfat/milestone/13) | Consolidate tooling, release trust and CI without losing validation | Installer/updater/tap features or speculative attestations |
 | [v0.3.0](https://github.com/EpicBlackWolfZ/microfat/milestone/2) | Coherent installation and executable lifecycle contracts | Native macOS support and new compression formats |
+| [v0.3.1](releases/v0.3.1.md) | Installer/dictionary corrections and dependency/toolchain updates | New binary formats and dedicated-hardware certification |
 | [v0.4.0](https://github.com/EpicBlackWolfZ/microfat/milestone/3) | Observability and performance improvements supported by evidence | Arbitrary latency targets and dedicated-hardware availability |
 
 Urgent, independently validated corrections can ship earlier in the patch stream. A tooling

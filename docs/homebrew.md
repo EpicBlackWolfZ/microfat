@@ -5,6 +5,10 @@ cask in the shared [EpicBlackWolfZ/homebrew-tap](https://github.com/EpicBlackWol
 repository. The Homebrew identifier is `EpicBlackWolfZ/tap`; future packages can coexist in the
 same repository. Only `Casks/microfat.rb` belongs to microfat's automatic update path.
 
+The [v0.3.1 acceptance record](releases/v0.3.1.md#release-acceptance) tracks the current immutable
+release, authenticated recipe generation and separate official public installation checks.
+The first-publication evidence below remains specific to v0.3.0.
+
 ## v0.3.0 first-publication evidence
 
 The authenticated recipe and official remote installation passed on native amd64 and arm64.
@@ -42,7 +46,7 @@ After publication, the workflow authenticates and prepares the recipe, runs nati
 qualification on amd64 and arm64, then reauthenticates before opening a deterministic
 `chore/microfat-v<version>` PR. A maintainer approves any waiting generated PR workflows, checks **Tap CI Complete**,
 reviews the evidence and merges manually. Verify the documented install command from the public
-tap after merge. Only then update availability documentation and close #205 as complete.
+tap after merge. Only then update availability documentation from the new public evidence.
 
 If an existing generated PR run requires approval, approve that run before monitoring its checks.
 Approval-required runs and event suppression by GITHUB_TOKEN are separate conditions; see
@@ -50,7 +54,7 @@ Approval-required runs and event suppression by GITHUB_TOKEN are separate condit
 For a missing run, the tap supports explicit full CI on the recipe branch, for example:
 
 ```bash
-gh workflow run ci.yml --repo EpicBlackWolfZ/homebrew-tap --ref chore/microfat-v0.3.0
+gh workflow run ci.yml --repo EpicBlackWolfZ/homebrew-tap --ref chore/microfat-v0.3.1
 ```
 
 Require completed checks at the recipe's final head: **Scripts and update policy**, native Homebrew
@@ -111,7 +115,7 @@ Use Go from `go.mod` and Task from `.config/tool-versions.env` from a reviewed c
 
 ```bash
 task homebrew-check
-task homebrew-prepare TAG=v0.3.0 OUTPUT=/absolute/new-candidate-directory
+task homebrew-prepare TAG=v0.3.1 OUTPUT=/absolute/new-candidate-directory
 task homebrew-check CASK=/absolute/new-candidate-directory/microfat.rb
 task qualify-homebrew OUTPUT=/absolute/new-qualification-directory \
   CASK=/absolute/new-candidate-directory/microfat.rb

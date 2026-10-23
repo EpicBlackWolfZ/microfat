@@ -29,6 +29,8 @@ The immutable v0.3.0 bootstrap retains its original v0.3.0 helper pin. Each boot
 is independent of the requested product release, so the v0.3.1 helper can install historical archives.
 A versioned bootstrap is usable only after its pinned helper release is published; an unsigned
 snapshot proves packaging, not publisher authentication.
+The [v0.3.1 acceptance record](releases/v0.3.1.md#release-acceptance) separates immutable publication,
+signed-candidate qualification and public installer/tap evidence.
 
 ## Exact product release policy
 
