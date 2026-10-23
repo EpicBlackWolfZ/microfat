@@ -1,0 +1,1784 @@
+{
+  "audit": "Independent Python standard-library consistency, control, completeness, pairing and exact-rank analysis; no authentication of supplied measurements, no reconstruction of absent hosted ELF artifacts.",
+  "cohorts": [
+    {
+      "cohort": "pool-amd64-0-39927016072-1",
+      "producer_sha256": "e086b23397722cc8874f2eaa97f300c6e02d2059c32543ff7596edac4920725a",
+      "workspace_mib": 96,
+      "stages": {
+        "training": {
+          "attempts": 108,
+          "successful": 102,
+          "failures": [
+            {
+              "spec": {
+                "family": "demo",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "demo",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "demo",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            }
+          ],
+          "report_sha256": "e69c06182be0eb3d134b210f337f822d0757701d926da1e4bd16cb026e0af373",
+          "observed_memory_peak_above_configured_max": []
+        },
+        "confirmation": {
+          "attempts": 312,
+          "successful": 312,
+          "failures": [],
+          "report_sha256": "300426d352c51c61983ded4aa543fa85fcd5ca4ced896b39b8f1507b43e05cfa",
+          "observed_memory_peak_above_configured_max": [
+            {
+              "spec": {
+                "family": "fortio",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 36864
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 8192
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 8192
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 256,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 8192
+            },
+            {
+              "spec": {
+                "family": "fortio",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 8192
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 256,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 8192
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 256,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 8192
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 256,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            }
+          ]
+        },
+        "matrix": {
+          "attempts": 32,
+          "successful": 32,
+          "failures": [],
+          "report_sha256": "85fe4338dd3c0ef49a0a438fc9b2283b340165825aad437ccf38a32e3793261a",
+          "observed_memory_peak_above_configured_max": []
+        }
+      },
+      "primary_cells": [
+        {
+          "family": "actionlint",
+          "eligible": true,
+          "pairs": 30,
+          "median_ratio": 1.3886775036631414,
+          "lower_rank": 8,
+          "lower_ratio": 1.3290517722823645,
+          "passes": true,
+          "max_cgroup_mib": {
+            "current": 99.9609375,
+            "policy": 128.6640625
+          },
+          "max_rss_mib": {
+            "current": 62.0078125,
+            "policy": 86.00390625
+          }
+        },
+        {
+          "family": "fortio",
+          "eligible": true,
+          "pairs": 30,
+          "median_ratio": 1.425269055211101,
+          "lower_rank": 8,
+          "lower_ratio": 1.3755803155091353,
+          "passes": true,
+          "max_cgroup_mib": {
+            "current": 210.94921875,
+            "policy": 331.73046875
+          },
+          "max_rss_mib": {
+            "current": 127.76953125,
+            "policy": 220.1640625
+          }
+        },
+        {
+          "family": "govulncheck",
+          "eligible": true,
+          "pairs": 30,
+          "median_ratio": 1.3941844879393674,
+          "lower_rank": 8,
+          "lower_ratio": 1.3565135688540115,
+          "passes": true,
+          "max_cgroup_mib": {
+            "current": 142.453125,
+            "policy": 192.33984375
+          },
+          "max_rss_mib": {
+            "current": 91.96484375,
+            "policy": 122.48046875
+          }
+        },
+        {
+          "family": "task",
+          "eligible": false,
+          "pairs": 30,
+          "median_ratio": 1.0098965741695454,
+          "lower_rank": 8,
+          "lower_ratio": 0.9460035093806508,
+          "passes": false,
+          "max_cgroup_mib": {
+            "current": 479.546875,
+            "policy": 480.56640625
+          },
+          "max_rss_mib": {
+            "current": 298.1953125,
+            "policy": 300.27734375
+          }
+        }
+      ],
+      "unsupported_baseline_fallback_pairs": 0,
+      "fallback_regressions": 0,
+      "vm_candidate": false
+    },
+    {
+      "cohort": "pool-amd64-1-39927016072-1",
+      "producer_sha256": "e086b23397722cc8874f2eaa97f300c6e02d2059c32543ff7596edac4920725a",
+      "workspace_mib": 96,
+      "stages": {
+        "training": {
+          "attempts": 108,
+          "successful": 102,
+          "failures": [
+            {
+              "spec": {
+                "family": "demo",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "demo",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "demo",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            }
+          ],
+          "report_sha256": "ad124f6cdccf11f15c2929b4bd8957d285ca88a190915b80b9daa2974d6c1ef5",
+          "observed_memory_peak_above_configured_max": [
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 32,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 20480
+            },
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 32,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            },
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 32,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            }
+          ]
+        },
+        "confirmation": {
+          "attempts": 312,
+          "successful": 312,
+          "failures": [],
+          "report_sha256": "23aad443ff3a353b3c0ba74def3f93efce9a4c697d85cf0f9e1accf7ddc59924",
+          "observed_memory_peak_above_configured_max": [
+            {
+              "spec": {
+                "family": "fortio",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 8192
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 8192
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 256,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 69632
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 256,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 8192
+            },
+            {
+              "spec": {
+                "family": "fortio",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 8192
+            },
+            {
+              "spec": {
+                "family": "fortio",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 256,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 8192
+            },
+            {
+              "spec": {
+                "family": "fortio",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 8192
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 8192
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            }
+          ]
+        },
+        "matrix": {
+          "attempts": 32,
+          "successful": 32,
+          "failures": [],
+          "report_sha256": "d3631472213e255a63ff3ba8cd1bf0b046773233a9e6b8ebdb1b11c282cafc94",
+          "observed_memory_peak_above_configured_max": []
+        }
+      },
+      "primary_cells": [
+        {
+          "family": "actionlint",
+          "eligible": true,
+          "pairs": 30,
+          "median_ratio": 1.3685767725243771,
+          "lower_rank": 8,
+          "lower_ratio": 1.3413445675116735,
+          "passes": true,
+          "max_cgroup_mib": {
+            "current": 109.77734375,
+            "policy": 133.6484375
+          },
+          "max_rss_mib": {
+            "current": 76.0859375,
+            "policy": 87.9765625
+          }
+        },
+        {
+          "family": "fortio",
+          "eligible": true,
+          "pairs": 30,
+          "median_ratio": 1.4311169248770343,
+          "lower_rank": 8,
+          "lower_ratio": 1.3890820883873598,
+          "passes": true,
+          "max_cgroup_mib": {
+            "current": 198.11328125,
+            "policy": 332.06640625
+          },
+          "max_rss_mib": {
+            "current": 123.87890625,
+            "policy": 216.046875
+          }
+        },
+        {
+          "family": "govulncheck",
+          "eligible": true,
+          "pairs": 30,
+          "median_ratio": 1.391394610440121,
+          "lower_rank": 8,
+          "lower_ratio": 1.348493361703704,
+          "passes": true,
+          "max_cgroup_mib": {
+            "current": 145.03515625,
+            "policy": 193.64453125
+          },
+          "max_rss_mib": {
+            "current": 94.0234375,
+            "policy": 122.04296875
+          }
+        },
+        {
+          "family": "task",
+          "eligible": false,
+          "pairs": 30,
+          "median_ratio": 0.987914481033511,
+          "lower_rank": 8,
+          "lower_ratio": 0.9525669427568222,
+          "passes": true,
+          "max_cgroup_mib": {
+            "current": 491.3671875,
+            "policy": 434.97265625
+          },
+          "max_rss_mib": {
+            "current": 302.05859375,
+            "policy": 265.66796875
+          }
+        }
+      ],
+      "unsupported_baseline_fallback_pairs": 0,
+      "fallback_regressions": 0,
+      "vm_candidate": true
+    },
+    {
+      "cohort": "pool-arm64-0-39927016072-1",
+      "producer_sha256": "b894c5354284efd0eb76e89c6135bd148924f95b432d77c7072844849da7f6c8",
+      "workspace_mib": 96,
+      "stages": {
+        "training": {
+          "attempts": 108,
+          "successful": 102,
+          "failures": [
+            {
+              "spec": {
+                "family": "demo",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "demo",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "demo",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            }
+          ],
+          "report_sha256": "8c7b907667b04991cc70f01060e144334d6b2e017fad6050400f99e054179b0a",
+          "observed_memory_peak_above_configured_max": []
+        },
+        "confirmation": {
+          "attempts": 312,
+          "successful": 306,
+          "failures": [
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 137,
+              "oom": true,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 137,
+              "oom": true,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 137,
+              "oom": true,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 137,
+              "oom": true,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 137,
+              "oom": true,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 137,
+              "oom": true,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            }
+          ],
+          "report_sha256": "2abc26eb0c445eb3ee07823e13fae1b83f499a8a6ee5ab79861e880e1797036e",
+          "observed_memory_peak_above_configured_max": [
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 256,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 256,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            }
+          ]
+        },
+        "matrix": {
+          "attempts": 32,
+          "successful": 32,
+          "failures": [],
+          "report_sha256": "358304f27c19f9a03f3bd19453bd9409f60e643b84bf8066d5d5e866f3fc5b65",
+          "observed_memory_peak_above_configured_max": []
+        }
+      },
+      "primary_cells": [
+        {
+          "family": "actionlint",
+          "eligible": true,
+          "pairs": 30,
+          "median_ratio": 1.5400403339082795,
+          "lower_rank": 8,
+          "lower_ratio": 1.5142398618860609,
+          "passes": true,
+          "max_cgroup_mib": {
+            "current": 97.53515625,
+            "policy": 114.1953125
+          },
+          "max_rss_mib": {
+            "current": 70.390625,
+            "policy": 78.6640625
+          }
+        },
+        {
+          "family": "fortio",
+          "eligible": true,
+          "pairs": 30,
+          "median_ratio": 1.386915003380692,
+          "lower_rank": 8,
+          "lower_ratio": 1.3554716224563237,
+          "passes": true,
+          "max_cgroup_mib": {
+            "current": 170.28515625,
+            "policy": 283.890625
+          },
+          "max_rss_mib": {
+            "current": 97.9375,
+            "policy": 184.33203125
+          }
+        },
+        {
+          "family": "govulncheck",
+          "eligible": true,
+          "pairs": 30,
+          "median_ratio": 1.5607285796476638,
+          "lower_rank": 8,
+          "lower_ratio": 1.546496528865319,
+          "passes": true,
+          "max_cgroup_mib": {
+            "current": 127.71484375,
+            "policy": 168.62109375
+          },
+          "max_rss_mib": {
+            "current": 85.546875,
+            "policy": 110.65234375
+          }
+        },
+        {
+          "family": "task",
+          "eligible": false,
+          "pairs": 30,
+          "median_ratio": 1.014330369465787,
+          "lower_rank": 8,
+          "lower_ratio": 0.9684834217226795,
+          "passes": true,
+          "max_cgroup_mib": {
+            "current": 389.9375,
+            "policy": 390.3046875
+          },
+          "max_rss_mib": {
+            "current": 227.98828125,
+            "policy": 227.83984375
+          }
+        }
+      ],
+      "unsupported_baseline_fallback_pairs": 3,
+      "fallback_regressions": 0,
+      "vm_candidate": true
+    },
+    {
+      "cohort": "pool-arm64-1-39927016072-1",
+      "producer_sha256": "b894c5354284efd0eb76e89c6135bd148924f95b432d77c7072844849da7f6c8",
+      "workspace_mib": 96,
+      "stages": {
+        "training": {
+          "attempts": 108,
+          "successful": 102,
+          "failures": [
+            {
+              "spec": {
+                "family": "demo",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "demo",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "demo",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "microfat",
+                "mode": "pool",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 96,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 1,
+              "oom": false,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            }
+          ],
+          "report_sha256": "891a90335b984f68fe0ce22db526a7ee1135febb28d9d40c4ebd107682c0e8f8",
+          "observed_memory_peak_above_configured_max": []
+        },
+        "confirmation": {
+          "attempts": 312,
+          "successful": 306,
+          "failures": [
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 137,
+              "oom": true,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 137,
+              "oom": true,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 137,
+              "oom": true,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 137,
+              "oom": true,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 137,
+              "oom": true,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "exit": 137,
+              "oom": true,
+              "error": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+            }
+          ],
+          "report_sha256": "756f17256bbbcb55292cedb215d51d1d5254afd43324df008de7dfa9ec5d22a9",
+          "observed_memory_peak_above_configured_max": [
+            {
+              "spec": {
+                "family": "fortio",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 256,
+                "block": 0,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            },
+            {
+              "spec": {
+                "family": "fortio",
+                "mode": "current",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            },
+            {
+              "spec": {
+                "family": "task",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 256,
+                "block": 1,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            },
+            {
+              "spec": {
+                "family": "fortio",
+                "mode": "policy",
+                "cpu_budget": 4,
+                "hard_memory_mib": 128,
+                "block": 2,
+                "format": 2,
+                "codec": "zstd",
+                "dictionary": false,
+                "stub_profile": "full",
+                "admission_mib_override": 0,
+                "prior_output_sentinel": true,
+                "workspace_mib": 0,
+                "corpus_profile": "stripped",
+                "primary_confirmation": false
+              },
+              "overshoot_bytes": 4096
+            }
+          ]
+        },
+        "matrix": {
+          "attempts": 32,
+          "successful": 32,
+          "failures": [],
+          "report_sha256": "a1a58e29d2b27a6cc80cee61b52f556675eefcee0e35f97669609de4fdcea531",
+          "observed_memory_peak_above_configured_max": []
+        }
+      },
+      "primary_cells": [
+        {
+          "family": "actionlint",
+          "eligible": true,
+          "pairs": 30,
+          "median_ratio": 1.6113802966668778,
+          "lower_rank": 8,
+          "lower_ratio": 1.5579877171782288,
+          "passes": true,
+          "max_cgroup_mib": {
+            "current": 97.86328125,
+            "policy": 107.4453125
+          },
+          "max_rss_mib": {
+            "current": 70.46484375,
+            "policy": 71.7265625
+          }
+        },
+        {
+          "family": "fortio",
+          "eligible": true,
+          "pairs": 30,
+          "median_ratio": 1.3607812742193957,
+          "lower_rank": 8,
+          "lower_ratio": 1.3285380002600244,
+          "passes": true,
+          "max_cgroup_mib": {
+            "current": 170.50390625,
+            "policy": 278.23828125
+          },
+          "max_rss_mib": {
+            "current": 98.20703125,
+            "policy": 178.49609375
+          }
+        },
+        {
+          "family": "govulncheck",
+          "eligible": true,
+          "pairs": 30,
+          "median_ratio": 1.6016763428526437,
+          "lower_rank": 8,
+          "lower_ratio": 1.5728542578197051,
+          "passes": true,
+          "max_cgroup_mib": {
+            "current": 127.5546875,
+            "policy": 162.46484375
+          },
+          "max_rss_mib": {
+            "current": 85.59765625,
+            "policy": 104.26953125
+          }
+        },
+        {
+          "family": "task",
+          "eligible": false,
+          "pairs": 30,
+          "median_ratio": 0.9909469721284415,
+          "lower_rank": 8,
+          "lower_ratio": 0.919877997424183,
+          "passes": false,
+          "max_cgroup_mib": {
+            "current": 379.0390625,
+            "policy": 339.51953125
+          },
+          "max_rss_mib": {
+            "current": 234.12109375,
+            "policy": 171.3125
+          }
+        }
+      ],
+      "unsupported_baseline_fallback_pairs": 3,
+      "fallback_regressions": 0,
+      "vm_candidate": false
+    }
+  ]
+}

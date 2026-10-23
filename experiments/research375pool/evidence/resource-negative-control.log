@@ -1,0 +1,7 @@
+=== RUN   TestResourceKernelFunctional
+    resources_test.go:417: Successful control: unit=microfat-poc375pool-1a50e1ed42953e3c.service exit=0 cap=134217728 swap=0 CPU=100000/100000 peak=2285568
+    resources_test.go:429: Ordinary failure retained: unit=microfat-poc375pool-e6293b2047782a72.service exit=1 OOM=false cap=268435456 CPU=400000/100000
+    resources_test.go:444: Hard-cap OOM retained: unit=microfat-poc375pool-9dc1614f44c56a46.service exit=137 signal=9 oom_kills=1 cap=67108864 peak=67108864 CPU=13441 us marker="resource-oom-touching-pages"
+--- PASS: TestResourceKernelFunctional (0.11s)
+PASS
+ok  	github.com/EpicBlackWolfZ/microfat/experiments/research375pool	1.121s

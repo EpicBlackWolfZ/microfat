@@ -1,0 +1,76 @@
+{
+  "measured_source_revision": "8c0ac81118363f8bda802483bd2b6ed2d01e22cc",
+  "initial_source_freeze": "c303d92fd0dd78f3eda0e06d8747158d87515b60",
+  "protocol_sha256": "4067972d7dd87d47d9ae895e0d4c6c71d6bf18fd46deb83937da0fb4000d3d4d",
+  "go_version": "go1.27.3",
+  "run_id": 39927016072,
+  "initial_zero_sample_setup_failure_run": 39926492099,
+  "cohorts": [
+    {
+      "host_id": "amd64-vm-0",
+      "archive": "pool-amd64-0-39927016072-1.tar.gz",
+      "producer_sha256": "e086b23397722cc8874f2eaa97f300c6e02d2059c32543ff7596edac4920725a",
+      "training_report_sha256": "e69c06182be0eb3d134b210f337f822d0757701d926da1e4bd16cb026e0af373",
+      "confirmation_report_sha256": "300426d352c51c61983ded4aa543fa85fcd5ca4ced896b39b8f1507b43e05cfa",
+      "matrix_report_sha256": "85fe4338dd3c0ef49a0a438fc9b2283b340165825aad437ccf38a32e3793261a",
+      "policy_sha256": "d4ca4d558dac8befa3e35b880f5c033e6c4cc60e88a770772c2b2f13f007e4df",
+      "training_manifest_sha256": "e1f3f08940d475fc2ae1f62b40472276fb218fabacb154013d63e0b1e63177df",
+      "heldout_manifest_sha256": "2fa0f86173a3f51963da8acbb6807beeced7198122e528da6278f497506490c9",
+      "vm_candidate": false
+    },
+    {
+      "host_id": "amd64-vm-1",
+      "archive": "pool-amd64-1-39927016072-1.tar.gz",
+      "producer_sha256": "e086b23397722cc8874f2eaa97f300c6e02d2059c32543ff7596edac4920725a",
+      "training_report_sha256": "ad124f6cdccf11f15c2929b4bd8957d285ca88a190915b80b9daa2974d6c1ef5",
+      "confirmation_report_sha256": "23aad443ff3a353b3c0ba74def3f93efce9a4c697d85cf0f9e1accf7ddc59924",
+      "matrix_report_sha256": "d3631472213e255a63ff3ba8cd1bf0b046773233a9e6b8ebdb1b11c282cafc94",
+      "policy_sha256": "739e94f6b213372065911e9633207228e62adbaa6fcfbbefa28e70b8840b025d",
+      "training_manifest_sha256": "e1f3f08940d475fc2ae1f62b40472276fb218fabacb154013d63e0b1e63177df",
+      "heldout_manifest_sha256": "2fa0f86173a3f51963da8acbb6807beeced7198122e528da6278f497506490c9",
+      "vm_candidate": true
+    },
+    {
+      "host_id": "arm64-vm-0",
+      "archive": "pool-arm64-0-39927016072-1.tar.gz",
+      "producer_sha256": "b894c5354284efd0eb76e89c6135bd148924f95b432d77c7072844849da7f6c8",
+      "training_report_sha256": "8c7b907667b04991cc70f01060e144334d6b2e017fad6050400f99e054179b0a",
+      "confirmation_report_sha256": "2abc26eb0c445eb3ee07823e13fae1b83f499a8a6ee5ab79861e880e1797036e",
+      "matrix_report_sha256": "358304f27c19f9a03f3bd19453bd9409f60e643b84bf8066d5d5e866f3fc5b65",
+      "policy_sha256": "d7136a5cdf987c41a6562d882ad20c37141fbb19488b1e68064bd6056651d257",
+      "training_manifest_sha256": "8169c47696aff0bf05dd2cf47afc153d55556ce1d1115f2720b2dba6e3ad9053",
+      "heldout_manifest_sha256": "c6f09eea1941a6faff0b7ab28e42a368844d913d08b2523bc39983d58111b902",
+      "vm_candidate": true
+    },
+    {
+      "host_id": "arm64-vm-1",
+      "archive": "pool-arm64-1-39927016072-1.tar.gz",
+      "producer_sha256": "b894c5354284efd0eb76e89c6135bd148924f95b432d77c7072844849da7f6c8",
+      "training_report_sha256": "891a90335b984f68fe0ce22db526a7ee1135febb28d9d40c4ebd107682c0e8f8",
+      "confirmation_report_sha256": "756f17256bbbcb55292cedb215d51d1d5254afd43324df008de7dfa9ec5d22a9",
+      "matrix_report_sha256": "a1a58e29d2b27a6cc80cee61b52f556675eefcee0e35f97669609de4fdcea531",
+      "policy_sha256": "6a4587c2b4eec485e3f61a2ae0c3f6ea82f67d8743358bfeb14b12ee81f4f0aa",
+      "training_manifest_sha256": "8169c47696aff0bf05dd2cf47afc153d55556ce1d1115f2720b2dba6e3ad9053",
+      "heldout_manifest_sha256": "c6f09eea1941a6faff0b7ab28e42a368844d913d08b2523bc39983d58111b902",
+      "vm_candidate": false
+    }
+  ],
+  "non_test_harness_go_file_sha256": {
+    "experiments/research375pool/campaign.go": "a038e288d067b85e3c6b7033b11526aedf6f0edcf03f170e269f91d6ea91c365",
+    "experiments/research375pool/campaign_study.go": "ca69c05f48d28bfc140ac1e2241af455f8712c181129b2e6ac43f8311adbde1c",
+    "experiments/research375pool/confirmation.go": "8e511beb14c98058be2f775d3b90839593c5c70879d6657b1b09988a23ddb68e",
+    "experiments/research375pool/confirmation_constants.go": "8fbfbff85111a59bf45cf562f3057d52ac7f68b9b618ac5b9a9ae1285197fc44",
+    "experiments/research375pool/confirmation_native.go": "f200348e63c7304eb81dab3c1dcd05b63b08382c7ed03b4c9d629a2cd6f8ed6b",
+    "experiments/research375pool/confirmation_summary.go": "f0311fcaef1d3125158f89245677b36d1dd0992c95367175a3cea4e4ab9ecc90",
+    "experiments/research375pool/corpus.go": "65d2e504507b189a4cae5bbacddf6f7e7dd38f70492855fb9d7c5e0bff5cc6e6",
+    "experiments/research375pool/disk.go": "84910fe4626ffb7830635c20f3de0b473b94ead463240c33c89b3203062b504e",
+    "experiments/research375pool/execute.go": "5e9205a2f4dbb2849c92474df35d1770c08dcdf5d6f42e180fdc954881fcd098",
+    "experiments/research375pool/main.go": "59dfbbde6402ba5e560aa3e3fef4f5dfaa5a28c19fcb1e320c549a4c5df70bc9",
+    "experiments/research375pool/native_readiness.go": "19994a0268627d2b001b31027de94b774d3c1c6280323bf135978e854e72532f",
+    "experiments/research375pool/resources.go": "7882f4a62521645048a3d4aee8a69449d1e15a8f51a488dccac19b3723c25f11",
+    "experiments/research375pool/retention.go": "add1c96db5a2e3dfbd08c9f6e051bee907fd84bcabb2d7bb1c6d2f2055b68b55",
+    "experiments/research375pool/summary.go": "d0819d95336c62658a276577e93244410a6e67383e3709acf0990fdf6c32b4e7"
+  },
+  "independent_audit_script_sha256": "73d20b56c4745fcc6e097219194c7ccb662688084f1490f86afbb671424a7c8a",
+  "note": "Raw host reports, journals, worker stdout, telemetry, metadata, input and binary hashes are archived unchanged. Replayed policy and summary files are derived exact checks. No executable payload or committed Python helper. Source ZIP digests were verified before extraction and are retained in artifacts.json."
+}

@@ -1,0 +1,555 @@
+{
+  "schema_version": 1,
+  "producer_revision": "39ab979e28b3adc41386d27260675d6e9cc4dbd8",
+  "producer_sha256": "ed90c9817e625d66bc391820c736fa7b8ba476823439f8915401019566a48355",
+  "warnings": [
+    "Descriptive medians and matched-block ratios only; no population p99, confidence interval or causal claim.",
+    "Principal metrics include successful complete artifacts only; every failure remains in counts and paired-block denominators.",
+    "Cgroup peaks include file cache/startup/keeper; worker RSS is separate. Logical admission is not an RSS bound.",
+    "Ratios are computed within successful block pairs before taking their median; missing and failed pairs are reported.",
+    "Whole-artifact hashes can differ from metadata timestamps even when all compressed payloads match.",
+    "This analysis validates reported structure and controls, not the authenticity of supplied data or raw on-disk artifacts."
+  ],
+  "groups": [
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 32,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": true
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 0,
+      "failed": 1,
+      "oom_killed": 1,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [
+        {
+          "block": 0,
+          "exit_code": 137,
+          "oom_killed": true,
+          "reason": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+        }
+      ],
+      "successful_pack_wall_ns": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_pack_cpu_ns": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_worker_rss_kib": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 33554432,
+        "min": 33554432,
+        "max": 33554432
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 33554432,
+        "min": 33554432,
+        "max": 33554432
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 32,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": true
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 0,
+      "failed": 1,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [
+        {
+          "block": 0,
+          "exit_code": 1,
+          "oom_killed": false,
+          "reason": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+        }
+      ],
+      "successful_pack_wall_ns": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_pack_cpu_ns": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_worker_rss_kib": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 33558528,
+        "min": 33558528,
+        "max": 33558528
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 33558528,
+        "min": 33558528,
+        "max": 33558528
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 25165824,
+        "min": 25165824,
+        "max": 25165824
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 1,
+        "prior_output_sentinel": true
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 0,
+      "failed": 1,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [
+        {
+          "block": 0,
+          "exit_code": 1,
+          "oom_killed": false,
+          "reason": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+        }
+      ],
+      "successful_pack_wall_ns": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_pack_cpu_ns": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_worker_rss_kib": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 99418112,
+        "min": 99418112,
+        "max": 99418112
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 99418112,
+        "min": 99418112,
+        "max": 99418112
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 1048576,
+        "min": 1048576,
+        "max": 1048576
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 64,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": true
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 269353045,
+        "min": 269353045,
+        "max": 269353045
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 312354000,
+        "min": 312354000,
+        "max": 312354000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 62404,
+        "min": 62404,
+        "max": 62404
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 67108864,
+        "min": 67108864,
+        "max": 67108864
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18493897,
+        "min": 18493897,
+        "max": 18493897
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 67108864,
+        "min": 67108864,
+        "max": 67108864
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 64,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": true
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 0,
+      "failed": 1,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [
+        {
+          "block": 0,
+          "exit_code": 1,
+          "oom_killed": false,
+          "reason": "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator"
+        }
+      ],
+      "successful_pack_wall_ns": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_pack_cpu_ns": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_worker_rss_kib": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 67112960,
+        "min": 67112960,
+        "max": 67112960
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 67112960,
+        "min": 67112960,
+        "max": 67112960
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 0,
+        "min": 0,
+        "max": 0
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 50331648,
+        "min": 50331648,
+        "max": 50331648
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 0,
+        "min": 0,
+        "max": 0
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 32,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": true
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 0,
+      "matched_blocks_with_failure": 1,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "compressed_payload_bitstreams_equal_pairs": 0,
+      "dictionary_hash_equal_pairs": 0,
+      "complete_artifact_size_equal_pairs": 0,
+      "complete_artifact_hash_equal_pairs": 0
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 64,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": true
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 0,
+      "matched_blocks_with_failure": 1,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "compressed_payload_bitstreams_equal_pairs": 0,
+      "dictionary_hash_equal_pairs": 0,
+      "complete_artifact_size_equal_pairs": 0,
+      "complete_artifact_hash_equal_pairs": 0
+    }
+  ]
+}
