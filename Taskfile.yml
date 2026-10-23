@@ -58,6 +58,8 @@ vars:
   QEMU_BACKEND: '{{.QEMU_BACKEND | default "userns"}}'
   QEMU_OUTPUT: '{{.QEMU_OUTPUT | default ".work/qemu-qualification"}}'
   QEMU_AARCH64: '{{.QEMU_AARCH64 | default ""}}'
+  HANDOFF_BASE: '{{.HANDOFF_BASE | default ".work/fd-handoff-base"}}'
+  HANDOFF_OUTPUT: '{{.HANDOFF_OUTPUT | default ".work/fd-handoff-confirmation"}}'
   BENCHMARK_BINARY: '{{.BENCHMARK_BINARY | default (printf "%s/microfat" .BIN_DIR)}}'
   TASK_ENV: |
     export GO={{.GO | shellQuote}}
@@ -87,6 +89,14 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  qualify-cache-handoff:
+    desc: Run the frozen native verified-descriptor experiment (HANDOFF_BASE checkout required, HANDOFF_OUTPUT must be new)
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      export PATH={{printf "%s/bin" .GO_ROOT | shellQuote}}:"$PATH"
+      {{.GO | shellQuote}} run ./tests/e2e/testdata/fd_handoff \
+        -base {{.HANDOFF_BASE | shellQuote}} -candidate "$PWD" -output {{.HANDOFF_OUTPUT | shellQuote}}
   test-runtime-fixtures:
     desc: Require native fat CLI inspection, timeout and detached-child cleanup regressions
     cmds:
@@ -309,7 +319,7 @@ tasks:
     cmds:
     - |-
       {{.TASK_ENV}}
-      golangci-lint run ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter
+      golangci-lint run ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter ./tests/e2e/testdata/fd_handoff
   lint-shell:
     desc: Run pinned ShellCheck on all tracked shell scripts
     preconditions:

@@ -22,6 +22,8 @@ import (
 const (
 	cacheTestFileMode = 0o600
 	cacheTestFIFO     = "fifo"
+	cacheTestSocket   = "socket"
+	cacheTestSymlink  = "symlink"
 	cacheTestUnsafe   = "unsafe"
 )
 
@@ -145,7 +147,7 @@ func TestFailedCacheOpenMetadataOnlyRejects(t *testing.T) {
 
 func TestMaterializeRefusesUnsafeReplacementTargets(t *testing.T) {
 	t.Parallel()
-	for _, state := range []string{"socket", cacheTestFIFO, "symlink", cacheTestUnsafe} {
+	for _, state := range []string{cacheTestSocket, cacheTestFIFO, cacheTestSymlink, cacheTestUnsafe} {
 		t.Run(state, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
@@ -154,11 +156,11 @@ func TestMaterializeRefusesUnsafeReplacementTargets(t *testing.T) {
 			entry := &format.VariantEntry{SHA256: hex.EncodeToString(sum[:]), UncompressedSize: int64(len(payload))}
 			path := filepath.Join(dir, entry.SHA256)
 			switch state {
-			case "socket":
+			case cacheTestSocket:
 				createCacheTestSocket(t, path)
 			case cacheTestFIFO:
 				require.NoError(t, unix.Mkfifo(path, uint32(cacheTestFileMode)))
-			case "symlink":
+			case cacheTestSymlink:
 				require.NoError(t, os.Symlink("/bin/true", path))
 			case cacheTestUnsafe:
 				const unsafeMode = 0o720

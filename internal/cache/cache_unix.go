@@ -377,45 +377,110 @@ func createTempFileAt(dirFD int, dirPath string) (int, string, string, error) {
 //  3. Verifies the computed SHA-256 matches entry.SHA256.
 //  4. Sets permissions to PrivateExecMode (0700), flushes via Sync(), and closes the descriptor.
 //  5. Atomically renames the temporary file to entry.SHA256 via Renameat.
-//  6. Re-opens and verifies the file descriptor via OpenAndValidateVariantAtFD before returning the validated path.
+//  6. Re-opens and verifies the file descriptor via OpenAndValidateVariantAtFD, then closes it before returning the path.
 //  7. On any error, all temporary files are unlinked via Unlinkat.
 //
-// On Unix platforms (Linux, Darwin, BSD), this operation is strictly descriptor-bound to eliminate TOCTOU races.
+// On Unix platforms (Linux, Darwin, BSD), publication and validation are relative to
+// the pinned directory descriptor. The returned path is informational; execution
+// callers must retain the verified descriptor via MaterializeAndOpenVariantAtFD.
+// Neither operation makes a writable cache inode immutable.
 func MaterializeVariantAtFD(
 	dirFD int,
 	dirPath string,
 	entry *format.VariantEntry,
 	writePayload func(w io.Writer) error,
 ) (string, error) {
+	path, fd, err := MaterializeAndOpenVariantAtFD(dirFD, dirPath, entry, writePayload)
+	if err != nil {
+		return "", err
+	}
+	_ = closeFD(fd)
+	return path, nil
+}
+
+// MaterializeAndOpenVariantAtFD materializes a variant using the same atomic publication
+// and canonical validation as MaterializeVariantAtFD, retaining the verified read-only,
+// no-follow, nonblocking, close-on-exec descriptor. On success the caller owns fd and must
+// close it. On error no descriptor ownership is transferred and fd is -1.
+//
+// The descriptor pins the verified inode across pathname replacement. It does not make
+// the cache inode immutable against trusted same-UID writers with write access.
+func MaterializeAndOpenVariantAtFD(
+	dirFD int,
+	dirPath string,
+	entry *format.VariantEntry,
+	writePayload func(w io.Writer) error,
+) (string, int, error) {
+	return MaterializeAndOpenVariantAtFDWithOpener(dirFD, dirPath, entry, writePayload, OpenFileAtFunc)
+}
+
+// MaterializeAndOpenVariantAtFDWithOpener injects the raw post-publication opener.
+// The opener is trusted to enforce O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK; descriptor
+// metadata and checksum validation do not establish these flags. A nil opener selects
+// the canonical opener. Ownership and validation are identical to MaterializeAndOpenVariantAtFD.
+func MaterializeAndOpenVariantAtFDWithOpener(
+	dirFD int,
+	dirPath string,
+	entry *format.VariantEntry,
+	writePayload func(w io.Writer) error,
+	opener func(int, string) (int, error),
+) (string, int, error) {
+	return materializeAndOpenVariantAtFD(dirFD, dirPath, entry, writePayload, opener, materializeFileOps{
+		create: createTempFileAt,
+		chmod:  (*os.File).Chmod,
+		sync:   (*os.File).Sync,
+		close:  (*os.File).Close,
+		rename: renameAtFunc,
+	})
+}
+
+// File-operation injection remains internal so failures can be checked without
+// changing the canonical opener or introducing process-global test hooks.
+type materializeFileOps struct {
+	create func(int, string) (int, string, string, error)
+	chmod  func(*os.File, os.FileMode) error
+	sync   func(*os.File) error
+	close  func(*os.File) error
+	rename func(int, string, int, string) error
+}
+
+func materializeAndOpenVariantAtFD(
+	dirFD int,
+	dirPath string,
+	entry *format.VariantEntry,
+	writePayload func(w io.Writer) error,
+	opener func(int, string) (int, error),
+	fileOps materializeFileOps,
+) (string, int, error) {
 	if dirFD < 0 {
-		return "", fmt.Errorf("%w: invalid directory descriptor", format.ErrCacheWrite)
+		return "", -1, fmt.Errorf("%w: invalid directory descriptor", format.ErrCacheWrite)
 	}
 	if dirPath == "" {
-		return "", fmt.Errorf("%w: invalid empty cache directory path", format.ErrCacheWrite)
+		return "", -1, fmt.Errorf("%w: invalid empty cache directory path", format.ErrCacheWrite)
 	}
 	if entry == nil {
-		return "", errors.New("nil variant entry")
+		return "", -1, errors.New("nil variant entry")
 	}
 	if entry.SHA256 == "" || !format.ValidateChecksum(entry.SHA256) {
-		return "", fmt.Errorf("%w: invalid variant checksum %q", format.ErrInvalidChecksum, entry.SHA256)
+		return "", -1, fmt.Errorf("%w: invalid variant checksum %q", format.ErrInvalidChecksum, entry.SHA256)
 	}
 	if entry.UncompressedSize <= 0 || entry.UncompressedSize > format.MaxPayloadSize {
-		return "", fmt.Errorf("%w: invalid variant uncompressed size %d", format.ErrPayloadTooLarge, entry.UncompressedSize)
+		return "", -1, fmt.Errorf("%w: invalid variant uncompressed size %d", format.ErrPayloadTooLarge, entry.UncompressedSize)
 	}
 	if writePayload == nil {
-		return "", errors.New("nil writePayload function")
+		return "", -1, errors.New("nil writePayload function")
 	}
 
 	cleanDir := filepath.Clean(dirPath)
 	cachedName := filepath.Clean(entry.SHA256)
 	cachedBinary := filepath.Join(cleanDir, cachedName)
 	if err := validateCacheReplacementAt(dirFD, cachedName); err != nil {
-		return "", fmt.Errorf("%w: refusing cache replacement: %w", format.ErrCacheWrite, err)
+		return "", -1, fmt.Errorf("%w: refusing cache replacement: %w", format.ErrCacheWrite, err)
 	}
 
-	tmpFD, tmpName, tmpPath, createErr := createTempFileAt(dirFD, cleanDir)
+	tmpFD, tmpName, tmpPath, createErr := fileOps.create(dirFD, cleanDir)
 	if createErr != nil {
-		return "", fmt.Errorf("%w: cannot create temp file in %s: %w", format.ErrCacheWrite, cleanDir, createErr)
+		return "", -1, fmt.Errorf("%w: cannot create temp file in %s: %w", format.ErrCacheWrite, cleanDir, createErr)
 	}
 
 	tmpFile := os.NewFile(uintptr(tmpFD), tmpPath)
@@ -431,36 +496,35 @@ func MaterializeVariantAtFD(
 	hasher := sha256.New()
 	mw := io.MultiWriter(tmpFile, hasher)
 	if err := writePayload(mw); err != nil {
-		return "", fmt.Errorf("%w: writing variant payload: %w", format.ErrCacheExtract, err)
+		return "", -1, fmt.Errorf("%w: writing variant payload: %w", format.ErrCacheExtract, err)
 	}
 
 	actualHex := hex.EncodeToString(hasher.Sum(nil))
 	if actualHex != entry.SHA256 {
-		return "", fmt.Errorf("%w: expected %s, got %s", format.ErrPayloadCorrupted, entry.SHA256, actualHex)
+		return "", -1, fmt.Errorf("%w: expected %s, got %s", format.ErrPayloadCorrupted, entry.SHA256, actualHex)
 	}
 
-	if err := tmpFile.Chmod(format.PrivateExecMode); err != nil {
-		return "", fmt.Errorf("%w: setting permissions on %s: %w", format.ErrCacheWrite, tmpPath, err)
+	if err := fileOps.chmod(tmpFile, format.PrivateExecMode); err != nil {
+		return "", -1, fmt.Errorf("%w: setting permissions on %s: %w", format.ErrCacheWrite, tmpPath, err)
 	}
-	if err := tmpFile.Sync(); err != nil {
-		return "", fmt.Errorf("%w: syncing temp cache file %s: %w", format.ErrCacheWrite, tmpPath, err)
+	if err := fileOps.sync(tmpFile); err != nil {
+		return "", -1, fmt.Errorf("%w: syncing temp cache file %s: %w", format.ErrCacheWrite, tmpPath, err)
 	}
-	if err := tmpFile.Close(); err != nil {
-		return "", fmt.Errorf("%w: closing temp cache file %s: %w", format.ErrCacheWrite, tmpPath, err)
+	if err := fileOps.close(tmpFile); err != nil {
+		return "", -1, fmt.Errorf("%w: closing temp cache file %s: %w", format.ErrCacheWrite, tmpPath, err)
 	}
 	tmpFile = nil
 
-	if err := renameAtFunc(dirFD, tmpName, dirFD, cachedName); err != nil {
-		return "", fmt.Errorf("%w: renaming temp cache file %s to %s: %w", format.ErrCacheWrite, tmpPath, cachedBinary, err)
+	if err := fileOps.rename(dirFD, tmpName, dirFD, cachedName); err != nil {
+		return "", -1, fmt.Errorf("%w: renaming temp cache file %s to %s: %w", format.ErrCacheWrite, tmpPath, cachedBinary, err)
 	}
 	tmpName = ""
 
-	vfd, openErr := OpenAndValidateVariantAtFD(dirFD, cachedName, entry, false)
+	vfd, openErr := OpenAndValidateVariantAtFDWithOpener(dirFD, cachedName, entry, false, opener)
 	if openErr != nil {
 		_ = unlinkAtFunc(dirFD, cachedName, 0)
-		return "", fmt.Errorf("%w: opening verified cache file %s: %w", format.ErrCacheWrite, cachedBinary, openErr)
+		return "", -1, fmt.Errorf("%w: opening verified cache file %s: %w", format.ErrCacheWrite, cachedBinary, openErr)
 	}
-	_ = closeFD(vfd)
 
-	return cachedBinary, nil
+	return cachedBinary, vfd, nil
 }

@@ -121,6 +121,7 @@ jobs:
           go install github.com/rhysd/actionlint/cmd/actionlint@${{ steps.toolchain.outputs.actionlint }}
           actionlint
           go test ./internal/cigate ./internal/cmd/ci-gate
+          go test -race ./tests/e2e/testdata/fd_handoff
           go test ./cmd/microfat -run '^TestGoReleaserConfiguration$' -count=1
 
       - name: Run golangci-lint
@@ -129,7 +130,7 @@ jobs:
         with:
           version: ${{ steps.toolchain.outputs.golangci-lint }}
           install-mode: binary
-          args: --timeout=5m ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter
+          args: --timeout=5m ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter ./tests/e2e/testdata/fd_handoff
 
   test:
     name: Unit Tests & Coverage Gate (>= 95%)
@@ -678,6 +679,11 @@ jobs:
           set -o pipefail
           go test -race -v ./tests/e2e -run '^Test(ReproducibleEpoch|CreationEpochNumericMetadata)' -count=1 -timeout=10m \
             | tee .work/runtime-qualification/creation-epochs.log
+      - name: Qualify verified cache descriptor execution across encoder levels
+        run: |
+          set -o pipefail
+          go test -race -v ./tests/e2e -run '^TestVerifiedCacheDescriptorCompatibility$' -count=1 -timeout=10m \
+            | tee .work/runtime-qualification/cache-descriptor-matrix.log
       - name: Require complete native concurrency and policy qualification
         run: task qualify-runtime RUNTIME_TESTS=required RUNTIME_BACKEND=sudo
       - name: Preserve runtime qualification evidence
