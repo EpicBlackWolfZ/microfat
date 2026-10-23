@@ -204,3 +204,23 @@ func TestRawEpisodeConsistencyRejectsFalseSuccess(t *testing.T) {
 	_, err := analyzeReport(in)
 	require.NoError(t, err)
 }
+
+func TestConditionalSensitivityDoesNotChangeObservedProtocol(t *testing.T) {
+	t.Parallel()
+	in := fixtureReport()
+	in.Request.IID = false
+	result, err := analyzeSensitivity(in, in.RequestSHA256)
+	require.NoError(t, err)
+	assert.False(t, in.Request.IID)
+	assert.False(t, result.OriginalIID)
+	assert.Contains(t, result.Kind, "not primary")
+	require.Len(t, result.Comparisons, 1)
+	require.NotNil(t, result.Comparisons[0].Inference)
+	in.Complete = false
+	_, err = analyzeSensitivity(in, in.RequestSHA256)
+	require.Error(t, err)
+	in = fixtureReport()
+	in.Request.SLONS = 0
+	_, err = analyzeSensitivity(in, in.RequestSHA256)
+	require.Error(t, err)
+}

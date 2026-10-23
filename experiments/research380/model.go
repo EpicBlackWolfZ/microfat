@@ -172,6 +172,27 @@ type costSummary struct {
 	OutputBlocks    int64    `json:"total_preparation_plus_foreground_output_blocks_512_bytes"`
 }
 
+type conditionalSensitivity struct {
+	Kind           string       `json:"kind"`
+	OriginalIID    bool         `json:"original_protocol_iid_assumption"`
+	ReportSHA256   string       `json:"observed_report_sha256"`
+	Interpretation string       `json:"interpretation"`
+	Comparisons    []comparison `json:"conditional_comparisons"`
+}
+
+func analyzeSensitivity(in report, reportSHA string) (conditionalSensitivity, error) {
+	result := conditionalSensitivity{Kind: "CONDITIONAL IID SENSITIVITY ONLY; not primary inference", OriginalIID: in.Request.IID,
+		ReportSHA256:   reportSHA,
+		Interpretation: "Hypothetical independent stationary episodes; desktop observations do not establish these assumptions."}
+	if !in.Complete || in.Request.Phase != phaseConfirmation || !validSHA(reportSHA) {
+		return result, errors.New("sensitivity requires a complete confirmation report and its digest")
+	}
+	in.Request.IID = true
+	comparisons, err := analyzeReport(in)
+	result.Comparisons = comparisons
+	return result, err
+}
+
 func validSHA(value string) bool {
 	decoded, err := hex.DecodeString(value)
 	return err == nil && len(decoded) == 32

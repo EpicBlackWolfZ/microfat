@@ -29,6 +29,9 @@ func TestCLIAnalysisAndInputGuards(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	require.NoError(t, run([]string{testModeFlag, "analyze", testRequestFlag, path}, &stdout, &stderr))
 	assert.Contains(t, stdout.String(), "baseline_attempts")
+	stdout.Reset()
+	require.NoError(t, run([]string{testModeFlag, "iid-sensitivity", testRequestFlag, path}, &stdout, &stderr))
+	assert.Contains(t, stdout.String(), "CONDITIONAL IID SENSITIVITY ONLY")
 	require.Error(t, run([]string{testModeFlag, "analyze", testRequestFlag, path}, brokenWriter{}, io.Discard))
 	for _, args := range [][]string{{}, {"--unknown"}, {testRequestFlag, path, "extra"}, {testModeFlag, testOther, testRequestFlag, path},
 		{testModeFlag, "run", testRequestFlag, path}, {testModeFlag, "prepare", testRequestFlag, path},
@@ -39,6 +42,7 @@ func TestCLIAnalysisAndInputGuards(t *testing.T) {
 	}
 	require.NoError(t, os.WriteFile(path, []byte("{"), privateFileMode))
 	require.Error(t, run([]string{testModeFlag, "analyze", testRequestFlag, path}, io.Discard, io.Discard))
+	require.Error(t, run([]string{testModeFlag, "iid-sensitivity", testRequestFlag, path}, io.Discard, io.Discard))
 	_, err := readJSON(filepath.Dir(path))
 	require.Error(t, err)
 	fifo := filepath.Join(t.TempDir(), "fifo")

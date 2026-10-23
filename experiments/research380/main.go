@@ -26,7 +26,7 @@ func main() {
 func run(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("research380", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	mode := flags.String("mode", "", "prepare, run or analyze")
+	mode := flags.String("mode", "", "prepare, run, analyze or iid-sensitivity")
 	input := flags.String("request", "", "bounded request or report JSON")
 	output := flags.String("output", "", "new private campaign directory (run mode)")
 	if err := flags.Parse(args); err != nil {
@@ -77,8 +77,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		return json.MarshalWrite(stdout, result)
+	case "iid-sensitivity":
+		var in report
+		if err := json.Unmarshal(data, &in, json.RejectUnknownMembers(true)); err != nil {
+			return err
+		}
+		result, err := analyzeSensitivity(in, textSHA(string(data)))
+		if err != nil {
+			return err
+		}
+		return json.MarshalWrite(stdout, result)
 	default:
-		return errors.New("--mode must be prepare, run or analyze")
+		return errors.New("--mode must be prepare, run, analyze or iid-sensitivity")
 	}
 }
 

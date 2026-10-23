@@ -89,6 +89,9 @@ only for complete confirmation reports with an explicit IID assumption. A source
 revision, fresh cache or alternating order does not establish independence or
 stationarity on a shared desktop. Such intervals remain conditional; leave IID
 false for descriptive evidence when that assumption is unsupported.
+The frozen protocol additionally prespecifies `--mode iid-sensitivity` as a
+separate hypothetical-IID calculation; it retains the original protocol's IID
+value and report digest, and never replaces the primary descriptive analysis.
 
 The practical improvement gate is an entire simultaneous candidate-minus-baseline
 risk interval below the predeclared negative margin. Practical harm uses the
