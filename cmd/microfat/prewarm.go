@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -108,7 +107,7 @@ func (opts *prewarmCommandOptions) run(cmd *cobra.Command, args []string) error 
 		return printPrewarmPlan(cmd.OutOrStdout(), idx, plan, opts.jsonOutput)
 	}
 	if opts.verifyOnly {
-		resolvedDir, err := resolvePrewarmCacheDir(opts.cacheDir, true)
+		resolvedDir, err := format.ResolveExistingCacheDir(opts.cacheDir)
 		if err != nil {
 			return fmt.Errorf("resolving cache directory: %w", err)
 		}
@@ -116,7 +115,7 @@ func (opts *prewarmCommandOptions) run(cmd *cobra.Command, args []string) error 
 		if err != nil {
 			return fmt.Errorf("verifying cache: %w", err)
 		}
-		return printPrewarmVerification(path, idx, results, resolvedDir, opts.jsonOutput)
+		return printPrewarmVerification(cmd.OutOrStdout(), path, idx, results, resolvedDir, opts.jsonOutput)
 	}
 	idx, results, runErr := pack.PrewarmBinaryWithOptions(f, stat.Size(), levels, opts.cacheDir, admission)
 	if idx != nil && (runErr == nil || len(results) > 0) {
@@ -125,9 +124,9 @@ func (opts *prewarmCommandOptions) run(cmd *cobra.Command, args []string) error 
 			resolvedDir = filepath.Dir(results[0].CachedPath)
 		}
 		if opts.jsonOutput {
-			err = printPrewarmJSON(idx, results, resolvedDir)
+			err = printPrewarmJSON(cmd.OutOrStdout(), idx, results, resolvedDir)
 		} else {
-			printPrewarmResults(path, idx, results, resolvedDir, runErr == nil)
+			printPrewarmResults(cmd.OutOrStdout(), path, idx, results, resolvedDir, runErr == nil)
 		}
 		if err != nil {
 			return err
@@ -158,14 +157,7 @@ func (opts *prewarmCommandOptions) selectLevels(idx *format.Index) ([]string, er
 	}
 }
 
-func resolvePrewarmCacheDir(dir string, verifyOnly bool) (string, error) {
-	if verifyOnly {
-		return format.ResolveExistingCacheDir(dir)
-	}
-	return format.ResolveCacheDir(dir)
-}
-
-func printPrewarmJSON(idx *format.Index, results []format.PrewarmResult, cacheDir string) error {
+func printPrewarmJSON(out io.Writer, idx *format.Index, results []format.PrewarmResult, cacheDir string) error {
 	telem := format.PrewarmTelemetry{
 		Event:             format.EventPrewarm,
 		TimestampUnixNano: time.Now().UnixNano(),
@@ -173,31 +165,35 @@ func printPrewarmJSON(idx *format.Index, results []format.PrewarmResult, cacheDi
 		CacheDir:          cacheDir,
 		Results:           results,
 	}
-	if err := json.MarshalWrite(os.Stdout, telem, jsontext.WithIndent("  ")); err != nil {
+	if err := json.MarshalWrite(out, telem, jsontext.WithIndent("  ")); err != nil {
 		return fmt.Errorf("encoding json: %w", err)
 	}
-	fmt.Println()
+	if _, err := fmt.Fprintln(out); err != nil {
+		return fmt.Errorf("writing prewarm json: %w", err)
+	}
 	return nil
 }
 
-func printPrewarmVerification(path string, idx *format.Index, results []format.PrewarmResult, cacheDir string, asJSON bool) error {
+func printPrewarmVerification(
+	out io.Writer, path string, idx *format.Index, results []format.PrewarmResult, cacheDir string, asJSON bool,
+) error {
 	allValid := true
 	for _, result := range results {
 		allValid = allValid && result.Valid
 	}
 	if asJSON {
-		if err := printPrewarmJSON(idx, results, cacheDir); err != nil {
+		if err := printPrewarmJSON(out, idx, results, cacheDir); err != nil {
 			return err
 		}
 	} else {
-		fmt.Printf("Verifying cache for '%s' (%s - %s/%s)...\n", path, idx.AppName, idx.TargetOS, idx.TargetArch)
-		fmt.Printf("Cache Directory: %s\n\n", cacheDir)
+		_, _ = fmt.Fprintf(out, "Verifying cache for '%s' (%s - %s/%s)...\n", path, idx.AppName, idx.TargetOS, idx.TargetArch)
+		_, _ = fmt.Fprintf(out, "Cache Directory: %s\n\n", cacheDir)
 		for _, r := range results {
 			if r.Valid {
-				fmt.Printf("  [PASS] %-6s (sha256: %.12s..., size: %d B) -> %s\n",
+				_, _ = fmt.Fprintf(out, "  [PASS] %-6s (sha256: %.12s..., size: %d B) -> %s\n",
 					r.Level, r.SHA256, r.UncompressedSize, r.CachedPath)
 			} else {
-				fmt.Printf("  [FAIL] %-6s (sha256: %.12s..., size: %d B) -> status: %s (%s)\n",
+				_, _ = fmt.Fprintf(out, "  [FAIL] %-6s (sha256: %.12s..., size: %d B) -> status: %s (%s)\n",
 					r.Level, r.SHA256, r.UncompressedSize, r.Status, r.Error)
 			}
 		}
@@ -206,26 +202,28 @@ func printPrewarmVerification(path string, idx *format.Index, results []format.P
 		return errors.New("cache verification failed for one or more variants")
 	}
 	if !asJSON {
-		fmt.Println("\nResult: All specified cache entries are valid and verified.")
+		_, _ = fmt.Fprintln(out, "\nResult: All specified cache entries are valid and verified.")
 	}
 	return nil
 }
 
-func printPrewarmResults(path string, idx *format.Index, results []format.PrewarmResult, cacheDir string, complete bool) {
-	fmt.Printf("Prewarming cache for '%s' (%s - %s/%s)...\n", path, idx.AppName, idx.TargetOS, idx.TargetArch)
-	fmt.Printf("Cache Directory: %s\n\n", cacheDir)
+func printPrewarmResults(
+	out io.Writer, path string, idx *format.Index, results []format.PrewarmResult, cacheDir string, complete bool,
+) {
+	_, _ = fmt.Fprintf(out, "Prewarming cache for '%s' (%s - %s/%s)...\n", path, idx.AppName, idx.TargetOS, idx.TargetArch)
+	_, _ = fmt.Fprintf(out, "Cache Directory: %s\n\n", cacheDir)
 	for _, r := range results {
 		status := "extracted"
 		if r.AlreadyCached {
 			status = "already cached"
 		}
-		fmt.Printf("  • %-6s (sha256: %.12s..., size: %d B) -> %s (%s, %d µs)\n",
+		_, _ = fmt.Fprintf(out, "  • %-6s (sha256: %.12s..., size: %d B) -> %s (%s, %d µs)\n",
 			r.Level, r.SHA256, r.UncompressedSize, r.CachedPath, status, r.DecompressionUs)
 	}
 	if complete {
-		fmt.Println("\nResult: Cache prewarming complete.")
+		_, _ = fmt.Fprintln(out, "\nResult: Cache prewarming complete.")
 	} else {
-		fmt.Printf("\nResult: Prewarming stopped after %d completed variants.\n", len(results))
+		_, _ = fmt.Fprintf(out, "\nResult: Prewarming stopped after %d completed variants.\n", len(results))
 	}
 }
 
