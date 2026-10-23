@@ -29,6 +29,15 @@ Native Linux, Go1.27.3, at least four usable CPUs, a working systemd user manage
 delegated CPU/memory/swap controllers and readable cgroup telemetry are required.
 Control setup/readback failures stop and preserve an incomplete report. Inputs
 are hashed before trials: page cache is warm or unspecified, never claimed cold.
+On disposable hosted VMs only, the adapter installs a runtime service drop-in
+delegating CPU/cpuset/I/O/memory/pids before starting the user manager. An already
+active manager is restarted only after verifying the runner is outside that
+manager's cgroup; delegation properties and cgroup identity are retained before
+and after setup. Initial run39926492099 at c303d92 failed on all four VMs because
+systemd rejected changing `Delegate` with `set-property`. All four failure bundles
+are retained; this failure preceded corpus building and collected zero timed
+Pack attempts. The adapter-only setup repair leaves the Go harness, policy,
+eligibility, fixed sample size and statistical gates unchanged.
 
 ## Training and the frozen policy
 

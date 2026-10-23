@@ -58,9 +58,58 @@ trap preserve_research_evidence EXIT
 # are fresh, bounded and owned by the harness; no external workloads are killed.
 research_uid="$(id -u)"
 research_user="$(id -un)"
+research_manager="user@${research_uid}.service"
+research_runner_cgroup=''
+while IFS=: read -r research_hierarchy research_controllers research_cgroup_path; do
+  if [[ "${research_hierarchy}" == 0 && -z "${research_controllers}" ]]; then
+    research_runner_cgroup="${research_cgroup_path}"
+  fi
+done < /proc/self/cgroup
+if [[ -z "${research_runner_cgroup}" || "${research_runner_cgroup}/" == *"/${research_manager}/"* ]]; then
+  echo 'Runner must be outside its delegated user manager before setup or restart.' >&2
+  exit 1
+fi
+research_manager_cgroup="$(systemctl show "${research_manager}" --property=ControlGroup --value)"
+research_manager_state="$(systemctl show "${research_manager}" --property=ActiveState --value)"
+if [[ -n "${research_manager_cgroup}" &&
+      ( "${research_runner_cgroup}" == "${research_manager_cgroup}" ||
+        "${research_runner_cgroup}" == "${research_manager_cgroup}/"* ) ]]; then
+  echo 'Refusing to restart a user manager that contains this runner.' >&2
+  exit 1
+fi
+if [[ "${research_manager_state}" != active && "${research_manager_state}" != inactive ]]; then
+  echo 'User manager must be active or inactive before disposable setup.' >&2
+  exit 1
+fi
+{
+  printf 'runner_cgroup=%s\n' "${research_runner_cgroup}"
+  systemctl show "${research_manager}" --property=ActiveState --property=Delegate \
+    --property=DelegateControllers --property=ControlGroup
+} > "${research_evidence}/user-manager-before.txt"
+research_delegate_dir="/run/systemd/system/${research_manager}.d"
+research_delegate_file="${research_delegate_dir}/90-microfat-research-delegate.conf"
+if [[ -e "${research_delegate_file}" || -L "${research_delegate_file}" ]]; then
+  echo 'Refusing to overwrite an existing research delegation drop-in.' >&2
+  exit 1
+fi
+sudo install -d -m 0755 -- "${research_delegate_dir}"
+printf '[Service]\nDelegate=cpu cpuset io memory pids\n' | sudo tee "${research_delegate_file}" >/dev/null
+sudo systemctl daemon-reload
 sudo loginctl enable-linger "${research_user}"
-sudo systemctl start "user@${research_uid}.service"
-sudo systemctl set-property --runtime "user@${research_uid}.service" Delegate=yes
+if [[ "${research_manager_state}" == inactive ]]; then
+  sudo systemctl start "${research_manager}"
+else
+  # Only this disposable VM's user manager can be restarted; the runner was
+  # checked above to be outside its cgroup before any delegation change.
+  sudo systemctl restart "${research_manager}"
+fi
+systemctl show "${research_manager}" --property=ActiveState --property=Delegate \
+  --property=DelegateControllers --property=ControlGroup > "${research_evidence}/user-manager-after.txt"
+research_delegated="$(systemctl show "${research_manager}" --property=Delegate --value)"
+if [[ "${research_delegated}" != yes ]]; then
+  echo 'User manager delegation did not become effective.' >&2
+  exit 1
+fi
 export XDG_RUNTIME_DIR="/run/user/${research_uid}"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
 systemctl --user show-environment >/dev/null
