@@ -1,0 +1,24 @@
+{
+  "args": [
+    "/tmp/microfat-research-pocs-20261023/research375",
+    "--source-revision=c5b18feb1091323e9bf6268e27ccb2c0feaf3316",
+    "--family=microfat",
+    "--encoders=-1,1,2,4",
+    "--workers=1,2,4",
+    "--decoders=-1,1,2,4",
+    "--bursts=1,2,4",
+    "--cpu-budget=4",
+    "--trials=3",
+    "--execute",
+    "--ready-output=Version: dev (Commit: none, Built: unknown, BuiltBy: local, Go: go1.27.3, linux/amd64)\n",
+    "--input=/tmp/microfat-research-pocs-20261023/corpus/microfat-v1",
+    "--input=/tmp/microfat-research-pocs-20261023/corpus/microfat-v2",
+    "--input=/tmp/microfat-research-pocs-20261023/corpus/microfat-v3",
+    "--payload-arg=--version"
+  ],
+  "environment": {
+    "GOMAXPROCS": "4"
+  },
+  "corpus_source_revision": "ada376b4ffffaa3354becbfb70c1896934caf277",
+  "ready_output": "Version: dev (Commit: none, Built: unknown, BuiltBy: local, Go: go1.27.3, linux/amd64)\n"
+}

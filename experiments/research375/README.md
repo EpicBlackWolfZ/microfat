@@ -6,6 +6,8 @@ It runs real streaming Zstd encode/decode, verifies the exact output size and SH
 and optionally runs an explicitly trusted, native Go ELF to known readiness output.
 It is an experiment harness, not a new microfat launcher.
 
+The [native screening result](RESULTS.md) preserves the first run and its evidence.
+
 ```bash
 GOMAXPROCS=4 task research-375 INPUT=/absolute/path/demo-v1 FAMILY=demo \
   SOURCE=$(git rev-parse HEAD) TRIALS=3 > .work/research375-demo.json
