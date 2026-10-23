@@ -6,6 +6,18 @@ by more than a practical margin?** It adds no runtime policy, format change or n
 dependency. The existing paired-block bootstrap in `benchmarks/analysis/paired.go`
 is preserved.
 
+The retained calibration was generated from the Go sources in original POC
+commit `8e1bd790e49b63fb66ae0fba351a257fb464ceb8`, based on
+`ada376b4ffffaa3354becbfb70c1896934caf277`. The branch was subsequently rebased onto
+release-preparation main `94cb9f6ad26c14931ea28e53a8969f09790eff80`; all experimental
+Go source bytes remain identical. The original
+[source patch](evidence/calibration-source-8e1bd79.patch.gz) can be decompressed
+and applied to that original base even after the old commit becomes unreachable.
+Its SHA-256 is `1d168ea3f51f1f6eed439f7fe559c3303b09ae8047e85a3b21cb3ffa72de5c17`.
+[Source file hashes](evidence/source-go.sha256) cover every experimental Go source
+and test file and can be checked with `sha256sum -c` from the repository root.
+This rebase did not regenerate or relabel the retained simulation as new evidence.
+
 Run with the repository's Go 1.27.3 toolchain:
 
 ```bash
