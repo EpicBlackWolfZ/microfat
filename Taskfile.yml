@@ -87,6 +87,12 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  research-376:
+    desc: Analyze explicit lifecycle observations and scenarios without executing workloads
+    cmds:
+    - >-
+      {{.GO | shellQuote}} run ./experiments/research376
+      --input {{.RESEARCH_INPUT | default "experiments/research376/testdata/example.json" | shellQuote}}
   test-runtime-fixtures:
     desc: Require native fat CLI inspection, timeout and detached-child cleanup regressions
     cmds:
