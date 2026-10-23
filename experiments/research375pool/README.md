@@ -1,5 +1,10 @@
 # Bounded in-process encoder pool POC (#375)
 
+The successor [training and held-out confirmation protocol](CONFIRMATION.md)
+freezes a conservative policy before native amd64/arm64 VM confirmation. Its
+fixed-sample gates, source pins, fallback diagnostics and retention bounds are
+separate from the original exploratory results below.
+
 See [the measured results](RESULTS.md) for the positive high-memory cohort and
 the low-budget regressions, retained controls and evidence replay instructions.
 

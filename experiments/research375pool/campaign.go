@@ -41,20 +41,30 @@ type campaignOptions struct {
 	Matrix                                  bool
 	Execute                                 bool
 	Limits                                  bool
+	Study                                   string
+	Profile                                 string
+	Policy                                  *frozenEncoderPolicy
+	HostID                                  string
+	Family                                  string
+	MatrixMemoryMiB                         int64
+	DiskProbe                               diskProbe
 }
 
 type trialSpec struct {
-	Family       string `json:"family"`
-	Mode         string `json:"mode"`
-	CPU          int    `json:"cpu_budget"`
-	MemoryMiB    int64  `json:"hard_memory_mib"`
-	Block        int    `json:"block"`
-	Format       int    `json:"format"`
-	Codec        string `json:"codec"`
-	Dictionary   bool   `json:"dictionary"`
-	StubProfile  string `json:"stub_profile"`
-	AdmissionMiB int64  `json:"admission_mib_override,omitempty"`
-	PriorOutput  bool   `json:"prior_output_sentinel,omitempty"`
+	Family        string `json:"family"`
+	Mode          string `json:"mode"`
+	CPU           int    `json:"cpu_budget"`
+	MemoryMiB     int64  `json:"hard_memory_mib"`
+	Block         int    `json:"block"`
+	Format        int    `json:"format"`
+	Codec         string `json:"codec"`
+	Dictionary    bool   `json:"dictionary"`
+	StubProfile   string `json:"stub_profile"`
+	AdmissionMiB  int64  `json:"admission_mib_override,omitempty"`
+	PriorOutput   bool   `json:"prior_output_sentinel,omitempty"`
+	WorkspaceMiB  int64  `json:"workspace_mib,omitempty"`
+	CorpusProfile string `json:"corpus_profile,omitempty"`
+	Primary       bool   `json:"primary_confirmation,omitempty"`
 }
 
 type artifactResult struct {
@@ -73,20 +83,25 @@ type observation struct {
 	Error                string              `json:"error,omitempty"`
 	Launches             []launchObservation `json:"launches,omitempty"`
 	PriorOutputPreserved *bool               `json:"prior_output_preserved,omitempty"`
+	PolicyDecision       string              `json:"policy_decision,omitempty"`
+	ArtifactRetention    string              `json:"artifact_retention,omitempty"`
 }
 
 type campaignReport struct {
-	SchemaVersion     int            `json:"schema_version"`
-	ProducerRevision  string         `json:"producer_revision"`
-	ProducerSHA256    string         `json:"producer_sha256"`
-	GoVersion         string         `json:"go_version"`
-	HostArch          string         `json:"host_arch"`
-	Corpus            corpusManifest `json:"corpus"`
-	ManifestSHA256    string         `json:"manifest_sha256"`
-	StubSHA256        string         `json:"stub_sha256"`
-	MinimalStubSHA256 string         `json:"minimal_stub_sha256,omitempty"`
-	Warnings          []string       `json:"warnings"`
-	Observations      []observation  `json:"observations"`
+	SchemaVersion     int              `json:"schema_version"`
+	ProducerRevision  string           `json:"producer_revision"`
+	ProducerSHA256    string           `json:"producer_sha256"`
+	GoVersion         string           `json:"go_version"`
+	HostArch          string           `json:"host_arch"`
+	Corpus            corpusManifest   `json:"corpus"`
+	ManifestSHA256    string           `json:"manifest_sha256"`
+	StubSHA256        string           `json:"stub_sha256"`
+	MinimalStubSHA256 string           `json:"minimal_stub_sha256,omitempty"`
+	Warnings          []string         `json:"warnings"`
+	Observations      []observation    `json:"observations"`
+	Study             *studyRecord     `json:"study,omitempty"`
+	DiskChecks        []studyDiskCheck `json:"disk_checks,omitempty"`
+	StopReason        string           `json:"stop_reason,omitempty"`
 }
 
 type trialRunner func(context.Context, trialResourceConfig, string, []string, []string) (resourceTrialResult, error)
@@ -113,6 +128,13 @@ func runCampaign(ctx context.Context, opts campaignOptions, runner trialRunner) 
 	if err != nil {
 		return r, err
 	}
+	opts, m, families, err = prepareStudyCampaign(opts, m, families)
+	if err != nil {
+		return r, err
+	}
+	if opts.Study != "" {
+		r.Study = recordStudy(opts)
+	}
 	r.Corpus = m
 	r.ManifestSHA256, _, err = digestFile(opts.Manifest, maxJSON)
 	if err != nil {
@@ -136,36 +158,30 @@ func runCampaign(ctx context.Context, opts campaignOptions, runner trialRunner) 
 	if err != nil {
 		return r, err
 	}
+	if opts.Study == studyConfirmation && (opts.Policy.TrainingProducerRevision != r.ProducerRevision ||
+		opts.Policy.TrainingProducerSHA256 != r.ProducerSHA256) {
+		return r, errors.New("confirmation producer differs from frozen training producer")
+	}
 	if err = os.Mkdir(opts.Output, privateDirMode); err != nil {
 		return r, err
 	}
-	specs := makeSpecs(families, opts)
-	for i, spec := range specs {
-		if err = ctx.Err(); err != nil {
-			break
-		}
-		var obs observation
-		obs, err = runObservation(ctx, opts, m, spec, i, exe, runner)
-		r.Observations = append(r.Observations, obs)
-		if err != nil {
-			break
-		} // Setup/control failures cannot silently become measurements.
-	}
-	if opts.Matrix && err == nil {
-		for _, obs := range r.Observations {
-			if obs.Error != "" {
-				err = errors.New("correctness matrix contains failed observations")
-				break
-			}
+	if opts.Study != "" {
+		if err = writeDurableStudyJSON(filepath.Join(opts.Output, "study.json"), r); err != nil {
+			return r, err
 		}
 	}
+	err = collectCampaign(ctx, opts, m, families, exe, runner, &r)
 	writeErr := writeJSON(filepath.Join(opts.Output, "report.json"), r)
 	return r, errors.Join(err, writeErr)
 }
 
 func validateCampaignOptions(opts campaignOptions) error {
-	if !validRevision(opts.Source) || opts.Trials < 1 || opts.Trials > maxTrials || opts.Output == "" ||
-		runtime.Version() != "go1.27.3" || (opts.Execute && !opts.Matrix) ||
+	limit := maxTrials
+	if opts.Study != "" {
+		limit = maxConfirmationBlocks
+	}
+	if !validRevision(opts.Source) || opts.Trials < 1 || opts.Trials > limit || opts.Output == "" ||
+		runtime.Version() != researchGoVersion || (opts.Execute && !opts.Matrix) ||
 		(producerRevision != "" && opts.Source != producerRevision) {
 		return errors.New("matching exact revision, Go 1.27.3, new output and bounded trials required")
 	}
@@ -187,24 +203,31 @@ func absoluteCampaignPaths(opts campaignOptions) (campaignOptions, error) {
 }
 
 func makeSpecs(families []string, opts campaignOptions) []trialSpec {
+	if opts.Study != "" {
+		return makeStudySpecs(families, opts)
+	}
 	var out []trialSpec
 	if opts.Limits {
 		for _, memory := range []int64{32, 64} {
 			for _, mode := range []string{modeCurrent, modePool} {
-				out = append(out, trialSpec{Family: "microfat", Mode: mode, CPU: fullCPU, MemoryMiB: memory,
-					Format: format.FormatVersion2, Codec: codecZstd, StubProfile: "full", PriorOutput: true})
+				out = append(out, trialSpec{Family: familyMicrofat, Mode: mode, CPU: fullCPU, MemoryMiB: memory,
+					Format: format.FormatVersion2, Codec: codecZstd, StubProfile: summaryFullStub, PriorOutput: true})
 			}
 		}
-		return append(out, trialSpec{Family: "microfat", Mode: modePool, CPU: fullCPU, MemoryMiB: maxTrialMemoryMiB,
-			Format: format.FormatVersion2, Codec: codecZstd, StubProfile: "full", AdmissionMiB: 1, PriorOutput: true})
+		return append(out, trialSpec{Family: familyMicrofat, Mode: modePool, CPU: fullCPU, MemoryMiB: maxTrialMemoryMiB,
+			Format: format.FormatVersion2, Codec: codecZstd, StubProfile: summaryFullStub, AdmissionMiB: 1, PriorOutput: true})
 	}
 	if opts.Matrix {
+		memory := int64(maxTrialMemoryMiB)
+		if opts.MatrixMemoryMiB > 0 {
+			memory = opts.MatrixMemoryMiB
+		}
 		for _, family := range families {
 			for _, version := range []int{1, 2} {
-				for _, stub := range []string{"full", "minimal"} {
+				for _, stub := range []string{summaryFullStub, "minimal"} {
 					for _, algorithm := range []string{"none", "lz4", codecZstd, "zstd-dict"} {
 						for _, mode := range []string{modeCurrent, modePool} {
-							out = append(out, trialSpec{Family: family, Mode: mode, CPU: fullCPU, MemoryMiB: maxTrialMemoryMiB, Format: version,
+							out = append(out, trialSpec{Family: family, Mode: mode, CPU: fullCPU, MemoryMiB: memory, Format: version,
 								Codec: mapCodec(algorithm), Dictionary: algorithm == "zstd-dict", StubProfile: stub})
 						}
 					}
@@ -218,7 +241,7 @@ func makeSpecs(families []string, opts campaignOptions) []trialSpec {
 		for _, cpu := range []int{1, 4} {
 			for _, memory := range []int64{128, 256, 512} {
 				cohorts = append(cohorts, trialSpec{Family: family, CPU: cpu, MemoryMiB: memory,
-					Format: format.FormatVersion2, Codec: codecZstd, StubProfile: "full"})
+					Format: format.FormatVersion2, Codec: codecZstd, StubProfile: summaryFullStub})
 			}
 		}
 	}
@@ -259,6 +282,9 @@ func runObservation(
 		return o, err
 	}
 	req := makeRequest(opts, m, spec, dir)
+	if spec.Mode == modePolicy {
+		req.Pool, o.PolicyDecision = selectFrozenPool(opts.Policy, m, spec)
+	}
 	const priorOutput = "existing output preserved on rejected or failed packing\n"
 	if spec.PriorOutput {
 		if err := os.WriteFile(req.Output, []byte(priorOutput), privateFileMode); err != nil {
@@ -377,7 +403,11 @@ func verifyArtifact(req request, m corpusManifest) (artifactResult, error) {
 		}
 		out.CompressedSHA256[v.Level] = hex.EncodeToString(h.Sum(nil))
 	}
-	out.SHA256, out.Bytes, err = digestFile(req.Output, maxArtifact)
+	artifactLimit := maxArtifact
+	if m.SchemaVersion == portableCorpusSchema {
+		artifactLimit = maxTrialMemoryMiB * mib
+	}
+	out.SHA256, out.Bytes, err = digestFile(req.Output, artifactLimit)
 	out.Index = idx
 	return out, err
 }
@@ -389,6 +419,7 @@ func makeRequest(opts campaignOptions, m corpusManifest, spec trialSpec, dir str
 	}
 	req := request{Stub: stub, Output: filepath.Join(dir, "artifact"), AppName: spec.Family, Arch: "amd64",
 		Variants: familyVariants(m, spec.Family), Compression: spec.Codec, Level: "default", Dictionary: spec.Dictionary, Format: spec.Format}
+	req.Arch = corpusArchitecture(m)
 	if spec.Mode != modeCurrent {
 		workers := min(maxPoolWidth, spec.CPU)
 		if spec.Mode == "serial1" {
@@ -399,6 +430,9 @@ func makeRequest(opts campaignOptions, m corpusManifest, spec trialSpec, dir str
 			WorkspaceBytesPerEncoder: defaultWorkspace}
 		if spec.AdmissionMiB > 0 {
 			req.Pool.MemoryBudgetBytes = spec.AdmissionMiB * mib
+		}
+		if spec.WorkspaceMiB > 0 {
+			req.Pool.WorkspaceBytesPerEncoder = spec.WorkspaceMiB * mib
 		}
 	}
 	return req
@@ -444,4 +478,45 @@ func verifyEnvelope(f *os.File, idx *format.Index, req request) error {
 		return errors.New("stub or dictionary boundary differs from request")
 	}
 	return nil
+}
+
+func collectCampaign(ctx context.Context, opts campaignOptions, m corpusManifest, families []string, exe string,
+	runner trialRunner, r *campaignReport) error {
+	var err error
+	specs := makeSpecs(families, opts)
+	for i, spec := range specs {
+		if err = ctx.Err(); err != nil {
+			break
+		}
+		if opts.Study != "" {
+			var check studyDiskCheck
+			check, err = checkStudyDisk(opts.Output, i, opts.DiskProbe)
+			r.DiskChecks = append(r.DiskChecks, check)
+			if err != nil {
+				r.StopReason = err.Error()
+				break
+			}
+		}
+		var obs observation
+		obs, err = runObservation(ctx, opts, m, spec, i, exe, runner)
+		if opts.Study != "" && err == nil {
+			err = retainStudyObservation(opts.Output, i, &obs)
+		}
+		r.Observations = append(r.Observations, obs)
+		if err != nil {
+			break
+		} // Setup/control failures cannot silently become measurements.
+	}
+	if opts.Matrix && err == nil {
+		for _, obs := range r.Observations {
+			if obs.Error != "" {
+				err = errors.New("correctness matrix contains failed observations")
+				break
+			}
+		}
+	}
+	if opts.Study == studyConfirmation && err == nil {
+		err = checkStudyNative(ctx, r, m, verifyNativeLaunches)
+	}
+	return err
 }

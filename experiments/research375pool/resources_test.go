@@ -300,7 +300,7 @@ func TestResourceConfigBoundsAndLiteralArguments(t *testing.T) {
 		"foreign unit":             func(c *trialResourceConfig) { c.UnitName = "foreign.service" },
 		"bad suffix":               func(c *trialResourceConfig) { c.UnitName = resourceUnitPrefix + "bad.scope" },
 		"bad unit character":       func(c *trialResourceConfig) { c.UnitName = resourceUnitPrefix + "bad/name.service" },
-		"relative trial directory": func(c *trialResourceConfig) { c.TrialDir = "relative" },
+		"relative trial directory": func(c *trialResourceConfig) { c.TrialDir = fixtureRelative },
 		"unit name cap": func(c *trialResourceConfig) {
 			c.UnitName = resourceUnitPrefix + strings.Repeat("a", resourceMaximumUnit) + resourceUnitSuffix
 		},
@@ -317,7 +317,7 @@ func TestResourceConfigBoundsAndLiteralArguments(t *testing.T) {
 		command   string
 		args, env []string
 	}{
-		{"relative", nil, nil}, {resourceFixtureWorker, make([]string, resourceMaximumArgs+1), nil},
+		{fixtureRelative, nil, nil}, {resourceFixtureWorker, make([]string, resourceMaximumArgs+1), nil},
 		{resourceFixtureWorker, nil, make([]string, resourceMaximumArgs+1)},
 		{resourceFixtureWorker, []string{strings.Repeat("x", resourceTelemetryLimit+1)}, nil},
 		{resourceFixtureWorker, []string{"contains\x00nul"}, nil}, {resourceFixtureWorker, nil, []string{"NO-EQUALS"}},
@@ -354,7 +354,7 @@ func TestResourceParsersFiniteAndNonduplicated(t *testing.T) {
 		require.ErrorIs(t, err, ErrResourceTelemetry)
 	}
 	fixture := newResourceFixture(t)
-	for _, group := range []string{"", "relative", "/foreign.service", "/x/../" + fixture.config.UnitName} {
+	for _, group := range []string{"", fixtureRelative, "/foreign.service", "/x/../" + fixture.config.UnitName} {
 		err := collectResourceTelemetry(&resourceTrialResult{}, group, fixture.config, fixture.backend(t))
 		require.ErrorIs(t, err, ErrResourceTelemetry)
 	}
@@ -367,7 +367,7 @@ func TestResourceParsersFiniteAndNonduplicated(t *testing.T) {
 func TestResourceBoundedFilesAndControlCommands(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
-	path := filepath.Join(directory, "bytes")
+	path := filepath.Join(directory, fixtureBytes)
 	require.NoError(t, os.WriteFile(path, []byte("fixture"), 0o600))
 	data, err := resourceRead(path, 7)
 	require.NoError(t, err)

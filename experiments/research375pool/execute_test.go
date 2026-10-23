@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	launchTestFamily = "demo"
+	launchTestFamily = familyDemo
 	launchTestReady  = "{\"status\":\"ready\",\"version\":\"1.0.0\"}\n"
 	launchTestOutput = "Version: dev (Go: go1.27.3, linux/amd64)\n"
 	launchHelperEnv  = "RESEARCH375POOL_LAUNCH_HELPER"
@@ -123,12 +123,12 @@ func TestNativeLaunchMatrixModesAndOutput(t *testing.T) {
 func TestNativeLaunchRejectsUnknownOrForeignFixtures(t *testing.T) {
 	t.Parallel()
 	m, _ := nativeLaunchFixture(t)
-	_, err := nativeFixtureArgs("unknown")
+	_, err := nativeFixtureArgs(fixtureUnknown)
 	require.Error(t, err)
-	args, err := nativeFixtureArgs("microfat")
+	args, err := nativeFixtureArgs(familyMicrofat)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"--version"}, args)
-	_, err = verifyNativeLaunches(context.Background(), "artifact", m, "unknown", t.TempDir())
+	_, err = verifyNativeLaunches(context.Background(), "artifact", m, fixtureUnknown, t.TempDir())
 	require.Error(t, err)
 	for _, tc := range []struct {
 		name string
@@ -136,7 +136,7 @@ func TestNativeLaunchRejectsUnknownOrForeignFixtures(t *testing.T) {
 	}{
 		{"foreign OS", microarch.Info{OS: "darwin", Arch: microarch.ArchAMD64, Level: microarch.AMD64v3}},
 		{"foreign arch", microarch.Info{OS: "linux", Arch: microarch.ArchARM64, Level: microarch.ARM64v8_0}},
-		{"unknown level", microarch.Info{OS: "linux", Arch: microarch.ArchAMD64, Level: "unknown"}},
+		{"unknown level", microarch.Info{OS: "linux", Arch: microarch.ArchAMD64, Level: fixtureUnknown}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := selectNativeFixture(m, launchTestFamily, tc.host)
@@ -231,13 +231,13 @@ func TestNativeLaunchManifestAndDirectoryFailures(t *testing.T) {
 func TestNativeLaunchOutputAndDiagnosticValidation(t *testing.T) {
 	t.Parallel()
 	require.NoError(t, validateNativeFixtureOutput(launchTestFamily, launchTestReady))
-	require.NoError(t, validateNativeFixtureOutput("microfat", launchTestOutput))
+	require.NoError(t, validateNativeFixtureOutput(familyMicrofat, launchTestOutput))
 	for _, output := range []string{"not JSON", `{}`, `{"status":"starting","version":"1"}`, `{"status":"ready"}`} {
 		require.Error(t, validateNativeFixtureOutput(launchTestFamily, output))
 	}
-	require.Error(t, validateNativeFixtureOutput("microfat", "Version: dev windows/amd64"))
+	require.Error(t, validateNativeFixtureOutput(familyMicrofat, "Version: dev windows/amd64"))
 	_, fixture := nativeLaunchFixture(t)
-	faults := []string{fixtureMissing, "bad-json", "wrong-event", "duplicate", "wrong-host", "wrong-hash", "wrong-size", "wrong-level"}
+	faults := []string{fixtureMissing, "bad-json", "wrong-event", fixtureDuplicate, "wrong-host", "wrong-hash", "wrong-size", "wrong-level"}
 	for _, fault := range faults {
 		t.Run(fault, func(t *testing.T) {
 			stderr := nativeLaunchTestDiagnostic(t, format.ExecModeMemfd, fixture)
@@ -248,7 +248,7 @@ func TestNativeLaunchOutputAndDiagnosticValidation(t *testing.T) {
 				stderr = "[microfat] broken"
 			case "wrong-event":
 				stderr = strings.ReplaceAll(stderr, format.EventDispatch, format.EventError)
-			case "duplicate":
+			case fixtureDuplicate:
 				stderr += stderr
 			case "wrong-host":
 				stderr = strings.ReplaceAll(stderr, microarch.ArchAMD64, microarch.ArchARM64)

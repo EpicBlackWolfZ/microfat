@@ -23,16 +23,19 @@ const (
 var ErrSummaryInput = errors.New("invalid or ambiguous campaign summary input")
 
 type summaryCohort struct {
-	Family       string `json:"family"`
-	CPU          int    `json:"cpu_budget"`
-	MemoryMiB    int64  `json:"hard_memory_mib"`
-	Format       int    `json:"format"`
-	Codec        string `json:"codec"`
-	Level        string `json:"compression_level"`
-	Dictionary   bool   `json:"dictionary"`
-	StubProfile  string `json:"stub_profile"`
-	AdmissionMiB int64  `json:"admission_mib_override"`
-	PriorOutput  bool   `json:"prior_output_sentinel"`
+	Family        string `json:"family"`
+	CPU           int    `json:"cpu_budget"`
+	MemoryMiB     int64  `json:"hard_memory_mib"`
+	Format        int    `json:"format"`
+	Codec         string `json:"codec"`
+	Level         string `json:"compression_level"`
+	Dictionary    bool   `json:"dictionary"`
+	StubProfile   string `json:"stub_profile"`
+	AdmissionMiB  int64  `json:"admission_mib_override"`
+	PriorOutput   bool   `json:"prior_output_sentinel"`
+	WorkspaceMiB  int64  `json:"workspace_mib,omitempty"`
+	CorpusProfile string `json:"corpus_profile,omitempty"`
+	Primary       bool   `json:"primary_confirmation,omitempty"`
 }
 
 type summarySeries struct {
@@ -128,7 +131,7 @@ func summarizeReport(report campaignReport) (campaignSummary, error) {
 			"This analysis validates reported structure and controls, not the authenticity of supplied data or raw on-disk artifacts.",
 		}}
 	if report.SchemaVersion != 1 || !validRevision(report.ProducerRevision) || !summaryValidHash(report.ProducerSHA256) ||
-		report.GoVersion != "go1.27.3" || len(report.Observations) == 0 || len(report.Observations) > summaryMaximumObservations {
+		report.GoVersion != researchGoVersion || len(report.Observations) == 0 || len(report.Observations) > summaryMaximumObservations {
 		return out, ErrSummaryInput
 	}
 	groups := make(map[summaryGroupKey]*summaryAccumulator)
@@ -170,7 +173,7 @@ func summarizeReport(report campaignReport) (campaignSummary, error) {
 func validateSummaryObservation(o observation, goVersion string) (summaryGroupKey, string, error) {
 	s, r := o.Spec, o.Request
 	key := summaryGroupKey{cohort: summaryCohort{s.Family, s.CPU, s.MemoryMiB, s.Format, s.Codec, r.Level,
-		s.Dictionary, s.StubProfile, s.AdmissionMiB, s.PriorOutput}, mode: s.Mode}
+		s.Dictionary, s.StubProfile, s.AdmissionMiB, s.PriorOutput, s.WorkspaceMiB, s.CorpusProfile, s.Primary}, mode: s.Mode}
 	if !validSummarySpec(s, r) {
 		return key, "", ErrSummaryInput
 	}
@@ -197,9 +200,9 @@ func validateSummaryObservation(o observation, goVersion string) (summaryGroupKe
 }
 
 func validSummarySpec(s trialSpec, r request) bool {
-	return safeName.MatchString(s.Family) && slices.Contains([]string{summaryCurrent, summarySerial, summaryPool}, s.Mode) &&
+	return safeName.MatchString(s.Family) && slices.Contains([]string{summaryCurrent, summarySerial, summaryPool, modePolicy}, s.Mode) &&
 		s.CPU >= 1 && s.CPU <= fullCPU && s.MemoryMiB >= resourceMinimumMemory/mib && s.MemoryMiB <= resourceMaximumMemory/mib &&
-		s.Block >= 0 && s.Block < maxTrials && slices.Contains([]int{1, 2}, s.Format) &&
+		s.Block >= 0 && s.Block < maxConfirmationBlocks && slices.Contains([]int{1, 2}, s.Format) &&
 		slices.Contains([]string{"none", "lz4", "zstd"}, s.Codec) && slices.Contains([]string{summaryFullStub, "minimal"}, s.StubProfile) &&
 		s.AdmissionMiB >= 0 && s.AdmissionMiB <= resourceMaximumMemory/mib &&
 		r.AppName == s.Family && r.Format == s.Format && r.Compression == s.Codec && r.Dictionary == s.Dictionary && r.Level != ""

@@ -12,10 +12,11 @@ import (
 )
 
 func summaryFixtureObservation(mode string, block int, wall int64) observation {
-	s := trialSpec{Family: "demo", Mode: mode, CPU: 4, MemoryMiB: 512, Block: block, Format: 2, Codec: "zstd", StubProfile: "full"}
+	s := trialSpec{Family: familyDemo, Mode: mode, CPU: 4, MemoryMiB: 512, Block: block,
+		Format: 2, Codec: "zstd", StubProfile: summaryFullStub}
 	r := request{AppName: s.Family, Arch: "amd64", Compression: s.Codec, Format: s.Format, Level: "default"}
 	w := &workerResult{PackNS: wall, PackCPUNS: wall / 2, MaxRSSKiB: 1024,
-		GoVersion: "go1.27.3", GOMAXPROCS: s.CPU, GoMemLimitBytes: s.MemoryMiB * mib * goMemoryNumerator / goMemoryDenominator}
+		GoVersion: researchGoVersion, GOMAXPROCS: s.CPU, GoMemLimitBytes: s.MemoryMiB * mib * goMemoryNumerator / goMemoryDenominator}
 	if mode != summaryCurrent {
 		workers := 3
 		if mode == summarySerial {
@@ -36,7 +37,7 @@ func summaryFixtureObservation(mode string, block int, wall int64) observation {
 
 func summaryFixtureReport(observations ...observation) campaignReport {
 	return campaignReport{SchemaVersion: 1, ProducerRevision: campaignTestRevision,
-		ProducerSHA256: strings.Repeat("c", summaryHashLength), GoVersion: "go1.27.3", Observations: observations}
+		ProducerSHA256: strings.Repeat("c", summaryHashLength), GoVersion: researchGoVersion, Observations: observations}
 }
 
 func TestSummaryUsesPairedRatiosAndRetainsEveryDenominator(t *testing.T) {
@@ -127,9 +128,9 @@ func TestSummaryRejectsAmbiguousOrInvalidInputs(t *testing.T) {
 		"empty":             func(r *campaignReport) { r.Observations = nil },
 		"cap":               func(r *campaignReport) { r.Observations = make([]observation, summaryMaximumObservations+1) },
 		"family":            func(r *campaignReport) { r.Observations[0].Spec.Family = "" },
-		"mode":              func(r *campaignReport) { r.Observations[0].Spec.Mode = "unknown" },
+		"mode":              func(r *campaignReport) { r.Observations[0].Spec.Mode = fixtureUnknown },
 		"CPU":               func(r *campaignReport) { r.Observations[0].Spec.CPU = 0 },
-		"memory":            func(r *campaignReport) { r.Observations[0].Spec.MemoryMiB = 0 },
+		fixtureMemory:       func(r *campaignReport) { r.Observations[0].Spec.MemoryMiB = 0 },
 		"block":             func(r *campaignReport) { r.Observations[0].Spec.Block = -1 },
 		"format":            func(r *campaignReport) { r.Observations[0].Spec.Format = 0 },
 		"codec":             func(r *campaignReport) { r.Observations[0].Spec.Codec = "deflate" },

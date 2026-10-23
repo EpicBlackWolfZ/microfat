@@ -78,7 +78,7 @@ func main() { os.Exit(run(context.Background(), os.Args[1:], os.Stdout, os.Stder
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("research375pool", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	mode := fs.String("mode", "campaign", "campaign, worker, corpus, matrix, limits, or summary")
+	mode := fs.String("mode", "campaign", "campaign, worker, corpus, matrix, limits, summary, calibrate, freeze, confirm, or confirm-summary")
 	requestPath := fs.String("request", "", "bounded worker request JSON")
 	manifest := fs.String("manifest", "", "hash-pinned corpus manifest")
 	stub := fs.String("stub", "", "full launcher stub")
@@ -88,6 +88,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	corpus := fs.String("corpus", "", "prebuilt corpus directory for manifest generation")
 	trials := fs.Int("trials", defaultTrials, "fixed blocks per controlled cohort, at most 10")
 	execute := fs.Bool("execute", false, "execute trusted native corpus in untimed matrix checks only")
+	policyPath := fs.String("policy", "", "frozen training-only policy JSON for confirmation")
+	profile := fs.String("profile", profileStripped, "stripped or unstripped corpus profile")
+	blocks := fs.Int("blocks", maxConfirmationBlocks, "fixed confirmation blocks (30 planned); calibration requires3")
+	hostID := fs.String("host-id", "", "predeclared native host/VM replica identifier")
+	family := fs.String("family", "", "one known family for the bounded correctness matrix")
+	architecture := fs.String("architecture", runtime.GOARCH, "native corpus architecture: amd64 or arm64")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -101,15 +107,43 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "worker":
 		value, err = runWorker(ctx, *requestPath)
 	case "corpus":
-		value, err = buildManifest(*corpus, *source)
+		value, err = buildManifestForArch(*corpus, *source, *architecture)
 	case "summary":
 		var report campaignReport
 		if err = readJSON(*requestPath, &report); err == nil {
 			value, err = summarizeReport(report)
 		}
+	case "freeze":
+		var report campaignReport
+		if err = readJSON(*requestPath, &report); err == nil {
+			var hash string
+			hash, _, err = digestFile(*requestPath, maxJSON)
+			if err == nil {
+				value, err = freezeEncoderPolicy(report, hash)
+			}
+			if err == nil {
+				err = writeJSON(*output, value)
+			}
+		}
+	case "confirm-summary":
+		var report campaignReport
+		if err = readJSON(*requestPath, &report); err == nil {
+			value, err = summarizeConfirmation(report)
+		}
+	case studyCalibration, studyConfirmation:
+		var policy *frozenEncoderPolicy
+		if *mode == studyConfirmation {
+			policy = &frozenEncoderPolicy{}
+			err = readJSON(*policyPath, policy)
+		}
+		if err == nil {
+			value, err = runCampaign(ctx, campaignOptions{Manifest: *manifest, Stub: *stub, Output: *output, Source: *source,
+				Trials: *blocks, Study: *mode, Profile: *profile, Policy: policy, HostID: *hostID}, RunResourceTrial)
+		}
 	case "campaign", "matrix", "limits":
 		value, err = runCampaign(ctx, campaignOptions{Manifest: *manifest, Stub: *stub, Minimal: *minimal,
-			Output: *output, Source: *source, Trials: *trials, Matrix: *mode == "matrix", Limits: *mode == "limits", Execute: *execute},
+			Output: *output, Source: *source, Trials: *trials, Matrix: *mode == "matrix", Limits: *mode == "limits",
+			Execute: *execute, Profile: *profile, Family: *family},
 			RunResourceTrial)
 	default:
 		err = errors.New("unsupported mode")

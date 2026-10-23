@@ -74,7 +74,7 @@ func storeCampaignJSON(t *testing.T, path string, value any) {
 func campaignFixture(t *testing.T) (campaignOptions, corpusManifest) {
 	t.Helper()
 	dir := t.TempDir()
-	for _, family := range []string{launchTestFamily, "microfat"} {
+	for _, family := range []string{launchTestFamily, familyMicrofat} {
 		for _, level := range []string{"v1", "v2", "v3"} {
 			data := append(campaignELFFixture(false), []byte(family+"-"+level)...)
 			require.NoError(t, os.WriteFile(filepath.Join(dir, family+"-"+level), data, 0o755))
@@ -108,7 +108,7 @@ func TestCorpusManifestIdentityAndStrictJSON(t *testing.T) {
 	m, families, err := loadCorpus(opts.Manifest)
 	require.NoError(t, err)
 	assert.Equal(t, original, m)
-	assert.Equal(t, []string{launchTestFamily, "microfat"}, families)
+	assert.Equal(t, []string{launchTestFamily, familyMicrofat}, families)
 	assert.Len(t, familyVariants(m, launchTestFamily), 3)
 	assert.Empty(t, familyVariants(m, "absent"))
 	_, err = buildManifest(filepath.Dir(opts.Manifest), campaignTestRevision)
@@ -167,11 +167,11 @@ func TestCorpusManifestRejectsMutationAndMalformedRecords(t *testing.T) {
 		{"too many", func(m *corpusManifest) { m.Variants = make([]corpusVariant, maxVariants+1) }},
 		{"family", func(m *corpusManifest) { m.Variants[0].Family = "../escape" }},
 		{"level", func(m *corpusManifest) { m.Variants[0].Level = "v4" }},
-		{"duplicate", func(m *corpusManifest) { m.Variants[1] = m.Variants[0] }},
-		{"sha256", func(m *corpusManifest) { m.Variants[0].SHA256 = "wrong" }},
-		{"bytes", func(m *corpusManifest) { m.Variants[0].Bytes++ }},
+		{fixtureDuplicate, func(m *corpusManifest) { m.Variants[1] = m.Variants[0] }},
+		{"sha256", func(m *corpusManifest) { m.Variants[0].SHA256 = fixtureWrong }},
+		{fixtureBytes, func(m *corpusManifest) { m.Variants[0].Bytes++ }},
 		{fixtureMissing, func(m *corpusManifest) { m.Variants[0].Path += fixtureMissing }},
-		{"relative", func(m *corpusManifest) { m.Variants[0].Path = filepath.Base(m.Variants[0].Path) }},
+		{fixtureRelative, func(m *corpusManifest) { m.Variants[0].Path = filepath.Base(m.Variants[0].Path) }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -189,7 +189,7 @@ func TestCorpusManifestRejectsMutationAndMalformedRecords(t *testing.T) {
 	require.ErrorContains(t, err, "integrity mismatch")
 	// Three maximum-size sparse files exceed the aggregate bound. Hashing streams
 	// through the files; no unbounded payload allocation is needed for this check.
-	m := corpusManifest{SchemaVersion: 1, SourceRevision: campaignTestRevision, GoVersion: "go1.27.3"}
+	m := corpusManifest{SchemaVersion: 1, SourceRevision: campaignTestRevision, GoVersion: researchGoVersion}
 	for _, level := range []string{"v1", "v2", "v3"} {
 		path := filepath.Join(t.TempDir(), level)
 		file, err := os.Create(path)
@@ -216,7 +216,7 @@ func TestWorkerActuallyPacksAndVerifiesBothPaths(t *testing.T) {
 			require.NoError(t, err)
 			require.Empty(t, result.Error)
 			require.NotNil(t, result.Index)
-			assert.Equal(t, "go1.27.3", result.GoVersion)
+			assert.Equal(t, researchGoVersion, result.GoVersion)
 			assert.Positive(t, result.PackNS)
 			assert.GreaterOrEqual(t, result.PackCPUNS, int64(0))
 			assert.Positive(t, result.MaxRSSKiB)
@@ -269,7 +269,7 @@ func TestVerifyArtifactRejectsCorruptionAndCorpusMismatch(t *testing.T) {
 		_, err := verifyArtifact(corrupt, corpus)
 		require.Error(t, err)
 	}
-	for _, mutation := range []string{"count", "sha256", "bytes", "level"} {
+	for _, mutation := range []string{"count", "sha256", fixtureBytes, "level"} {
 		t.Run(mutation, func(t *testing.T) {
 			m := corpus
 			m.Variants = slices.Clone(corpus.Variants)
@@ -278,7 +278,7 @@ func TestVerifyArtifactRejectsCorruptionAndCorpusMismatch(t *testing.T) {
 				m.Variants = m.Variants[1:]
 			case "sha256":
 				m.Variants[0].SHA256 = strings.Repeat("0", sha256.Size*2)
-			case "bytes":
+			case fixtureBytes:
 				m.Variants[0].Bytes++
 			case "level":
 				m.Variants[0].Level = "v0"
@@ -339,7 +339,7 @@ func TestVerifyArtifactChecksRequestedCodecDictionaryStubAndMetadata(t *testing.
 
 func TestCampaignSpecsBalanceAndRotation(t *testing.T) {
 	t.Parallel()
-	families := []string{launchTestFamily, "microfat"}
+	families := []string{launchTestFamily, familyMicrofat}
 	specs := makeSpecs(families, campaignOptions{Trials: 2})
 	require.Len(t, specs, 60)
 	counts := map[string]int{}
@@ -360,7 +360,7 @@ func TestCampaignSpecsBalanceAndRotation(t *testing.T) {
 	require.Len(t, matrix, 64)
 	for _, spec := range matrix {
 		assert.Contains(t, []int{format.FormatVersion1, format.FormatVersion2}, spec.Format)
-		assert.Contains(t, []string{"full", "minimal"}, spec.StubProfile)
+		assert.Contains(t, []string{summaryFullStub, "minimal"}, spec.StubProfile)
 		assert.Contains(t, []string{"current", "pool"}, spec.Mode)
 		assert.Contains(t, []string{codec.AlgorithmNone, codec.AlgorithmLZ4, codec.AlgorithmZstd}, spec.Codec)
 		assert.Equal(t, 4, spec.CPU)
@@ -370,7 +370,7 @@ func TestCampaignSpecsBalanceAndRotation(t *testing.T) {
 	negative := makeSpecs(families, campaignOptions{Limits: true, Trials: 2})
 	require.Len(t, negative, 5)
 	for _, spec := range negative {
-		assert.Equal(t, "microfat", spec.Family)
+		assert.Equal(t, familyMicrofat, spec.Family)
 		assert.True(t, spec.PriorOutput)
 		assert.Equal(t, 4, spec.CPU)
 	}
@@ -452,20 +452,20 @@ func TestNegativeControlsRetainOOMAdmissionAndPriorOutput(t *testing.T) {
 
 func TestCampaignRuntimeControlMismatchesStopMeasurement(t *testing.T) {
 	t.Parallel()
-	for _, control := range []string{"toolchain", "cpu", "memory"} {
+	for _, control := range []string{"toolchain", "cpu", fixtureMemory} {
 		t.Run(control, func(t *testing.T) {
 			t.Parallel()
 			opts, _ := campaignFixture(t)
 			r, err := runCampaign(context.Background(), opts, func(
 				_ context.Context, cfg trialResourceConfig, _ string, _, _ []string,
 			) (resourceTrialResult, error) {
-				worker := workerResult{GoVersion: "go1.27.3", GOMAXPROCS: cfg.GOMAXPROCS, GoMemLimitBytes: cfg.GoMemLimitBytes}
+				worker := workerResult{GoVersion: researchGoVersion, GOMAXPROCS: cfg.GOMAXPROCS, GoMemLimitBytes: cfg.GoMemLimitBytes}
 				switch control {
 				case "toolchain":
 					worker.GoVersion = "go1.27.2"
 				case "cpu":
 					worker.GOMAXPROCS++
-				case "memory":
+				case fixtureMemory:
 					worker.GoMemLimitBytes++
 				}
 				data, err := json.Marshal(worker)

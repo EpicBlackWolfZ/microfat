@@ -29,23 +29,25 @@ const (
 )
 
 type launchObservation struct {
-	MeasurementKind   string `json:"measurement_kind"`
-	RequestedMode     string `json:"requested_mode"`
-	ExecMode          string `json:"exec_mode"`
-	ExpectedVariant   string `json:"expected_variant"`
-	ExpectedSHA256    string `json:"expected_sha256"`
-	ExpectedSizeBytes int64  `json:"expected_size_bytes"`
-	SelectedVariant   string `json:"selected_variant"`
-	SelectedSHA256    string `json:"selected_sha256"`
-	SelectedSizeBytes int64  `json:"selected_size_bytes"`
-	NativePayloadPath string `json:"native_payload_path"`
-	ArtifactPath      string `json:"artifact_path"`
-	CacheDir          string `json:"private_cache_dir,omitempty"`
-	Prewarmed         bool   `json:"prewarmed"`
-	OutputMatched     bool   `json:"output_matched"`
-	Stdout            string `json:"stdout"`
-	Stderr            string `json:"stderr"`
-	Error             string `json:"error,omitempty"`
+	Readiness         nativeReadiness `json:"readiness"`
+	MeasurementKind   string          `json:"measurement_kind"`
+	RequestedMode     string          `json:"requested_mode"`
+	ExecMode          string          `json:"exec_mode"`
+	ExpectedVariant   string          `json:"expected_variant"`
+	ExpectedSHA256    string          `json:"expected_sha256"`
+	ExpectedSizeBytes int64           `json:"expected_size_bytes"`
+	ExpectedArch      string          `json:"expected_arch,omitempty"`
+	SelectedVariant   string          `json:"selected_variant"`
+	SelectedSHA256    string          `json:"selected_sha256"`
+	SelectedSizeBytes int64           `json:"selected_size_bytes"`
+	NativePayloadPath string          `json:"native_payload_path"`
+	ArtifactPath      string          `json:"artifact_path"`
+	CacheDir          string          `json:"private_cache_dir,omitempty"`
+	Prewarmed         bool            `json:"prewarmed"`
+	OutputMatched     bool            `json:"output_matched"`
+	Stdout            string          `json:"stdout"`
+	Stderr            string          `json:"stderr"`
+	Error             string          `json:"error,omitempty"`
 }
 
 type nativeLaunchRunner func(context.Context, string, []string, []string) (string, string, error)
@@ -56,8 +58,8 @@ type nativeLaunchHooks struct {
 	prewarm func(string, string, string) error
 }
 
-// verifyNativeLaunches is an opt-in correctness check for two trusted, terminating
-// fixtures. It runs outside the measured packing cgroup and has no latency claim.
+// verifyNativeLaunches checks allowlisted, trusted, terminating corpus fixtures.
+// It runs outside the measured packing cgroup and has no latency claim.
 // Dispatch telemetry reports the actual mode, selected bytes and variant; these
 // checks do not replace the launcher's descriptor-bound security implementation.
 func verifyNativeLaunches(ctx context.Context, artifact string, m corpusManifest, family, dir string) ([]launchObservation, error) {
@@ -68,18 +70,24 @@ func verifyNativeLaunches(ctx context.Context, artifact string, m corpusManifest
 
 func nativeFixtureArgs(family string) ([]string, error) {
 	switch family {
-	case "demo":
+	case familyDemo:
 		return []string{"--startup-only", "--json"}, nil
-	case "microfat":
+	case familyMicrofat:
 		return []string{"--version"}, nil
+	case familyTask:
+		return []string{"--version"}, nil
+	case familyFortio:
+		return []string{"version"}, nil
+	case familyActionlint, familyGovulncheck:
+		return []string{"-version"}, nil
 	default:
-		return nil, errors.New("native execution requires a known trusted demo or microfat fixture")
+		return nil, errors.New("native execution requires an allowlisted trusted corpus fixture")
 	}
 }
 
 func selectNativeFixture(m corpusManifest, family string, host microarch.Info) (corpusVariant, error) {
-	if host.OS != "linux" || host.Arch != microarch.ArchAMD64 {
-		return corpusVariant{}, errors.New("native correctness execution requires a Linux amd64 host")
+	if host.OS != "linux" || host.Arch != corpusArchitecture(m) {
+		return corpusVariant{}, errors.New("native correctness execution requires a matching native Linux host")
 	}
 	var levels []string
 	byLevel := map[string]corpusVariant{}
@@ -87,8 +95,8 @@ func selectNativeFixture(m corpusManifest, family string, host microarch.Info) (
 		if v.Family != family {
 			continue
 		}
-		if v.Level != microarch.AMD64v1 && v.Level != microarch.AMD64v2 && v.Level != microarch.AMD64v3 {
-			return corpusVariant{}, errors.New("native fixture must use v1, v2 or v3")
+		if !validCorpusLevel(host.Arch, v.Level) {
+			return corpusVariant{}, errors.New("native fixture uses an unsupported corpus level")
 		}
 		if _, duplicate := byLevel[v.Level]; duplicate {
 			return corpusVariant{}, errors.New("duplicate native fixture level")
@@ -106,15 +114,14 @@ func selectNativeFixture(m corpusManifest, family string, host microarch.Info) (
 func verifyNativeLaunchesWithHooks(
 	ctx context.Context, artifact string, m corpusManifest, family, dir string, hooks nativeLaunchHooks,
 ) (observations []launchObservation, returnErr error) {
-	args, err := nativeFixtureArgs(family)
-	if err != nil {
+	if _, err := nativeFixtureArgs(family); err != nil {
 		return nil, err
 	}
 	fixture, err := selectNativeFixture(m, family, hooks.host())
 	if err != nil {
 		return nil, err
 	}
-	hash, size, err := digestFile(fixture.Path, maxInput)
+	hash, size, err := digestFile(fixture.Path, maxPortableInput)
 	if err != nil {
 		return nil, err
 	}
@@ -126,12 +133,17 @@ func verifyNativeLaunchesWithHooks(
 		return nil, err
 	}
 	defer func() { returnErr = errors.Join(returnErr, os.RemoveAll(cacheRoot)) }()
+	readiness, err := prepareNativeReadiness(family, cacheRoot)
+	if err != nil {
+		return nil, err
+	}
 	base := launchObservation{MeasurementKind: nativeLaunchKind, ExpectedVariant: fixture.Level,
-		ExpectedSHA256: hash, ExpectedSizeBytes: size, NativePayloadPath: fixture.Path, ArtifactPath: artifact}
+		ExpectedSHA256: hash, ExpectedSizeBytes: size, ExpectedArch: corpusArchitecture(m),
+		NativePayloadPath: fixture.Path, ArtifactPath: artifact, Readiness: readiness}
 	native := base
 	native.RequestedMode, native.ExecMode = nativeLaunchMode, nativeLaunchMode
 	native.SelectedVariant, native.SelectedSHA256, native.SelectedSizeBytes = fixture.Level, hash, size
-	native.Stdout, native.Stderr, err = hooks.run(ctx, fixture.Path, args, nativeLaunchEnv("", ""))
+	native.Stdout, native.Stderr, err = runNativeReadiness(ctx, fixture.Path, readiness, nativeLaunchEnv("", ""), hooks.run)
 	if err == nil {
 		err = validateNativeFixtureOutput(family, native.Stdout)
 	}
@@ -154,7 +166,8 @@ func verifyNativeLaunchesWithHooks(
 			}
 			observation.Prewarmed = true
 		}
-		observation.Stdout, observation.Stderr, err = hooks.run(ctx, artifact, args, nativeLaunchEnv(mode, observation.CacheDir))
+		observation.Stdout, observation.Stderr, err = runNativeReadiness(ctx, artifact, readiness,
+			nativeLaunchEnv(mode, observation.CacheDir), hooks.run)
 		if err == nil {
 			err = validateNativeDispatch(&observation, native.Stdout)
 		}
@@ -168,7 +181,7 @@ func verifyNativeLaunchesWithHooks(
 }
 
 func validateNativeFixtureOutput(family, stdout string) error {
-	if family == "demo" {
+	if family == familyDemo {
 		var ready struct {
 			Status  string `json:"status"`
 			Version string `json:"version"`
@@ -181,7 +194,17 @@ func validateNativeFixtureOutput(family, stdout string) error {
 		}
 		return nil
 	}
-	if !strings.HasPrefix(stdout, "Version: ") || !strings.Contains(stdout, "linux/amd64") {
+	if family != familyMicrofat {
+		if _, err := nativeFixtureArgs(family); err != nil {
+			return err
+		}
+		if strings.TrimSpace(stdout) == "" {
+			return errors.New("native fixture emitted no version output")
+		}
+		return nil
+	}
+	if !strings.HasPrefix(stdout, "Version: ") ||
+		(!strings.Contains(stdout, "linux/amd64") && !strings.Contains(stdout, "linux/arm64")) {
 		return errors.New("native microfat did not report its expected version/platform")
 	}
 	return nil
@@ -214,7 +237,11 @@ func validateNativeDispatch(observation *launchObservation, expected string) err
 	if wantMode == format.ExecModeAuto {
 		wantMode = format.ExecModeCache
 	}
-	if dispatch.ExecMode != wantMode || dispatch.HostArch != microarch.ArchAMD64 ||
+	wantArch := observation.ExpectedArch
+	if wantArch == "" {
+		wantArch = microarch.ArchAMD64
+	}
+	if dispatch.ExecMode != wantMode || dispatch.HostArch != wantArch ||
 		dispatch.SelectedVariant != observation.ExpectedVariant || dispatch.SelectedSHA256 != observation.ExpectedSHA256 ||
 		dispatch.SelectedSizeBytes != observation.ExpectedSizeBytes {
 		return errors.New("dispatch mode, host or selected payload identity does not match the requested correctness case")
@@ -227,7 +254,7 @@ func validateNativeDispatch(observation *launchObservation, expected string) err
 }
 
 func nativeLaunchEnv(mode, cacheDir string) []string {
-	env := []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C", "GOMAXPROCS=4"}
+	env := []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C", "GOMAXPROCS=4", "GOVERSION=" + researchGoVersion}
 	if mode != "" {
 		env = append(env, format.EnvExecMode+"="+mode, format.EnvLog+"=json", format.EnvCacheDir+"="+cacheDir)
 	}

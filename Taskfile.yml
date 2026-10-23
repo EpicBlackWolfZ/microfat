@@ -87,6 +87,18 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  research-375-pool-hosted:
+    desc: Run committed pool confirmation on disposable native GitHub-hosted VMs only
+    cmds:
+    - |
+      export GO={{.GO | shellQuote}}
+      bash scripts/research-pool-hosted.sh
+  research-heldout-corpus:
+    desc: Build checksum-pinned independent research corpus (CORPUS_OUTPUT=new directory, CORPUS_ARCH=amd64|arm64)
+    cmds:
+    - |
+      export GO={{.GO | shellQuote}}
+      bash scripts/research-heldout-corpus.sh {{.CORPUS_OUTPUT | default "" | shellQuote}} {{.CORPUS_ARCH | default "amd64" | shellQuote}}
   research-375-pool-build:
     desc: Build the opt-in encoder-pool research harness without changing CLI defaults
     cmds:
@@ -101,7 +113,7 @@ tasks:
         -ldflags="-s -w -buildid= -X main.producerRevision=$source_revision" \
         -o .work/research375pool/encoder-pool ./experiments/research375pool
   research-375-pool-prepare:
-    desc: Build six pinned native AMD64 corpus ELFs and full/minimal stubs in a new POC_ROOT
+    desc: Build six native training ELFs and full/minimal stubs in a new POC_ROOT
     cmds:
     - task: research-375-pool-build
     - |-
@@ -112,17 +124,23 @@ tasks:
         exit 1
       fi
       mkdir -p "$root"
+      arch=$("$GO" env GOARCH)
+      levels='v1 v2 v3'
+      isa=GOAMD64
+      baseline=v1
+      if [ "$arch" = arm64 ]; then levels='v8.0 v8.1 v8.2'; isa=GOARM64; baseline=v8.0; fi
+      if [ "$arch" != amd64 ] && [ "$arch" != arm64 ]; then echo 'Native amd64 or arm64 required.' >&2; exit 1; fi
       for family in demo microfat; do
         package=./cmd/microfat
         if [ "$family" = demo ]; then package=./examples/demo; fi
-        for level in v1 v2 v3; do
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64="$level" \
+        for level in $levels; do
+          env CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "$isa=$level" \
             "$GO" build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' -o "$root/$family-$level" "$package"
         done
       done
-      CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 \
+      env CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "$isa=$baseline" \
         "$GO" build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' -o "$root/stub-full" ./cmd/microfat-stub
-      CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 \
+      env CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "$isa=$baseline" \
         "$GO" build -tags minimal -trimpath -buildvcs=false -ldflags='-s -w -buildid=' -o "$root/stub-minimal" ./cmd/microfat-stub
       .work/research375pool/encoder-pool --mode=corpus --corpus "$root" --source-revision "$(git rev-parse HEAD)"
   research-375-pool:
