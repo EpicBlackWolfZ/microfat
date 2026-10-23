@@ -675,6 +675,7 @@ jobs:
             | tee .work/runtime-qualification/arm64-features.log
       - name: Qualify reproducible package epochs and native dispatch
         run: |
+          set -o pipefail
           go test -race -v ./tests/e2e -run '^Test(ReproducibleEpoch|CreationEpochNumericMetadata)' -count=1 -timeout=10m \
             | tee .work/runtime-qualification/creation-epochs.log
       - name: Require complete native concurrency and policy qualification
