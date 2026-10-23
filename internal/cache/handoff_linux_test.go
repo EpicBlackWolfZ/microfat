@@ -162,7 +162,13 @@ func TestMaterializeHandoffInvalidInputOwnership(t *testing.T) {
 
 func TestMaterializeHandoffRejectsForeignOwnedDescriptor(t *testing.T) {
 	f := newHandoffFixture(t)
-	const foreignPath = "/bin/true"
+	// Some distributions install true as a symlink to a multicall executable.
+	// Resolve this fixture before the canonical no-follow open so the test
+	// exercises ownership rejection rather than symlink rejection.
+	foreignLink := filepath.Join(t.TempDir(), "foreign-executable")
+	require.NoError(t, os.Symlink("/bin/true", foreignLink))
+	foreignPath, resolveErr := filepath.EvalSymlinks(foreignLink)
+	require.NoError(t, resolveErr)
 	var stat unix.Stat_t
 	require.NoError(t, unix.Stat(foreignPath, &stat))
 	if uint64(stat.Uid) == uint64(os.Geteuid()) {
