@@ -12,6 +12,35 @@ process creation, launcher, native ELF bootstrap, output and exit. It is not
 server/network readiness or request-service latency. Demo reports `ready`; the
 other fixtures report versions. No vulnerability scanning or arbitrary jobs run.
 
+## Rebuild or replay
+
+The [shared corpus recipe](../heldoutcorpus/README.md), checksum lock and builder
+are included in this branch. Build outside any timed window with Go 1.27.3:
+
+```sh
+task research-heldout-corpus CORPUS_OUTPUT=/absolute/new/corpus CORPUS_ARCH=amd64
+```
+
+Use the new manifest and sidecar tool/stub paths and SHA-256 values in a preparation
+request, then run the preparation mode below. Freshly packed artifacts can contain
+different creation-time metadata. **Prepare and freeze a new request after each
+rebuild**, using the new artifact hashes, corpus digest and producer revision;
+historical frozen request paths/hashes are evidence identities, not portable
+rebuild expectations. A newly timed study also needs its own prospective pilot
+and confirmation freeze.
+
+Analysis replay needs no original artifact files or launches. Decompress the
+retained report and analyze its exact observations:
+
+```sh
+gzip -dc experiments/research380/evidence/confirmation-report.json.gz > /tmp/prewarm-report.json
+go run ./experiments/research380 --mode analyze --request /tmp/prewarm-report.json
+go run ./experiments/research380 --mode iid-sensitivity --request /tmp/prewarm-report.json
+```
+
+The second analysis remains a hypothetical IID sensitivity. It does not change
+the report's primary descriptive protocol or establish independence.
+
 ## Prospective protocol
 
 1. Prepare artifacts outside timing with `--mode prepare --request prepare.json
