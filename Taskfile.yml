@@ -87,6 +87,14 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  research-377:
+    desc: Run the isolated seeded fixed-sample SLO-risk calibration POC
+    cmds:
+    - >-
+      {{.GO | shellQuote}} run ./experiments/research377/cmd/tailcal
+      --samples {{.SAMPLES | default "600" | shellQuote}}
+      --replications {{.REPLICATIONS | default "500" | shellQuote}}
+      --seed {{.SEED | default "377" | shellQuote}}
   test-runtime-fixtures:
     desc: Require native fat CLI inspection, timeout and detached-child cleanup regressions
     cmds:

@@ -1,0 +1,35 @@
+{
+  "provenance": {
+    "source_revision": "ada376b4ffffaa3354becbfb70c1896934caf277",
+    "go_version": "go1.27.3",
+    "host": "synthetic fixture; no host timing",
+    "measurement_kind": "synthetic fixture; not benchmark evidence",
+    "dataset_sha256": "a8e820ed22916be2166254a6cfb593c0ecc12090e0be0c536d311a6bb00b2dd5"
+  },
+  "plan": {
+    "estimand": "probability an independent process launch exceeds SLO or fails",
+    "independent_unit": "one separately isolated launch in a prespecified cohort",
+    "cohort": "synthetic explicit-memfd example",
+    "confirmation": "synthetic fixture only; real experiments need an independent training/confirmation split",
+    "iid_within_each_arm": true,
+    "fixed_sample": true,
+    "baseline_samples": 4,
+    "candidate_samples": 4,
+    "slo_ns": 1000000,
+    "practical_margin_probability": 0.01,
+    "family_alpha": 0.05,
+    "comparison_family_size": 1
+  },
+  "baseline": [
+    {"unit_id": "b1", "duration_ns": 950000, "failed": false, "timed_out": false},
+    {"unit_id": "b2", "duration_ns": 1000000, "failed": false, "timed_out": false},
+    {"unit_id": "b3", "duration_ns": 1100000, "failed": false, "timed_out": false},
+    {"unit_id": "b4", "duration_ns": 0, "failed": true, "timed_out": false}
+  ],
+  "candidate": [
+    {"unit_id": "c1", "duration_ns": 800000, "failed": false, "timed_out": false},
+    {"unit_id": "c2", "duration_ns": 1000000, "failed": false, "timed_out": false},
+    {"unit_id": "c3", "duration_ns": 900000, "failed": false, "timed_out": false},
+    {"unit_id": "c4", "duration_ns": 1000000, "failed": true, "timed_out": true}
+  ]
+}

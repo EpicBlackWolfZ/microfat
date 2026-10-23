@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "method": "fixed-sample-clopper-pearson-bonferroni-v1",
+  "config": {"seed": 377, "samples_per_arm": 600, "replications": 500},
+  "comparison_alpha": 0.05,
+  "practical_margin_probability": 0.01,
+  "scenarios": [
+    {
+      "name": "iid-no-change",
+      "iid_assumption_satisfied": true,
+      "shared_latent_cluster_size": 1,
+      "true_baseline_risk": 0.01,
+      "true_candidate_risk": 0.01,
+      "baseline_interval_coverage": 0.99,
+      "candidate_interval_coverage": 0.986,
+      "difference_interval_coverage": 1,
+      "difference_coverage_monte_carlo_interval": {"low": 0.9926493899480922, "high": 1},
+      "false_material_direction_rate": 0,
+      "useful_improvement_rate": 0,
+      "practical_equivalence_rate": 0,
+      "inconclusive_rate": 1
+    },
+    {
+      "name": "iid-injected-benefit",
+      "iid_assumption_satisfied": true,
+      "shared_latent_cluster_size": 1,
+      "true_baseline_risk": 0.1,
+      "true_candidate_risk": 0.005,
+      "baseline_interval_coverage": 0.986,
+      "candidate_interval_coverage": 0.992,
+      "difference_interval_coverage": 0.996,
+      "difference_coverage_monte_carlo_interval": {"low": 0.9856259214377999, "high": 0.9995152138237102},
+      "false_material_direction_rate": 0,
+      "useful_improvement_rate": 1,
+      "practical_equivalence_rate": 0,
+      "inconclusive_rate": 0
+    },
+    {
+      "name": "iid-rare-slow-mixture",
+      "iid_assumption_satisfied": true,
+      "shared_latent_cluster_size": 1,
+      "true_baseline_risk": 0.03,
+      "true_candidate_risk": 0.03,
+      "baseline_interval_coverage": 0.988,
+      "candidate_interval_coverage": 0.986,
+      "difference_interval_coverage": 1,
+      "difference_coverage_monte_carlo_interval": {"low": 0.9926493899480922, "high": 1},
+      "false_material_direction_rate": 0,
+      "useful_improvement_rate": 0,
+      "practical_equivalence_rate": 0,
+      "inconclusive_rate": 1
+    },
+    {
+      "name": "correlated-bursts-naive-iid-invalid",
+      "iid_assumption_satisfied": false,
+      "shared_latent_cluster_size": 25,
+      "true_baseline_risk": 0.03,
+      "true_candidate_risk": 0.03,
+      "baseline_interval_coverage": 0.396,
+      "candidate_interval_coverage": 0.382,
+      "difference_interval_coverage": 0.52,
+      "difference_coverage_monte_carlo_interval": {"low": 0.4752015787679516, "high": 0.5645606411002975},
+      "false_material_direction_rate": 0.48,
+      "useful_improvement_rate": 0.248,
+      "practical_equivalence_rate": 0.234,
+      "inconclusive_rate": 0.286
+    }
+  ],
+  "limitations": [
+    "Fixed sample sizes and one predeclared comparison; repeated peeking is unsupported.",
+    "Known binary event models test SLO-risk inference, not a fitted universal latency distribution.",
+    "Mixture coverage is independent of the latency law inside each side of the SLO, including heavy tails.",
+    "The correlated scenario deliberately violates IID; its nominal bounds must not be used for real bursts.",
+    "Monte Carlo intervals describe finite simulation uncertainty, not proof for untested populations."
+  ]
+}
