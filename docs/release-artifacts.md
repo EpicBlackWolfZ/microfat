@@ -26,7 +26,13 @@ Each product archive and native helper is accompanied by:
 - From **v0.2.5**, Software Bill of Materials (SBOM) in **SPDX 3.0.1 JSON-LD** (`.spdx.json`)
   and **CycloneDX 1.7 JSON** (`.cyclonedx.json`). Published v0.2.3/v0.2.4 documents retain
   their historical SPDX 2.3 and CycloneDX 1.5 formats.
-- Verified hosted benchmark evidence (`benchmark-evidence-<tag>-<run>-<attempt>.tar.gz` and `.sha256`).
+
+Release-level evidence is attached separately: hosted benchmark evidence uses
+`benchmark-evidence-<source-sha>-<run>-<attempt>.tar.gz`, and native runtime evidence uses
+`runtime-evidence_<version>.tar.gz`, each with its own `.sha256` sidecar. These four supplemental
+files have separate digest and workflow-provenance checks; they are outside the signed product
+checksum inventory. The v0.3.1 release has eighteen uploaded assets: twelve signed payloads, the
+checksum file and signature, and these four evidence files.
 
 ### SBOM inventory and verification
 
@@ -39,7 +45,7 @@ Native helper SBOMs use the explicit `native-installer` artifact kind and contai
 executable with its actual linked Go dependencies. They declare the project Apache-2.0 license
 without pretending license text was extracted from a raw ELF. Baseline ISA, Linux architecture,
 CGO-disabled build settings, expected main package and absence of an ELF interpreter are checked.
-The historical inventory remains six signed payloads; v0.3.0 requires twelve (four artifacts and
+The historical inventory remains six signed payloads; releases from v0.3.0 require twelve (four artifacts and
 their eight SBOMs), without accepting arbitrary extra checksum entries.
 
 Release contract validation and extraction consume gzip through EOF to verify every member's
@@ -88,6 +94,9 @@ Those checks install from the official remote tap and retain product hashes, own
 results. Signed-draft helper qualification, published archive audits and these public-path checks
 retain separate evidence.
 
+The [v0.3.1 acceptance record](releases/v0.3.1.md#release-acceptance) identifies its immutable publication,
+signed-candidate and hosted qualification, and the independently reviewed public installer/tap results.
+
 The v0.3.0 then-private signed candidate passed native installer and runtime qualification on both architectures.
 Hosted evidence passed and v0.3.0 is published as an immutable release. Independently verified
 [public installation acceptance 38376089070, attempt 2](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38376089070/attempts/2)
@@ -134,15 +143,16 @@ Extracting `microfat_<version>_linux_<arch>.tar.gz` provides:
 ### Scenario A: Installing the `microfat` CLI
 
 The [official Homebrew tap](https://github.com/EpicBlackWolfZ/homebrew-tap) selects these same archives
-for Linux amd64 and arm64. The authenticated v0.3.0 recipe and official remote installation passed
+for Linux amd64 and arm64. The authenticated v0.3.1 recipe and official remote installation passed
 on both native architectures. See [Homebrew commands](installation.md#homebrew-linux-amd64-and-arm64)
-and the [release acceptance record](releases/v0.3.0.md#release-acceptance). The tap generator consumes
+and the [release acceptance record](releases/v0.3.1.md#release-acceptance). The tap generator consumes
 the authenticated release inventory directly, so GoReleaser's `meta: true` archive output does not
 need fabricated platform metadata or a second packaging pass.
 
 Use the [verified installer](installation.md) to authenticate the release and publish all three products
-as one owned generation. Signed v0.3.0 helper assets are published; native public bootstrap acceptance
-passed in fresh nonroot containers without Go or preinstalled Cosign, using default user roots.
+as one owned generation. Signed v0.3.1 helper assets are published; their public bootstrap passed
+in fresh nonroot native amd64/arm64 containers without Go or preinstalled Cosign, using default user
+roots. The retained evidence identifies the exact bootstrap digest and authenticated product hashes.
 The guide also covers a trusted source helper and independently provisioned verifier.
 Historical v0.2.3 through v0.2.5 remain installable without changing their immutable archives.
 

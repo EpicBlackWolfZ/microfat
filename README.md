@@ -36,7 +36,7 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 | Guide | Description |
 | :--- | :--- |
 | [**v0.3.0 Release Notes**](docs/releases/v0.3.0.md) | Verified installation, updates, Linux Homebrew and release acceptance evidence. |
-| [**v0.3.1 Release Notes**](docs/releases/v0.3.1.md) | Patch release changes and qualification requirements; publication is pending. |
+| [**v0.3.1 Release Notes**](docs/releases/v0.3.1.md) | Installer and dictionary fixes, dependency updates, and release acceptance evidence. |
 | [**v0.2.5 Release Notes**](docs/releases/v0.2.5.md) | Go/Task tooling, modern SBOMs, staged CI and benchmark correctness. |
 | [**Release Artifacts Guide**](docs/release-artifacts.md) | Universal fat archives, bundled launcher stubs, and Format v1 deprecation. |
 | [**Native Runtime Qualification**](docs/runtime-qualification.md) | Concurrent cache and kernel-policy testing, replay, and signed-candidate release gates. |
@@ -67,7 +67,7 @@ See [update options and recovery](docs/installation.md#explicit-release-checks-a
 #### Homebrew on Linux
 
 The official shared tap is [`EpicBlackWolfZ/homebrew-tap`](https://github.com/EpicBlackWolfZ/homebrew-tap).
-The authenticated v0.3.0 recipe is available and its public installation passed on native amd64 and arm64.
+The authenticated v0.3.1 recipe is available and its public installation passed on native amd64 and arm64.
 The Linux cask installs the CLI and both launcher stubs together:
 
 ```bash
@@ -76,23 +76,25 @@ brew upgrade --cask microfat
 brew uninstall --cask microfat
 ```
 
-Supported platforms are Linux amd64 and arm64. Qualification uses Homebrew 7.0.2 with Linux cask support.
+Supported platforms are Linux amd64 and arm64. Qualification follows `HOMEBREW_SOURCE` in
+[the shared tool definitions](.config/tool-versions.env).
 See [Homebrew installation and recovery](docs/installation.md#homebrew-linux-amd64-and-arm64) and
-the [v0.3.0 acceptance record](docs/releases/v0.3.0.md#release-acceptance).
+the [v0.3.1 acceptance record](docs/releases/v0.3.1.md#release-acceptance).
 
 #### Verified Linux installer and release archives
 
-The v0.3.0 installer installs the CLI and both companions coherently into user-owned generation storage.
-It authenticates a pinned verifier and native helper before downloading and verifying the selected release.
-Public bootstrap installation passed in fresh nonroot Linux containers on native amd64 and arm64
-without Go or preinstalled Cosign. Latest/pinned installation, reinstall, companion discovery,
-memfd/cache execution and conservative uninstall passed with authenticated product hashes.
+The v0.3.1 bootstrap authenticates its pinned verifier and v0.3.1 native helper before the helper
+downloads and verifies the selected product release. It installs the CLI and both companions
+coherently into user-owned generation storage. Public bootstrap installation passed in fresh nonroot
+containers on native amd64 and arm64 without Go or preinstalled Cosign. Latest/pinned installation,
+reinstall, authenticated product hashes, memfd/cache execution and conservative uninstall passed.
 
 See [installation and recovery](docs/installation.md) for trusted source-helper use, pinned/latest versions,
 custom destinations, manual-install migration and uninstall. See the [release verification contract](docs/release-verification.md)
 before executing any downloaded program. The [release artifact guide](docs/release-artifacts.md) describes
 the two architecture archives, each containing the CLI plus both launcher stubs. The
-[v0.3.0 acceptance record](docs/releases/v0.3.0.md#release-acceptance) identifies each qualification boundary.
+[v0.3.1 acceptance record](docs/releases/v0.3.1.md#release-acceptance) identifies the current release gates.
+The [v0.3.0 record](docs/releases/v0.3.0.md#release-acceptance) retains the completed historical public checks.
 
 #### Via Go Toolchain
 ```bash

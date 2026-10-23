@@ -6,7 +6,7 @@
 
 This document provides an exhaustive reference for the `microfat` developer and CI CLI toolkit, as well as the runtime launcher stub (`microfat-stub`) meta-commands, flags, exit codes, and environment variable controls.
 
-The separate v0.3.0 `microfat-install` bootstrap helper is documented in the
+The separate native `microfat-install` bootstrap helper is documented in the
 [installation guide](installation.md). It selects a product with `--version`, reports its own build
 with `--helper-version`, supports explicit roots/system mode, repair, downgrade and uninstall, and
 authenticates locally staged signed releases with `--release-dir`. It is not a `microfat update`
@@ -640,7 +640,7 @@ Check official release metadata or explicitly update an installer-owned Linux am
 ```bash
 microfat update --check --json
 microfat update
-microfat update --version 0.3.0
+microfat update --version 0.3.1
 microfat update --version 0.2.5 --allow-downgrade
 ```
 

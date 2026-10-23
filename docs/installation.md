@@ -4,8 +4,8 @@
 
 The official shared repository is [EpicBlackWolfZ/homebrew-tap](https://github.com/EpicBlackWolfZ/homebrew-tap),
 which Homebrew addresses as `EpicBlackWolfZ/tap`.
-The authenticated v0.3.0 recipe and documented public install command passed on native amd64 and arm64.
-The [release acceptance record](releases/v0.3.0.md#release-acceptance) identifies the exact recipe and
+The authenticated v0.3.1 recipe and documented public install command passed on native amd64 and arm64.
+The [release acceptance record](releases/v0.3.1.md#release-acceptance) identifies the exact recipe and
 public checks. Install, upgrade, reinstall or remove the cask with:
 
 ```bash
@@ -37,20 +37,22 @@ Tap automation authenticates the release before proposing metadata. At installat
 the archive against the reviewed recipe's fixed hash; the cask does not run an installer or Cosign.
 See [Homebrew release maintenance](homebrew.md) for the publication order, checks and recovery procedure.
 Public Homebrew acceptance passed in fresh disposable prefixes on provisioned native Linux hosts.
-Its first-release upgrade check covered the same version; cross-version upgrade and checksum-failure recovery use controlled fixtures. Those fixtures
-do not prove an upgrade between two published microfat releases.
+Its upgrade check covered the same version; cross-version upgrade and checksum-failure recovery use
+controlled fixtures. Those fixtures do not prove an upgrade between two published microfat releases.
 
 ## Verified installer requirements
 
-The v0.3.0 installer supports Linux amd64 and arm64. It installs the CLI and both launcher stubs
+The verified installer supports Linux amd64 and arm64. It installs the CLI and both launcher stubs
 as one owned generation, using user directories by default. It does not require Go, preinstalled
 Cosign, jq, Python or tar. Base requirements are Bash, curl with HTTPS support, trusted CA certificates,
 and coreutils (`uname`, `mktemp`, `sha256sum`, `chmod`, `rm`, `stat`). Temporary staging must permit execution
 and use an already existing parent with safe owned ancestors (root-owned sticky `/tmp` is supported).
 
-Signed v0.3.0 helper assets are published. Public bootstrap acceptance passed in fresh nonroot native
-amd64/arm64 containers without Go or preinstalled Cosign, using default user roots. See the
-[release acceptance record](releases/v0.3.0.md#release-acceptance) for the candidate and public evidence.
+Signed v0.3.1 helper assets are published. Public bootstrap acceptance passed in fresh nonroot native
+amd64/arm64 containers without Go or preinstalled Cosign, using default user roots. Independently
+reviewed artifact digests and summaries identify the exact bootstrap and authenticated product bytes;
+see the [current acceptance record](releases/v0.3.1.md#release-acceptance).
+The [v0.3.0 record](releases/v0.3.0.md#release-acceptance) retains the earlier clean native public checks.
 Custom/system roots and adversarial cases retain their separate source/candidate qualification scope.
 A trusted source build can also use the native helper with an independently provisioned verifier as
 described below. The release workflow qualified the exact signed candidate before publication.
@@ -58,7 +60,7 @@ described below. The release workflow qualified the exact signed candidate befor
 ## Bootstrap and version selection
 
 Obtain and review `scripts/install.sh` from a trusted, pinned source revision. Its embedded helper
-version is v0.3.0, independently of the product version you request. Downloading and executing a
+version is v0.3.1, independently of the product version you request. Downloading and executing a
 script over HTTPS trusts that source and transport. For a stronger operator workflow, download it
 first, compare its digest with an independently trusted provisioning record, review it, then run it.
 Do not treat a checksum fetched beside an untrusted script as an independent trust anchor.
@@ -67,7 +69,7 @@ Install without a source checkout using the versioned bootstrap:
 
 ```bash
 curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-  https://raw.githubusercontent.com/EpicBlackWolfZ/microfat/v0.3.0/scripts/install.sh | bash -s --
+  https://raw.githubusercontent.com/EpicBlackWolfZ/microfat/v0.3.1/scripts/install.sh | bash -s --
 ```
 
 Append installer arguments after `--`, such as
@@ -82,8 +84,9 @@ bash scripts/install.sh --bin-dir "$HOME/tools/bin" --store-dir "$HOME/tools/mic
 ```
 
 The bootstrap authenticates the pinned Cosign release before executing it, verifies the helper's signed
-checksums under the exact official v0.3.0 workflow identity, and checks the helper bytes. The helper
+checksums under the exact official v0.3.1 workflow identity, and checks the helper bytes. The helper
 then authenticates the separately selected product archive before bounded extraction.
+The immutable v0.3.0 bootstrap retains its v0.3.0 helper pin, including when installing a newer product.
 See the [complete trust policy](release-verification.md). Drafts and prereleases are never selected
 by latest discovery; errors never cause fallback to a different release. Supported history starts
 at v0.2.3. An older selection requires `--version VERSION --allow-downgrade`.
@@ -165,7 +168,7 @@ Starting with v0.3.0, use the CLI to check for and apply published stable releas
 microfat update --check
 microfat update --check --json
 microfat update
-microfat update --version 0.3.0
+microfat update --version 0.3.1
 microfat update --version 0.2.5 --allow-downgrade
 ```
 
