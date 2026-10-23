@@ -170,6 +170,14 @@ warm hit while preserving universal multi-variant distribution. Default auto mod
 prewarmed entry read-only; no execution-mode override is needed. Cache hashing, launcher work and
 normal ELF startup still apply. A successful cold auto memfd launch does not populate this cache.
 
+Choose selected-variant prewarm when repeated, latency-sensitive launches may repay its setup
+cost. For one-off use, it adds preparation delay, CPU work and retained cache bytes; count these
+costs along with the descriptor hashing that continues on every warm launch. Move prewarming
+before traffic only when deployment can afford the work and you have validated the tradeoff on
+your workload; default auto already discovers verified cache entries. The
+[bounded prewarm study](../experiments/research380/RESULTS.md) illustrates these tradeoffs for
+short commands and does not establish general startup or application-service p99 improvements.
+
 ### Prewarming Mechanics
 
 ```
