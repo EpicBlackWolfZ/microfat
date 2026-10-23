@@ -38,12 +38,17 @@ func TestWorkflowsReadGoVersionFromCheckedOutModule(t *testing.T) {
 	}
 }
 
+const ciMetadataCondition = "github.event_name == 'pull_request' && github.head_ref == 'perf/verified-cache-descriptor' && " +
+	"github.event.action == 'edited' && " +
+	"github.event.changes.base == null"
+
 type workflow struct {
 	On          map[string]yaml.Node   `yaml:"on"`
 	Permissions map[string]string      `yaml:"permissions"`
 	Jobs        map[string]workflowJob `yaml:"jobs"`
 	Concurrency struct {
-		Group string `yaml:"group"`
+		Group            string `yaml:"group"`
+		CancelInProgress any    `yaml:"cancel-in-progress"`
 	} `yaml:"concurrency"`
 }
 
@@ -103,7 +108,9 @@ func TestWorkflowDependencyContract(t *testing.T) {
 	t.Parallel()
 	w := readWorkflow(t, "ci.yml")
 	complete := w.Jobs["complete"]
-	assert.Equal(t, "CI Complete", complete.Name)
+	assert.Equal(t,
+		"${{ "+ciMetadataCondition+" && 'CI Metadata Complete' || 'CI Complete' }}",
+		complete.Name)
 	assert.Equal(t, "always()", complete.If)
 	assert.ElementsMatch(t, RequiredJobs(), needs(t, complete))
 	var jobs []string

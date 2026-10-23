@@ -101,8 +101,19 @@ sample. This protocol does not promise fleet-wide or service-p99 improvement.
 
 ## Execution and retention
 
-The PR workflow `verified-cache-handoff.yml` executes this fixed study on the
-`perf/verified-cache-descriptor` delivery branch and retains
+The existing `ci.yml` native runtime matrix executes this fixed study on the
+`perf/verified-cache-descriptor` delivery branch after the shared lint/test gates
+and required runtime security qualification. Collect timing for source events,
+including PR opening, synchronization, reopening, base-branch changes and explicit
+manual runs on that delivery branch. Body/title edits without a base change do not
+collect another timing cohort. These metadata runs use a separate concurrency
+group, `CI Metadata Complete`, and
+distinct native metadata runtime check names, so they cannot cancel or replace
+a pending or failed source `CI Complete` or native runtime check. All ordinary
+metadata-triggered checks still run. Reopening or manually rerunning a study is a
+separate retained cohort; do not pool it with or use it to erase earlier failures.
+Confirmation failures fail the runtime
+job and the existing `CI Complete` aggregate. The runtime artifact retains
 the entire evidence directory with `if: always()`, including preparation errors,
 the prospective protocol, schedule, source identities, raw JSONL observations,
 compiled artifacts and per-family decisions. A workflow cancellation or truncated

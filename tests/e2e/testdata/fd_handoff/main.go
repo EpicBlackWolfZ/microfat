@@ -287,7 +287,7 @@ func freezeSources(base, candidate, output string) error {
 	var files []identity
 	for _, rel := range []string{
 		protocolPath, "tests/e2e/testdata/fd_handoff/main.go", "tests/e2e/testdata/fd_handoff/main_test.go",
-		".github/workflows/verified-cache-handoff.yml", "Taskfile.yml", ".config/tool-versions.env", "go.mod", "go.sum",
+		".github/workflows/ci.yml", "Taskfile.yml", ".config/tool-versions.env", "go.mod", "go.sum",
 	} {
 		path := filepath.Join(candidate, rel)
 		id, err := identify(path)
