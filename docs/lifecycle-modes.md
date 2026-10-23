@@ -203,9 +203,33 @@ microfat prewarm --all --cache-dir /var/cache/microfat /usr/local/bin/myapp
 # Verify cache health without extracting:
 microfat prewarm --verify /usr/local/bin/myapp
 
+# Inspect all selected work using a 32 MiB logical payload budget:
+microfat prewarm --all --plan --max-payload-bytes=33554432 \
+  --cache-dir /var/cache/microfat /usr/local/bin/myapp
+
+# Apply the same selection and budget after reviewing the plan:
+microfat prewarm --all --max-payload-bytes=33554432 \
+  --cache-dir /var/cache/microfat /usr/local/bin/myapp
+
 # Structured JSON output:
 microfat prewarm --json /usr/local/bin/myapp
 ```
+
+`--plan` reports selected index-declared identities and raw sizes, deduplicated logical payload
+bytes, descriptor-verified cache bytes, and bytes needing materialization. It performs read-only
+discovery, reads and cache hashing without creating or changing anything, and never executes
+payloads. The declarations do not verify embedded payload contents. An explicit missing cache
+directory is planned work; unavailable or unsafe state remains visible. Decoder availability is
+reported separately, so a valid cached entry can remain reusable when its decoder is unavailable.
+These snapshots may become stale immediately; applying a plan performs fresh descriptor validation.
+
+`--max-payload-bytes` checks unique selected logical raw bytes before cache discovery or writes,
+including for `--plan` and `--verify`. It can reject an entirely warm selection. The exact cap is
+allowed, zero rejects nonempty selections, and omission preserves unlimited admission. This cap
+does not count filesystem metadata, temporary/replacement overlap, other processes, physical disk
+allocation or RSS, and does not reserve space. Admission rejection makes no cache changes. Later
+operational failure may leave already completed entries; results and exit status report that outcome.
+See the [CLI reference](cli-reference.md#microfat-prewarm-binary) for JSON vocabulary and flag rules.
 
 Verification opens existing cache directories without creating them or repairing permissions, and never extracts or removes entries. Missing or insecure explicit directories fail directly. Automatic discovery tries the configured XDG/home and temporary-directory candidates without modifying any of them; if none is secure and present it fails. Missing or corrupt entries produce a failing exit status and remain untouched. This contract also applies to the full launcher's verify meta-command and library cache verification with implicit directory selection.
 

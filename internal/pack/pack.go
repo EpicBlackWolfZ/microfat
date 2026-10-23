@@ -942,9 +942,34 @@ func PrewarmBinary(
 	targetLevels []string,
 	cacheDir string,
 ) (*format.Index, []format.PrewarmResult, error) {
+	idx, results, err := PrewarmBinaryWithOptions(r, totalSize, targetLevels, cacheDir, PrewarmOptions{})
+	if err != nil {
+		return nil, nil, err
+	}
+	return idx, results, nil
+}
+
+// PrewarmBinaryWithOptions checks admission before cache discovery or writes, then materializes selected entries.
+// On an operational failure it returns the successful earlier results; admission is not a multi-entry transaction.
+// Cache observations from prior planning are never trusted: every reused entry is validated again on its open descriptor.
+func PrewarmBinaryWithOptions(
+	r io.ReaderAt,
+	totalSize int64,
+	targetLevels []string,
+	cacheDir string,
+	opts PrewarmOptions,
+) (*format.Index, []format.PrewarmResult, error) {
 	idx, err := format.ReadTrailerAndIndex(r, totalSize)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading index: %w", err)
+	}
+	selected, _, err := selectPrewarmVariants(idx, targetLevels, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	dictBytes, err := readPrewarmDictionary(r, idx)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	if cacheDir == "" {
@@ -955,72 +980,22 @@ func PrewarmBinary(
 		cacheDir = resolved
 	}
 
-	var dictBytes []byte
-	if idx.DictionarySize > 0 {
-		if idx.DictionarySize > format.MaxDictionarySize || idx.DictionaryOffset < 0 {
-			return nil, nil, fmt.Errorf("%w: dictionary size %d or offset %d out of bounds",
-				format.ErrInvalidDictionary, idx.DictionarySize, idx.DictionaryOffset)
-		}
-		if idx.DictionarySHA256 == "" || !format.ValidateChecksum(idx.DictionarySHA256) {
-			return nil, nil, fmt.Errorf("%w: dictionary missing or invalid sha256 checksum", format.ErrInvalidChecksum)
-		}
-		dictBytes = make([]byte, idx.DictionarySize)
-		if _, err := r.ReadAt(dictBytes, idx.DictionaryOffset); err != nil {
-			return nil, nil, fmt.Errorf("reading shared dictionary: %w", err)
-		}
-		h := sha256.Sum256(dictBytes)
-		actualHex := hex.EncodeToString(h[:])
-		if actualHex != idx.DictionarySHA256 {
-			return nil, nil, fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, actualHex)
-		}
-	}
-
-	targetCap := len(idx.Variants)
-	var targetSet map[string]struct{}
-	if len(targetLevels) > 0 {
-		targetSet = make(map[string]struct{}, len(targetLevels))
-		for _, lvl := range targetLevels {
-			entry, found := idx.FindVariant(lvl)
-			if !found {
-				return nil, nil, fmt.Errorf("variant level %q not found in binary manifest", lvl)
-			}
-			targetSet[entry.Level] = struct{}{}
-		}
-		if len(targetSet) < targetCap {
-			targetCap = len(targetSet)
-		}
-	}
-
-	results := make([]format.PrewarmResult, 0, targetCap)
-	for _, v := range idx.Variants {
-		if targetSet != nil {
-			if _, ok := targetSet[v.Level]; !ok {
-				continue
-			}
-		}
-
-		path, alreadyCached, duration, err := PrewarmVariantWithDict(r, &v, cacheDir, dictBytes)
+	results := make([]format.PrewarmResult, 0, len(selected))
+	for _, entry := range selected {
+		path, alreadyCached, duration, err := PrewarmVariantWithDict(r, &entry, cacheDir, dictBytes)
 		if err != nil {
-			return nil, nil, fmt.Errorf("prewarming variant %s: %w", v.Level, err)
+			return idx, results, fmt.Errorf("prewarming variant %s: %w", entry.Level, err)
 		}
-
 		status := format.PrewarmStatusExtracted
 		if alreadyCached {
 			status = format.PrewarmStatusAlreadyCached
 		}
-
 		results = append(results, format.PrewarmResult{
-			Level:            v.Level,
-			SHA256:           v.SHA256,
-			UncompressedSize: v.UncompressedSize,
-			CachedPath:       path,
-			AlreadyCached:    alreadyCached,
-			DecompressionUs:  duration.Microseconds(),
-			Valid:            true,
-			Status:           status,
+			Level: entry.Level, SHA256: entry.SHA256, UncompressedSize: entry.UncompressedSize,
+			CachedPath: path, AlreadyCached: alreadyCached, DecompressionUs: duration.Microseconds(),
+			Valid: true, Status: status,
 		})
 	}
-
 	return idx, results, nil
 }
 

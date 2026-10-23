@@ -558,6 +558,15 @@ microfat prewarm bin/myapp --cache-dir /var/cache/microfat
 # Verify cache health without re-extracting
 microfat prewarm bin/myapp --verify
 
+# Inspect selected work without changing the cache
+microfat prewarm bin/myapp --all --plan --cache-dir /var/cache/microfat
+
+# Plan and then apply a 32 MiB logical selected-payload budget
+microfat prewarm bin/myapp --all --plan --json --max-payload-bytes=33554432 \
+  --cache-dir /var/cache/microfat
+microfat prewarm bin/myapp --all --max-payload-bytes=33554432 \
+  --cache-dir /var/cache/microfat
+
 # Structured JSON output for initContainers
 microfat prewarm bin/myapp --json
 ```
@@ -569,7 +578,86 @@ microfat prewarm bin/myapp --json
 | `--all` | *(none)* | `bool` | `false` | Prewarm all embedded variants into the cache directory. |
 | `--cache-dir` | *(none)* | `string` | `""` | Custom cache directory path. |
 | `--verify` | *(none)* | `bool` | `false` | Verify existing cache entries without creating directories, repairing permissions, extracting, or removing entries. |
+| `--plan` | *(none)* | `bool` | `false` | Report selected declarations, read-only cache checks and materialization prerequisites without extracting or executing payloads. |
+| `--max-payload-bytes` | *(none)* | `decimal bytes` | unlimited | Admit at most this many unique selected raw payload bytes, independently of cache state. |
 | `--json` | *(none)* | `bool` | `false` | Output results in JSON telemetry format. |
+
+`--all` and `--level` are mutually exclusive. Omit both to select the host-compatible variant.
+Explicit `--level` and `--all` can stage supported foreign-architecture payloads without executing
+them. Unsupported target architectures fail. `--plan` and `--verify` are mutually exclusive;
+`--max-payload-bytes` works with planning, verification and extraction. These two new flags apply
+to the CLI only; the embedded launcher interface is unchanged.
+
+The byte limit accepts one or more ASCII decimal digits in the range `0` through
+`18446744073709551615`; signs, whitespace, units, fractions, hexadecimal and empty values fail.
+The exact limit is admitted. Explicit zero rejects every nonempty selection. Omission preserves
+unlimited admission. SHA-256 identities shared by several selected levels count once; conflicting
+declared sizes and arithmetic overflow fail. The limit is checked before cache discovery,
+directory creation, permission repair, temporary files or extraction. An oversized request fails
+without partial materialization, even if every selected payload is already cached.
+
+This is a logical selected-payload cap, not a filesystem quota, free-space check or reservation.
+It excludes filesystem metadata, temporary and replacement overlap, other processes, sparse or
+compressed filesystem allocation, and RSS. A later operational failure can leave earlier entries
+successfully materialized; this is not a multi-entry transaction. On such a failure, prewarm emits
+completed results and a failing exit status. JSON `results` contains only completed entries.
+
+Planning never creates, repairs, chmods, removes or replaces cache entries or directories. It
+validates the source index and shared dictionary, and checks existing entries by opening and
+hashing their descriptors with the normal size, ownership, mode and SHA-256 requirements. This
+performs reads and hashing. Reported payload hashes and raw sizes are validated index declarations,
+not verification of embedded payload contents. Authenticate or verify the whole artifact separately.
+Every observation can become stale immediately; a later prewarm invocation revalidates its own
+opened descriptors and retains normal atomic publication and error handling.
+
+An explicit missing cache directory is reported as planned work without creating it. Automatic
+discovery uses existing secure directories; when none can be securely identified, the plan reports
+`unavailable` and an empty `cache_path`, rather than guessing a future extraction destination.
+Read-only automatic discovery can observe an existing fallback directory while a later mutating
+resolution creates or repairs a primary directory and uses a different path with different cache
+totals. Supply the same explicit `--cache-dir` to review and apply the same destination; its state
+can still change between invocations.
+Cache state and decoder availability are independent: a descriptor-verified cache hit can be reused
+even if its embedded codec is unavailable.
+
+#### Plan JSON vocabulary
+
+`--plan --json` emits `event: "prewarm_plan"`, `app_name`, `target_os`, `target_arch`, the following
+totals, and an `entries` array. All sizes are integer bytes. Each total deduplicates selected SHA-256
+identities; `entries` still lists every selected level. Existing extraction and `--verify` JSON keep
+their `event: "prewarm"` shape when `--plan` is absent, including when a cap is supplied.
+
+| Field | Meaning |
+| :--- | :--- |
+| `unique_payload_count` | Number of distinct selected SHA-256 identities. |
+| `unique_payload_bytes` | Sum of their index-declared raw sizes; the admission limit uses this total. |
+| `verified_cache_bytes` | Logical bytes whose existing descriptors passed mandatory validation. |
+| `needs_materialization_bytes` | Declared logical bytes with cache status `missing` or `corrupt_safe`, including when their decoder is unavailable. |
+| `blocked_payload_bytes` | Declared logical bytes with cache status `unsafe` or `unavailable`. |
+
+| Entry field | Meaning |
+| :--- | :--- |
+| `level`, `sha256`, `uncompressed_size` | Selected level and validated index-declared identity and raw bytes. |
+| `cache_path` | Observed or explicit destination pathname; empty when discovery could not identify one. |
+| `cache_status` | `valid`, `missing`, `corrupt_safe`, `unsafe` or `unavailable`, as described below. |
+| `cache_error` | Explanation of a failed cache observation; omitted when empty. |
+| `decoder_available`, `decoder_error` | Whether the CLI has the declared codec, and an optional explanation when it does not. |
+| `materialization_possible` | Whether known decoder and cache safety prerequisites permit extraction if needed; no capacity or success guarantee. |
+| `can_prewarm` | Whether a verified hit, known extraction prerequisites or earlier same-identity staging can satisfy this entry. |
+| `reuse_after_level` | Optional earlier selected level whose successful staging would let this entry reuse the same payload. |
+
+`valid` requires a descriptor-verified executable entry. `missing` means an explicit directory or
+entry is absent. `corrupt_safe` means a safe regular entry failed executable-mode, size or content
+validation and can be replaced by explicit extraction. `unsafe` means directory or entry metadata
+violates cache safety requirements, including symlinks and nonregular entries. `unavailable` means
+the directory or entry could not be inspected or securely discovered; it does not claim absence.
+
+The plan is printed before a failing exit status when any selected entry cannot prewarm, including
+unsafe or unavailable cache observations and an unavailable decoder without a reusable hit or
+earlier supported duplicate. A later duplicate can depend on earlier successful materialization;
+`reuse_after_level` is a conditional dependency, not a reservation. A missing entry with a known
+decoder normally produces a successful plan. None of these outcomes authorizes skipping validation
+when applying the work.
 
 ---
 
