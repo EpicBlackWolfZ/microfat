@@ -781,13 +781,14 @@ func executeViaCache(
 			return fmt.Errorf("%w: %w", format.ErrCacheExtract, err)
 		}
 		decompStart := time.Now()
-		cachedBinary, matErr := cache.MaterializeVariantAtFD(dirFD, cacheDir, entry, func(w io.Writer) error {
+		_, materializedFD, matErr := cache.MaterializeAndOpenVariantAtFDWithOpener(dirFD, cacheDir, entry, func(w io.Writer) error {
 			return extractVariantToWriter(selfFile, entry, idx, w)
-		})
+		}, openCachedBinaryAtFunc)
 		if matErr != nil {
 			stage := format.StageCacheCreateTemp
 			sentinel := format.ErrCacheWrite
-			if errors.Is(matErr, format.ErrCacheExtract) || isPayloadCorruptionOrDecompressionError(matErr) {
+			if !errors.Is(matErr, format.ErrCacheWrite) &&
+				(errors.Is(matErr, format.ErrCacheExtract) || isPayloadCorruptionOrDecompressionError(matErr)) {
 				stage = format.StageCacheExtract
 				sentinel = format.ErrCacheExtract
 			}
@@ -797,17 +798,8 @@ func executeViaCache(
 			)
 		}
 		decompDuration = time.Since(decompStart)
-
-		// Re-open with canonical descriptor-bound primitive and validate before execve
-		fd, openErr = openAndValidateCacheAtFD(dirFD, cachedName, entry)
-		if openErr != nil {
-			_ = unix.Unlinkat(dirFD, cachedName, 0)
-			rawErr := fmt.Errorf("opening verified cache file %s: %w", cachedBinary, openErr)
-			return handleCacheError(
-				format.ErrCacheWrite, format.StageCacheCreateTemp, rawErr,
-				primaryErr, requestedMode, hostInfo, entry, policyRes, "opening verified cache file failed",
-			)
-		}
+		// Execute the same descriptor validated after publication; do not reopen or rehash its pathname.
+		fd = materializedFD
 	}
 
 	defer func() { _ = unix.Close(fd) }()

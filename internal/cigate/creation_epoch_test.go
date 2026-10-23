@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -38,11 +39,15 @@ func TestCreationEpochQualificationPropagatesFailuresAndRetainsEvidence(t *testi
 			qualification = &step
 			qualificationPosition = position
 		}
-		if strings.HasPrefix(step.Uses, "actions/upload-artifact@") && step.With["path"] == ".work/runtime-qualification/" {
-			evidencePosition = position
-			assert.Equal(t, "always()", step.If)
-			assert.Equal(t, true, step.With["include-hidden-files"])
-			assert.Equal(t, "error", step.With["if-no-files-found"])
+		if strings.HasPrefix(step.Uses, "actions/upload-artifact@") {
+			paths, ok := step.With["path"].(string)
+			require.True(t, ok)
+			if slices.Contains(strings.Fields(paths), ".work/runtime-qualification/") {
+				evidencePosition = position
+				assert.Equal(t, "always()", step.If)
+				assert.Equal(t, true, step.With["include-hidden-files"])
+				assert.Equal(t, "error", step.With["if-no-files-found"])
+			}
 		}
 	}
 	require.NotNil(t, qualification)

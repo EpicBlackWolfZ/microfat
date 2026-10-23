@@ -257,7 +257,12 @@ to succeed. Explicit `cache` skips memfd and materializes/repairs only safe regu
    still modify its contents. Cache execution does not provide memfd's immutable backing storage.
 5. **Atomic materialization when requested**: Explicit cache mode, prewarming or a cold memfd
    fallback extracts to a private `.exec-*.tmp` file, verifies and synchronizes it, then atomically
-   installs it. Unsafe entries are rejected rather than repaired.
+   installs it. The published file is opened read-only with the canonical flags above and fully
+   checked once. Cold cache execution takes ownership of that verified descriptor and executes it
+   directly, without reopening the pathname or repeating the post-publication hash. Path-only
+   materialization callers, including prewarming, close it before returning. Extraction hashing
+   and every warm-hit check remain mandatory. Validation or execution errors close every owned
+   descriptor. Unsafe entries are rejected rather than repaired.
 
 A warm hit avoids source payload/dictionary decompression and uses the cached executable's digest
 as integrity evidence against the validated index. It does not verify unused compressed bytes;
@@ -267,6 +272,8 @@ so use prewarming or explicit cache mode to populate one.
 
 The [startup measurements](cache-first-startup.md) compare full-process cold and warm launches
 across formats, stub profiles, codecs and execution modes with identical tuning.
+The [verified-descriptor confirmation protocol](verified-cache-handoff-confirmation.md) freezes
+the separate native cold-materialization experiment and unchanged warm-cache/memfd controls.
 
 Read-only roots can use a valid executable warm entry or sealed memfd without cache writes.
 If neither executes, cold disk fallback requires writable cache storage. See the

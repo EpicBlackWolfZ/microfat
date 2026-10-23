@@ -211,6 +211,28 @@ func VerifyVariant(entry *format.VariantEntry, cacheDir string) format.PrewarmRe
 	return res
 }
 
+// MaterializeAndOpenVariantAtFD returns ErrUnsupportedPlatform because a verified
+// Unix descriptor cannot be transferred on this platform.
+func MaterializeAndOpenVariantAtFD(
+	dirFD int,
+	dirPath string,
+	entry *format.VariantEntry,
+	writePayload func(w io.Writer) error,
+) (string, int, error) {
+	return "", -1, fmt.Errorf("%w: descriptor-bound materialization is Unix-specific", ErrUnsupportedPlatform)
+}
+
+// MaterializeAndOpenVariantAtFDWithOpener returns ErrUnsupportedPlatform on non-Unix platforms.
+func MaterializeAndOpenVariantAtFDWithOpener(
+	dirFD int,
+	dirPath string,
+	entry *format.VariantEntry,
+	writePayload func(w io.Writer) error,
+	opener func(int, string) (int, error),
+) (string, int, error) {
+	return MaterializeAndOpenVariantAtFD(dirFD, dirPath, entry, writePayload)
+}
+
 // MaterializeVariantAtFD provides a portable implementation of variant cache materialization for non-Unix platforms.
 // On Unix platforms this operation is strictly descriptor-bound via openat/renameat. On platforms without openat/renameat
 // semantics (e.g. Windows), it uses the platform's safe temporary file and atomic rename primitives, providing
