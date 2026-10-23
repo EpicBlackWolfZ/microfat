@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
+	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -31,19 +32,31 @@ func readBounded(path string, limit int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readOpened(f, limit)
+}
+
+func readRegular(path string, limit int64) ([]byte, error) {
+	f, err := inputfile.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	return readOpened(f, limit)
+}
+
+func readOpened(f *os.File, limit int64) ([]byte, error) {
 	data, readErr := io.ReadAll(io.LimitReader(f, limit+1))
 	closeErr := f.Close()
 	if err := errors.Join(readErr, closeErr); err != nil {
 		return nil, err
 	}
 	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("input %q exceeds %d byte limit", path, limit)
+		return nil, fmt.Errorf("input %q exceeds %d byte limit", f.Name(), limit)
 	}
 	return data, nil
 }
 
 func loadPayload(path string) (payload, error) {
-	data, err := readBounded(path, maxInputBytes)
+	data, err := readRegular(path, maxInputBytes)
 	if err != nil {
 		return payload{}, err
 	}

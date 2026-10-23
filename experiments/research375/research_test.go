@@ -17,8 +17,10 @@ import (
 
 	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
+	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 const missingPath = "/missing"
@@ -141,6 +143,38 @@ func TestInputValidation(t *testing.T) {
 	data = bytes.ReplaceAll(p.Data, []byte("\xff Go buildinf:"), []byte(".............."))
 	_, err = loadPayload(writeTest(t, data))
 	require.ErrorContains(t, err, "real Go ELF")
+}
+
+func TestCallerInputsRefuseFIFOWithoutWaitingForWriter(t *testing.T) {
+	t.Parallel()
+	pipe := filepath.Join(t.TempDir(), "input.fifo")
+	require.NoError(t, unix.Mkfifo(pipe, privateMode))
+	// If blocking behavior returns, release the reader during cleanup before unlinking.
+	t.Cleanup(func() {
+		fd, err := unix.Open(pipe, unix.O_WRONLY|unix.O_NONBLOCK, 0)
+		if err == nil {
+			_ = unix.Close(fd)
+		}
+	})
+	done := make(chan error, 1)
+	go func() { _, err := readRegular(pipe, maxInputBytes); done <- err }()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, inputfile.ErrNotRegular)
+	case <-time.After(time.Second):
+		t.Fatal("FIFO input waited for a writer")
+	}
+	_, err := loadPayload(pipe)
+	require.ErrorIs(t, err, inputfile.ErrNotRegular)
+	data := []byte("bytes")
+	err = operate(context.Background(), request{Mode: modeEncode, Input: writeTest(t, data), Dictionary: pipe}, &observation{})
+	require.ErrorIs(t, err, inputfile.ErrNotRegular)
+	_, err = readRegular(t.TempDir(), maxInputBytes)
+	require.ErrorIs(t, err, inputfile.ErrNotRegular)
+	// Procfs reports zero sizes; the telemetry path must remain readable.
+	data, err = readBounded("/proc/self/status", workerConfigLimit)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "Pid:")
 }
 
 func TestWorkerProtocol(t *testing.T) {

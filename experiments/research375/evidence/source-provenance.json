@@ -35,5 +35,37 @@
     }
   ],
   "reconstruction": "Checkout measured_parent_revision in a separate worktree; gzip -dc measured-source.patch.gz | git am. git am reproduces the measured source tree; committer metadata may produce a different commit id.",
-  "measurement_status": "Measurements are unchanged and were not repeated after the rebase."
+  "measurement_status": "Measurements are unchanged and were not repeated after the rebase.",
+  "experimental_go_sources_scope": "Historical identical rebase snapshot 7cbcb0b, before the later input guard.",
+  "post_measurement_change": {
+    "timing_repeated": false,
+    "description": "Caller-selected ELF/dictionary and worker files now use nonblocking descriptor-validated regular-file opens, keeping procfs telemetry reads unchanged. FIFO regression coverage and the README readiness example were added/corrected.",
+    "current_go_sources": [
+      {
+        "path": "experiments/research375/campaign.go",
+        "sha256": "6db6d754c0a8f0db6c1cdb6cd6c2f02779b85c03fbc420cb14012442124f653f",
+        "matches_original_measured_source": false
+      },
+      {
+        "path": "experiments/research375/codec.go",
+        "sha256": "774be995bf240f0ebf71d37faf0624ac7b6c64727cdda0bc228c6f0af2f27121",
+        "matches_original_measured_source": false
+      },
+      {
+        "path": "experiments/research375/main.go",
+        "sha256": "c6a9dce00fb099bba57e29e3b199a9439e29c959fd0906cc4d4b8518136997f8",
+        "matches_original_measured_source": true
+      },
+      {
+        "path": "experiments/research375/research_test.go",
+        "sha256": "41b18022a6a0ea503423a61585a6f8ec02fe60e7e93511ca9250eb46ba981b5c",
+        "matches_original_measured_source": false
+      },
+      {
+        "path": "experiments/research375/worker.go",
+        "sha256": "42c80b99d2e42e5645369ba3cb3d0d5ce0858dfd6a133fe4376b5a9efd966fab",
+        "matches_original_measured_source": false
+      }
+    ]
+  }
 }

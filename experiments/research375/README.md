@@ -25,13 +25,15 @@ GOMAXPROCS=4 .work/research375 \
   --encoders=-1,1,2,4 --workers=1,2,4 --decoders=-1,1,2,4 --bursts=1,2,4 \
   --cpu-budget=4 --trials=3 --execute \
   --payload-arg=--startup-only --payload-arg=--json \
-  --ready-output=$'{"status":"ready","version":"1.0.0"}\n' \
+  --ready-output=$'{\n  "status": "ready",\n  "version": "1.0.0"\n}\n' \
   > .work/research375-demo-ready.json
 ```
 
 Inspect the fixture's actual stdout before supplying `--ready-output`. Only execute
 trusted corpus programs with bounded, terminating readiness arguments. Input paths
-must be native Linux amd64/arm64 Go ELFs; CPU variant compatibility remains the
+must be nonempty regular native Linux amd64/arm64 Go ELF files; dictionaries and
+worker request/frame files also receive descriptor-based regular-file checks.
+FIFO inputs fail without waiting for a writer. CPU variant compatibility remains the
 operator's responsibility. Foreign or emulated timing is not native evidence.
 
 `-1` preserves the upstream codec default: encoder GOMAXPROCS, decoder

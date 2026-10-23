@@ -127,7 +127,7 @@ func campaign(ctx context.Context, c config) (result report, resultErr error) {
 		c.Inputs[i] = p.Path
 	}
 	if c.Dictionary != "" {
-		dict, err := readBounded(c.Dictionary, maxDictBytes)
+		dict, err := readRegular(c.Dictionary, maxDictBytes)
 		if err != nil {
 			return result, err
 		}
@@ -181,13 +181,13 @@ func decoderBatches(ctx context.Context, c config, executable, dir string, input
 		if err := ctx.Err(); err != nil {
 			return batches, err
 		}
-		data, err := readBounded(c.Inputs[i], maxInputBytes)
+		data, err := readRegular(c.Inputs[i], maxInputBytes)
 		if err != nil {
 			return batches, err
 		}
 		var dict []byte
 		if c.Dictionary != "" {
-			dict, err = readBounded(c.Dictionary, maxDictBytes)
+			dict, err = readRegular(c.Dictionary, maxDictBytes)
 			if err != nil {
 				return batches, err
 			}

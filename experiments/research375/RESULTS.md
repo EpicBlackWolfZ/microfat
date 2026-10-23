@@ -21,7 +21,14 @@ installer and documentation merge. Measurements were not repeated or relabeled.
 [Original measured source patch](evidence/measured-source.patch.gz) reconstructs the
 experiment on parent `ada376b4`; [source provenance](evidence/source-provenance.json)
 pins both compressed and uncompressed patch SHA256 and confirms byte-for-byte
-equivalence of all five experimental Go source/test files after the rebase.
+equivalence of all five experimental Go source/test files at rebase snapshot
+`7cbcb0b`. A later, **unmeasured** input-guard change uses nonblocking,
+descriptor-validated regular-file opens for caller-selected ELF/dictionary inputs
+and worker requests/frames, with a FIFO regression test. It also corrects the
+README's expected readiness JSON. Current Go hashes and this historical boundary
+are recorded in the same provenance file; the equivalence statement describes the
+rebase snapshot, not that later change. Timing reports and the original source
+patch remain unchanged.
 For example, use a separate checkout at the recorded measured parent and run
 `gzip -dc measured-source.patch.gz | git am`. This reconstructs the measured source
 tree; committer metadata can result in a different commit ID. The original harness

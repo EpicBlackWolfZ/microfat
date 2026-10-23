@@ -54,7 +54,7 @@ type observation struct {
 }
 
 func worker(ctx context.Context, path string, gate io.Reader, out io.Writer, ready io.Writer) error {
-	configData, err := readBounded(path, workerConfigLimit)
+	configData, err := readRegular(path, workerConfigLimit)
 	if err != nil {
 		return err
 	}
@@ -86,13 +86,13 @@ func operate(ctx context.Context, r request, o *observation) error {
 	if r.Mode == modeDecode {
 		limit = maxFrameBytes
 	}
-	data, err := readBounded(r.Input, int64(limit))
+	data, err := readRegular(r.Input, int64(limit))
 	if err != nil {
 		return err
 	}
 	var dict []byte
 	if r.Dictionary != "" {
-		dict, err = readBounded(r.Dictionary, maxDictBytes)
+		dict, err = readRegular(r.Dictionary, maxDictBytes)
 		if err != nil {
 			return err
 		}
