@@ -2,7 +2,7 @@
   "schema_version": 1,
   "phase": "confirmation",
   "protocol_id": "explicit-prewarm-confirmation-v1",
-  "source_revision": "164046036d732004095ad3f568bc2e0bb0bbd126",
+  "source_revision": "fbf5947dd3b19e356bc4fa1dee3d478274d09ff8",
   "host": "local-native-amd64-ryzen3950x-quiet-desktop-pagecache-uncontrolled",
   "corpus_sha256": "ee1a51e9720eab58d561839e2f8428f85c3c1fa49b02481f4fd872380b30b194",
   "microfat": "/tmp/microfat-research-confirm-20261023/corpus/amd64/microfat",
