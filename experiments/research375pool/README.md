@@ -1,5 +1,8 @@
 # Bounded in-process encoder pool POC (#375)
 
+See [the measured results](RESULTS.md) for the positive high-memory cohort and
+the low-budget regressions, retained controls and evidence replay instructions.
+
 This opt-in experiment compares **complete packing**, including input snapshotting,
 ELF/ABI validation, compression, assembly, fsync and atomic publication. The normal
 CLI still calls the unchanged sequential payload path in `pack.Pack`.
