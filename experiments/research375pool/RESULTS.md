@@ -134,6 +134,17 @@ prewarmed auto. Every output matched; actual modes and selected payload
 identities matched. This qualifies these native correctness cases, not ARM64,
 foreign kernels, launch p99 or application service latency.
 
+An independent subagent audit checked the retained files outside the Go packer:
+all **214 artifacts / 642 frames** passed manual format/trailer, stub, dictionary
+and hash checks, and independent raw/libzstd/liblz4 decoding matched every source
+byte. All 32 matrix and 60 timed current/pool pairs also had identical normalized
+indexes. Exact whole files matched in 23/32 and 41/60 pairs respectively; all
+remaining differences were solely CreatedUnix bytes and the consequent index
+digest. Native execution selected **v3 on this host**; all three tiers were
+independently decoded. The matrix's dictionary ablation increased complete v2
+sizes by 30,303 bytes (demo) / 72,465 bytes (CLI) in both packers; there is no
+dictionary or pool size win here.
+
 ## Validation and next investment
 
 Combined experiment tests with required live cgroup controls pass under race
