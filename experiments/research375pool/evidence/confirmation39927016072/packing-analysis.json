@@ -1,0 +1,615 @@
+[
+  {
+    "host": "amd64-vm-0",
+    "cells": [
+      {
+        "family": "actionlint",
+        "median_ratio": 1.3886775036631414,
+        "lower_ratio": 1.3290517722823645,
+        "median_time_reduction_pct": 27.989040121832698,
+        "lower_time_reduction_pct": 24.758386328117822,
+        "median_policy_over_current_pack_cpu": 1.1173820925731028,
+        "max_cgroup_peak_bytes": {
+          "current": 104816640,
+          "policy": 134914048
+        },
+        "eligible": true,
+        "decision": "useful: lower bound exceeds 10 percent packing-time reduction"
+      },
+      {
+        "family": "fortio",
+        "median_ratio": 1.425269055211101,
+        "lower_ratio": 1.3755803155091353,
+        "median_time_reduction_pct": 29.837808774155494,
+        "lower_time_reduction_pct": 27.303408697741073,
+        "median_policy_over_current_pack_cpu": 1.1234545508701412,
+        "max_cgroup_peak_bytes": {
+          "current": 221196288,
+          "policy": 347844608
+        },
+        "eligible": true,
+        "decision": "useful: lower bound exceeds 10 percent packing-time reduction"
+      },
+      {
+        "family": "govulncheck",
+        "median_ratio": 1.3941844879393674,
+        "lower_ratio": 1.3565135688540115,
+        "median_time_reduction_pct": 28.27348111740793,
+        "lower_time_reduction_pct": 26.28160727910711,
+        "median_policy_over_current_pack_cpu": 1.1279271629670213,
+        "max_cgroup_peak_bytes": {
+          "current": 149372928,
+          "policy": 201682944
+        },
+        "eligible": true,
+        "decision": "useful: lower bound exceeds 10 percent packing-time reduction"
+      },
+      {
+        "family": "task",
+        "median_ratio": 1.0098965741695454,
+        "lower_ratio": 0.9460035093806508,
+        "median_time_reduction_pct": 0.9799591782637229,
+        "lower_time_reduction_pct": -5.7078530982089815,
+        "median_policy_over_current_pack_cpu": 1.0024365015161392,
+        "max_cgroup_peak_bytes": {
+          "current": 502841344,
+          "policy": 503910400
+        },
+        "eligible": false,
+        "decision": "inconclusive"
+      }
+    ],
+    "stages": {
+      "training": {
+        "attempts": 108,
+        "successes": 102,
+        "failures": 6,
+        "ooms": 0,
+        "native_launches": 0,
+        "failure_reasons": {
+          "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator": 6
+        },
+        "peak_memory_bytes": 202387456,
+        "peak_over_configured_max": []
+      },
+      "confirmation": {
+        "attempts": 312,
+        "successes": 312,
+        "failures": 0,
+        "ooms": 0,
+        "native_launches": 32,
+        "failure_reasons": {},
+        "peak_memory_bytes": 503910400,
+        "peak_over_configured_max": [
+          {
+            "family": "fortio",
+            "mode": "current",
+            "block": 0,
+            "budget_mib": 128,
+            "overshoot_bytes": 36864
+          },
+          {
+            "family": "task",
+            "mode": "current",
+            "block": 0,
+            "budget_mib": 128,
+            "overshoot_bytes": 8192
+          },
+          {
+            "family": "task",
+            "mode": "policy",
+            "block": 0,
+            "budget_mib": 128,
+            "overshoot_bytes": 8192
+          },
+          {
+            "family": "task",
+            "mode": "current",
+            "block": 0,
+            "budget_mib": 256,
+            "overshoot_bytes": 8192
+          },
+          {
+            "family": "fortio",
+            "mode": "current",
+            "block": 1,
+            "budget_mib": 128,
+            "overshoot_bytes": 8192
+          },
+          {
+            "family": "task",
+            "mode": "policy",
+            "block": 1,
+            "budget_mib": 128,
+            "overshoot_bytes": 4096
+          },
+          {
+            "family": "task",
+            "mode": "current",
+            "block": 1,
+            "budget_mib": 128,
+            "overshoot_bytes": 4096
+          },
+          {
+            "family": "task",
+            "mode": "policy",
+            "block": 1,
+            "budget_mib": 256,
+            "overshoot_bytes": 8192
+          },
+          {
+            "family": "task",
+            "mode": "policy",
+            "block": 2,
+            "budget_mib": 128,
+            "overshoot_bytes": 4096
+          },
+          {
+            "family": "task",
+            "mode": "current",
+            "block": 2,
+            "budget_mib": 256,
+            "overshoot_bytes": 8192
+          },
+          {
+            "family": "task",
+            "mode": "policy",
+            "block": 2,
+            "budget_mib": 256,
+            "overshoot_bytes": 4096
+          }
+        ]
+      },
+      "matrix": {
+        "attempts": 32,
+        "successes": 32,
+        "failures": 0,
+        "ooms": 0,
+        "native_launches": 128,
+        "failure_reasons": {},
+        "peak_memory_bytes": 133853184,
+        "peak_over_configured_max": []
+      }
+    }
+  },
+  {
+    "host": "amd64-vm-1",
+    "cells": [
+      {
+        "family": "actionlint",
+        "median_ratio": 1.3685767725243771,
+        "lower_ratio": 1.3413445675116735,
+        "median_time_reduction_pct": 26.931391787727577,
+        "lower_time_reduction_pct": 25.447940505317092,
+        "median_policy_over_current_pack_cpu": 1.1207278277090926,
+        "max_cgroup_peak_bytes": {
+          "current": 115109888,
+          "policy": 140140544
+        },
+        "eligible": true,
+        "decision": "useful: lower bound exceeds 10 percent packing-time reduction"
+      },
+      {
+        "family": "fortio",
+        "median_ratio": 1.4311169248770343,
+        "lower_ratio": 1.3890820883873598,
+        "median_time_reduction_pct": 30.12450746566897,
+        "lower_time_reduction_pct": 28.010014069007294,
+        "median_policy_over_current_pack_cpu": 1.1180157062702736,
+        "max_cgroup_peak_bytes": {
+          "current": 207736832,
+          "policy": 348196864
+        },
+        "eligible": true,
+        "decision": "useful: lower bound exceeds 10 percent packing-time reduction"
+      },
+      {
+        "family": "govulncheck",
+        "median_ratio": 1.391394610440121,
+        "lower_ratio": 1.348493361703704,
+        "median_time_reduction_pct": 28.129662678247435,
+        "lower_time_reduction_pct": 25.843164794182815,
+        "median_policy_over_current_pack_cpu": 1.1285975279172291,
+        "max_cgroup_peak_bytes": {
+          "current": 152080384,
+          "policy": 203051008
+        },
+        "eligible": true,
+        "decision": "useful: lower bound exceeds 10 percent packing-time reduction"
+      },
+      {
+        "family": "task",
+        "median_ratio": 0.987914481033511,
+        "lower_ratio": 0.9525669427568222,
+        "median_time_reduction_pct": -1.2233365537719143,
+        "lower_time_reduction_pct": -4.97949856478348,
+        "median_policy_over_current_pack_cpu": 0.9981955273135319,
+        "max_cgroup_peak_bytes": {
+          "current": 515235840,
+          "policy": 456101888
+        },
+        "eligible": false,
+        "decision": "safe fallback: lower bound excludes more than 5 percent packing-time regression"
+      }
+    ],
+    "stages": {
+      "training": {
+        "attempts": 108,
+        "successes": 102,
+        "failures": 6,
+        "ooms": 0,
+        "native_launches": 0,
+        "failure_reasons": {
+          "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator": 6
+        },
+        "peak_memory_bytes": 207310848,
+        "peak_over_configured_max": [
+          {
+            "family": "microfat",
+            "mode": "pool",
+            "block": 1,
+            "budget_mib": 128,
+            "overshoot_bytes": 20480
+          },
+          {
+            "family": "microfat",
+            "mode": "pool",
+            "block": 2,
+            "budget_mib": 128,
+            "overshoot_bytes": 4096
+          },
+          {
+            "family": "microfat",
+            "mode": "current",
+            "block": 2,
+            "budget_mib": 128,
+            "overshoot_bytes": 4096
+          }
+        ]
+      },
+      "confirmation": {
+        "attempts": 312,
+        "successes": 312,
+        "failures": 0,
+        "ooms": 0,
+        "native_launches": 32,
+        "failure_reasons": {},
+        "peak_memory_bytes": 515235840,
+        "peak_over_configured_max": [
+          {
+            "family": "fortio",
+            "mode": "policy",
+            "block": 0,
+            "budget_mib": 128,
+            "overshoot_bytes": 8192
+          },
+          {
+            "family": "task",
+            "mode": "current",
+            "block": 0,
+            "budget_mib": 128,
+            "overshoot_bytes": 8192
+          },
+          {
+            "family": "task",
+            "mode": "current",
+            "block": 0,
+            "budget_mib": 256,
+            "overshoot_bytes": 69632
+          },
+          {
+            "family": "task",
+            "mode": "policy",
+            "block": 0,
+            "budget_mib": 256,
+            "overshoot_bytes": 8192
+          },
+          {
+            "family": "fortio",
+            "mode": "policy",
+            "block": 1,
+            "budget_mib": 128,
+            "overshoot_bytes": 8192
+          },
+          {
+            "family": "fortio",
+            "mode": "current",
+            "block": 1,
+            "budget_mib": 128,
+            "overshoot_bytes": 4096
+          },
+          {
+            "family": "task",
+            "mode": "policy",
+            "block": 1,
+            "budget_mib": 128,
+            "overshoot_bytes": 4096
+          },
+          {
+            "family": "task",
+            "mode": "current",
+            "block": 1,
+            "budget_mib": 256,
+            "overshoot_bytes": 8192
+          },
+          {
+            "family": "fortio",
+            "mode": "policy",
+            "block": 2,
+            "budget_mib": 128,
+            "overshoot_bytes": 8192
+          },
+          {
+            "family": "task",
+            "mode": "current",
+            "block": 2,
+            "budget_mib": 128,
+            "overshoot_bytes": 8192
+          },
+          {
+            "family": "task",
+            "mode": "policy",
+            "block": 2,
+            "budget_mib": 128,
+            "overshoot_bytes": 4096
+          }
+        ]
+      },
+      "matrix": {
+        "attempts": 32,
+        "successes": 32,
+        "failures": 0,
+        "ooms": 0,
+        "native_launches": 128,
+        "failure_reasons": {},
+        "peak_memory_bytes": 138219520,
+        "peak_over_configured_max": []
+      }
+    }
+  },
+  {
+    "host": "arm64-vm-0",
+    "cells": [
+      {
+        "family": "actionlint",
+        "median_ratio": 1.5400403339082795,
+        "lower_ratio": 1.5142398618860609,
+        "median_time_reduction_pct": 35.066635724908416,
+        "lower_time_reduction_pct": 33.960264475243015,
+        "median_policy_over_current_pack_cpu": 1.0095948514077713,
+        "max_cgroup_peak_bytes": {
+          "current": 102273024,
+          "policy": 119742464
+        },
+        "eligible": true,
+        "decision": "useful: lower bound exceeds 10 percent packing-time reduction"
+      },
+      {
+        "family": "fortio",
+        "median_ratio": 1.386915003380692,
+        "lower_ratio": 1.3554716224563237,
+        "median_time_reduction_pct": 27.897528142500626,
+        "lower_time_reduction_pct": 26.224940202890735,
+        "median_policy_over_current_pack_cpu": 1.0239752804821953,
+        "max_cgroup_peak_bytes": {
+          "current": 178556928,
+          "policy": 297680896
+        },
+        "eligible": true,
+        "decision": "useful: lower bound exceeds 10 percent packing-time reduction"
+      },
+      {
+        "family": "govulncheck",
+        "median_ratio": 1.5607285796476638,
+        "lower_ratio": 1.546496528865319,
+        "median_time_reduction_pct": 35.927360270050855,
+        "lower_time_reduction_pct": 35.33771454801061,
+        "median_policy_over_current_pack_cpu": 1.026410617869209,
+        "max_cgroup_peak_bytes": {
+          "current": 133918720,
+          "policy": 176812032
+        },
+        "eligible": true,
+        "decision": "useful: lower bound exceeds 10 percent packing-time reduction"
+      },
+      {
+        "family": "task",
+        "median_ratio": 1.014330369465787,
+        "lower_ratio": 0.9684834217226795,
+        "median_time_reduction_pct": 1.4127911277401983,
+        "lower_time_reduction_pct": -3.2542196975618554,
+        "median_policy_over_current_pack_cpu": 1.0040550012064051,
+        "max_cgroup_peak_bytes": {
+          "current": 408879104,
+          "policy": 409264128
+        },
+        "eligible": false,
+        "decision": "safe fallback: lower bound excludes more than 5 percent packing-time regression"
+      }
+    ],
+    "stages": {
+      "training": {
+        "attempts": 108,
+        "successes": 102,
+        "failures": 6,
+        "ooms": 0,
+        "native_launches": 0,
+        "failure_reasons": {
+          "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator": 6
+        },
+        "peak_memory_bytes": 172978176,
+        "peak_over_configured_max": []
+      },
+      "confirmation": {
+        "attempts": 312,
+        "successes": 306,
+        "failures": 6,
+        "ooms": 6,
+        "native_launches": 32,
+        "failure_reasons": {
+          "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator": 6
+        },
+        "peak_memory_bytes": 409264128,
+        "peak_over_configured_max": [
+          {
+            "family": "task",
+            "mode": "current",
+            "block": 0,
+            "budget_mib": 256,
+            "overshoot_bytes": 4096
+          },
+          {
+            "family": "task",
+            "mode": "current",
+            "block": 1,
+            "budget_mib": 256,
+            "overshoot_bytes": 4096
+          }
+        ]
+      },
+      "matrix": {
+        "attempts": 32,
+        "successes": 32,
+        "failures": 0,
+        "ooms": 0,
+        "native_launches": 128,
+        "failure_reasons": {},
+        "peak_memory_bytes": 117760000,
+        "peak_over_configured_max": []
+      }
+    }
+  },
+  {
+    "host": "arm64-vm-1",
+    "cells": [
+      {
+        "family": "actionlint",
+        "median_ratio": 1.6113802966668778,
+        "lower_ratio": 1.5579877171782288,
+        "median_time_reduction_pct": 37.94140327590645,
+        "lower_time_reduction_pct": 35.81464160634309,
+        "median_policy_over_current_pack_cpu": 0.9920181079241546,
+        "max_cgroup_peak_bytes": {
+          "current": 102617088,
+          "policy": 112664576
+        },
+        "eligible": true,
+        "decision": "useful: lower bound exceeds 10 percent packing-time reduction"
+      },
+      {
+        "family": "fortio",
+        "median_ratio": 1.3607812742193957,
+        "lower_ratio": 1.3285380002600244,
+        "median_time_reduction_pct": 26.512804155565394,
+        "lower_time_reduction_pct": 24.729288902215984,
+        "median_policy_over_current_pack_cpu": 1.017735370200646,
+        "max_cgroup_peak_bytes": {
+          "current": 178786304,
+          "policy": 291753984
+        },
+        "eligible": true,
+        "decision": "useful: lower bound exceeds 10 percent packing-time reduction"
+      },
+      {
+        "family": "govulncheck",
+        "median_ratio": 1.6016763428526437,
+        "lower_ratio": 1.5728542578197051,
+        "median_time_reduction_pct": 37.565413607910095,
+        "lower_time_reduction_pct": 36.42131843886142,
+        "median_policy_over_current_pack_cpu": 1.0176583820194711,
+        "max_cgroup_peak_bytes": {
+          "current": 133750784,
+          "policy": 170356736
+        },
+        "eligible": true,
+        "decision": "useful: lower bound exceeds 10 percent packing-time reduction"
+      },
+      {
+        "family": "task",
+        "median_ratio": 0.9909469721284415,
+        "lower_ratio": 0.919877997424183,
+        "median_time_reduction_pct": -0.9135733925412337,
+        "lower_time_reduction_pct": -8.71006837865156,
+        "median_policy_over_current_pack_cpu": 0.998438935370672,
+        "max_cgroup_peak_bytes": {
+          "current": 397451264,
+          "policy": 356012032
+        },
+        "eligible": false,
+        "decision": "inconclusive"
+      }
+    ],
+    "stages": {
+      "training": {
+        "attempts": 108,
+        "successes": 102,
+        "failures": 6,
+        "ooms": 0,
+        "native_launches": 0,
+        "failure_reasons": {
+          "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator": 6
+        },
+        "peak_memory_bytes": 174825472,
+        "peak_over_configured_max": []
+      },
+      "confirmation": {
+        "attempts": 312,
+        "successes": 306,
+        "failures": 6,
+        "ooms": 6,
+        "native_launches": 32,
+        "failure_reasons": {
+          "worker failed, timed out, rejected admission, or was OOM-killed; retained in denominator": 6
+        },
+        "peak_memory_bytes": 397451264,
+        "peak_over_configured_max": [
+          {
+            "family": "fortio",
+            "mode": "current",
+            "block": 0,
+            "budget_mib": 128,
+            "overshoot_bytes": 4096
+          },
+          {
+            "family": "task",
+            "mode": "policy",
+            "block": 0,
+            "budget_mib": 256,
+            "overshoot_bytes": 4096
+          },
+          {
+            "family": "fortio",
+            "mode": "current",
+            "block": 1,
+            "budget_mib": 128,
+            "overshoot_bytes": 4096
+          },
+          {
+            "family": "task",
+            "mode": "policy",
+            "block": 1,
+            "budget_mib": 256,
+            "overshoot_bytes": 4096
+          },
+          {
+            "family": "fortio",
+            "mode": "policy",
+            "block": 2,
+            "budget_mib": 128,
+            "overshoot_bytes": 4096
+          }
+        ]
+      },
+      "matrix": {
+        "attempts": 32,
+        "successes": 32,
+        "failures": 0,
+        "ooms": 0,
+        "native_launches": 128,
+        "failure_reasons": {},
+        "peak_memory_bytes": 114180096,
+        "peak_over_configured_max": []
+      }
+    }
+  }
+]

@@ -4,6 +4,9 @@ The successor [training and held-out confirmation protocol](CONFIRMATION.md)
 freezes a conservative policy before native amd64/arm64 VM confirmation. Its
 fixed-sample gates, source pins, fallback diagnostics and retention bounds are
 separate from the original exploratory results below.
+The [native confirmation results](CONFIRMATION_RESULTS.md) retain all 16 cells:
+all 12 pool-eligible cells pass, while two fallback bounds leave broad promotion
+unqualified.
 
 See [the measured results](RESULTS.md) for the positive high-memory cohort and
 the low-budget regressions, retained controls and evidence replay instructions.
