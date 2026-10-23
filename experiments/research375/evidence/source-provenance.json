@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "measured_source_revision": "c5b18feb1091323e9bf6268e27ccb2c0feaf3316",
+  "measured_parent_revision": "ada376b4ffffaa3354becbfb70c1896934caf277",
+  "rebased_revision_before_provenance_addition": "7cbcb0bbaf3a1404b1eabf9cff22dd11032713bb",
+  "rebased_parent_revision": "94cb9f6ad26c14931ea28e53a8969f09790eff80",
+  "patch": "measured-source.patch.gz",
+  "patch_sha256": "b67126de7b46b6aee4623718c99629a859145e8382b14d96b5fdb06b70eefe06",
+  "gzip_sha256": "02f9f52b84c6290fd42e08b71412dddf203c83b1542359168a8b464c923ddbbe",
+  "experimental_go_sources": [
+    {
+      "path": "experiments/research375/campaign.go",
+      "sha256": "0afccd190359df1304a2697697b903235f4fd5b7ee69fbec2672a87b5d6ee5fb",
+      "matches_original_measured_source": true
+    },
+    {
+      "path": "experiments/research375/codec.go",
+      "sha256": "676661e5609afcf93b0619bad52f1159f45a9da69a63dddc575717aef050b587",
+      "matches_original_measured_source": true
+    },
+    {
+      "path": "experiments/research375/main.go",
+      "sha256": "c6a9dce00fb099bba57e29e3b199a9439e29c959fd0906cc4d4b8518136997f8",
+      "matches_original_measured_source": true
+    },
+    {
+      "path": "experiments/research375/research_test.go",
+      "sha256": "27c7a06d00977b99f028382f5e76fb5876872b93753e31817e4735ef10a095ef",
+      "matches_original_measured_source": true
+    },
+    {
+      "path": "experiments/research375/worker.go",
+      "sha256": "1de70cb11294c19a682d57f15cad2a651b9b1f3039ca130885114d34c0fc2e16",
+      "matches_original_measured_source": true
+    }
+  ],
+  "reconstruction": "Checkout measured_parent_revision in a separate worktree; gzip -dc measured-source.patch.gz | git am. git am reproduces the measured source tree; committer metadata may produce a different commit id.",
+  "measurement_status": "Measurements are unchanged and were not repeated after the rebase.",
+  "experimental_go_sources_scope": "Historical identical rebase snapshot 7cbcb0b, before the later input guard.",
+  "post_measurement_change": {
+    "timing_repeated": false,
+    "description": "Caller-selected ELF/dictionary and worker files now use nonblocking descriptor-validated regular-file opens, keeping procfs telemetry reads unchanged. FIFO regression coverage and the README readiness example were added/corrected.",
+    "current_go_sources": [
+      {
+        "path": "experiments/research375/campaign.go",
+        "sha256": "6db6d754c0a8f0db6c1cdb6cd6c2f02779b85c03fbc420cb14012442124f653f",
+        "matches_original_measured_source": false
+      },
+      {
+        "path": "experiments/research375/codec.go",
+        "sha256": "774be995bf240f0ebf71d37faf0624ac7b6c64727cdda0bc228c6f0af2f27121",
+        "matches_original_measured_source": false
+      },
+      {
+        "path": "experiments/research375/main.go",
+        "sha256": "c6a9dce00fb099bba57e29e3b199a9439e29c959fd0906cc4d4b8518136997f8",
+        "matches_original_measured_source": true
+      },
+      {
+        "path": "experiments/research375/research_test.go",
+        "sha256": "41b18022a6a0ea503423a61585a6f8ec02fe60e7e93511ca9250eb46ba981b5c",
+        "matches_original_measured_source": false
+      },
+      {
+        "path": "experiments/research375/worker.go",
+        "sha256": "42c80b99d2e42e5645369ba3cb3d0d5ce0858dfd6a133fe4376b5a9efd966fab",
+        "matches_original_measured_source": false
+      }
+    ]
+  }
+}

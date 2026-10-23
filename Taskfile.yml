@@ -87,6 +87,23 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  research-375:
+    desc: Screen codec concurrency using a trusted native Go ELF (INPUT, FAMILY and SOURCE required)
+    cmds:
+    - |-
+      {{.GO | shellQuote}} run ./experiments/research375 \
+        --input {{.INPUT | default "" | shellQuote}} \
+        --family {{.FAMILY | default "" | shellQuote}} \
+        --source-revision {{.SOURCE | default "" | shellQuote}} \
+        --encoders {{.ENCODERS | default "-1,1,2,4" | shellQuote}} \
+        --workers {{.WORKERS | default "1,2,4" | shellQuote}} \
+        --decoders {{.DECODERS | default "-1,1,2,4" | shellQuote}} \
+        --bursts {{.BURSTS | default "1,2,4" | shellQuote}} \
+        --cpu-budget {{.CPU_BUDGET | default "4" | shellQuote}} \
+        --trials {{.TRIALS | shellQuote}} \
+        --dictionary {{.DICTIONARY | default "" | shellQuote}} \
+        --level {{.LEVEL | default "default" | shellQuote}} \
+        --arrival-gap {{.ARRIVAL_GAP | default "0s" | shellQuote}}
   test-runtime-fixtures:
     desc: Require native fat CLI inspection, timeout and detached-child cleanup regressions
     cmds:
