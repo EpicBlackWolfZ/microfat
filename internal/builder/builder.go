@@ -44,6 +44,7 @@ type BuildOptions struct {
 	EnableDict        bool
 	DictSize          int
 	FormatVersion     int
+	CreatedUnix       *int64 // Optional creation metadata for Pack; nil retains wall-clock time.
 	Stdout            io.Writer
 	Stderr            io.Writer
 	WarnFunc          pack.WarnFunc
@@ -433,6 +434,7 @@ func assemblePackOptions(
 	packOpts.StubPath = stubPath
 	packOpts.OutputPath = finalOutput
 	packOpts.AppName = appName
+	packOpts.CreatedUnix = opts.CreatedUnix
 	if m.TargetOS != "" {
 		packOpts.TargetOS = m.TargetOS
 	}

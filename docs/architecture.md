@@ -72,7 +72,7 @@ for trusted actors, parser/resource bounds and the regression tests behind each 
 | :--- | :--- | :--- | :--- | :--- |
 | `0..3` | `IndexMagic` | `[4]byte` | ASCII | Fixed magic signature `\x00\xFAM2`. |
 | `4..5` | `FormatVersion` | `uint16` | Little Endian | Version number (`2`). |
-| `6..13` | `CreatedUnix` | `uint64` | Little Endian | Unix epoch timestamp of creation. |
+| `6..13` | `CreatedUnix` | `int64` | Little Endian, two's complement | Signed Unix creation epoch in seconds. |
 | `14..21` | `DictOffset` | `uint64` | Little Endian | Byte offset of shared dictionary (`0` if unused). |
 | `22..29` | `DictSize` | `uint64` | Little Endian | Byte length of shared dictionary (`0` if unused). |
 | `30..33` | `DictID` | `uint32` | Little Endian | Zstandard dictionary ID. |
@@ -85,6 +85,13 @@ for trusted actors, parser/resource bounds and the regression tests behind each 
 | `+0..1`| `AppNameLen` | `uint16` | Little Endian | Length $N_{\text{app}}$ of application name. |
 | `+2..` | `AppName` | `[N]byte` | UTF-8 | Application name string. |
 | `+0..1`| `VariantCount` | `uint16` | Little Endian | Number of embedded variant records ($K$). |
+
+`CreatedUnix` preserves the full signed 64-bit range in both formats; its wire layout is
+unchanged. New Pack operations use an explicit `pack.Options.CreatedUnix` when supplied,
+otherwise wall-clock seconds. The CLI resolves `SOURCE_DATE_EPOCH` into that option before
+building/snapshotting. The epoch is informational caller-supplied metadata, not an authenticity
+signal or measured build time. See [reproducible packaging](cli-reference.md#reproducible-creation-epoch)
+for input validation and the limits of byte reproducibility.
 
 ### Per-Variant Record Layout ($K$ records)
 
