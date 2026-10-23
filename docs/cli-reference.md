@@ -363,7 +363,7 @@ Variant keys accept the same normalized aliases as `--variant`, including `V3`,
 `amd64_v3`, and `arm64-v8.2`. Each key must belong to the selected architecture and
 refer to a supplied direct or manifest variant. Repeated keys, including different
 aliases for the same variant, are rejected. Missing keys/codecs, extra separators,
-unknown codecs, unsupported levels and a trailing empty `:` are rejected before
+unknown codecs, unsupported inline levels and a trailing empty `:` are rejected before
 compilation or packaging. `none` accepts no inline compression level.
 
 Codec names and named compression levels are case-insensitive. The level mappings
@@ -391,10 +391,11 @@ Algorithm, compression level and profile are resolved separately for each varian
    outranks an inline level in its effective variant algorithm. Either outranks
    the global level. A codec-only variant algorithm inherits the global level
    when the variant has no separate level.
-4. The global level comes from `--compression-level`, then an inline level in
-   `--compression`, then root manifest `compression.level`, then an inline level
-   in the effective root algorithm. A global codec-only override also replaces
-   the root algorithm's inline level while retaining a separate root level.
+4. The inherited global level comes from `--compression-level`, then an inline
+   level in CLI `--compression`, then root manifest `compression.level`. An inline
+   level in root manifest `compression.algorithm` remains part of that field:
+   replacing its algorithm with a global or variant override replaces that inline
+   level too. Codec-only overrides retain a separate root level.
 5. The profile comes from the manifest variant's `compression.profile`, then
    global `--profile`, then root manifest `compression.profile`, then `balanced`.
    When the algorithm is absent, `latency` selects `none` for positive payload

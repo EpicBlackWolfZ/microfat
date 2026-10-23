@@ -708,6 +708,9 @@ func runDirectPack(
 	}
 	if flags.Compression != "" {
 		opts.Compression = flags.Compression
+		if _, inlineLevel := codec.ParseCompressionSpec(flags.Compression); inlineLevel != "" {
+			opts.CompressionLevel = inlineLevel
+		}
 	}
 	if flags.CompressionLevel != "" {
 		opts.CompressionLevel = flags.CompressionLevel
