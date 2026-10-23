@@ -1,0 +1,41 @@
+# Run from any directory: task -t <repo>/experiments/research161/corpus.Taskfile.yml corpus
+version: '3'
+silent: true
+set: [errexit, nounset, pipefail]
+vars:
+  ROOT:
+    sh: git -C {{.TASKFILE_DIR | shellQuote}} rev-parse --show-toplevel
+  OUTPUT: '{{.OUTPUT | default ".work/research161-corpus"}}'
+  GO: '{{.GO | default "go"}}'
+  SOURCE_REVISION:
+    sh: git -C {{.TASKFILE_DIR | shellQuote}} rev-parse HEAD
+tasks:
+  corpus:
+    desc: Build the native Linux amd64 stripped two-family v1-v3 research corpus and pinned manifest
+    dir: '{{.ROOT}}'
+    preconditions:
+    - sh: test ! -e {{.OUTPUT | shellQuote}}
+      msg: OUTPUT must not exist
+    - sh: test "$({{.GO | shellQuote}} version | cut -d ' ' -f 3)" = go1.27.3
+      msg: Require Go 1.27.3
+    env:
+      GOOS: linux
+      GOARCH: amd64
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    cmds:
+    - mkdir -p {{.OUTPUT | shellQuote}}
+    - for: [v1, v2, v3]
+      cmd: >-
+        GOAMD64={{.ITEM}} {{.GO | shellQuote}} build -trimpath -buildvcs=false -ldflags='-s -w -buildid='
+        -o {{.OUTPUT | shellQuote}}/microfat-{{.ITEM}} ./cmd/microfat
+    - for: [v1, v2, v3]
+      cmd: >-
+        GOAMD64={{.ITEM}} {{.GO | shellQuote}} build -trimpath -buildvcs=false -ldflags='-s -w -buildid='
+        -o {{.OUTPUT | shellQuote}}/demo-{{.ITEM}} ./examples/demo
+    - >-
+      GOAMD64=v1 {{.GO | shellQuote}} build -trimpath -buildvcs=false -ldflags='-s -w -buildid='
+      -o {{.OUTPUT | shellQuote}}/microfat-stub ./cmd/microfat-stub
+    - >-
+      {{.GO | shellQuote}} run ./experiments/research161 manifest
+      --directory {{.OUTPUT | shellQuote}} --source-revision {{.SOURCE_REVISION | shellQuote}}

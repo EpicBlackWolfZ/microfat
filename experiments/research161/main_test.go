@@ -167,3 +167,33 @@ func TestRunFailures(t *testing.T) {
 	}
 	require.Error(t, run(nil, io.Discard))
 }
+
+func TestCorpusManifestWriter(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{nil, {"--unknown"}, {"--directory", "directory", "--source-revision", "source", "extra"}} {
+		require.Error(t, writeCorpusManifest(args, io.Discard))
+	}
+	dir := t.TempDir()
+	args := []string{"--directory", dir, "--source-revision", "source"}
+	require.Error(t, writeCorpusManifest(args, io.Discard), "missing corpus inputs")
+	for _, family := range []string{"microfat", "demo"} {
+		for _, level := range []string{"v1", "v2", "v3"} {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, family+"-"+level), fixtureELF(), privateFile))
+		}
+	}
+	require.NoError(t, run(append([]string{"manifest"}, args...), io.Discard))
+	data, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	require.NoError(t, err)
+	var corpus manifest
+	require.NoError(t, json.Unmarshal(data, &corpus))
+	require.Len(t, corpus.Variants, 6)
+	assert.Equal(t, "source", corpus.SourceRevision)
+	assert.Equal(t, "go1.27.3", corpus.GoVersion)
+	for _, item := range corpus.Variants {
+		assert.True(t, filepath.IsAbs(item.Path))
+		assert.Equal(t, digest(fixtureELF()), item.SHA256)
+	}
+	require.Error(t, writeCorpusManifest(args, io.Discard), "existing manifest is immutable")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "microfat-v1"), []byte("invalid"), privateFile))
+	require.Error(t, writeCorpusManifest(args, io.Discard), "ELF validation")
+}

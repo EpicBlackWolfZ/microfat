@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
+	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 )
 
@@ -123,7 +124,7 @@ func parseSizes(value string) ([]int, error) {
 }
 
 func readBounded(path string) ([]byte, error) {
-	f, err := os.Open(path) // #nosec G304 -- Explicit user-selected corpus input; size and file type are bounded below.
+	f, err := inputfile.Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +194,9 @@ func loadCorpus(opts options) (manifest, []input, string, error) {
 }
 
 func run(args []string, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "manifest" {
+		return writeCorpusManifest(args[1:], stderr)
+	}
 	opts, err := parseOptions(args, stderr)
 	if err != nil {
 		return err
