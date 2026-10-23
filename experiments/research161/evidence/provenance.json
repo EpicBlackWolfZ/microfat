@@ -4,6 +4,8 @@
   "measured_date_utc": "2026-10-23",
   "corpus_source_revision": "ada376b4ffffaa3354becbfb70c1896934caf277",
   "runner_source_commit": "327a5dd649dcd435db5dcd235bf667c1677d758a",
+  "runner_source_patch": "measured-runner.patch",
+  "runner_source_patch_sha256": "f9dd56035ade9afa55d345751b84c17fe175ae01651f2b7153a9d31f57514a81",
   "runner_source_note": "The campaigns ran before this commit was created. These exact Go source bytes were unchanged when committed. The raw report source_revision identifies the corpus, not the experiment runner.",
   "runner_go_sources_sha256": {
     "experiments/research161/main.go": "6838208a81b6715477d4fee00522e541c89b1d4831eb1aada6b54f2e85af2e39",

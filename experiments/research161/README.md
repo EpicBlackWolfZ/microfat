@@ -48,6 +48,8 @@ This is a first screen on supplied families, with no fitted heuristic tuning. Be
 
 The [demo report](evidence/demo.json), [microfat report](evidence/microfat.json), [corpus manifest](evidence/corpus-manifest.json) and [runner provenance](evidence/provenance.json) retain all 26 candidate results and input identities. The native Linux amd64 corpus contains two stripped program families at tiers v1/v2/v3 from source `ada376b4ffffaa3354becbfb70c1896934caf277`, built with Go 1.27.3, `-trimpath -buildvcs=false -ldflags='-s -w -buildid='`. The runner used `GOMAXPROCS=2`, `GOFLAGS=-p=2` and Zstd `better`. Team measurements were serialized; host controls were inherited, without an imposed CPU affinity, quota, RSS ceiling or pressure workload.
 
+The [measured runner patch](evidence/measured-runner.patch) reconstructs the exact campaign source on top of that corpus revision, independently of later branch rebases. Its checksum and the individual Go source checksums are recorded in provenance. The later FIFO input fix and corpus-manifest helper do not change history selection or artifact construction; the original measurement source remains explicit.
+
 | Family | No dictionary | Current, 32 KiB requested | Current, 112 KiB requested | Smallest new selector |
 |---|---:|---:|---:|---:|
 | demo | 9,626,985 B | 9,623,774 B | **9,606,459 B** | section/32 KiB: 9,643,659 B |

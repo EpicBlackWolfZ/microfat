@@ -1,0 +1,1128 @@
+diff --git a/Taskfile.yml b/Taskfile.yml
+index b02c248..00f966d 100644
+--- a/Taskfile.yml
++++ b/Taskfile.yml
+@@ -87,6 +87,18 @@ vars:
+     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
+ 
+ tasks:
++  research-161:
++    desc: Screen dictionary sampling on a pinned ELF corpus (MANIFEST, FAMILY, STUB, OUTPUT required)
++    cmds:
++    - |-
++      {{.GO | shellQuote}} run ./experiments/research161 \
++        --manifest {{.MANIFEST | default "" | shellQuote}} \
++        --family {{.FAMILY | default "" | shellQuote}} \
++        --stub {{.STUB | default "" | shellQuote}} \
++        --output {{.OUTPUT | default "" | shellQuote}} \
++        --sizes {{.SIZES | default "32768,114688" | shellQuote}} \
++        --level {{.LEVEL | default "better" | shellQuote}} \
++        --arch {{.ARCH | default .HOST_ARCH | shellQuote}}
+   test-runtime-fixtures:
+     desc: Require native fat CLI inspection, timeout and detached-child cleanup regressions
+     cmds:
+diff --git a/experiments/research161/README.md b/experiments/research161/README.md
+new file mode 100644
+index 0000000..a3751e9
+--- /dev/null
++++ b/experiments/research161/README.md
+@@ -0,0 +1,36 @@
++# Dictionary sampling screen (#161)
++
++This isolated POC writes complete Format v2 fat artifacts and compares their actual byte counts. It does not change production packing, formats, launchers or defaults. The candidates are no dictionary, the current trainer, balanced per-variant history, exact-window deduplication, frequency/prevalence ordering, alternating core/accessory history, and ELF-section sampling. No superstring algorithm or specialist dictionary pool is implemented.
++
++All history alternatives except section sampling keep the **same training contents** and change only dictionary history. This separates the prefix-history question from training-statistics changes. Frequency sorts exact windows by distinct-variant prevalence and then occurrence count. Core means present byte-for-byte in every variant; core/accessory alternates one unique core and one unique accessory window, then fills from the remaining group. When every window is unique, prevalence provides little information; the report records that negative diagnostic. Exact hash buckets are followed by byte comparison.
++
++Uniform sampling reproduces the current 32 evenly spaced 4 KiB windows per variant. Section sampling cycles through file-backed ELF `PROGBITS` sections at least 4 KiB long, selecting 32 4 KiB windows per file. At most eight variants and 64 MiB per input are allowed, so the sample budget stays below the production 4 MiB ceiling. Each requested history budget is capped at one quarter of actual sample bytes, as in the production trainer. Zstd dictionary headers are additional bytes; the reported complete artifact includes them, every frame, the launcher, the exact serialized index and the trailer.
++
++Run with Go 1.27.3 and pinned Task:
++
++```bash
++GOMAXPROCS=2 GOFLAGS=-p=2 task research-161 \
++  MANIFEST=/absolute/path/corpus/manifest.json FAMILY=demo \
++  STUB=/absolute/path/microfat-stub OUTPUT=.work/research161-demo \
++  SIZES=32768,114688 LEVEL=better
++```
++
++`OUTPUT` must be a new directory with an existing parent. It receives a `report.json` and one executable `.fat` per successful candidate. Inputs are read once, hashes and lengths are checked against the manifest, ELF class/endianness/architecture are checked, and immutable in-memory snapshots feed every candidate. The experiment does not execute input or output binaries. Use a launcher built for the same target; SHA-256 and full stub size are recorded. The manifest format is:
++
++```json
++{
++  "schema_version": 1,
++  "source_revision": "full source commit",
++  "go_version": "go1.27.3",
++  "variants": [
++    {"family": "demo", "level": "v1", "path": "/absolute/demo-v1", "sha256": "full hash", "bytes": 123456},
++    {"family": "demo", "level": "v2", "path": "/absolute/demo-v2", "sha256": "full hash", "bytes": 123456}
++  ]
++}
++```
++
++Retain the manifest, exact source/build recipe (including strip flags, architecture tiers and toolchain), and output together. Reports retain every attempted candidate and error. Successful candidates require byte-for-byte decompression **and** the expected SHA-256, followed by the production complete-artifact verifier. The smallest candidate is only a size winner for this bundle; no dictionary remains eligible. The index creation timestamp is fixed at zero to make artifacts deterministic across reruns at the same dependency/toolchain/settings. Timing fields naturally vary.
++
++The one-shot train/assembly wall duration includes compression and round-trip checks but excludes input I/O, complete-artifact verification and file publication. Allocation counters are process-wide Go allocations during that interval, **not peak RSS**. Per-variant compression and decompression durations are codec diagnostics in one process. They do not establish cold process latency, independent samples, application readiness, p99, CPU usage, cgroup behavior or production pack memory. Run timing experiments serially and retain resource controls. Warm verified-cache launches skip decompression, so they remain a negative control for any subsequent launch study.
++
++This is a first screen on supplied families, with no fitted heuristic tuning. Before promotion, predeclare a meaningful complete-byte threshold and pack/startup/memory ceilings, pin separate stripped/unstripped families and toolchains, and confirm on held-out whole program families. Stop selection complexity if the current trainer or no dictionary is equally good. Follow-up startup work must use independently sampled launches, preserve all failures, and keep explicit memfd, auto cache miss, warm verified cache and cold cache materialization separate. Descriptor hashes, size bounds and sealing remain mandatory.
+diff --git a/experiments/research161/experiment.go b/experiments/research161/experiment.go
+new file mode 100644
+index 0000000..cbdb7de
+--- /dev/null
++++ b/experiments/research161/experiment.go
+@@ -0,0 +1,172 @@
++package main
++
++import (
++	"bytes"
++	"fmt"
++	"runtime"
++	"time"
++
++	"github.com/EpicBlackWolfZ/microfat/internal/codec"
++	"github.com/EpicBlackWolfZ/microfat/internal/format"
++	"github.com/EpicBlackWolfZ/microfat/internal/pack"
++	"github.com/klauspost/compress/zstd"
++)
++
++type payloadResult struct {
++	Level      string `json:"level"`
++	Bytes      int    `json:"compressed_bytes"`
++	CompressNS int64  `json:"compress_wall_ns_diagnostic"`
++	DecodeNS   int64  `json:"decode_wall_ns_diagnostic"`
++	Verified   bool   `json:"byte_exact_and_sha256_verified"`
++}
++
++type result struct {
++	ID               string          `json:"id"`
++	HistoryBudget    int             `json:"history_budget_bytes"`
++	SampleBytes      int             `json:"sample_bytes"`
++	SampleCount      int             `json:"sample_count"`
++	UniqueSamples    int             `json:"unique_sample_count"`
++	CoreSamples      int             `json:"core_sample_count"`
++	HistoryBytes     int             `json:"history_bytes"`
++	HistorySHA256    string          `json:"history_sha256"`
++	DictionaryBytes  int             `json:"dictionary_bytes"`
++	DictionarySHA256 string          `json:"dictionary_sha256"`
++	TrainNS          int64           `json:"train_wall_ns_diagnostic"`
++	EncodeNS         int64           `json:"train_and_assemble_wall_ns_diagnostic"`
++	AllocatedBytes   uint64          `json:"train_and_assemble_allocated_bytes_diagnostic"`
++	Payloads         []payloadResult `json:"payloads"`
++	MetadataBytes    int             `json:"index_and_trailer_bytes"`
++	ArtifactBytes    int             `json:"artifact_bytes"`
++	ArtifactSHA256   string          `json:"artifact_sha256"`
++	ArtifactVerified bool            `json:"artifact_verified"`
++	Error            string          `json:"error,omitempty"`
++}
++
++func train(c candidate, level string) ([]byte, result, error) {
++	res := result{ID: candidateID(c), HistoryBudget: c.size, SampleCount: len(c.samples)}
++	if c.policy == "none" {
++		return nil, res, nil
++	}
++	history, total := selectedHistory(c)
++	res.SampleBytes, res.HistoryBytes, res.HistorySHA256 = total, len(history), digest(history)
++	unique := motifs(c.samples)
++	res.UniqueSamples = len(unique)
++	variants := make(map[int]bool)
++	for _, item := range c.samples {
++		variants[item.variant] = true
++	}
++	for _, item := range unique {
++		if len(item.variants) == len(variants) {
++			res.CoreSamples++
++		}
++	}
++	contents := make([][]byte, 0, len(c.samples))
++	for _, item := range c.samples {
++		contents = append(contents, item.data)
++	}
++	start := time.Now()
++	var dictionary []byte
++	var err error
++	if c.policy == "current" {
++		dictionary, err = codec.TrainDictionary(contents, c.size, level)
++	} else {
++		encLevel, mapErr := codec.NewZstdCodec().MapLevel(level)
++		if mapErr != nil {
++			return nil, res, mapErr
++		}
++		dictionary, err = zstd.BuildDict(zstd.BuildDictOptions{
++			ID: codec.DefaultDictionaryID, History: history, Contents: contents, Level: encLevel,
++		})
++	}
++	res.TrainNS = time.Since(start).Nanoseconds()
++	res.DictionaryBytes, res.DictionarySHA256 = len(dictionary), digest(dictionary)
++	return dictionary, res, err
++}
++
++func evaluate(c candidate, inputs []input, stub []byte, opts options) (result, []byte) {
++	var before, after runtime.MemStats
++	runtime.ReadMemStats(&before)
++	start := time.Now()
++	dictionary, res, err := train(c, opts.level)
++	if err != nil {
++		res.Error = err.Error()
++		return res, nil
++	}
++	artifact, err := assemble(inputs, stub, dictionary, opts, &res)
++	res.EncodeNS = time.Since(start).Nanoseconds()
++	runtime.ReadMemStats(&after)
++	res.AllocatedBytes = after.TotalAlloc - before.TotalAlloc
++	if err != nil {
++		res.Error = err.Error()
++		return res, nil
++	}
++	_, checks, err := pack.VerifyBinary(bytes.NewReader(artifact), int64(len(artifact)))
++	if err != nil {
++		res.Error = fmt.Sprintf("complete artifact verification: %v", err)
++		return res, nil
++	}
++	for _, check := range checks {
++		if !check.Valid {
++			res.Error = fmt.Sprintf("complete artifact variant %s: %s", check.Level, check.ErrorString)
++			return res, nil
++		}
++	}
++	res.ArtifactBytes, res.ArtifactSHA256, res.ArtifactVerified = len(artifact), digest(artifact), true
++	return res, artifact
++}
++
++func assemble(inputs []input, stub, dictionary []byte, opts options, res *result) ([]byte, error) {
++	var artifact bytes.Buffer
++	artifact.Write(stub)
++	idx := &format.Index{
++		Version: format.FormatVersion2, AppName: "research161", TargetOS: "linux", TargetArch: opts.arch,
++	}
++	if len(dictionary) > 0 {
++		idx.DictionaryOffset = int64(artifact.Len())
++		idx.DictionarySize = int64(len(dictionary))
++		idx.DictionarySHA256 = digest(dictionary)
++		idx.DictionaryID = codec.DefaultDictionaryID
++		artifact.Write(dictionary)
++	}
++	zcodec := codec.NewZstdCodec()
++	for _, item := range inputs {
++		payload, diagnostics, err := compressAndVerify(zcodec, item, dictionary, opts.level)
++		res.Payloads = append(res.Payloads, diagnostics)
++		if err != nil {
++			return nil, err
++		}
++		idx.Variants = append(idx.Variants, format.VariantEntry{
++			Level: item.Level, Offset: int64(artifact.Len()), CompressedSize: int64(len(payload)),
++			UncompressedSize: int64(len(item.data)), SHA256: item.SHA256, Compression: codec.AlgorithmZstd,
++		})
++		artifact.Write(payload)
++	}
++	metadataBytes, err := format.WriteIndexAndTrailer(&artifact, idx, int64(artifact.Len()))
++	if err != nil {
++		return nil, err
++	}
++	res.MetadataBytes = int(metadataBytes)
++	return artifact.Bytes(), nil
++}
++
++func compressAndVerify(zcodec *codec.ZstdCodec, item input, dictionary []byte, level string) ([]byte, payloadResult, error) {
++	res := payloadResult{Level: item.Level}
++	var compressed bytes.Buffer
++	start := time.Now()
++	if err := zcodec.CompressWithDict(&compressed, item.data, level, dictionary); err != nil {
++		return nil, res, err
++	}
++	res.CompressNS = time.Since(start).Nanoseconds()
++	res.Bytes = compressed.Len()
++	var decoded bytes.Buffer
++	start = time.Now()
++	if err := zcodec.DecompressWithDict(&decoded, bytes.NewReader(compressed.Bytes()), int64(len(item.data)), dictionary); err != nil {
++		return nil, res, err
++	}
++	res.DecodeNS = time.Since(start).Nanoseconds()
++	if !bytes.Equal(item.data, decoded.Bytes()) || digest(decoded.Bytes()) != item.SHA256 {
++		return nil, res, fmt.Errorf("variant %s failed exact round trip", item.Level)
++	}
++	res.Verified = true
++	return compressed.Bytes(), res, nil
++}
+diff --git a/experiments/research161/main.go b/experiments/research161/main.go
+new file mode 100644
+index 0000000..79461dc
+--- /dev/null
++++ b/experiments/research161/main.go
+@@ -0,0 +1,279 @@
++// Command research161 screens bounded dictionary sampling alternatives for issue #161.
++package main
++
++import (
++	"crypto/sha256"
++	"encoding/hex"
++	"encoding/json"
++	"errors"
++	"flag"
++	"fmt"
++	"io"
++	"os"
++	"path/filepath"
++	"runtime"
++	"runtime/debug"
++	"slices"
++	"strconv"
++	"strings"
++
++	"github.com/EpicBlackWolfZ/microfat/internal/codec"
++	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
++)
++
++const (
++	maxInputBytes = 64 * 1024 * 1024
++	maxVariants   = 8
++	minVariants   = 2
++	defaultSizes  = "32768,114688"
++	privateDir    = 0o700
++	privateFile   = 0o600
++	issueNumber   = 161
++)
++
++type input struct {
++	Family string `json:"family"`
++	Level  string `json:"level"`
++	Path   string `json:"path"`
++	SHA256 string `json:"sha256"`
++	Bytes  int    `json:"bytes"`
++	data   []byte
++}
++
++type manifest struct {
++	SchemaVersion  int     `json:"schema_version"`
++	SourceRevision string  `json:"source_revision"`
++	GoVersion      string  `json:"go_version"`
++	Variants       []input `json:"variants"`
++}
++
++type options struct {
++	manifestPath string
++	family       string
++	stubPath     string
++	output       string
++	sizes        string
++	level        string
++	arch         string
++}
++
++type report struct {
++	SchemaVersion  int      `json:"schema_version"`
++	Issue          int      `json:"issue"`
++	ManifestSHA256 string   `json:"manifest_sha256"`
++	SourceRevision string   `json:"source_revision"`
++	CorpusGo       string   `json:"corpus_go_version"`
++	RunnerGo       string   `json:"runner_go_version"`
++	CodecVersion   string   `json:"codec_version"`
++	Family         string   `json:"family"`
++	TargetArch     string   `json:"target_arch"`
++	Level          string   `json:"compression_level"`
++	GOMAXPROCS     int      `json:"gomaxprocs"`
++	StubSHA256     string   `json:"stub_sha256"`
++	StubBytes      int      `json:"stub_bytes"`
++	Inputs         []input  `json:"inputs"`
++	Results        []result `json:"results"`
++	Smallest       string   `json:"smallest_verified_artifact"`
++	Limitations    []string `json:"limitations"`
++}
++
++func main() {
++	if err := run(os.Args[1:], os.Stderr); err != nil {
++		fmt.Fprintln(os.Stderr, err)
++		os.Exit(1)
++	}
++}
++
++func parseOptions(args []string, stderr io.Writer) (options, error) {
++	var opts options
++	flags := flag.NewFlagSet("research161", flag.ContinueOnError)
++	flags.SetOutput(stderr)
++	flags.StringVar(&opts.manifestPath, "manifest", "", "pinned corpus manifest JSON")
++	flags.StringVar(&opts.family, "family", "", "one corpus program family")
++	flags.StringVar(&opts.stubPath, "stub", "", "matching microfat stub ELF")
++	flags.StringVar(&opts.output, "output", "", "new output directory (never overwritten)")
++	flags.StringVar(&opts.sizes, "sizes", defaultSizes, "comma-separated history byte budgets")
++	flags.StringVar(&opts.level, "level", "better", "fixed Zstd compression level")
++	flags.StringVar(&opts.arch, "arch", runtime.GOARCH, "target ELF architecture")
++	if err := flags.Parse(args); err != nil {
++		return opts, err
++	}
++	if flags.NArg() != 0 || opts.manifestPath == "" || opts.family == "" || opts.stubPath == "" || opts.output == "" {
++		return opts, errors.New("--manifest, --family, --stub and --output are required; positional arguments are unsupported")
++	}
++	if _, err := codec.NewZstdCodec().MapLevel(opts.level); err != nil {
++		return opts, err
++	}
++	return opts, nil
++}
++
++func parseSizes(value string) ([]int, error) {
++	var sizes []int
++	for _, part := range strings.Split(value, ",") {
++		size, err := strconv.Atoi(part)
++		if err != nil || size < sampleBytes || size > codec.MaxDictSize {
++			return nil, fmt.Errorf("invalid history budget %q: require %d..%d bytes", part, sampleBytes, codec.MaxDictSize)
++		}
++		if slices.Contains(sizes, size) {
++			return nil, fmt.Errorf("duplicate history budget %d", size)
++		}
++		sizes = append(sizes, size)
++	}
++	return sizes, nil
++}
++
++func readBounded(path string) ([]byte, error) {
++	f, err := os.Open(path) // #nosec G304 -- Explicit user-selected corpus input; size and file type are bounded below.
++	if err != nil {
++		return nil, err
++	}
++	defer func() { _ = f.Close() }()
++	info, err := f.Stat()
++	if err != nil {
++		return nil, err
++	}
++	if !info.Mode().IsRegular() || info.Size() > maxInputBytes {
++		return nil, errors.New("input must be a regular file at most 64 MiB")
++	}
++	data, err := io.ReadAll(io.LimitReader(f, maxInputBytes+1))
++	if err != nil {
++		return nil, err
++	}
++	if len(data) > maxInputBytes {
++		return nil, errors.New("input exceeded 64 MiB while reading")
++	}
++	return data, nil
++}
++
++func loadCorpus(opts options) (manifest, []input, string, error) {
++	data, err := readBounded(opts.manifestPath)
++	if err != nil {
++		return manifest{}, nil, "", err
++	}
++	var corpus manifest
++	if err := json.Unmarshal(data, &corpus); err != nil {
++		return corpus, nil, "", err
++	}
++	if corpus.SchemaVersion != 1 || corpus.SourceRevision == "" || corpus.GoVersion != "go1.27.3" {
++		return corpus, nil, "", errors.New("require schema_version=1, source_revision and pinned corpus go_version=go1.27.3")
++	}
++	var selected []input
++	seen := make(map[string]bool)
++	for _, item := range corpus.Variants {
++		if item.Family != opts.family {
++			continue
++		}
++		if strings.TrimSpace(item.Level) == "" {
++			return corpus, nil, "", errors.New("variant level is required")
++		}
++		item.Level = microarch.Normalize(item.Level)
++		if seen[item.Level] || microarch.Rank(opts.arch, item.Level) < 0 {
++			return corpus, nil, "", fmt.Errorf("duplicate or invalid variant level %q", item.Level)
++		}
++		seen[item.Level] = true
++		item.data, err = readBounded(item.Path)
++		if err != nil {
++			return corpus, nil, "", err
++		}
++		if item.Bytes != len(item.data) || item.SHA256 != digest(item.data) {
++			return corpus, nil, "", fmt.Errorf("corpus identity mismatch: %s", item.Path)
++		}
++		if err := validateELF(item.data, opts.arch); err != nil {
++			return corpus, nil, "", fmt.Errorf("variant %s: %w", item.Level, err)
++		}
++		selected = append(selected, item)
++	}
++	if len(selected) < minVariants || len(selected) > maxVariants {
++		return corpus, nil, "", errors.New("select between two and eight variants from one family")
++	}
++	slices.SortFunc(selected, func(a, b input) int {
++		return microarch.Rank(opts.arch, a.Level) - microarch.Rank(opts.arch, b.Level)
++	})
++	return corpus, selected, digest(data), nil
++}
++
++func run(args []string, stderr io.Writer) error {
++	opts, err := parseOptions(args, stderr)
++	if err != nil {
++		return err
++	}
++	sizes, err := parseSizes(opts.sizes)
++	if err != nil {
++		return err
++	}
++	corpus, inputs, manifestHash, err := loadCorpus(opts)
++	if err != nil {
++		return err
++	}
++	stub, err := readBounded(opts.stubPath)
++	if err != nil {
++		return err
++	}
++	if err := validateELF(stub, opts.arch); err != nil {
++		return fmt.Errorf("stub: %w", err)
++	}
++	if err := os.Mkdir(opts.output, privateDir); err != nil {
++		return err
++	}
++	rep := report{
++		SchemaVersion: 1, Issue: issueNumber, ManifestSHA256: manifestHash, SourceRevision: corpus.SourceRevision,
++		CorpusGo: corpus.GoVersion, RunnerGo: runtime.Version(), CodecVersion: codecVersion(), Family: opts.family,
++		TargetArch: opts.arch, Level: opts.level, GOMAXPROCS: runtime.GOMAXPROCS(0), StubSHA256: digest(stub),
++		StubBytes: len(stub), Inputs: inputs,
++		Limitations: []string{
++			"A bounded in-memory size screen; all inputs and complete artifacts are retained in memory.",
++			"Wall time and allocation counters are one-shot diagnostics, excluding input I/O and publication; they are not process-start p99.",
++			"No peak RSS, pack CPU, cgroup stress, launch execution, held-out validation or production-default decision is claimed.",
++			"Requested history budgets match; actual history is capped at one quarter of training bytes. Dictionary headers add bytes.",
++			"Section sampling changes training contents; other alternatives isolate history selection with uniform contents.",
++			"No dictionary is a required candidate. Warm verified-cache launches do not decompress.",
++		},
++	}
++	for _, candidate := range candidates(inputs, sizes) {
++		res, artifact := evaluate(candidate, inputs, stub, opts)
++		if res.Error == "" {
++			if err := os.WriteFile(filepath.Join(opts.output, res.ID+".fat"), artifact, privateDir); err != nil {
++				return err
++			}
++		}
++		rep.Results = append(rep.Results, res)
++	}
++	rep.Smallest = smallest(rep.Results)
++	if rep.Smallest == "" {
++		return errors.New("all candidates failed; output directory retained for inspection")
++	}
++	data, err := json.MarshalIndent(rep, "", "  ")
++	if err != nil {
++		return err
++	}
++	return os.WriteFile(filepath.Join(opts.output, "report.json"), append(data, '\n'), privateFile)
++}
++
++func digest(data []byte) string {
++	hash := sha256.Sum256(data)
++	return hex.EncodeToString(hash[:])
++}
++
++func codecVersion() string {
++	if info, ok := debug.ReadBuildInfo(); ok {
++		for _, dep := range info.Deps {
++			if dep.Path == "github.com/klauspost/compress" {
++				return dep.Version
++			}
++		}
++	}
++	return "unavailable"
++}
++
++func smallest(results []result) string {
++	var best *result
++	for i := range results {
++		if results[i].Error == "" && (best == nil || results[i].ArtifactBytes < best.ArtifactBytes) {
++			best = &results[i]
++		}
++	}
++	if best == nil {
++		return ""
++	}
++	return best.ID
++}
+diff --git a/experiments/research161/main_test.go b/experiments/research161/main_test.go
+new file mode 100644
+index 0000000..be6a7cf
+--- /dev/null
++++ b/experiments/research161/main_test.go
+@@ -0,0 +1,169 @@
++package main
++
++import (
++	"encoding/json"
++	"io"
++	"os"
++	"path/filepath"
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++)
++
++func corpusFixture(t *testing.T) (options, manifest) {
++	t.Helper()
++	dir := t.TempDir()
++	inputs := fixtureInputs()
++	for i := range inputs {
++		inputs[i].Path = filepath.Join(dir, inputs[i].Level)
++		require.NoError(t, os.WriteFile(inputs[i].Path, inputs[i].data, 0o600))
++	}
++	corpus := manifest{SchemaVersion: 1, SourceRevision: "fixture-source", GoVersion: "go1.27.3", Variants: inputs}
++	path := filepath.Join(dir, "manifest.json")
++	data, err := json.Marshal(corpus)
++	require.NoError(t, err)
++	require.NoError(t, os.WriteFile(path, data, 0o600))
++	return options{manifestPath: path, family: "test", arch: "amd64", stubPath: inputs[0].Path,
++		output: filepath.Join(dir, "out"), sizes: "4096", level: "fastest"}, corpus
++}
++
++func cliArgs(opts options) []string {
++	return []string{"--manifest", opts.manifestPath, "--family", opts.family, "--stub", opts.stubPath,
++		"--output", opts.output, "--sizes", opts.sizes, "--level", opts.level, "--arch", opts.arch}
++}
++
++func TestCLIAndCorpus(t *testing.T) {
++	opts, _ := corpusFixture(t)
++	parsed, err := parseOptions(cliArgs(opts), io.Discard)
++	require.NoError(t, err)
++	assert.Equal(t, opts, parsed)
++	for _, args := range [][]string{nil, {"--unknown"}, append(cliArgs(opts), "extra"), {"--level", "invalid"}} {
++		_, err := parseOptions(args, io.Discard)
++		require.Error(t, err)
++	}
++	args := cliArgs(opts)
++	args = append(args, "--level", "invalid")
++	_, err = parseOptions(args, io.Discard)
++	require.Error(t, err)
++	for _, sizes := range []string{"", "no", "1", "4096,4096", "99999999"} {
++		_, err := parseSizes(sizes)
++		require.Error(t, err)
++	}
++	sizes, err := parseSizes(defaultSizes)
++	require.NoError(t, err)
++	assert.Equal(t, []int{32768, 114688}, sizes)
++	corpus, inputs, hash, err := loadCorpus(opts)
++	require.NoError(t, err)
++	assert.Equal(t, "fixture-source", corpus.SourceRevision)
++	require.Len(t, inputs, 2)
++	assert.Len(t, hash, 64)
++	assert.Equal(t, "v1", inputs[0].Level)
++	require.NoError(t, run(cliArgs(opts), io.Discard))
++	data, err := os.ReadFile(filepath.Join(opts.output, "report.json"))
++	require.NoError(t, err)
++	var rep report
++	require.NoError(t, json.Unmarshal(data, &rep))
++	require.Len(t, rep.Results, 7)
++	assert.NotEmpty(t, rep.Smallest)
++	assert.Equal(t, hash, rep.ManifestSHA256)
++	for _, result := range rep.Results {
++		require.Empty(t, result.Error)
++		artifact, err := os.ReadFile(filepath.Join(opts.output, result.ID+".fat"))
++		require.NoError(t, err)
++		assert.Equal(t, result.ArtifactSHA256, digest(artifact))
++	}
++	require.Error(t, run(cliArgs(opts), io.Discard), "existing output must not be overwritten")
++	assert.NotEmpty(t, codecVersion())
++}
++
++func TestMainSuccess(t *testing.T) {
++	opts, corpus := corpusFixture(t)
++	corpus.Variants = append(corpus.Variants, input{Family: "other-family", Path: "ignored"})
++	data, err := json.Marshal(corpus)
++	require.NoError(t, err)
++	require.NoError(t, os.WriteFile(opts.manifestPath, data, privateFile))
++	previous := os.Args
++	os.Args = append([]string{"research161"}, cliArgs(opts)...)
++	t.Cleanup(func() { os.Args = previous })
++	main()
++	_, err = os.Stat(filepath.Join(opts.output, "report.json"))
++	require.NoError(t, err)
++}
++
++func TestManifestFailures(t *testing.T) {
++	t.Parallel()
++	cases := []struct {
++		name   string
++		mutate func(*manifest)
++	}{
++		{"schema", func(m *manifest) { m.SchemaVersion = 2 }},
++		{"go version", func(m *manifest) { m.GoVersion = "go1.26.0" }},
++		{"revision", func(m *manifest) { m.SourceRevision = "" }},
++		{"no family", func(m *manifest) { m.Variants = nil }},
++		{"missing input", func(m *manifest) { m.Variants[0].Path += "-missing" }},
++		{"duplicate", func(m *manifest) { m.Variants[1].Level = "AMD64_V1" }},
++		{"unknown level", func(m *manifest) { m.Variants[1].Level = "v0" }},
++		{"empty level", func(m *manifest) { m.Variants[1].Level = "" }},
++		{"hash", func(m *manifest) { m.Variants[0].SHA256 = "wrong" }},
++		{"bytes", func(m *manifest) { m.Variants[0].Bytes++ }},
++		{"invalid elf", func(m *manifest) {
++			m.Variants[0].data = []byte("invalid")
++			m.Variants[0].Bytes = len(m.Variants[0].data)
++			m.Variants[0].SHA256 = digest(m.Variants[0].data)
++		}},
++	}
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			t.Parallel()
++			opts, corpus := corpusFixture(t)
++			tc.mutate(&corpus)
++			for _, item := range corpus.Variants {
++				if item.data != nil && item.Path != "" && tc.name == "invalid elf" {
++					require.NoError(t, os.WriteFile(item.Path, item.data, 0o600))
++				}
++			}
++			data, err := json.Marshal(corpus)
++			require.NoError(t, err)
++			require.NoError(t, os.WriteFile(opts.manifestPath, data, 0o600))
++			_, _, _, err = loadCorpus(opts)
++			require.Error(t, err)
++		})
++	}
++	for _, content := range []string{"invalid json", "{}"} {
++		opts, _ := corpusFixture(t)
++		require.NoError(t, os.WriteFile(opts.manifestPath, []byte(content), 0o600))
++		_, _, _, err := loadCorpus(opts)
++		require.Error(t, err)
++	}
++	opts, _ := corpusFixture(t)
++	opts.manifestPath += "missing"
++	_, _, _, err := loadCorpus(opts)
++	require.Error(t, err)
++	_, err = readBounded(t.TempDir())
++	require.Error(t, err)
++	_, err = readBounded(filepath.Join(t.TempDir(), "missing"))
++	require.Error(t, err)
++	large := filepath.Join(t.TempDir(), "large")
++	f, err := os.Create(large)
++	require.NoError(t, err)
++	require.NoError(t, f.Truncate(maxInputBytes+1))
++	require.NoError(t, f.Close())
++	_, err = readBounded(large)
++	require.Error(t, err)
++}
++
++func TestRunFailures(t *testing.T) {
++	for _, change := range []func(*options){
++		func(o *options) { o.sizes = "bad" },
++		func(o *options) { o.manifestPath += "missing" },
++		func(o *options) { o.stubPath += "missing" },
++		func(o *options) { o.stubPath = o.manifestPath },
++		func(o *options) { o.output = filepath.Join(o.output, "missing", "out") },
++	} {
++		opts, _ := corpusFixture(t)
++		change(&opts)
++		require.Error(t, run(cliArgs(opts), io.Discard))
++	}
++	require.Error(t, run(nil, io.Discard))
++}
+diff --git a/experiments/research161/samples.go b/experiments/research161/samples.go
+new file mode 100644
+index 0000000..63b5eb7
+--- /dev/null
++++ b/experiments/research161/samples.go
+@@ -0,0 +1,234 @@
++package main
++
++import (
++	"bytes"
++	"debug/elf"
++	"errors"
++	"fmt"
++	"slices"
++	"strings"
++
++	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
++)
++
++const (
++	sampleBytes    = 4 * 1024
++	samplesPerFile = 32
++	historyDivisor = 4
++)
++
++type sample struct {
++	data    []byte
++	variant int
++}
++
++type candidate struct {
++	policy  string
++	size    int
++	samples []sample
++}
++
++func validateELF(data []byte, arch string) error {
++	f, err := elf.NewFile(bytes.NewReader(data))
++	if err != nil {
++		return err
++	}
++	defer func() { _ = f.Close() }()
++	want := elf.EM_X86_64
++	if arch == microarch.ArchARM64 {
++		want = elf.EM_AARCH64
++	} else if arch != microarch.ArchAMD64 {
++		return errors.New("only amd64 and arm64 ELF corpora are supported")
++	}
++	if f.Machine != want || f.Class != elf.ELFCLASS64 || f.Data != elf.ELFDATA2LSB {
++		return fmt.Errorf("ELF must be little-endian 64-bit %s", arch)
++	}
++	return nil
++}
++
++func uniformSamples(inputs []input) []sample {
++	var out []sample
++	for variant, item := range inputs {
++		step := max(len(item.data)/samplesPerFile, sampleBytes)
++		count := 0
++		for offset := 0; offset < len(item.data) && count < samplesPerFile; offset += step {
++			out = append(out, sample{data: item.data[offset:min(offset+sampleBytes, len(item.data))], variant: variant})
++			count++
++		}
++	}
++	return out
++}
++
++// sectionSamples splits the same per-file count across ELF PROGBITS sections.
++// Round-robin sections prevent large .text sections from exhausting every slot.
++func sectionSamples(inputs []input) []sample {
++	var out []sample
++	for variant, item := range inputs {
++		f, err := elf.NewFile(bytes.NewReader(item.data))
++		if err != nil {
++			continue // loadCorpus rejects malformed ELF before candidate generation.
++		}
++		var sections []*elf.Section
++		for _, section := range f.Sections {
++			if section.Type == elf.SHT_PROGBITS && section.Size >= sampleBytes &&
++				section.Size <= maxInputBytes && section.Offset <= maxInputBytes &&
++				section.Offset < uint64(len(item.data)) && section.Size <= uint64(len(item.data))-section.Offset {
++				sections = append(sections, section)
++			}
++		}
++		for round := 0; round < samplesPerFile && len(sections) > 0; round++ {
++			section := sections[round%len(sections)]
++			slots := (samplesPerFile + len(sections) - 1) / len(sections)
++			position := round / len(sections)
++			// Section size and offset were bounded to 64 MiB before entering sections.
++			span := int(section.Size) - sampleBytes // #nosec G115 -- Explicit 64 MiB bound above fits every supported int.
++			start := int(section.Offset)            // #nosec G115 -- Explicit 64 MiB bound above fits every supported int.
++			offset := start + position*max(span/slots, 1)
++			offset = min(offset, start+span)
++			end := offset + sampleBytes
++			out = append(out, sample{data: item.data[offset:end], variant: variant})
++		}
++		_ = f.Close()
++	}
++	return out
++}
++
++func candidates(inputs []input, sizes []int) []candidate {
++	uniform := uniformSamples(inputs)
++	section := sectionSamples(inputs)
++	out := []candidate{{policy: "none"}}
++	for _, size := range sizes {
++		for _, policy := range []string{"current", "balanced", "deduplicated", "frequency", "core-accessory", "section"} {
++			samples := uniform
++			if policy == "section" {
++				samples = section
++			}
++			out = append(out, candidate{policy: policy, size: size, samples: samples})
++		}
++	}
++	return out
++}
++
++func balanced(samples []sample) []sample {
++	result := slices.Clone(samples)
++	// Stable sort by sample ordinal within variant, then by variant.
++	positions := make(map[int]int)
++	type indexed struct {
++		sample
++		position int
++	}
++	ordered := make([]indexed, 0, len(samples))
++	for _, item := range samples {
++		ordered = append(ordered, indexed{sample: item, position: positions[item.variant]})
++		positions[item.variant]++
++	}
++	slices.SortStableFunc(ordered, func(a, b indexed) int {
++		if a.position != b.position {
++			return a.position - b.position
++		}
++		return a.variant - b.variant
++	})
++	for i := range ordered {
++		result[i] = ordered[i].sample
++	}
++	return result
++}
++
++type motif struct {
++	sample
++	variants map[int]bool
++	count    int
++}
++
++func motifs(samples []sample) []motif {
++	var out []motif
++	byDigest := make(map[string][]int)
++	for _, item := range samples {
++		key := digest(item.data)
++		found := false
++		for _, index := range byDigest[key] {
++			if bytes.Equal(out[index].data, item.data) {
++				out[index].variants[item.variant] = true
++				out[index].count++
++				found = true
++				break
++			}
++		}
++		if !found {
++			byDigest[key] = append(byDigest[key], len(out))
++			out = append(out, motif{sample: item, variants: map[int]bool{item.variant: true}, count: 1})
++		}
++	}
++	return out
++}
++
++func selectedHistory(c candidate) ([]byte, int) {
++	total := 0
++	for _, item := range c.samples {
++		total += len(item.data)
++	}
++	limit := max(min(c.size, total/historyDivisor), 8)
++	ordered := c.samples
++	if c.policy == "balanced" || c.policy == "section" {
++		ordered = balanced(ordered)
++	}
++	if c.policy == "deduplicated" || c.policy == "frequency" || c.policy == "core-accessory" {
++		unique := motifs(balanced(c.samples))
++		if c.policy != "deduplicated" {
++			slices.SortStableFunc(unique, func(a, b motif) int {
++				if len(a.variants) != len(b.variants) {
++					return len(b.variants) - len(a.variants)
++				}
++				return b.count - a.count
++			})
++		}
++		ordered = make([]sample, 0, len(unique))
++		if c.policy == "core-accessory" {
++			unique = interleaveCoreAccessory(unique, c.samples)
++		}
++		for _, item := range unique {
++			ordered = append(ordered, item.sample)
++		}
++	}
++	var history []byte
++	for _, item := range ordered {
++		remaining := limit - len(history)
++		if remaining <= 0 {
++			break
++		}
++		history = append(history, item.data[:min(remaining, len(item.data))]...)
++	}
++	return history, total
++}
++
++func interleaveCoreAccessory(unique []motif, samples []sample) []motif {
++	variants := make(map[int]bool)
++	for _, item := range samples {
++		variants[item.variant] = true
++	}
++	var core, accessory []motif
++	for _, item := range unique {
++		if len(item.variants) == len(variants) {
++			core = append(core, item)
++		} else {
++			accessory = append(accessory, item)
++		}
++	}
++	var out []motif
++	for i := 0; i < max(len(core), len(accessory)); i++ {
++		if i < len(core) {
++			out = append(out, core[i])
++		}
++		if i < len(accessory) {
++			out = append(out, accessory[i])
++		}
++	}
++	return out
++}
++
++func candidateID(c candidate) string {
++	if c.policy == "none" {
++		return c.policy
++	}
++	return strings.Join([]string{c.policy, fmt.Sprint(c.size)}, "-")
++}
+diff --git a/experiments/research161/samples_test.go b/experiments/research161/samples_test.go
+new file mode 100644
+index 0000000..d3907bc
+--- /dev/null
++++ b/experiments/research161/samples_test.go
+@@ -0,0 +1,179 @@
++package main
++
++import (
++	"bytes"
++	"debug/elf"
++	"encoding/binary"
++	"slices"
++	"testing"
++
++	"github.com/EpicBlackWolfZ/microfat/internal/codec"
++	"github.com/EpicBlackWolfZ/microfat/internal/format"
++	"github.com/EpicBlackWolfZ/microfat/internal/pack"
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++)
++
++const fixtureSize = 128 * 1024
++
++func fixtureELF() []byte {
++	const (
++		sectionTable = 64
++		sectionSize  = 64
++		sectionCount = 2
++		bodyOffset   = sectionTable + sectionSize*sectionCount
++	)
++	data := make([]byte, bodyOffset+fixtureSize)
++	copy(data, "\x7fELF")
++	data[elf.EI_CLASS], data[elf.EI_DATA], data[elf.EI_VERSION] = byte(elf.ELFCLASS64), byte(elf.ELFDATA2LSB), 1
++	binary.LittleEndian.PutUint16(data[16:], uint16(elf.ET_EXEC))
++	binary.LittleEndian.PutUint16(data[18:], uint16(elf.EM_X86_64))
++	binary.LittleEndian.PutUint32(data[20:], 1)
++	binary.LittleEndian.PutUint64(data[40:], sectionTable)
++	binary.LittleEndian.PutUint16(data[52:], sectionTable)
++	binary.LittleEndian.PutUint16(data[58:], sectionSize)
++	binary.LittleEndian.PutUint16(data[60:], sectionCount)
++	section := data[sectionTable+sectionSize:]
++	binary.LittleEndian.PutUint32(section[4:], uint32(elf.SHT_PROGBITS))
++	binary.LittleEndian.PutUint64(section[24:], bodyOffset)
++	binary.LittleEndian.PutUint64(section[32:], fixtureSize)
++	for i := bodyOffset; i < len(data); i++ {
++		data[i] = byte((i % 251) ^ (i / 1024))
++	}
++	return data
++}
++
++func fixtureInputs() []input {
++	first := fixtureELF()
++	second := slices.Clone(first)
++	for i := 1024; i < len(second); i += sampleBytes {
++		second[i] ^= 1
++	}
++	return []input{
++		{Family: "test", Level: "v1", data: first, Bytes: len(first), SHA256: digest(first)},
++		{Family: "test", Level: "v2", data: second, Bytes: len(second), SHA256: digest(second)},
++	}
++}
++
++func TestELFAndSampling(t *testing.T) {
++	t.Parallel()
++	inputs := fixtureInputs()
++	require.NoError(t, validateELF(inputs[0].data, "amd64"))
++	require.Error(t, validateELF(inputs[0].data, "arm64"))
++	require.Error(t, validateELF(inputs[0].data, "other"))
++	require.Error(t, validateELF(nil, "amd64"))
++	arm := slices.Clone(inputs[0].data)
++	binary.LittleEndian.PutUint16(arm[18:], uint16(elf.EM_AARCH64))
++	require.NoError(t, validateELF(arm, "arm64"))
++	uniform := uniformSamples(inputs)
++	require.Len(t, uniform, samplesPerFile*len(inputs))
++	assert.Equal(t, inputs[0].data[:sampleBytes], uniform[0].data)
++	step := len(inputs[0].data) / samplesPerFile
++	assert.Equal(t, inputs[0].data[step:step+sampleBytes], uniform[1].data)
++	section := sectionSamples(inputs)
++	require.Len(t, section, samplesPerFile*len(inputs))
++	for _, item := range section {
++		assert.Len(t, item.data, sampleBytes)
++	}
++	assert.Empty(t, sectionSamples([]input{{data: nil}}))
++	assert.Len(t, uniformSamples([]input{{data: []byte("tiny")}}), 1)
++	all := candidates(inputs, []int{sampleBytes})
++	require.Len(t, all, 7)
++	assert.Equal(t, "none", candidateID(all[0]))
++	assert.Equal(t, "current-4096", candidateID(all[1]))
++}
++
++func TestHistoryAblations(t *testing.T) {
++	t.Parallel()
++	block := func(value byte) []byte { return bytes.Repeat([]byte{value}, sampleBytes) }
++	core, accessory, rare := block('c'), block('a'), block('r')
++	samples := []sample{
++		{data: core, variant: 0}, {data: accessory, variant: 0}, {data: rare, variant: 0},
++		{data: core, variant: 1}, {data: accessory, variant: 1}, {data: core, variant: 1},
++	}
++	ordered := balanced(samples)
++	require.Equal(t, []int{0, 1, 0, 1, 0, 1}, []int{
++		ordered[0].variant, ordered[1].variant, ordered[2].variant,
++		ordered[3].variant, ordered[4].variant, ordered[5].variant,
++	})
++	unique := motifs(samples)
++	require.Len(t, unique, 3)
++	assert.Len(t, unique[0].variants, 2)
++	assert.Equal(t, 3, unique[0].count)
++	assert.Equal(t, []byte{'c', 'r', 'a'}, func() []byte {
++		var out []byte
++		for _, item := range interleaveCoreAccessory(unique, samples) {
++			out = append(out, item.data[0])
++		}
++		return out
++	}())
++	for _, policy := range []string{"current", "balanced", "deduplicated", "frequency", "core-accessory", "section"} {
++		t.Run(policy, func(t *testing.T) {
++			t.Parallel()
++			history, total := selectedHistory(candidate{policy: policy, size: sampleBytes, samples: samples})
++			assert.Equal(t, len(samples)*sampleBytes, total)
++			assert.Len(t, history, sampleBytes)
++			assert.Equal(t, core, history)
++		})
++	}
++	// Repeated windows must not displace a later unique motif in deduplicated history.
++	small := []sample{{data: []byte("aaaa"), variant: 0}, {data: []byte("aaaa"), variant: 1},
++		{data: []byte("bbbb"), variant: 1}, {data: []byte("cccc"), variant: 1}}
++	history, _ := selectedHistory(candidate{policy: "deduplicated", size: sampleBytes, samples: small})
++	assert.Equal(t, "aaaabbbb", string(history))
++}
++
++func TestCompleteArtifactCandidates(t *testing.T) {
++	// Serial because the allocation/timing diagnostics intentionally observe the process.
++	inputs := fixtureInputs()
++	stub := fixtureELF()
++	opts := options{arch: "amd64", level: "fastest"}
++	for _, candidate := range candidates(inputs, []int{sampleBytes}) {
++		t.Run(candidateID(candidate), func(t *testing.T) {
++			res, artifact := evaluate(candidate, inputs, stub, opts)
++			require.Empty(t, res.Error)
++			require.True(t, res.ArtifactVerified)
++			require.Len(t, artifact, res.ArtifactBytes)
++			var payloadBytes int
++			for _, item := range res.Payloads {
++				assert.True(t, item.Verified)
++				payloadBytes += item.Bytes
++			}
++			assert.Equal(t, len(stub)+res.DictionaryBytes+payloadBytes+res.MetadataBytes, res.ArtifactBytes)
++			assert.Equal(t, digest(artifact), res.ArtifactSHA256)
++			idx, checks, err := pack.VerifyBinary(bytes.NewReader(artifact), int64(len(artifact)))
++			require.NoError(t, err)
++			require.Len(t, checks, len(inputs))
++			assert.Equal(t, int64(0), idx.CreatedUnix)
++			assert.Equal(t, format.FormatVersion2, idx.Version)
++			_, again := evaluate(candidate, inputs, stub, opts)
++			assert.Equal(t, artifact, again, "same settings produce deterministic complete artifacts")
++			if idx.DictionarySize > 0 {
++				artifact[idx.DictionaryOffset] ^= 1
++				_, _, err = pack.VerifyBinary(bytes.NewReader(artifact), int64(len(artifact)))
++				require.ErrorIs(t, err, format.ErrDictionaryCorrupted)
++			} else {
++				artifact[idx.Variants[0].Offset] ^= 1
++				_, checks, err = pack.VerifyBinary(bytes.NewReader(artifact), int64(len(artifact)))
++				require.NoError(t, err)
++				assert.False(t, checks[0].Valid)
++			}
++		})
++	}
++	_, _, err := train(candidate{policy: "current"}, "better")
++	require.Error(t, err)
++	_, _, err = train(candidate{policy: "balanced", samples: uniformSamples(inputs), size: sampleBytes}, "invalid")
++	require.Error(t, err)
++	bad := inputs[0]
++	bad.SHA256 = "wrong"
++	_, _, err = compressAndVerify(codec.NewZstdCodec(), bad, nil, "fastest")
++	require.ErrorContains(t, err, "exact round trip")
++	_, _, err = compressAndVerify(codec.NewZstdCodec(), inputs[0], nil, "invalid")
++	require.Error(t, err)
++	res, _ := evaluate(candidate{policy: "current"}, inputs, stub, opts)
++	assert.NotEmpty(t, res.Error)
++	res, _ = evaluate(candidate{policy: "none"}, inputs, stub, options{arch: "amd64", level: "invalid"})
++	assert.NotEmpty(t, res.Error)
++	assert.Empty(t, smallest([]result{{ID: "failed", Error: "error"}}))
++	assert.Equal(t, "small", smallest([]result{{ID: "large", ArtifactBytes: 10}, {ID: "small", ArtifactBytes: 1}}))
++}
