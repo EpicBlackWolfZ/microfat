@@ -1,0 +1,16 @@
+version: '3'
+silent: true
+set: [errexit, nounset, pipefail]
+tasks:
+  corpus:
+    dir: /home/nanoninja/.codex/worktrees/poc-376-lifecycle/microfat
+    env:
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    cmds:
+      - mkdir -p /tmp/microfat-research-pocs-20261023/corpus
+      - for: [v1, v2, v3]
+        cmd: GOAMD64={{.ITEM}} go build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' -o /tmp/microfat-research-pocs-20261023/corpus/microfat-{{.ITEM}} ./cmd/microfat
+      - for: [v1, v2, v3]
+        cmd: GOAMD64={{.ITEM}} go build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' -o /tmp/microfat-research-pocs-20261023/corpus/demo-{{.ITEM}} ./examples/demo
+      - go run /tmp/microfat-research-pocs-20261023/manifest.go

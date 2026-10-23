@@ -1,0 +1,27 @@
+{
+  "cache_dir": "/tmp/microfat-research-pocs-20261023/evidence/research376/demo-zstd-cache-1954160349",
+  "native_output": "{\n  \"status\": \"ready\",\n  \"version\": \"1.0.0\"\n}\n",
+  "pack_command": [
+    "pack",
+    "--stub",
+    "/tmp/microfat-research-pocs-20261023/tool-bin/microfat-stub",
+    "--output",
+    "/tmp/microfat-research-pocs-20261023/evidence/research376/demo-zstd",
+    "--compression",
+    "zstd",
+    "--format-version",
+    "2",
+    "--variant",
+    "v1=/tmp/microfat-research-pocs-20261023/corpus/demo-v1",
+    "--variant",
+    "v2=/tmp/microfat-research-pocs-20261023/corpus/demo-v2",
+    "--variant",
+    "v3=/tmp/microfat-research-pocs-20261023/corpus/demo-v3"
+  ],
+  "pack_output": "Packaging fat binary '/tmp/microfat-research-pocs-20261023/evidence/research376/demo-zstd'...\nSuccessfully packaged 3 variants into '/tmp/microfat-research-pocs-20261023/evidence/research376/demo-zstd':\n  • v1     [zstd] -\u003e uncompressed: 4333795 B | compressed: 1867340 B\n  • v2     [zstd] -\u003e uncompressed: 4329699 B | compressed: 1866329 B\n  • v3     [zstd] -\u003e uncompressed: 4321507 B | compressed: 1862283 B\n\nDeclared ABI Requirements:\n  • v1     [dynamic] -\u003e interpreter: /lib64/ld-linux-x86-64.so.2 | deps: libresolv.so.2, libc.so.6 | versions: libc.so.6 (GLIBC_2.2.5), libc.so.6 (GLIBC_2.3.2), libc.so.6 (GLIBC_2.32), libc.so.6 (GLIBC_2.34) (complete)\n  • v2     [dynamic] -\u003e interpreter: /lib64/ld-linux-x86-64.so.2 | deps: libresolv.so.2, libc.so.6 | versions: libc.so.6 (GLIBC_2.2.5), libc.so.6 (GLIBC_2.3.2), libc.so.6 (GLIBC_2.32), libc.so.6 (GLIBC_2.34) (complete)\n  • v3     [dynamic] -\u003e interpreter: /lib64/ld-linux-x86-64.so.2 | deps: libresolv.so.2, libc.so.6 | versions: libc.so.6 (GLIBC_2.2.5), libc.so.6 (GLIBC_2.3.2), libc.so.6 (GLIBC_2.32), libc.so.6 (GLIBC_2.34) (complete)\n  [i] Matching declared ABI requirements does not guarantee deployment host compatibility; the target system must provide the required dynamic linker and libraries.\n",
+  "payload_args": [
+    "--startup-only",
+    "--json"
+  ],
+  "sha256": "914c386e065ee92775e7913e351655fe8b6edbe72f4f050c7df6fc59c98aee8a"
+}

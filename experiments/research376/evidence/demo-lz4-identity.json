@@ -1,0 +1,27 @@
+{
+  "cache_dir": "/tmp/microfat-research-pocs-20261023/evidence/research376/demo-lz4-cache-2765012518",
+  "native_output": "{\n  \"status\": \"ready\",\n  \"version\": \"1.0.0\"\n}\n",
+  "pack_command": [
+    "pack",
+    "--stub",
+    "/tmp/microfat-research-pocs-20261023/tool-bin/microfat-stub",
+    "--output",
+    "/tmp/microfat-research-pocs-20261023/evidence/research376/demo-lz4",
+    "--compression",
+    "lz4",
+    "--format-version",
+    "2",
+    "--variant",
+    "v1=/tmp/microfat-research-pocs-20261023/corpus/demo-v1",
+    "--variant",
+    "v2=/tmp/microfat-research-pocs-20261023/corpus/demo-v2",
+    "--variant",
+    "v3=/tmp/microfat-research-pocs-20261023/corpus/demo-v3"
+  ],
+  "pack_output": "Packaging fat binary '/tmp/microfat-research-pocs-20261023/evidence/research376/demo-lz4'...\nSuccessfully packaged 3 variants into '/tmp/microfat-research-pocs-20261023/evidence/research376/demo-lz4':\n  • v1     [lz4] -\u003e uncompressed: 4333795 B | compressed: 2525708 B\n  • v2     [lz4] -\u003e uncompressed: 4329699 B | compressed: 2524812 B\n  • v3     [lz4] -\u003e uncompressed: 4321507 B | compressed: 2518272 B\n\nDeclared ABI Requirements:\n  • v1     [dynamic] -\u003e interpreter: /lib64/ld-linux-x86-64.so.2 | deps: libresolv.so.2, libc.so.6 | versions: libc.so.6 (GLIBC_2.2.5), libc.so.6 (GLIBC_2.3.2), libc.so.6 (GLIBC_2.32), libc.so.6 (GLIBC_2.34) (complete)\n  • v2     [dynamic] -\u003e interpreter: /lib64/ld-linux-x86-64.so.2 | deps: libresolv.so.2, libc.so.6 | versions: libc.so.6 (GLIBC_2.2.5), libc.so.6 (GLIBC_2.3.2), libc.so.6 (GLIBC_2.32), libc.so.6 (GLIBC_2.34) (complete)\n  • v3     [dynamic] -\u003e interpreter: /lib64/ld-linux-x86-64.so.2 | deps: libresolv.so.2, libc.so.6 | versions: libc.so.6 (GLIBC_2.2.5), libc.so.6 (GLIBC_2.3.2), libc.so.6 (GLIBC_2.32), libc.so.6 (GLIBC_2.34) (complete)\n  [i] Matching declared ABI requirements does not guarantee deployment host compatibility; the target system must provide the required dynamic linker and libraries.\n",
+  "payload_args": [
+    "--startup-only",
+    "--json"
+  ],
+  "sha256": "837afb00529cfa69ba91f18a2021d987d76840b63e45cb111372087bad7d8101"
+}

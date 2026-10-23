@@ -1,0 +1,26 @@
+{
+  "cache_dir": "/tmp/microfat-research-pocs-20261023/evidence/research376/microfat-none-cache-1314344053",
+  "native_output": "Version: dev (Commit: none, Built: unknown, BuiltBy: local, Go: go1.27.3, linux/amd64)\n",
+  "pack_command": [
+    "pack",
+    "--stub",
+    "/tmp/microfat-research-pocs-20261023/tool-bin/microfat-stub",
+    "--output",
+    "/tmp/microfat-research-pocs-20261023/evidence/research376/microfat-none",
+    "--compression",
+    "none",
+    "--format-version",
+    "2",
+    "--variant",
+    "v1=/tmp/microfat-research-pocs-20261023/corpus/microfat-v1",
+    "--variant",
+    "v2=/tmp/microfat-research-pocs-20261023/corpus/microfat-v2",
+    "--variant",
+    "v3=/tmp/microfat-research-pocs-20261023/corpus/microfat-v3"
+  ],
+  "pack_output": "Packaging fat binary '/tmp/microfat-research-pocs-20261023/evidence/research376/microfat-none'...\nSuccessfully packaged 3 variants into '/tmp/microfat-research-pocs-20261023/evidence/research376/microfat-none':\n  • v1     [none] -\u003e uncompressed: 11514083 B | compressed: 11514083 B\n  • v2     [none] -\u003e uncompressed: 11509987 B | compressed: 11509987 B\n  • v3     [none] -\u003e uncompressed: 11501795 B | compressed: 11501795 B\n\nDeclared ABI Requirements:\n  • v1     [dynamic] -\u003e interpreter: /lib64/ld-linux-x86-64.so.2 | deps: libresolv.so.2, libc.so.6 | versions: libc.so.6 (GLIBC_2.2.5), libc.so.6 (GLIBC_2.3.2), libc.so.6 (GLIBC_2.32), libc.so.6 (GLIBC_2.34) (complete)\n  • v2     [dynamic] -\u003e interpreter: /lib64/ld-linux-x86-64.so.2 | deps: libresolv.so.2, libc.so.6 | versions: libc.so.6 (GLIBC_2.2.5), libc.so.6 (GLIBC_2.3.2), libc.so.6 (GLIBC_2.32), libc.so.6 (GLIBC_2.34) (complete)\n  • v3     [dynamic] -\u003e interpreter: /lib64/ld-linux-x86-64.so.2 | deps: libresolv.so.2, libc.so.6 | versions: libc.so.6 (GLIBC_2.2.5), libc.so.6 (GLIBC_2.3.2), libc.so.6 (GLIBC_2.32), libc.so.6 (GLIBC_2.34) (complete)\n  [i] Matching declared ABI requirements does not guarantee deployment host compatibility; the target system must provide the required dynamic linker and libraries.\n",
+  "payload_args": [
+    "--version"
+  ],
+  "sha256": "fee570ef53f71afa5e96dc3f64bc3cb3315f46e5d1ae945717c1d5edd816ea1a"
+}
