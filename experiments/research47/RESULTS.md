@@ -72,8 +72,8 @@ choices were retained; v2 is the smallest one-base choice in every group.
 | Task | unstripped | 98,063,687 | 89,159,314 | 9.080% | 89,219,758 | +60,444 B |
 
 The one-base control is smaller in six groups. Range sharing wins the two Task
-groups by just 27,721/60,444 bytes; every difference is below 0.15% of the
-corresponding complete representation. Both controls use the same decoder-size
+groups by just 27,721/60,444 bytes; every difference is at most 0.14 percentage
+points of complete-size saving relative to the current control. Both controls use the same decoder-size
 reserve. Their actual implementations could have different code costs, which
 remain unmeasured. There is no demonstrated reward for graph complexity here.
 
