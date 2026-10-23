@@ -16,6 +16,17 @@ hashes. [Demo raw report](evidence/demo.json.gz) and
 PSI/cgroup snapshot. `gzip -dc` exposes the original JSON; gzip metadata has no
 filename or timestamp. No environment dump or secret material is captured.
 
+The branch was subsequently rebased onto `94cb9f6` after an unrelated release,
+installer and documentation merge. Measurements were not repeated or relabeled.
+[Original measured source patch](evidence/measured-source.patch.gz) reconstructs the
+experiment on parent `ada376b4`; [source provenance](evidence/source-provenance.json)
+pins both compressed and uncompressed patch SHA256 and confirms byte-for-byte
+equivalence of all five experimental Go source/test files after the rebase.
+For example, use a separate checkout at the recorded measured parent and run
+`gzip -dc measured-source.patch.gz | git am`. This reconstructs the measured source
+tree; committer metadata can result in a different commit ID. The original harness
+executable hash remains in each raw report.
+
 The encoder allocation screen suggests that independent variant work deserves a
 single-process worker-pool follow-up. Three-variant bundle median batch wall times:
 

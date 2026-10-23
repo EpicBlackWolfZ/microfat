@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "measured_source_revision": "c5b18feb1091323e9bf6268e27ccb2c0feaf3316",
+  "measured_parent_revision": "ada376b4ffffaa3354becbfb70c1896934caf277",
+  "rebased_revision_before_provenance_addition": "7cbcb0bbaf3a1404b1eabf9cff22dd11032713bb",
+  "rebased_parent_revision": "94cb9f6ad26c14931ea28e53a8969f09790eff80",
+  "patch": "measured-source.patch.gz",
+  "patch_sha256": "b67126de7b46b6aee4623718c99629a859145e8382b14d96b5fdb06b70eefe06",
+  "gzip_sha256": "02f9f52b84c6290fd42e08b71412dddf203c83b1542359168a8b464c923ddbbe",
+  "experimental_go_sources": [
+    {
+      "path": "experiments/research375/campaign.go",
+      "sha256": "0afccd190359df1304a2697697b903235f4fd5b7ee69fbec2672a87b5d6ee5fb",
+      "matches_original_measured_source": true
+    },
+    {
+      "path": "experiments/research375/codec.go",
+      "sha256": "676661e5609afcf93b0619bad52f1159f45a9da69a63dddc575717aef050b587",
+      "matches_original_measured_source": true
+    },
+    {
+      "path": "experiments/research375/main.go",
+      "sha256": "c6a9dce00fb099bba57e29e3b199a9439e29c959fd0906cc4d4b8518136997f8",
+      "matches_original_measured_source": true
+    },
+    {
+      "path": "experiments/research375/research_test.go",
+      "sha256": "27c7a06d00977b99f028382f5e76fb5876872b93753e31817e4735ef10a095ef",
+      "matches_original_measured_source": true
+    },
+    {
+      "path": "experiments/research375/worker.go",
+      "sha256": "1de70cb11294c19a682d57f15cad2a651b9b1f3039ca130885114d34c0fc2e16",
+      "matches_original_measured_source": true
+    }
+  ],
+  "reconstruction": "Checkout measured_parent_revision in a separate worktree; gzip -dc measured-source.patch.gz | git am. git am reproduces the measured source tree; committer metadata may produce a different commit id.",
+  "measurement_status": "Measurements are unchanged and were not repeated after the rebase."
+}
