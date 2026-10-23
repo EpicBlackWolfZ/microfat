@@ -87,6 +87,53 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  research-375-pool-build:
+    desc: Build the opt-in encoder-pool research harness without changing CLI defaults
+    cmds:
+    - |-
+      if [ -n "$(git status --porcelain)" ]; then
+        echo 'Commit research sources before building a revision-pinned harness.' >&2
+        exit 1
+      fi
+      mkdir -p .work/research375pool
+      source_revision=$(git rev-parse HEAD)
+      {{.GO | shellQuote}} build -trimpath -buildvcs=false \
+        -ldflags="-s -w -buildid= -X main.producerRevision=$source_revision" \
+        -o .work/research375pool/encoder-pool ./experiments/research375pool
+  research-375-pool-prepare:
+    desc: Build six pinned native AMD64 corpus ELFs and full/minimal stubs in a new POC_ROOT
+    cmds:
+    - task: research-375-pool-build
+    - |-
+      {{.TASK_ENV}}
+      root={{.POC_ROOT | default ".work/research375pool/fixtures" | shellQuote}}
+      if [ -e "$root" ]; then
+        echo "POC_ROOT must be new: $root" >&2
+        exit 1
+      fi
+      mkdir -p "$root"
+      for family in demo microfat; do
+        package=./cmd/microfat
+        if [ "$family" = demo ]; then package=./examples/demo; fi
+        for level in v1 v2 v3; do
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64="$level" \
+            "$GO" build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' -o "$root/$family-$level" "$package"
+        done
+      done
+      CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 \
+        "$GO" build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' -o "$root/stub-full" ./cmd/microfat-stub
+      CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 \
+        "$GO" build -tags minimal -trimpath -buildvcs=false -ldflags='-s -w -buildid=' -o "$root/stub-minimal" ./cmd/microfat-stub
+      .work/research375pool/encoder-pool --mode=corpus --corpus "$root" --source-revision "$(git rev-parse HEAD)"
+  research-375-pool:
+    desc: Run controlled pool campaign (POC_MODE=campaign|matrix|limits; MANIFEST, STUB and OUTPUT required)
+    cmds:
+    - |-
+      .work/research375pool/encoder-pool --mode={{.POC_MODE | default "campaign" | shellQuote}} \
+        --manifest {{.MANIFEST | default "" | shellQuote}} --stub {{.STUB | default "" | shellQuote}} \
+        --minimal-stub {{.MINIMAL_STUB | default "" | shellQuote}} --output {{.OUTPUT | default "" | shellQuote}} \
+        --source-revision "$(git rev-parse HEAD)" --trials {{.POC_TRIALS | default "5" | shellQuote}} \
+        --execute={{.POC_EXECUTE | default "false" | shellQuote}}
   test-runtime-fixtures:
     desc: Require native fat CLI inspection, timeout and detached-child cleanup regressions
     cmds:

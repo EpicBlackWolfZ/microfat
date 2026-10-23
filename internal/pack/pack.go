@@ -2,6 +2,7 @@
 package pack
 
 import (
+	"context"
 	"crypto/sha256"
 	"debug/elf"
 	"encoding/hex"
@@ -243,6 +244,15 @@ func hasDictionaryCapableVariant(opts *Options, levels []string) (bool, error) {
 
 // Pack stitches the stub and compressed variant binaries into a complete microfat fat executable.
 func Pack(opts Options) (*format.Index, error) {
+	return packWithPayloadStage(context.Background(), opts, writeSequentialPayloads)
+}
+
+type payloadStage func(context.Context, *os.File, []string, *Options, int64, []byte) ([]format.VariantEntry, int64, error)
+
+func packWithPayloadStage(ctx context.Context, opts Options, writePayloads payloadStage) (*format.Index, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// Validate configuration first; validate ELF bytes only after pinning the inputs.
 	validateELF := !opts.SkipELFValidation
 	opts.SkipELFValidation = true
@@ -296,7 +306,6 @@ func Pack(opts Options) (*format.Index, error) {
 		TargetOS:    opts.TargetOS,
 		TargetArch:  opts.TargetArch,
 		CreatedUnix: time.Now().Unix(),
-		Variants:    make([]format.VariantEntry, 0, len(levels)),
 	}
 
 	// 2. Write Shared Dictionary (if trained)
@@ -314,13 +323,12 @@ func Pack(opts Options) (*format.Index, error) {
 	}
 
 	// 3. Compress and write each variant payload
-	for _, lvl := range levels {
-		entry, newOffset, err := writeVariantPayload(tmpFile, lvl, opts.Variants[lvl], &opts, currentOffset, dictBytes)
-		if err != nil {
-			return nil, err
-		}
-		currentOffset = newOffset
-		idx.Variants = append(idx.Variants, entry)
+	idx.Variants, currentOffset, err = writePayloads(ctx, tmpFile, levels, &opts, currentOffset, dictBytes)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	// 4. Write Index and Trailer
@@ -329,11 +337,26 @@ func Pack(opts Options) (*format.Index, error) {
 	}
 
 	// 5. Sync, chmod and atomically move
-	if err := finalizeOutputFile(tmpFile, tmpPath, opts.OutputPath, opts.Permissions); err != nil {
+	if err := finalizeOutputFileContext(ctx, tmpFile, tmpPath, opts.OutputPath, opts.Permissions); err != nil {
 		return nil, err
 	}
 
 	return idx, nil
+}
+
+func writeSequentialPayloads(
+	_ context.Context, out *os.File, levels []string, opts *Options, offset int64, dict []byte,
+) ([]format.VariantEntry, int64, error) {
+	entries := make([]format.VariantEntry, 0, len(levels))
+	for _, level := range levels {
+		entry, nextOffset, err := writeVariantPayload(out, level, opts.Variants[level], opts, offset, dict)
+		if err != nil {
+			return nil, 0, err
+		}
+		offset = nextOffset
+		entries = append(entries, entry)
+	}
+	return entries, offset, nil
 }
 
 func validateOptions(opts *Options) error {
@@ -543,6 +566,10 @@ func resolveVariantCompression(opts *Options, lvl string, uncompressedSize int64
 }
 
 func finalizeOutputFile(tmpFile *os.File, tmpPath, outputPath string, perms os.FileMode) error {
+	return finalizeOutputFileContext(context.Background(), tmpFile, tmpPath, outputPath, perms)
+}
+
+func finalizeOutputFileContext(ctx context.Context, tmpFile *os.File, tmpPath, outputPath string, perms os.FileMode) error {
 	if err := tmpFile.Sync(); err != nil {
 		return fmt.Errorf("syncing output file: %w", err)
 	}
@@ -551,6 +578,9 @@ func finalizeOutputFile(tmpFile *os.File, tmpPath, outputPath string, perms os.F
 	}
 	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("closing output file: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := os.Rename(tmpPath, outputPath); err != nil {
 		return fmt.Errorf("moving temporary file to output %s: %w", outputPath, err)

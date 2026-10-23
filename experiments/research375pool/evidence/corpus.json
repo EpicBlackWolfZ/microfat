@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "source_revision": "39ab979e28b3adc41386d27260675d6e9cc4dbd8",
+  "go_version": "go1.27.3",
+  "variants": [
+    {
+      "family": "demo",
+      "level": "v1",
+      "path": "/home/nanoninja/.codex/worktrees/poc-375-concurrency/microfat/.work/research375pool/fixtures/demo-v1",
+      "sha256": "e5cf490af3c61216e5e5c99e285d8ef04732cefd6786a61498ef1d32a5aefaf2",
+      "bytes": 4317308
+    },
+    {
+      "family": "demo",
+      "level": "v2",
+      "path": "/home/nanoninja/.codex/worktrees/poc-375-concurrency/microfat/.work/research375pool/fixtures/demo-v2",
+      "sha256": "24a760b59e02f085704708813beb1912b76d76caf47bcd4fafc0308e7b847c37",
+      "bytes": 4317308
+    },
+    {
+      "family": "demo",
+      "level": "v3",
+      "path": "/home/nanoninja/.codex/worktrees/poc-375-concurrency/microfat/.work/research375pool/fixtures/demo-v3",
+      "sha256": "508989d60447f2ede55fc60bbfe8ae805f75162843eb3740b84f8f5536661da8",
+      "bytes": 4305020
+    },
+    {
+      "family": "microfat",
+      "level": "v1",
+      "path": "/home/nanoninja/.codex/worktrees/poc-375-concurrency/microfat/.work/research375pool/fixtures/microfat-v1",
+      "sha256": "3f4fb0f8543c610195c9141edf12fa26965432d1bcc68a99bfc3d07e32bc281e",
+      "bytes": 11464828
+    },
+    {
+      "family": "microfat",
+      "level": "v2",
+      "path": "/home/nanoninja/.codex/worktrees/poc-375-concurrency/microfat/.work/research375pool/fixtures/microfat-v2",
+      "sha256": "0fc7a8a91ec876720eb9a98103724d4041b4fe97da9852c8c7dcda695b6cfcd1",
+      "bytes": 11464828
+    },
+    {
+      "family": "microfat",
+      "level": "v3",
+      "path": "/home/nanoninja/.codex/worktrees/poc-375-concurrency/microfat/.work/research375pool/fixtures/microfat-v3",
+      "sha256": "120d166c1cefcf7ec1edaf5ba2351ff9c6a837d273ba9de54f927a0677e3b441",
+      "bytes": 11456636
+    }
+  ]
+}

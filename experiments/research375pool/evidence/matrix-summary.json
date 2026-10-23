@@ -1,0 +1,6833 @@
+{
+  "schema_version": 1,
+  "producer_revision": "39ab979e28b3adc41386d27260675d6e9cc4dbd8",
+  "producer_sha256": "ed90c9817e625d66bc391820c736fa7b8ba476823439f8915401019566a48355",
+  "warnings": [
+    "Descriptive medians and matched-block ratios only; no population p99, confidence interval or causal claim.",
+    "Principal metrics include successful complete artifacts only; every failure remains in counts and paired-block denominators.",
+    "Cgroup peaks include file cache/startup/keeper; worker RSS is separate. Logical admission is not an RSS bound.",
+    "Ratios are computed within successful block pairs before taking their median; missing and failed pairs are reported.",
+    "Whole-artifact hashes can differ from metadata timestamps even when all compressed payloads match.",
+    "This analysis validates reported structure and controls, not the authenticity of supplied data or raw on-disk artifacts."
+  ],
+  "groups": [
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 79520513,
+        "min": 79520513,
+        "max": 79520513
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 80893000,
+        "min": 80893000,
+        "max": 80893000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 34168,
+        "min": 34168,
+        "max": 34168
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 67817472,
+        "min": 67817472,
+        "max": 67817472
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 11535919,
+        "min": 11535919,
+        "max": 11535919
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 67817472,
+        "min": 67817472,
+        "max": 67817472
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 47039201,
+        "min": 47039201,
+        "max": 47039201
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 86807000,
+        "min": 86807000,
+        "max": 86807000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 50380,
+        "min": 50380,
+        "max": 50380
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 89280512,
+        "min": 89280512,
+        "max": 89280512
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 11535919,
+        "min": 11535919,
+        "max": 11535919
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 89280512,
+        "min": 89280512,
+        "max": 89280512
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218255856,
+        "min": 218255856,
+        "max": 218255856
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 79154684,
+        "min": 79154684,
+        "max": 79154684
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 79832000,
+        "min": 79832000,
+        "max": 79832000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 38456,
+        "min": 38456,
+        "max": 38456
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 73412608,
+        "min": 73412608,
+        "max": 73412608
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 11302447,
+        "min": 11302447,
+        "max": 11302447
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 73412608,
+        "min": 73412608,
+        "max": 73412608
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 47767090,
+        "min": 47767090,
+        "max": 47767090
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 89155000,
+        "min": 89155000,
+        "max": 89155000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 50256,
+        "min": 50256,
+        "max": 50256
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 93265920,
+        "min": 93265920,
+        "max": 93265920
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 11302447,
+        "min": 11302447,
+        "max": 11302447
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 93265920,
+        "min": 93265920,
+        "max": 93265920
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218022384,
+        "min": 218022384,
+        "max": 218022384
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 37543888,
+        "min": 37543888,
+        "max": 37543888
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 40690000,
+        "min": 40690000,
+        "max": 40690000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 27788,
+        "min": 27788,
+        "max": 27788
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 57237504,
+        "min": 57237504,
+        "max": 57237504
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 16929968,
+        "min": 16929968,
+        "max": 16929968
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 57237504,
+        "min": 57237504,
+        "max": 57237504
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 35981911,
+        "min": 35981911,
+        "max": 35981911
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 44648000,
+        "min": 44648000,
+        "max": 44648000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 41964,
+        "min": 41964,
+        "max": 41964
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 95629312,
+        "min": 95629312,
+        "max": 95629312
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 16929968,
+        "min": 16929968,
+        "max": 16929968
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 95629312,
+        "min": 95629312,
+        "max": 95629312
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218255856,
+        "min": 218255856,
+        "max": 218255856
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 37040739,
+        "min": 37040739,
+        "max": 37040739
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 40023000,
+        "min": 40023000,
+        "max": 40023000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 27964,
+        "min": 27964,
+        "max": 27964
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 58929152,
+        "min": 58929152,
+        "max": 58929152
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 16696496,
+        "min": 16696496,
+        "max": 16696496
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 58929152,
+        "min": 58929152,
+        "max": 58929152
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 35459093,
+        "min": 35459093,
+        "max": 35459093
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 45533000,
+        "min": 45533000,
+        "max": 45533000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 40052,
+        "min": 40052,
+        "max": 40052
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 94285824,
+        "min": 94285824,
+        "max": 94285824
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 16696496,
+        "min": 16696496,
+        "max": 16696496
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 94285824,
+        "min": 94285824,
+        "max": 94285824
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218022384,
+        "min": 218022384,
+        "max": 218022384
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 94912401,
+        "min": 94912401,
+        "max": 94912401
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 121298000,
+        "min": 121298000,
+        "max": 121298000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 53040,
+        "min": 53040,
+        "max": 53040
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 82464768,
+        "min": 82464768,
+        "max": 82464768
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9668422,
+        "min": 9668422,
+        "max": 9668422
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 82464768,
+        "min": 82464768,
+        "max": 82464768
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 60409675,
+        "min": 60409675,
+        "max": 60409675
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 123840000,
+        "min": 123840000,
+        "max": 123840000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 59624,
+        "min": 59624,
+        "max": 59624
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 98086912,
+        "min": 98086912,
+        "max": 98086912
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9668422,
+        "min": 9668422,
+        "max": 9668422
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 98086912,
+        "min": 98086912,
+        "max": 98086912
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218255856,
+        "min": 218255856,
+        "max": 218255856
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 96433647,
+        "min": 96433647,
+        "max": 96433647
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 121381000,
+        "min": 121381000,
+        "max": 121381000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 68740,
+        "min": 68740,
+        "max": 68740
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 99434496,
+        "min": 99434496,
+        "max": 99434496
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9434950,
+        "min": 9434950,
+        "max": 9434950
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 99434496,
+        "min": 99434496,
+        "max": 99434496
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 60791744,
+        "min": 60791744,
+        "max": 60791744
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 121805000,
+        "min": 121805000,
+        "max": 121805000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 59188,
+        "min": 59188,
+        "max": 59188
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 97046528,
+        "min": 97046528,
+        "max": 97046528
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9434950,
+        "min": 9434950,
+        "max": 9434950
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 97046528,
+        "min": 97046528,
+        "max": 97046528
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218022384,
+        "min": 218022384,
+        "max": 218022384
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 109518001,
+        "min": 109518001,
+        "max": 109518001
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 137930000,
+        "min": 137930000,
+        "max": 137930000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 68980,
+        "min": 68980,
+        "max": 68980
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 100098048,
+        "min": 100098048,
+        "max": 100098048
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9698827,
+        "min": 9698827,
+        "max": 9698827
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 100098048,
+        "min": 100098048,
+        "max": 100098048
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 67936284,
+        "min": 67936284,
+        "max": 67936284
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 132826000,
+        "min": 132826000,
+        "max": 132826000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 58820,
+        "min": 58820,
+        "max": 58820
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 96120832,
+        "min": 96120832,
+        "max": 96120832
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9698827,
+        "min": 9698827,
+        "max": 9698827
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 96120832,
+        "min": 96120832,
+        "max": 96120832
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218354301,
+        "min": 218354301,
+        "max": 218354301
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 110605338,
+        "min": 110605338,
+        "max": 110605338
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 136807000,
+        "min": 136807000,
+        "max": 136807000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 44032,
+        "min": 44032,
+        "max": 44032
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 77828096,
+        "min": 77828096,
+        "max": 77828096
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9465355,
+        "min": 9465355,
+        "max": 9465355
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 77828096,
+        "min": 77828096,
+        "max": 77828096
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 69580070,
+        "min": 69580070,
+        "max": 69580070
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 135993000,
+        "min": 135993000,
+        "max": 135993000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 58272,
+        "min": 58272,
+        "max": 58272
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 96464896,
+        "min": 96464896,
+        "max": 96464896
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9465355,
+        "min": 9465355,
+        "max": 9465355
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 96464896,
+        "min": 96464896,
+        "max": 96464896
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218120829,
+        "min": 218120829,
+        "max": 218120829
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 80648530,
+        "min": 80648530,
+        "max": 80648530
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 82934000,
+        "min": 82934000,
+        "max": 82934000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 32384,
+        "min": 32384,
+        "max": 32384
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 61849600,
+        "min": 61849600,
+        "max": 61849600
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 11535618,
+        "min": 11535618,
+        "max": 11535618
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 61849600,
+        "min": 61849600,
+        "max": 61849600
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 47400761,
+        "min": 47400761,
+        "max": 47400761
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 86806000,
+        "min": 86806000,
+        "max": 86806000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 50604,
+        "min": 50604,
+        "max": 50604
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 92233728,
+        "min": 92233728,
+        "max": 92233728
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 11535618,
+        "min": 11535618,
+        "max": 11535618
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 92233728,
+        "min": 92233728,
+        "max": 92233728
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218255856,
+        "min": 218255856,
+        "max": 218255856
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 77910188,
+        "min": 77910188,
+        "max": 77910188
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 80803000,
+        "min": 80803000,
+        "max": 80803000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 30340,
+        "min": 30340,
+        "max": 30340
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 59899904,
+        "min": 59899904,
+        "max": 59899904
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 11302146,
+        "min": 11302146,
+        "max": 11302146
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 59899904,
+        "min": 59899904,
+        "max": 59899904
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 48949996,
+        "min": 48949996,
+        "max": 48949996
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 87020000,
+        "min": 87020000,
+        "max": 87020000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 46368,
+        "min": 46368,
+        "max": 46368
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 87560192,
+        "min": 87560192,
+        "max": 87560192
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 11302146,
+        "min": 11302146,
+        "max": 11302146
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 87560192,
+        "min": 87560192,
+        "max": 87560192
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218022384,
+        "min": 218022384,
+        "max": 218022384
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 36499320,
+        "min": 36499320,
+        "max": 36499320
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 39660000,
+        "min": 39660000,
+        "max": 39660000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 29996,
+        "min": 29996,
+        "max": 29996
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 60596224,
+        "min": 60596224,
+        "max": 60596224
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 16929666,
+        "min": 16929666,
+        "max": 16929666
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 60596224,
+        "min": 60596224,
+        "max": 60596224
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 36061272,
+        "min": 36061272,
+        "max": 36061272
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 43485000,
+        "min": 43485000,
+        "max": 43485000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 40200,
+        "min": 40200,
+        "max": 40200
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 94322688,
+        "min": 94322688,
+        "max": 94322688
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 16929666,
+        "min": 16929666,
+        "max": 16929666
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 94322688,
+        "min": 94322688,
+        "max": 94322688
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218255856,
+        "min": 218255856,
+        "max": 218255856
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 37367278,
+        "min": 37367278,
+        "max": 37367278
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 39981000,
+        "min": 39981000,
+        "max": 39981000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 27796,
+        "min": 27796,
+        "max": 27796
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 60977152,
+        "min": 60977152,
+        "max": 60977152
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 16696194,
+        "min": 16696194,
+        "max": 16696194
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 60977152,
+        "min": 60977152,
+        "max": 60977152
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 34001657,
+        "min": 34001657,
+        "max": 34001657
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 43251000,
+        "min": 43251000,
+        "max": 43251000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 37284,
+        "min": 37284,
+        "max": 37284
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 87138304,
+        "min": 87138304,
+        "max": 87138304
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 16696194,
+        "min": 16696194,
+        "max": 16696194
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 87138304,
+        "min": 87138304,
+        "max": 87138304
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218022384,
+        "min": 218022384,
+        "max": 218022384
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 94360993,
+        "min": 94360993,
+        "max": 94360993
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 120286000,
+        "min": 120286000,
+        "max": 120286000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 50036,
+        "min": 50036,
+        "max": 50036
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 80457728,
+        "min": 80457728,
+        "max": 80457728
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9668121,
+        "min": 9668121,
+        "max": 9668121
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 80457728,
+        "min": 80457728,
+        "max": 80457728
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 56580686,
+        "min": 56580686,
+        "max": 56580686
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 119468000,
+        "min": 119468000,
+        "max": 119468000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 56260,
+        "min": 56260,
+        "max": 56260
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 91893760,
+        "min": 91893760,
+        "max": 91893760
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9668121,
+        "min": 9668121,
+        "max": 9668121
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 91893760,
+        "min": 91893760,
+        "max": 91893760
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218255856,
+        "min": 218255856,
+        "max": 218255856
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 97231575,
+        "min": 97231575,
+        "max": 97231575
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 121968000,
+        "min": 121968000,
+        "max": 121968000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 50476,
+        "min": 50476,
+        "max": 50476
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 79425536,
+        "min": 79425536,
+        "max": 79425536
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9434649,
+        "min": 9434649,
+        "max": 9434649
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 79425536,
+        "min": 79425536,
+        "max": 79425536
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 59397268,
+        "min": 59397268,
+        "max": 59397268
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 120195000,
+        "min": 120195000,
+        "max": 120195000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 61052,
+        "min": 61052,
+        "max": 61052
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 99766272,
+        "min": 99766272,
+        "max": 99766272
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9434649,
+        "min": 9434649,
+        "max": 9434649
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 99766272,
+        "min": 99766272,
+        "max": 99766272
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218022384,
+        "min": 218022384,
+        "max": 218022384
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 109909420,
+        "min": 109909420,
+        "max": 109909420
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 136648000,
+        "min": 136648000,
+        "max": 136648000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 48356,
+        "min": 48356,
+        "max": 48356
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 77119488,
+        "min": 77119488,
+        "max": 77119488
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9698424,
+        "min": 9698424,
+        "max": 9698424
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 77119488,
+        "min": 77119488,
+        "max": 77119488
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 69437521,
+        "min": 69437521,
+        "max": 69437521
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 136757000,
+        "min": 136757000,
+        "max": 136757000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 62740,
+        "min": 62740,
+        "max": 62740
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 104861696,
+        "min": 104861696,
+        "max": 104861696
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9698424,
+        "min": 9698424,
+        "max": 9698424
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 104861696,
+        "min": 104861696,
+        "max": 104861696
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218354301,
+        "min": 218354301,
+        "max": 218354301
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 110184909,
+        "min": 110184909,
+        "max": 110184909
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 134550000,
+        "min": 134550000,
+        "max": 134550000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 49212,
+        "min": 49212,
+        "max": 49212
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 78671872,
+        "min": 78671872,
+        "max": 78671872
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9464952,
+        "min": 9464952,
+        "max": 9464952
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 78671872,
+        "min": 78671872,
+        "max": 78671872
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 74478967,
+        "min": 74478967,
+        "max": 74478967
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 139818000,
+        "min": 139818000,
+        "max": 139818000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 58768,
+        "min": 58768,
+        "max": 58768
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 100421632,
+        "min": 100421632,
+        "max": 100421632
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 9464952,
+        "min": 9464952,
+        "max": 9464952
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 100421632,
+        "min": 100421632,
+        "max": 100421632
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 218120829,
+        "min": 218120829,
+        "max": 218120829
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 192712884,
+        "min": 192712884,
+        "max": 192712884
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 200672000,
+        "min": 200672000,
+        "max": 200672000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 50788,
+        "min": 50788,
+        "max": 50788
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 115896320,
+        "min": 115896320,
+        "max": 115896320
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 23340323,
+        "min": 23340323,
+        "max": 23340323
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 115896320,
+        "min": 115896320,
+        "max": 115896320
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 103945226,
+        "min": 103945226,
+        "max": 103945226
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 211674000,
+        "min": 211674000,
+        "max": 211674000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 89892,
+        "min": 89892,
+        "max": 89892
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 177700864,
+        "min": 177700864,
+        "max": 177700864
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 23340323,
+        "min": 23340323,
+        "max": 23340323
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 177700864,
+        "min": 177700864,
+        "max": 177700864
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239702512,
+        "min": 239702512,
+        "max": 239702512
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 193470842,
+        "min": 193470842,
+        "max": 193470842
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 201144000,
+        "min": 201144000,
+        "max": 201144000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 49912,
+        "min": 49912,
+        "max": 49912
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 108421120,
+        "min": 108421120,
+        "max": 108421120
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 23106851,
+        "min": 23106851,
+        "max": 23106851
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 108421120,
+        "min": 108421120,
+        "max": 108421120
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 103497057,
+        "min": 103497057,
+        "max": 103497057
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 211513000,
+        "min": 211513000,
+        "max": 211513000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 90336,
+        "min": 90336,
+        "max": 90336
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 180502528,
+        "min": 180502528,
+        "max": 180502528
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 23106851,
+        "min": 23106851,
+        "max": 23106851
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 180502528,
+        "min": 180502528,
+        "max": 180502528
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239469040,
+        "min": 239469040,
+        "max": 239469040
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 79224254,
+        "min": 79224254,
+        "max": 79224254
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 87298000,
+        "min": 87298000,
+        "max": 87298000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 50120,
+        "min": 50120,
+        "max": 50120
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 117764096,
+        "min": 117764096,
+        "max": 117764096
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 38376635,
+        "min": 38376635,
+        "max": 38376635
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 117764096,
+        "min": 117764096,
+        "max": 117764096
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 85827796,
+        "min": 85827796,
+        "max": 85827796
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 108568000,
+        "min": 108568000,
+        "max": 108568000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 81676,
+        "min": 81676,
+        "max": 81676
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 202002432,
+        "min": 202002432,
+        "max": 202002432
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 38376635,
+        "min": 38376635,
+        "max": 38376635
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 202002432,
+        "min": 202002432,
+        "max": 202002432
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239702512,
+        "min": 239702512,
+        "max": 239702512
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 77695338,
+        "min": 77695338,
+        "max": 77695338
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 84667000,
+        "min": 84667000,
+        "max": 84667000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 52268,
+        "min": 52268,
+        "max": 52268
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 117166080,
+        "min": 117166080,
+        "max": 117166080
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 38143163,
+        "min": 38143163,
+        "max": 38143163
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 117166080,
+        "min": 117166080,
+        "max": 117166080
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 83441472,
+        "min": 83441472,
+        "max": 83441472
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 105197000,
+        "min": 105197000,
+        "max": 105197000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 81404,
+        "min": 81404,
+        "max": 81404
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 195600384,
+        "min": 195600384,
+        "max": 195600384
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 38143163,
+        "min": 38143163,
+        "max": 38143163
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 195600384,
+        "min": 195600384,
+        "max": 195600384
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239469040,
+        "min": 239469040,
+        "max": 239469040
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 211589553,
+        "min": 211589553,
+        "max": 211589553
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 283212000,
+        "min": 283212000,
+        "max": 283212000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 78828,
+        "min": 78828,
+        "max": 78828
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 142356480,
+        "min": 142356480,
+        "max": 142356480
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18494202,
+        "min": 18494202,
+        "max": 18494202
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 142356480,
+        "min": 142356480,
+        "max": 142356480
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 141259324,
+        "min": 141259324,
+        "max": 141259324
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 289240000,
+        "min": 289240000,
+        "max": 289240000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 121424,
+        "min": 121424,
+        "max": 121424
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 205897728,
+        "min": 205897728,
+        "max": 205897728
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18494202,
+        "min": 18494202,
+        "max": 18494202
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 205897728,
+        "min": 205897728,
+        "max": 205897728
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239702512,
+        "min": 239702512,
+        "max": 239702512
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 214899544,
+        "min": 214899544,
+        "max": 214899544
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 282482000,
+        "min": 282482000,
+        "max": 282482000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 78864,
+        "min": 78864,
+        "max": 78864
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 140509184,
+        "min": 140509184,
+        "max": 140509184
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18260730,
+        "min": 18260730,
+        "max": 18260730
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 140509184,
+        "min": 140509184,
+        "max": 140509184
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 129095828,
+        "min": 129095828,
+        "max": 129095828
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 289884000,
+        "min": 289884000,
+        "max": 289884000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 112968,
+        "min": 112968,
+        "max": 112968
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 190640128,
+        "min": 190640128,
+        "max": 190640128
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18260730,
+        "min": 18260730,
+        "max": 18260730
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 190640128,
+        "min": 190640128,
+        "max": 190640128
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239469040,
+        "min": 239469040,
+        "max": 239469040
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 231892067,
+        "min": 231892067,
+        "max": 231892067
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 301844000,
+        "min": 301844000,
+        "max": 301844000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 68896,
+        "min": 68896,
+        "max": 68896
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 133709824,
+        "min": 133709824,
+        "max": 133709824
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18566769,
+        "min": 18566769,
+        "max": 18566769
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 133709824,
+        "min": 133709824,
+        "max": 133709824
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 151690406,
+        "min": 151690406,
+        "max": 151690406
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 310606000,
+        "min": 310606000,
+        "max": 310606000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 101800,
+        "min": 101800,
+        "max": 101800
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 183328768,
+        "min": 183328768,
+        "max": 183328768
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18566769,
+        "min": 18566769,
+        "max": 18566769
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 183328768,
+        "min": 183328768,
+        "max": 183328768
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239800968,
+        "min": 239800968,
+        "max": 239800968
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 228584827,
+        "min": 228584827,
+        "max": 228584827
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 297795000,
+        "min": 297795000,
+        "max": 297795000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 69244,
+        "min": 69244,
+        "max": 69244
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 132395008,
+        "min": 132395008,
+        "max": 132395008
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18333297,
+        "min": 18333297,
+        "max": 18333297
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 132395008,
+        "min": 132395008,
+        "max": 132395008
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 143332459,
+        "min": 143332459,
+        "max": 143332459
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 309559000,
+        "min": 309559000,
+        "max": 309559000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 114384,
+        "min": 114384,
+        "max": 114384
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 191508480,
+        "min": 191508480,
+        "max": 191508480
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18333297,
+        "min": 18333297,
+        "max": 18333297
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 191508480,
+        "min": 191508480,
+        "max": 191508480
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239567496,
+        "min": 239567496,
+        "max": 239567496
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 190291811,
+        "min": 190291811,
+        "max": 190291811
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 200791000,
+        "min": 200791000,
+        "max": 200791000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 52248,
+        "min": 52248,
+        "max": 52248
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 108568576,
+        "min": 108568576,
+        "max": 108568576
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 23340017,
+        "min": 23340017,
+        "max": 23340017
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 108568576,
+        "min": 108568576,
+        "max": 108568576
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 103700077,
+        "min": 103700077,
+        "max": 103700077
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 213210000,
+        "min": 213210000,
+        "max": 213210000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 94220,
+        "min": 94220,
+        "max": 94220
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 181948416,
+        "min": 181948416,
+        "max": 181948416
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 23340017,
+        "min": 23340017,
+        "max": 23340017
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 181948416,
+        "min": 181948416,
+        "max": 181948416
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239702512,
+        "min": 239702512,
+        "max": 239702512
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 192310325,
+        "min": 192310325,
+        "max": 192310325
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 195209000,
+        "min": 195209000,
+        "max": 195209000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 65068,
+        "min": 65068,
+        "max": 65068
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 119898112,
+        "min": 119898112,
+        "max": 119898112
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 23106545,
+        "min": 23106545,
+        "max": 23106545
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 119898112,
+        "min": 119898112,
+        "max": 119898112
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 111547595,
+        "min": 111547595,
+        "max": 111547595
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 223945000,
+        "min": 223945000,
+        "max": 223945000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 85936,
+        "min": 85936,
+        "max": 85936
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 172019712,
+        "min": 172019712,
+        "max": 172019712
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 23106545,
+        "min": 23106545,
+        "max": 23106545
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 172019712,
+        "min": 172019712,
+        "max": 172019712
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239469040,
+        "min": 239469040,
+        "max": 239469040
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 77120660,
+        "min": 77120660,
+        "max": 77120660
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 86312000,
+        "min": 86312000,
+        "max": 86312000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 50616,
+        "min": 50616,
+        "max": 50616
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 113983488,
+        "min": 113983488,
+        "max": 113983488
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 38376326,
+        "min": 38376326,
+        "max": 38376326
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 113983488,
+        "min": 113983488,
+        "max": 113983488
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 86165545,
+        "min": 86165545,
+        "max": 86165545
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 105257000,
+        "min": 105257000,
+        "max": 105257000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 87536,
+        "min": 87536,
+        "max": 87536
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 209170432,
+        "min": 209170432,
+        "max": 209170432
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 38376326,
+        "min": 38376326,
+        "max": 38376326
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 209170432,
+        "min": 209170432,
+        "max": 209170432
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239702512,
+        "min": 239702512,
+        "max": 239702512
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 79091794,
+        "min": 79091794,
+        "max": 79091794
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 84564000,
+        "min": 84564000,
+        "max": 84564000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 50404,
+        "min": 50404,
+        "max": 50404
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 118280192,
+        "min": 118280192,
+        "max": 118280192
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 38142854,
+        "min": 38142854,
+        "max": 38142854
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 118280192,
+        "min": 118280192,
+        "max": 118280192
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 90929982,
+        "min": 90929982,
+        "max": 90929982
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 99121000,
+        "min": 99121000,
+        "max": 99121000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 81496,
+        "min": 81496,
+        "max": 81496
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 202006528,
+        "min": 202006528,
+        "max": 202006528
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 38142854,
+        "min": 38142854,
+        "max": 38142854
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 202006528,
+        "min": 202006528,
+        "max": 202006528
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239469040,
+        "min": 239469040,
+        "max": 239469040
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 216864158,
+        "min": 216864158,
+        "max": 216864158
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 287950000,
+        "min": 287950000,
+        "max": 287950000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 83748,
+        "min": 83748,
+        "max": 83748
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 147361792,
+        "min": 147361792,
+        "max": 147361792
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18493897,
+        "min": 18493897,
+        "max": 18493897
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 147361792,
+        "min": 147361792,
+        "max": 147361792
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 127300003,
+        "min": 127300003,
+        "max": 127300003
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 288253000,
+        "min": 288253000,
+        "max": 288253000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 108120,
+        "min": 108120,
+        "max": 108120
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 188514304,
+        "min": 188514304,
+        "max": 188514304
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18493897,
+        "min": 18493897,
+        "max": 18493897
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 188514304,
+        "min": 188514304,
+        "max": 188514304
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239702512,
+        "min": 239702512,
+        "max": 239702512
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 207757983,
+        "min": 207757983,
+        "max": 207757983
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 276100000,
+        "min": 276100000,
+        "max": 276100000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 76960,
+        "min": 76960,
+        "max": 76960
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 144433152,
+        "min": 144433152,
+        "max": 144433152
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18260425,
+        "min": 18260425,
+        "max": 18260425
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 144433152,
+        "min": 144433152,
+        "max": 144433152
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 127945791,
+        "min": 127945791,
+        "max": 127945791
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 289923000,
+        "min": 289923000,
+        "max": 289923000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 110160,
+        "min": 110160,
+        "max": 110160
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 187187200,
+        "min": 187187200,
+        "max": 187187200
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18260425,
+        "min": 18260425,
+        "max": 18260425
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 187187200,
+        "min": 187187200,
+        "max": 187187200
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239469040,
+        "min": 239469040,
+        "max": 239469040
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 237088233,
+        "min": 237088233,
+        "max": 237088233
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 305779000,
+        "min": 305779000,
+        "max": 305779000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 69020,
+        "min": 69020,
+        "max": 69020
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 130920448,
+        "min": 130920448,
+        "max": 130920448
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18566362,
+        "min": 18566362,
+        "max": 18566362
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 130920448,
+        "min": 130920448,
+        "max": 130920448
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 147399118,
+        "min": 147399118,
+        "max": 147399118
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 320981000,
+        "min": 320981000,
+        "max": 320981000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 107988,
+        "min": 107988,
+        "max": 107988
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 186773504,
+        "min": 186773504,
+        "max": 186773504
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18566362,
+        "min": 18566362,
+        "max": 18566362
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 186773504,
+        "min": 186773504,
+        "max": 186773504
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239800968,
+        "min": 239800968,
+        "max": 239800968
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "current",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 240463424,
+        "min": 240463424,
+        "max": 240463424
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 308644000,
+        "min": 308644000,
+        "max": 308644000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 70772,
+        "min": 70772,
+        "max": 70772
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 133414912,
+        "min": 133414912,
+        "max": 133414912
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18332890,
+        "min": 18332890,
+        "max": 18332890
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 133414912,
+        "min": 133414912,
+        "max": 133414912
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 0,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "recorded_peak_active_workers": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      }
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "mode": "pool",
+      "attempts": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "oom_killed": 0,
+      "telemetry_unavailable": 0,
+      "failed_prior_output_not_preserved": 0,
+      "failures": [],
+      "successful_pack_wall_ns": {
+        "n": 1,
+        "median": 142378212,
+        "min": 142378212,
+        "max": 142378212
+      },
+      "successful_pack_cpu_ns": {
+        "n": 1,
+        "median": 304499000,
+        "min": 304499000,
+        "max": 304499000
+      },
+      "successful_worker_rss_kib": {
+        "n": 1,
+        "median": 120752,
+        "min": 120752,
+        "max": 120752
+      },
+      "successful_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 204034048,
+        "min": 204034048,
+        "max": 204034048
+      },
+      "successful_complete_artifact_bytes": {
+        "n": 1,
+        "median": 18332890,
+        "min": 18332890,
+        "max": 18332890
+      },
+      "all_attempt_recorded_cgroup_peak_bytes": {
+        "n": 1,
+        "median": 204034048,
+        "min": 204034048,
+        "max": 204034048
+      },
+      "failed_attempt_recorded_cgroup_peak_bytes": {
+        "n": 0,
+        "median": null,
+        "min": null,
+        "max": null
+      },
+      "logical_stats_samples": 1,
+      "logical_bound_violations": 0,
+      "recorded_peak_logical_admitted_bytes": {
+        "n": 1,
+        "median": 239567496,
+        "min": 239567496,
+        "max": 239567496
+      },
+      "recorded_logical_memory_budget_bytes": {
+        "n": 1,
+        "median": 402653184,
+        "min": 402653184,
+        "max": 402653184
+      },
+      "recorded_peak_active_workers": {
+        "n": 1,
+        "median": 3,
+        "min": 3,
+        "max": 3
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.690515810419484,
+        "min": 1.690515810419484,
+        "max": 1.690515810419484
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -32481312,
+        "min": -32481312,
+        "max": -32481312
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 0
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.6570966328491017,
+        "min": 1.6570966328491017,
+        "max": 1.6570966328491017
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -31387594,
+        "min": -31387594,
+        "max": -31387594
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.043410062350496,
+        "min": 1.043410062350496,
+        "max": 1.043410062350496
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -1561977,
+        "min": -1561977,
+        "max": -1561977
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.044604807009587,
+        "min": 1.044604807009587,
+        "max": 1.044604807009587
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -1581646,
+        "min": -1581646,
+        "max": -1581646
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.5711456981021665,
+        "min": 1.5711456981021665,
+        "max": 1.5711456981021665
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -34502726,
+        "min": -34502726,
+        "max": -34502726
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.586295122574539,
+        "min": 1.586295122574539,
+        "max": 1.586295122574539
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -35641903,
+        "min": -35641903,
+        "max": -35641903
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.6120693472136334,
+        "min": 1.6120693472136334,
+        "max": 1.6120693472136334
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -41581717,
+        "min": -41581717,
+        "max": -41581717
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.5896123415799956,
+        "min": 1.5896123415799956,
+        "max": 1.5896123415799956
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -41025268,
+        "min": -41025268,
+        "max": -41025268
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.701418464568533,
+        "min": 1.701418464568533,
+        "max": 1.701418464568533
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -33247769,
+        "min": -33247769,
+        "max": -33247769
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 0
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.5916280769461146,
+        "min": 1.5916280769461146,
+        "max": 1.5916280769461146
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -28960192,
+        "min": -28960192,
+        "max": -28960192
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.0121473252524205,
+        "min": 1.0121473252524205,
+        "max": 1.0121473252524205
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -438048,
+        "min": -438048,
+        "max": -438048
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.0989840289254138,
+        "min": 1.0989840289254138,
+        "max": 1.0989840289254138
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -3365621,
+        "min": -3365621,
+        "max": -3365621
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.6677244422239772,
+        "min": 1.6677244422239772,
+        "max": 1.6677244422239772
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -37780307,
+        "min": -37780307,
+        "max": -37780307
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.6369704916394472,
+        "min": 1.6369704916394472,
+        "max": 1.6369704916394472
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -37834307,
+        "min": -37834307,
+        "max": -37834307
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 0
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.5828534546905844,
+        "min": 1.5828534546905844,
+        "max": 1.5828534546905844
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -40471899,
+        "min": -40471899,
+        "max": -40471899
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "demo",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.4794097372483697,
+        "min": 1.4794097372483697,
+        "max": 1.4794097372483697
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -35705942,
+        "min": -35705942,
+        "max": -35705942
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.8539849439550018,
+        "min": 1.8539849439550018,
+        "max": 1.8539849439550018
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -88767658,
+        "min": -88767658,
+        "max": -88767658
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.8693366517658565,
+        "min": 1.8693366517658565,
+        "max": 1.8693366517658565
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -89973785,
+        "min": -89973785,
+        "max": -89973785
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 0.9230605665325485,
+        "min": 0.9230605665325485,
+        "max": 0.9230605665325485
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": 6603542,
+        "min": 6603542,
+        "max": 6603542
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 0
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 0.9311357546520752,
+        "min": 0.9311357546520752,
+        "max": 0.9311357546520752
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": 5746134,
+        "min": 5746134,
+        "max": 5746134
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 0
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.4978802602793144,
+        "min": 1.4978802602793144,
+        "max": 1.4978802602793144
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -70330229,
+        "min": -70330229,
+        "max": -70330229
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.6646513472147217,
+        "min": 1.6646513472147217,
+        "max": 1.6646513472147217
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -85803716,
+        "min": -85803716,
+        "max": -85803716
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.528719403651672,
+        "min": 1.528719403651672,
+        "max": 1.528719403651672
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -80201661,
+        "min": -80201661,
+        "max": -80201661
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 0
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 1,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.5947875909950027,
+        "min": 1.5947875909950027,
+        "max": 1.5947875909950027
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -85252368,
+        "min": -85252368,
+        "max": -85252368
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 0
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.835020922887068,
+        "min": 1.835020922887068,
+        "max": 1.835020922887068
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -86591734,
+        "min": -86591734,
+        "max": -86591734
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "lz4",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.7240203609947844,
+        "min": 1.7240203609947844,
+        "max": 1.7240203609947844
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -80762730,
+        "min": -80762730,
+        "max": -80762730
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 0
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 0.8950289817118896,
+        "min": 0.8950289817118896,
+        "max": 0.8950289817118896
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": 9044885,
+        "min": 9044885,
+        "max": 9044885
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 0
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "none",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 0.8698098499568602,
+        "min": 0.8698098499568602,
+        "max": 0.8698098499568602
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": 11838188,
+        "min": 11838188,
+        "max": 11838188
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.7035675796488394,
+        "min": 1.7035675796488394,
+        "max": 1.7035675796488394
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -89564155,
+        "min": -89564155,
+        "max": -89564155
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": false,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.623796932874486,
+        "min": 1.623796932874486,
+        "max": 1.623796932874486
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -79812192,
+        "min": -79812192,
+        "max": -79812192
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "full",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.6084779625343484,
+        "min": 1.6084779625343484,
+        "max": 1.6084779625343484
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -89689115,
+        "min": -89689115,
+        "max": -89689115
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    },
+    {
+      "cohort": {
+        "family": "microfat",
+        "cpu_budget": 4,
+        "hard_memory_mib": 512,
+        "format": 2,
+        "codec": "zstd",
+        "compression_level": "default",
+        "dictionary": true,
+        "stub_profile": "minimal",
+        "admission_mib_override": 0,
+        "prior_output_sentinel": false
+      },
+      "baseline": "current",
+      "candidate": "pool",
+      "baseline_attempts": 1,
+      "candidate_attempts": 1,
+      "matched_attempt_blocks": 1,
+      "complete_successful_pairs": 1,
+      "matched_blocks_with_failure": 0,
+      "baseline_only_blocks": 0,
+      "candidate_only_blocks": 0,
+      "baseline_over_candidate_pack_wall_ratio": {
+        "n": 1,
+        "median": 1.6889060525637167,
+        "min": 1.6889060525637167,
+        "max": 1.6889060525637167
+      },
+      "candidate_minus_baseline_pack_wall_ns": {
+        "n": 1,
+        "median": -98085212,
+        "min": -98085212,
+        "max": -98085212
+      },
+      "candidate_over_baseline_artifact_bytes_ratio": {
+        "n": 1,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "compressed_payload_bitstreams_equal_pairs": 1,
+      "dictionary_hash_equal_pairs": 1,
+      "complete_artifact_size_equal_pairs": 1,
+      "complete_artifact_hash_equal_pairs": 1
+    }
+  ]
+}
