@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "phase": "pilot",
+  "protocol_id": "explicit-prewarm-pilot-v1",
+  "source_revision": "164046036d732004095ad3f568bc2e0bb0bbd126",
+  "host": "local-native-amd64-ryzen3950x-quiet-desktop-pagecache-uncontrolled",
+  "corpus_sha256": "4cb12d170692bb9de301796f89cc74f589e24f0789fb6081edda1653ea08f20e",
+  "microfat": "/tmp/microfat-research-confirm-20261023/corpus/amd64/microfat",
+  "microfat_sha256": "e45e40915ba609b8be8aea91b2a6127ebe84dba8a384e186473b016a2b4c3036",
+  "samples_per_arm": 12,
+  "command_timeout_ns": 2000000000,
+  "campaign_budget_ns": 120000000000,
+  "gomaxprocs_per_process": 4,
+  "episode_slo_ns": 20000000,
+  "practical_risk_margin": 0.1,
+  "family_alpha": 0.05,
+  "comparison_family_size": 6,
+  "iid_assumption": false,
+  "applications": [
+    {
+      "family": "demo",
+      "artifact": "/home/nanoninja/.codex/worktrees/poc-376-lifecycle/microfat/.work/research380/pilot-artifacts/artifact-2a97516c354b68848cdbd8f54a226a0a55b21ed138e207ad6c5cbb9c00aa5aea",
+      "artifact_sha256": "56112f2aebedd61f02342f500c7d7b9dc8d69250a44a67d4f28a298336754228",
+      "selected_level": "v3",
+      "readiness_args": [
+        "--startup-only",
+        "--json"
+      ],
+      "expected_stdout_sha256": "913aad51f014d7b33eddc7e3984f6c9cb00b9f259c58a5aa9529f7d820f7191c",
+      "selected_payload_sha256": "5ebd71d40ff4561b79cdc2be6f5e857debb1bcb35a8d846f0e6aea6ac0d66dc1",
+      "selected_payload_bytes": 4321507
+    },
+    {
+      "family": "microfat",
+      "artifact": "/home/nanoninja/.codex/worktrees/poc-376-lifecycle/microfat/.work/research380/pilot-artifacts/artifact-34447f23f7cd7182e1190e97f9424f9ce45487182d770f4ac238cf002a2014e5",
+      "artifact_sha256": "cf5858e70f0ef5e097a7facd53872e064a7aa51b2299fa770764dd57e65fbbbd",
+      "selected_level": "v3",
+      "readiness_args": [
+        "--version"
+      ],
+      "expected_stdout_sha256": "241f164e9064673a8b0cfb9f38a9ed3b29ee1b8a7c2e25c154198f0bd66ce1e3",
+      "selected_payload_sha256": "dabbb42c127d11fbdaa268cfe362cddd93a61a59082275d93e54a85526b11e3f",
+      "selected_payload_bytes": 11501795
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "one-off",
+      "launch_offsets_ns": [
+        0
+      ],
+      "logical_retention_horizon_ns": 60000000000
+    },
+    {
+      "name": "recurring-2x3",
+      "launch_offsets_ns": [
+        0,
+        0,
+        0,
+        100000000,
+        100000000,
+        100000000
+      ],
+      "logical_retention_horizon_ns": 1000000000
+    },
+    {
+      "name": "disappearing-1x3",
+      "launch_offsets_ns": [
+        0,
+        0,
+        0
+      ],
+      "logical_retention_horizon_ns": 60000000000
+    }
+  ]
+}

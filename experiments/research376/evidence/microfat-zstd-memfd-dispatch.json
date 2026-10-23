@@ -1,0 +1,1 @@
+{"event":"dispatch","timestamp_unix_nano":1792716071961438917,"host_arch":"amd64","host_level":"v3","selected_variant":"v3","selected_sha256":"dabbb42c127d11fbdaa268cfe362cddd93a61a59082275d93e54a85526b11e3f","selected_size_bytes":11501795,"exec_mode":"memfd","cgroup_version":2,"gomaxprocs":"4","decompression_duration_us":20021,"total_launcher_us":20425}

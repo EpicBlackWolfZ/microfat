@@ -1,0 +1,49 @@
+{
+  "go_version": "go1.27.3",
+  "schema_version": 1,
+  "source_revision": "ada376b4ffffaa3354becbfb70c1896934caf277",
+  "variants": [
+    {
+      "bytes": 11514083,
+      "family": "microfat",
+      "level": "v1",
+      "path": "/tmp/microfat-research-pocs-20261023/corpus/microfat-v1",
+      "sha256": "11c5a13b332ccbce8dc6f74c9abcaa07f8e32e6e29d1e2bfa736e46fac71d2cd"
+    },
+    {
+      "bytes": 11509987,
+      "family": "microfat",
+      "level": "v2",
+      "path": "/tmp/microfat-research-pocs-20261023/corpus/microfat-v2",
+      "sha256": "7554e87864642473fdd4a42a8953a2fbbca60a58d761027a33b3b9a5f2d87f0d"
+    },
+    {
+      "bytes": 11501795,
+      "family": "microfat",
+      "level": "v3",
+      "path": "/tmp/microfat-research-pocs-20261023/corpus/microfat-v3",
+      "sha256": "dabbb42c127d11fbdaa268cfe362cddd93a61a59082275d93e54a85526b11e3f"
+    },
+    {
+      "bytes": 4333795,
+      "family": "demo",
+      "level": "v1",
+      "path": "/tmp/microfat-research-pocs-20261023/corpus/demo-v1",
+      "sha256": "8596f07123ed9ddc6c29a1f53d65fa2bd8150843314d5dac2b4c2f9d06dc3f72"
+    },
+    {
+      "bytes": 4329699,
+      "family": "demo",
+      "level": "v2",
+      "path": "/tmp/microfat-research-pocs-20261023/corpus/demo-v2",
+      "sha256": "f96029baed822ef9d1afbca5dd110299b7d6ee00adaace4d352fce100dd7b340"
+    },
+    {
+      "bytes": 4321507,
+      "family": "demo",
+      "level": "v3",
+      "path": "/tmp/microfat-research-pocs-20261023/corpus/demo-v3",
+      "sha256": "5ebd71d40ff4561b79cdc2be6f5e857debb1bcb35a8d846f0e6aea6ac0d66dc1"
+    }
+  ]
+}

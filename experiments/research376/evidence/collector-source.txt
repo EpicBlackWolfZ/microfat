@@ -1,0 +1,66 @@
+package main
+
+import (
+ "bytes"
+ "context"
+ "crypto/sha256"
+ "encoding/hex"
+ "encoding/json"
+ "fmt"
+ "os"
+ "os/exec"
+ "path/filepath"
+ "runtime"
+ "time"
+)
+
+const root = "/tmp/microfat-research-pocs-20261023"
+
+func invoke(binary string, args, env []string) ([]byte, error) {
+ ctx,cancel:=context.WithTimeout(context.Background(),30*time.Second);defer cancel()
+ cmd:=exec.CommandContext(ctx,binary,args...);cmd.Env=env
+ return cmd.CombinedOutput()
+}
+func checked(binary string,args,env []string) []byte { b,e:=invoke(binary,args,env);if e!=nil {panic(fmt.Sprintf("%s %v: %v: %s",binary,args,e,b))};return b }
+func write(path string,v any) {b,e:=json.MarshalIndent(v,"","  ");if e!=nil {panic(e)};if e=os.WriteFile(path,append(b,'\n'),0o644);e!=nil {panic(e)}}
+func digest(b []byte)string {h:=sha256.Sum256(b);return hex.EncodeToString(h[:])}
+
+func main(){
+ out:=filepath.Join(root,"evidence","research376");if e:=os.MkdirAll(out,0o755);e!=nil{panic(e)}
+ corpus:=filepath.Join(root,"corpus");manifest,e:=os.ReadFile(filepath.Join(corpus,"manifest.json"));if e!=nil{panic(e)}
+ tool:=filepath.Join(root,"tool-bin","microfat");stub:=filepath.Join(root,"tool-bin","microfat-stub")
+ for _,family:=range []string{"demo","microfat"}{
+  args:=[]string{"--startup-only","--json"};if family=="microfat"{args=[]string{"--version"}}
+  native:=checked(filepath.Join(corpus,family+"-v3"),args,os.Environ())
+  var candidates []map[string]any;var records []map[string]any
+  for _,codec:=range []string{"none","lz4","zstd"}{
+   name:=family+"-"+codec;binary:=filepath.Join(out,name)
+   packArgs:=[]string{"pack","--stub",stub,"--output",binary,"--compression",codec,"--format-version","2"}
+   for _,level:=range []string{"v1","v2","v3"}{packArgs=append(packArgs,"--variant",level+"="+filepath.Join(corpus,family+"-"+level))}
+   started:=time.Now();packOutput:=checked(tool,packArgs,os.Environ());packNS:=time.Since(started).Nanoseconds()
+   checked(tool,[]string{"verify",binary},os.Environ())
+   cache,e:=os.MkdirTemp(out,name+"-cache-");if e!=nil{panic(e)}
+   checked(tool,[]string{"prewarm","--cache-dir",cache,binary},os.Environ())
+   checked(tool,[]string{"prewarm","--cache-dir",cache,"--verify",binary},os.Environ())
+   cold,warm:=[]int64{},[]int64{};failCold,failWarm:=0,0
+   for block:=0;block<60;block++{
+    modes:=[]string{"memfd","auto"};if block%2==1{modes=[]string{"auto","memfd"}}
+    for _,mode:=range modes{
+     env:=append(os.Environ(),"MICROFAT_EXEC_MODE="+mode,"MICROFAT_CACHE_DIR="+cache,"GOMAXPROCS=4")
+     started=time.Now();output,err:=invoke(binary,args,env);duration:=time.Since(started).Nanoseconds()
+     failed:=err!=nil||!bytes.Equal(output,native)
+     records=append(records,map[string]any{"candidate":name,"block":block,"mode":mode,"duration_ns":duration,"failed":failed})
+     if failed {if mode=="auto"{failWarm++}else{failCold++};continue}
+     if mode=="auto"{warm=append(warm,duration)}else{cold=append(cold,duration)}
+    }
+   }
+   binaryBytes,e:=os.ReadFile(binary);if e!=nil{panic(e)}
+   candidates=append(candidates,map[string]any{"name":name,"bundle_bytes":len(binaryBytes),"pack_ns":packNS,"cold_ns":cold,"warm_ns":warm,"cold_failures":failCold,"warm_failures":failWarm})
+   write(filepath.Join(out,name+"-identity.json"),map[string]any{"sha256":digest(binaryBytes),"pack_command":packArgs,"pack_output":string(packOutput),"payload_args":args,"native_output":string(native),"cache_dir":cache})
+  }
+  var scenarios []map[string]any
+  for _,h:=range []float64{0,.5,.9,.99,.999,1}{scenarios=append(scenarios,map[string]any{"name":fmt.Sprintf("warm-%g",h),"warm_fraction":h,"launches":100,"transfers":1,"bandwidth_bytes_per_second":10000000,"include_pack":true})}
+  write(filepath.Join(out,family+"-input.json"),map[string]any{"schema_version":1,"provenance":map[string]any{"source_revision":"ada376b4ffffaa3354becbfb70c1896934caf277","go_version":runtime.Version(),"corpus_sha256":digest(manifest),"host_class":"local-native-amd64-ryzen3950x-uncontrolled-desktop","measurement_kind":"full-process-exit","scope":"local-native-exploratory"},"candidates":candidates,"scenarios":scenarios})
+  write(filepath.Join(out,family+"-raw-observations.json"),records)
+ }
+}

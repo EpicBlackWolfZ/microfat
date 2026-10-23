@@ -87,6 +87,24 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  research-heldout-corpus:
+    desc: Build checksum-pinned independent research corpus (CORPUS_OUTPUT=new directory, CORPUS_ARCH=amd64|arm64)
+    cmds:
+    - |
+      export GO={{.GO | shellQuote}}
+      bash scripts/research-heldout-corpus.sh {{.CORPUS_OUTPUT | default "" | shellQuote}} {{.CORPUS_ARCH | default "amd64" | shellQuote}}
+  research-380:
+    desc: Analyze an explicit prewarm episode report without running workloads
+    cmds:
+    - >-
+      {{.GO | shellQuote}} run ./experiments/research380
+      --mode analyze --request {{.RESEARCH_INPUT | shellQuote}}
+  research-376:
+    desc: Analyze explicit lifecycle observations and scenarios without executing workloads
+    cmds:
+    - >-
+      {{.GO | shellQuote}} run ./experiments/research376
+      --input {{.RESEARCH_INPUT | default "experiments/research376/testdata/example.json" | shellQuote}}
   test-runtime-fixtures:
     desc: Require native fat CLI inspection, timeout and detached-child cleanup regressions
     cmds:

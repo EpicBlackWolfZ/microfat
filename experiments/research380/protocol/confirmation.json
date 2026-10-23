@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "phase": "confirmation",
+  "protocol_id": "explicit-prewarm-confirmation-v1",
+  "source_revision": "fbf5947dd3b19e356bc4fa1dee3d478274d09ff8",
+  "host": "local-native-amd64-ryzen3950x-quiet-desktop-pagecache-uncontrolled",
+  "corpus_sha256": "ee1a51e9720eab58d561839e2f8428f85c3c1fa49b02481f4fd872380b30b194",
+  "microfat": "/tmp/microfat-research-confirm-20261023/corpus/amd64/microfat",
+  "microfat_sha256": "e45e40915ba609b8be8aea91b2a6127ebe84dba8a384e186473b016a2b4c3036",
+  "samples_per_arm": 100,
+  "command_timeout_ns": 2000000000,
+  "campaign_budget_ns": 1080000000000,
+  "gomaxprocs_per_process": 4,
+  "episode_slo_ns": 20000000,
+  "practical_risk_margin": 0.1,
+  "family_alpha": 0.05,
+  "comparison_family_size": 6,
+  "iid_assumption": false,
+  "applications": [
+    {
+      "family": "actionlint",
+      "artifact": "/home/nanoninja/.codex/worktrees/poc-376-lifecycle/microfat/.work/research380/heldout-artifacts/artifact-69168ef9628c1e105c2abf4ec17287a0bead857baf01222869a65402f42b6647",
+      "artifact_sha256": "925aa019b86758d99473d48ee8f0ec3c6b88615751b3bd52b0c1c5ce2744acc8",
+      "selected_level": "v3",
+      "readiness_args": [
+        "-version"
+      ],
+      "expected_stdout_sha256": "7fbd8c16d279f2713744d34c5daf3ac0f75eb5551532b3d26d34efb574e3894c",
+      "selected_payload_sha256": "8cb9b4fd7dc32a64540ff627048bd9f263e901bbe53070556776494d2b9b2ac3",
+      "selected_payload_bytes": 6512764
+    },
+    {
+      "family": "fortio",
+      "artifact": "/home/nanoninja/.codex/worktrees/poc-376-lifecycle/microfat/.work/research380/heldout-artifacts/artifact-ca7d4432482ce836e37b0d75e680b882af0ce58f20fcc30465996847771016b1",
+      "artifact_sha256": "6c9e176c701e0c1ff2bbb4cb948ba05f89e53755cd7d0f281a5d254f7ef10547",
+      "selected_level": "v3",
+      "readiness_args": [
+        "version"
+      ],
+      "expected_stdout_sha256": "9c5955fc99a60b8f6dee6cf582c4420d91e1b3e2a201f532c91e2cbdfce7fa51",
+      "selected_payload_sha256": "69481306d1ad934253a1454cfe329da5e02defbf81861057eef9e21249e524f0",
+      "selected_payload_bytes": 19718268
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "one-off",
+      "launch_offsets_ns": [
+        0
+      ],
+      "logical_retention_horizon_ns": 60000000000
+    },
+    {
+      "name": "recurring-2x3",
+      "launch_offsets_ns": [
+        0,
+        0,
+        0,
+        100000000,
+        100000000,
+        100000000
+      ],
+      "logical_retention_horizon_ns": 1000000000
+    },
+    {
+      "name": "disappearing-1x3",
+      "launch_offsets_ns": [
+        0,
+        0,
+        0
+      ],
+      "logical_retention_horizon_ns": 60000000000
+    }
+  ],
+  "pilot_report_sha256": "4f8f5b8fd86343abf3436581c1e756d799f1171a4c7a90231e9c9ad9397a5c9b"
+}

@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "os": "linux",
+  "arch": "amd64",
+  "created_unix": 1792715791,
+  "dictionary_offset": 0,
+  "dictionary_size": 0,
+  "dictionary_id": 0,
+  "variants": [
+    {
+      "level": "v1",
+      "offset": 4030624,
+      "compressed_size": 11514083,
+      "uncompressed_size": 11514083,
+      "sha256": "11c5a13b332ccbce8dc6f74c9abcaa07f8e32e6e29d1e2bfa736e46fac71d2cd",
+      "compression": "none"
+    },
+    {
+      "level": "v2",
+      "offset": 15544707,
+      "compressed_size": 11509987,
+      "uncompressed_size": 11509987,
+      "sha256": "7554e87864642473fdd4a42a8953a2fbbca60a58d761027a33b3b9a5f2d87f0d",
+      "compression": "none"
+    },
+    {
+      "level": "v3",
+      "offset": 27054694,
+      "compressed_size": 11501795,
+      "uncompressed_size": 11501795,
+      "sha256": "dabbb42c127d11fbdaa268cfe362cddd93a61a59082275d93e54a85526b11e3f",
+      "compression": "none"
+    }
+  ]
+}
