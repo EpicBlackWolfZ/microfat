@@ -68,7 +68,7 @@ func TestToolchainRejectsAlternateCompilerAndMachine(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			settings := map[string]string{
-				"GOVERSION": goVersion, "GOOS": "linux", "GOARCH": runtime.GOARCH, "GOENV": "off", "GOTOOLCHAIN": "local",
+				"GOVERSION": goVersion, "GOOS": "linux", "GOARCH": runtime.GOARCH, "GOENV": "", "GOTOOLCHAIN": "local",
 			}
 			if tc.key != "" {
 				settings[tc.key] = tc.value
@@ -77,9 +77,20 @@ func TestToolchainRejectsAlternateCompilerAndMachine(t *testing.T) {
 				assert.NoError(t, checkToolchain(version, settings, machine))
 				assert.Error(t, checkToolchain("go version go1.27.2 linux/"+runtime.GOARCH, settings, machine))
 				assert.Error(t, checkToolchain(version, settings, "unsupported"))
+				delete(settings, "GOENV")
+				assert.Error(t, checkToolchain(version, settings, machine), "missing environment evidence must fail closed")
 			}
 		})
 	}
+}
+
+func TestToolchainPreflightWithPinnedCompiler(t *testing.T) {
+	t.Setenv("PATH", filepath.Join(runtime.GOROOT(), "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	output := t.TempDir()
+	require.NoError(t, verifyToolchain(output))
+	data, err := os.ReadFile(filepath.Join(output, "toolchain.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), goVersion)
 }
 
 func TestScheduleIsCompleteAndBalanced(t *testing.T) {

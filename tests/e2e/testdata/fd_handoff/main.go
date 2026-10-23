@@ -239,13 +239,16 @@ func verifyToolchain(output string) error {
 }
 
 func checkToolchain(version string, settings map[string]string, machine string) error {
+	// GOENV=off disables the persistent file, and `go env GOENV` reports that
+	// disabled file as an empty value rather than echoing the input literal.
+	envFile, envFileReported := settings["GOENV"]
 	wantMachine := "x86_64"
 	if runtime.GOARCH == archARM64 {
 		wantMachine = "aarch64"
 	}
 	wantVersion := "go version " + goVersion + " linux/" + runtime.GOARCH
 	if strings.TrimSpace(version) != wantVersion || settings["GOVERSION"] != goVersion || settings["GOOS"] != "linux" ||
-		settings["GOARCH"] != runtime.GOARCH || settings["GOENV"] != "off" || settings["GOTOOLCHAIN"] != "local" ||
+		settings["GOARCH"] != runtime.GOARCH || !envFileReported || envFile != "" || settings["GOTOOLCHAIN"] != "local" ||
 		machine != wantMachine {
 		return fmt.Errorf("external compiler or machine differs from frozen native Go 1.27.3 requirement: %s, %v, %s",
 			version, settings, machine)
