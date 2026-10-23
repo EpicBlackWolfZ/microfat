@@ -33,11 +33,16 @@ import (
 )
 
 const (
-	percentMultiplier      = 100.0
-	keyValueParts          = 2
-	defaultDirMode         = 0o750
-	pprofHeaderTimeoutSec  = 3
-	pprofReadHeaderTimeout = pprofHeaderTimeoutSec * time.Second
+	percentMultiplier       = 100.0
+	keyValueParts           = 2
+	defaultDirMode          = 0o750
+	pprofHeaderTimeoutSec   = 3
+	pprofReadHeaderTimeout  = pprofHeaderTimeoutSec * time.Second
+	sourceDateEpochEnv      = "SOURCE_DATE_EPOCH"
+	creationDateUnavailable = "unavailable"
+	// UTC RFC3339 dates have four-digit years, from 0000 through 9999.
+	minCreationDateUnix int64 = -62167219200
+	maxCreationDateUnix int64 = 253402300799
 )
 
 var exitFunc = os.Exit
@@ -252,7 +257,8 @@ func newInspectCmd() *cobra.Command {
 				_, _ = fmt.Fprintf(out, "Shared Dictionary: %d bytes (offset %d, sha256: %.12s...)\n",
 					idx.DictionarySize, idx.DictionaryOffset, idx.DictionarySHA256)
 			}
-			_, _ = fmt.Fprintf(out, "Created At:        %s\n\n", time.Unix(idx.CreatedUnix, 0).Format(time.RFC3339))
+			_, _ = fmt.Fprintf(out, "Created At:        %s\n", creationDate(idx.CreatedUnix))
+			_, _ = fmt.Fprintf(out, "Created Unix:      %d\n\n", idx.CreatedUnix)
 
 			_, _ = fmt.Fprintf(out, "Embedded Variants (%d total):\n", len(idx.Variants))
 			for _, v := range idx.Variants {
@@ -525,6 +531,30 @@ func cmdWarnFunc(cmd *cobra.Command) func(string, ...any) {
 	}
 }
 
+// sourceDateEpoch resolves the packaging epoch without modifying the environment
+// inherited by compiler and other build children.
+func sourceDateEpoch() (*int64, error) {
+	raw, present := os.LookupEnv(sourceDateEpochEnv)
+	if !present {
+		return nil, nil
+	}
+	epoch, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s %q: expected signed ASCII base-10 integer Unix seconds in the int64 range; "+
+			"unset the variable to use the current time: %w", sourceDateEpochEnv, raw, err)
+	}
+	return &epoch, nil
+}
+
+func creationDate(epoch int64) string {
+	// Bound the numeric input before constructing a time.Time: some int64 Unix
+	// seconds overflow Go's internal time representation and produce bogus dates.
+	if epoch < minCreationDateUnix || epoch > maxCreationDateUnix {
+		return creationDateUnavailable
+	}
+	return time.Unix(epoch, 0).UTC().Format(time.RFC3339)
+}
+
 func newPackCmd() *cobra.Command {
 	var flags builder.BuildOptions
 	var (
@@ -535,7 +565,14 @@ func newPackCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "pack [--manifest <file> | [--stub <stub>] -v <level>=<path> ... -o <output>]",
 		Short: "Package multiple Go microarchitecture binaries into a single fat binary",
+		Long: `Package multiple Go microarchitecture binaries into a single fat binary.
+Set SOURCE_DATE_EPOCH to signed integer Unix seconds to supply reproducible creation metadata.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			epoch, err := sourceDateEpoch()
+			if err != nil {
+				return err
+			}
+			flags.CreatedUnix = epoch
 			if err := validateEmptyStubFlags(cmd, flags); err != nil {
 				return err
 			}
@@ -647,6 +684,7 @@ func runDirectPack(
 		opts.TargetArch = targetArch
 	}
 	opts.Variants = variants
+	opts.CreatedUnix = flags.CreatedUnix
 	opts.SkipELFValidation = flags.SkipELFValidation
 	opts.AllowMixedABI = flags.AllowMixedABI
 	var artifactABIReport *pack.ArtifactABIReport
@@ -737,8 +775,14 @@ func newPgoPackCmd() *cobra.Command {
 		Short: "Compile and package microarchitecture variants with Profile-Guided Optimization (PGO)",
 		Long: `pgo-pack automates concurrent Go compilation across multiple microarchitecture levels
 (e.g., v1, v3, v4 on AMD64 or v8.0, v8.2 on ARM64) with Profile-Guided Optimization (-pgo) profiles,
-then packages them into a self-dispatching microfat binary.`,
+then packages them into a self-dispatching microfat binary.
+Set SOURCE_DATE_EPOCH to signed integer Unix seconds to supply reproducible creation metadata.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			epoch, err := sourceDateEpoch()
+			if err != nil {
+				return err
+			}
+			flags.CreatedUnix = epoch
 			if err := validateEmptyStubFlags(cmd, flags); err != nil {
 				return err
 			}

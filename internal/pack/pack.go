@@ -66,6 +66,7 @@ type Options struct {
 	VariantCompression map[string]VariantCompressionOptions
 	Permissions        os.FileMode
 	FormatVersion      int                                       // FormatVersion1 (JSON) or FormatVersion2 (Binary, default)
+	CreatedUnix        *int64                                    // Optional creation epoch in Unix seconds; nil uses the wall clock
 	SkipELFValidation  bool                                      // Optional flag to bypass ELF header validation (primarily for testing)
 	AllowMixedABI      bool                                      // Allow packaging variants with differing declared ABI requirements
 	ABIReportCallback  func(report *ArtifactABIReport)           // Optional callback receiving the aggregate ABI report
@@ -243,6 +244,13 @@ func hasDictionaryCapableVariant(opts *Options, levels []string) (bool, error) {
 
 // Pack stitches the stub and compressed variant binaries into a complete microfat fat executable.
 func Pack(opts Options) (*format.Index, error) {
+	var createdUnix int64
+	if opts.CreatedUnix == nil {
+		createdUnix = time.Now().Unix()
+	} else {
+		createdUnix = *opts.CreatedUnix
+	}
+
 	// Validate configuration first; validate ELF bytes only after pinning the inputs.
 	validateELF := !opts.SkipELFValidation
 	opts.SkipELFValidation = true
@@ -295,7 +303,7 @@ func Pack(opts Options) (*format.Index, error) {
 		AppName:     opts.AppName,
 		TargetOS:    opts.TargetOS,
 		TargetArch:  opts.TargetArch,
-		CreatedUnix: time.Now().Unix(),
+		CreatedUnix: createdUnix,
 		Variants:    make([]format.VariantEntry, 0, len(levels)),
 	}
 

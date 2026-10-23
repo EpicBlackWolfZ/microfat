@@ -16,11 +16,13 @@ const (
 	EnvGOARM64 = "GOARM64"
 )
 
+const sourceDateEpochEnv = "SOURCE_DATE_EPOCH"
+
 // assembleTargetEnv constructs a deterministic, deduplicated compiler environment
 // for compiling variant v of manifest m. Controlled target keys (GOOS, GOARCH, GOAMD64, GOARM64)
 // are stripped from the ambient environment, validated ordinary variables are overlaid
 // in ambient -> root -> variant order, and exactly one authoritative GOOS, GOARCH, and active
-// architecture-tier variable is added.
+// architecture-tier variable is added. An ambient SOURCE_DATE_EPOCH is preserved unchanged.
 func assembleTargetEnv(ambient []string, m *Manifest, v VariantConfig) []string {
 	// Parse and deduplicate ambient environment with last-value semantics.
 	envMap := make(map[string]string, len(ambient))
@@ -34,6 +36,7 @@ func assembleTargetEnv(ambient []string, m *Manifest, v VariantConfig) []string 
 		}
 		envMap[k] = val
 	}
+	sourceDateEpoch, preserveEpoch := envMap[sourceDateEpochEnv]
 
 	// Overlay ordinary root variables
 	for k, val := range m.Env {
@@ -49,6 +52,11 @@ func assembleTargetEnv(ambient []string, m *Manifest, v VariantConfig) []string 
 			continue
 		}
 		envMap[k] = val
+	}
+	// The reproducible-build environment contract preserves an already exported
+	// SOURCE_DATE_EPOCH unchanged for build children, including manifest builds.
+	if preserveEpoch {
+		envMap[sourceDateEpochEnv] = sourceDateEpoch
 	}
 
 	// Add authoritative target configuration

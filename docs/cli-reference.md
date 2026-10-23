@@ -190,12 +190,18 @@ Target Platform:   linux/amd64
 Total Size:        12582912 bytes
 Shared Dictionary: 114688 bytes (offset 3254120, sha256: 8f3c4e1b...)
 Created At:        2026-08-28T02:30:00Z
+Created Unix:      1787884200
 
 Embedded Variants (3 total):
   • v1     [zstd] offset:    3368808 | comp:    2945120 B | raw:    7397639 B (39.8%) | sha256: f4e7f675b059...
   • v3     [zstd] offset:    6313928 | comp:    2891240 B | raw:    7389447 B (39.1%) | sha256: fda5c10d86f6...
   • v4     [zstd] offset:    9205168 | comp:    2892110 B | raw:    7389447 B (39.1%) | sha256: 56b5656ccdd1...
 ```
+
+`Created Unix` and JSON `created_unix` preserve the exact signed integer epoch. `Created At`
+shows its UTC RFC3339 calendar representation for years 0000 through 9999, or `unavailable`
+outside that range. The creation epoch is caller-supplied metadata, not proof of producer
+identity or a measurement of when the build actually ran.
 
 ---
 
@@ -302,6 +308,39 @@ microfat pack --manifest pgo.yaml -o bin/myapp
 | `--concurrency` | `-j` | `int` | `NumCPU` | Concurrent compiler workers when building via manifest. |
 | `--keep-intermediates` | *(none)* | `bool` | `false` | Retain intermediate compiled variant binaries when building via manifest. |
 | `--go-binary` | *(none)* | `string` | `""` | Path to custom Go toolchain binary (defaults to `$GO` or `go`). |
+
+#### Reproducible Creation Epoch
+
+Direct `pack`, `pack --manifest`, and `pgo-pack` read
+[`SOURCE_DATE_EPOCH`](https://reproducible-builds.org/specs/source-date-epoch/) once before
+building or snapshotting packaging inputs. When absent, new packages retain wall-clock Unix
+seconds. When present, the value must be an ASCII decimal integer with an optional `+` or `-`
+sign that fits `int64` (`-9223372036854775808` through `9223372036854775807`). Zero and
+pre-1970 epochs are accepted. Empty values, whitespace, fractions, non-ASCII digits and overflow
+fail with an error before packaging changes output files. An already exported value is
+preserved for compiler/build children, taking precedence over manifest `env` entries for this
+variable. When the ambient variable is absent, a manifest `env` entry remains a build-child
+setting and does not select the package creation epoch.
+
+```bash
+# Reuse one epoch for every packaging operation in this build.
+export SOURCE_DATE_EPOCH=1787884200
+microfat pack --stub bin/microfat-stub -v v1=dist/app_v1 -o bin/myapp
+microfat pack --manifest pgo.yaml -o bin/myapp-manifest
+microfat pgo-pack --manifest pgo.yaml -o bin/myapp-pgo
+```
+
+With identical stub/payload bytes, effective compression settings, dictionary inputs, epoch,
+other metadata/options, and pinned toolchain/codec, repeated packaging produces identical
+complete bytes and SHA-256.
+The same epoch is preserved in Format v1 and v2. This controls new package metadata; it does
+not normalize ELF build IDs, source paths, compiler provenance or signatures, and does not
+guarantee identical arbitrary source builds or output across different toolchains/codecs.
+Trim/optimize transformations retain their existing timestamp and filesystem metadata policies.
+
+Internal Go callers can set `pack.Options.CreatedUnix` to an `*int64`; nil selects wall-clock
+seconds and a pointer to zero selects epoch zero. Core `Pack` resolves this option once and
+does not read `SOURCE_DATE_EPOCH` itself.
 
 #### Compression Precedence and Profile Resolution Contract
 

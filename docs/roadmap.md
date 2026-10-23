@@ -189,8 +189,16 @@ shared release gates below apply to the final candidate; green intermediate CI i
 
 ## v0.4.0: measured improvements and observability
 
+Start with reproducible new-Pack creation epochs [#391](https://github.com/EpicBlackWolfZ/microfat/issues/391)
+and per-variant CLI compression #43. The live
+[delivery index #378](https://github.com/EpicBlackWolfZ/microfat/issues/378) records the complete
+ten-issue commitment and ordering, including verified-descriptor handoff #392, prewarm planning
+and payload-byte admission #390, and the original matched service-p99 investigation #230.
+Issue-local acceptance remains authoritative; these are pending release commitments.
+
 | Scope | Issues |
 | --- | --- |
+| Explicit new-Pack epoch and CLI `SOURCE_DATE_EPOCH` | [#391](https://github.com/EpicBlackWolfZ/microfat/issues/391) |
 | Runtime metadata accessor/recipes and non-mutating doctor tuning preview | [#15](https://github.com/EpicBlackWolfZ/microfat/issues/15), [#156](https://github.com/EpicBlackWolfZ/microfat/issues/156) |
 | Attribute and reduce disabled-telemetry overhead | [#41](https://github.com/EpicBlackWolfZ/microfat/issues/41) |
 | Derive automatic codec policy from representative measurements | [#42](https://github.com/EpicBlackWolfZ/microfat/issues/42) |
