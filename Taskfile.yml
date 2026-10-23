@@ -87,6 +87,27 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  research-47-build:
+    desc: Build the committed bounded exact-sharing diagnostic
+    cmds:
+    - |
+      git diff --quiet HEAD -- experiments/research47 internal/codec internal/format internal/pack go.mod go.sum
+      mkdir -p .work/research47
+      research_revision="$(git rev-parse HEAD)"
+      {{.GO | shellQuote}} build -trimpath -ldflags="-X main.producerRevision=${research_revision}" \
+        -o .work/research47/research47 ./experiments/research47
+  research-47:
+    desc: Screen actual shared-range size costs (MANIFEST, STUB, OUTPUT=new directory)
+    cmds:
+    - |
+      .work/research47/research47 --manifest {{.MANIFEST | default "" | shellQuote}} \
+        --stub {{.STUB | default "" | shellQuote}} --output {{.OUTPUT | default "" | shellQuote}}
+  research-heldout-corpus:
+    desc: Build checksum-pinned independent research corpus (CORPUS_OUTPUT=new directory, CORPUS_ARCH=amd64|arm64)
+    cmds:
+    - |
+      export GO={{.GO | shellQuote}}
+      bash scripts/research-heldout-corpus.sh {{.CORPUS_OUTPUT | default "" | shellQuote}} {{.CORPUS_ARCH | default "amd64" | shellQuote}}
   test-runtime-fixtures:
     desc: Require native fat CLI inspection, timeout and detached-child cleanup regressions
     cmds:
