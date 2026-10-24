@@ -46,6 +46,7 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 | 📖 [**Architecture & Binary Format**](docs/architecture.md) | Technical specification of the 56-byte trailer, Format v2 binary table layout, shared dictionaries, and `memfd_create` lifecycle. |
 | 💻 [**CLI & Launcher Stub Reference**](docs/cli-reference.md) | Complete reference for `microfat` CLI commands, flags, launcher stub meta-commands, exit codes, and environment variables. |
 | ⚙️ [**Container Resource Auto-Tuning**](docs/runtime-tuning.md) | Linux cgroup v1/v2 auto-tuning (`GOMEMLIMIT` / `GOMAXPROCS`), GC mechanics, and workload `GOGC` tuning recipes. |
+| [**Application Runtime Metadata**](docs/runtimeinfo.md) | Supported read-only accessor, source/unknown semantics, and runnable Prometheus/OpenTelemetry recipes. |
 | 🔄 [**Binary Lifecycle Modes**](docs/lifecycle-modes.md) | Comprehensive comparison and workflows for Universal Fat, Trimmed Fat, Raw Native ELF, and node cache prewarming. |
 | 🚀 [**Advanced Optimizations & Compression Matrix**](docs/advanced-optimizations.md) | AVX-512 downclocking mitigation, Compression Decision Matrix, declarative PGO matrices, and high-performance C allocators. |
 | 🩺 [**Troubleshooting & Runbook**](docs/troubleshooting.md) | Diagnostic workflows with `microfat doctor`, seccomp `memfd_create` remediation, read-only rootfs fallback, and FAQ. |
@@ -311,6 +312,14 @@ configPath := filepath.Join(filepath.Dir(exePath), "config.yaml")
 > **Authenticity Boundary**: `MICROFAT_ORIGINAL_EXE` and `runtimeinit.Executable()` are informational asset-resolution hints. They must NOT be used as cryptographic identity, access-control tokens, or trusted binary origin claims.
 
 ---
+
+## Application Runtime Metadata (`runtimeinfo`)
+
+Read launcher hints, current environment configuration and observed Go runtime
+settings through the standard-library-only `runtimeinfo.Read()` accessor. Missing
+metadata stays explicit; cgroup recommendations do not imply applied tuning.
+See the [field and source contract](docs/runtimeinfo.md) and the separate
+[Prometheus/OpenTelemetry recipes](examples/runtimeinfo/README.md).
 
 ## Runtime Meta-Commands
 

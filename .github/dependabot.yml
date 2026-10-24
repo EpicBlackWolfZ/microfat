@@ -2,7 +2,9 @@ version: 2
 updates:
   # Native Go module updates include transitive dependencies and go.sum integrity.
   - package-ecosystem: "gomod"
-    directory: "/"
+    directories:
+      - "/"
+      - "/examples/runtimeinfo/*"
     schedule:
       interval: "weekly"
       day: "monday"
