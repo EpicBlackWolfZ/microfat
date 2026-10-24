@@ -7,6 +7,10 @@ alias defects are fixed: `x86-64` now matches an `amd64` host, and safe AVX-512
 policy applies consistently to `amd64`, `x86_64` and `x86-64` architecture names.
 Forced selection retains its existing precedence over caps/disabled/safe policy.
 
+The maintainer-requested [separate local reassessment after gaming stopped](requirements-exact-selection-rerun-results.md)
+also misses both unchanged gates. Its prospective amendment and complete raw
+cohort are retained separately; the historical observations below are unchanged.
+
 **Local contention disclosure:** after collection, the user reported gaming on
 this workstation during the same session. Exact overlap was not logged, so
 contention during timing cannot be excluded. Treat this local cohort as

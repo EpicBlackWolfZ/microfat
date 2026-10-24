@@ -8,6 +8,8 @@ with no pooling, replacement attempts, trimmed samples or favorable-subset rescu
 The [local cohort](requirements-exact-selection-results.md) remains exploratory:
 gaming was disclosed after collection and exact overlap was not recorded. Hosted
 results do not remove that limitation or replace its preserved observations.
+The later [requested local reassessment after gaming stopped](requirements-exact-selection-rerun-results.md)
+also retains the simpler selector; it remains a separate cohort.
 
 ## Frozen source and collection
 
