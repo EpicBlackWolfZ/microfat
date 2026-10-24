@@ -286,6 +286,13 @@ If neither executes, cold disk fallback requires writable cache storage. See the
 
 ## 8. ARM64 (aarch64) Microarchitecture Matrix
 
+Selection checks exact feature requirements before applying policy/ranking; ARM
+v8/v9 branches do not form a numeric compatibility ladder. The
+[requirements-exact evaluation](requirements-exact-selection-results.md) retains
+the simpler selector after the test-only mask candidate missed its fixed gates.
+AMD64 architecture aliases `amd64`, `x86_64` and `x86-64` share compatibility and
+safe AVX-512 policy behavior; forced levels retain their explicit precedence.
+
 Microfat provides an ARM64 compatibility model based on the Arm Architecture Reference Manual (ARM DDI 0487) ISA specifications and aligned with the Go compiler `GOARM64` level hierarchy (`v8.0` through `v9.5`):
 
 | Level | Compiler Flag | Key Instruction Set Extensions | Target Cloud Silicon & Hardware |
