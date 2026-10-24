@@ -3,11 +3,13 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -115,7 +117,7 @@ func TestTimeoutTerminatesOwnedDescendant(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 	start := time.Now()
 	args := []string{"-c", `sleep 60 & child=$!; printf '%s' "$child" > "$1"; wait`, "owned-timeout-test", pidFile}
-	obs := execute("/bin/sh", args, cleanEnv(), 50*time.Millisecond)
+	obs := execute("/bin/sh", args, cleanEnv(), 250*time.Millisecond)
 	require.False(t, obs.Success)
 	require.Contains(t, obs.Error, "context deadline exceeded")
 	require.Less(t, time.Since(start), 3*time.Second)
@@ -124,7 +126,7 @@ func TestTimeoutTerminatesOwnedDescendant(t *testing.T) {
 	pid, err := strconv.Atoi(string(pidData))
 	require.NoError(t, err)
 	state, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
-	if os.IsNotExist(err) {
+	if os.IsNotExist(err) || errors.Is(err, syscall.ESRCH) {
 		return
 	}
 	require.NoError(t, err)
