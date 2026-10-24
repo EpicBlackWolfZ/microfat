@@ -365,7 +365,7 @@ func canonicalArch(arch string) string {
 	switch strings.ToLower(arch) {
 	case "aarch64":
 		return ArchARM64
-	case "x86_64":
+	case "x86_64", "x86-64":
 		return ArchAMD64
 	default:
 		return strings.ToLower(arch)
@@ -479,7 +479,7 @@ func computeEffectiveMaxRank(arch string, hostRank int, policy Policy) (int, str
 	}
 
 	isSafeAVX512 := policy.AVX512DownclockProtection || policy.Name == PolicySafeAVX512 || policy.Name == PolicyNoDownclock
-	if isSafeAVX512 && strings.ToLower(arch) == ArchAMD64 && hostRank >= rankAMD64v4 && isSkylakeXOrCascadeLakeFunc() {
+	if isSafeAVX512 && canonicalArch(arch) == ArchAMD64 && hostRank >= rankAMD64v4 && isSkylakeXOrCascadeLakeFunc() {
 		const v3Rank = rankAMD64v3
 		if v3Rank < effectiveMaxRank {
 			effectiveMaxRank = v3Rank
