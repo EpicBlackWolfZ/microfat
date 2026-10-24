@@ -79,7 +79,10 @@ func command(study studyConfig, dir, name string, args ...string) ([]byte, error
 	defer cancel()
 	cmd := ownedCommand(ctx, name, args...)
 	cmd.Dir, cmd.Env = dir, study.env()
-	data, err := cmd.CombinedOutput()
+	var output bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &output, &output
+	err := runOwned(cmd)
+	data := output.Bytes()
 	if err != nil {
 		return data, fmt.Errorf("%s %v: %w: %s", name, args, err, data)
 	}

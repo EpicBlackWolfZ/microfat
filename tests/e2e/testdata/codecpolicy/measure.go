@@ -13,11 +13,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+	"golang.org/x/sys/unix"
 )
 
 type artifactKey struct {
@@ -35,7 +37,7 @@ func execute(path string, args, env []string, timeout time.Duration) observation
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	start := time.Now()
-	err := cmd.Run()
+	err := runOwned(cmd)
 	obs.WallNS = time.Since(start).Nanoseconds()
 	if ctx.Err() != nil {
 		err = errors.Join(err, ctx.Err())
@@ -334,4 +336,57 @@ func ownedCommand(ctx context.Context, path string, args ...string) *exec.Cmd {
 		return err
 	}
 	return cmd
+}
+
+// Observe the leader without reaping it so its PID continues to reserve our
+// process group until descendants have been signaled. Signaling after Cmd.Wait
+// would risk targeting a reused group. Descendants that create a new session or
+// process group are outside this ownership boundary.
+func runOwned(cmd *exec.Cmd) error {
+	// Cmd.Wait reaps the leader before draining its context watcher. Stop and
+	// drain our raw group-signal callback first, while the leader is reserved.
+	var cancelMu sync.Mutex
+	cancelActive := true
+	cancel := cmd.Cancel
+	if cancel != nil {
+		cmd.Cancel = func() error {
+			cancelMu.Lock()
+			defer cancelMu.Unlock()
+			if !cancelActive {
+				return os.ErrProcessDone
+			}
+			return cancel()
+		}
+	}
+	disableCancel := func() {
+		cancelMu.Lock()
+		defer cancelMu.Unlock()
+		cancelActive = false
+	}
+	if err := cmd.Start(); err != nil {
+		disableCancel()
+		return err
+	}
+	var observeErr error
+	var info unix.Siginfo
+	for {
+		observeErr = unix.Waitid(unix.P_PID, cmd.Process.Pid, &info, unix.WEXITED|unix.WNOWAIT, nil)
+		if !errors.Is(observeErr, unix.EINTR) {
+			break
+		}
+	}
+	disableCancel()
+	if observeErr != nil {
+		// Do not signal a group whose reserved-leader state could not be proved.
+		killErr := cmd.Process.Kill()
+		if errors.Is(killErr, os.ErrProcessDone) {
+			killErr = nil
+		}
+		return errors.Join(fmt.Errorf("observe owned leader exit without reaping: %w", observeErr), killErr, cmd.Wait())
+	}
+	cleanupErr := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	if errors.Is(cleanupErr, syscall.ESRCH) {
+		cleanupErr = nil
+	}
+	return errors.Join(cleanupErr, cmd.Wait())
 }

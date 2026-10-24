@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 func TestSchedule(t *testing.T) {
@@ -133,6 +135,156 @@ func TestTimeoutTerminatesOwnedDescendant(t *testing.T) {
 	fields := strings.Fields(string(state)[strings.LastIndex(string(state), ")")+1:])
 	require.NotEmpty(t, fields)
 	require.Contains(t, []string{"Z", "X"}, fields[0], "owned descendant must be terminated")
+}
+
+func TestLeaderExitTerminatesOwnedDescendants(t *testing.T) {
+	requirePidfdObservation(t)
+	t.Parallel()
+	for _, caller := range []string{"execute", "preparation"} {
+		for _, redirected := range []bool{false, true} {
+			name := "inherited-pipes"
+			background := "sleep 60 &"
+			if redirected {
+				name, background = "redirected-pipes", "sleep 60 >/dev/null 2>&1 &"
+			}
+			t.Run(caller+"/"+name, func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				pidFile, releaseFile := filepath.Join(dir, "child.pid"), filepath.Join(dir, "release")
+				script := background + ` child=$!; printf '%s' "$child" > "$1"; while [ ! -e "$2" ]; do sleep 0.01; done`
+				args := []string{"-c", script, "owned-exit-test", pidFile, releaseFile}
+				result := make(chan error, 1)
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					if caller == "execute" {
+						obs := execute("/bin/sh", args, cleanEnv(), 3*time.Second)
+						if !obs.Success {
+							result <- errors.New(obs.Error)
+							return
+						}
+						result <- nil
+						return
+					}
+					_, err := command(studyConfig{}, "", "/bin/sh", args...)
+					result <- err
+				}()
+				t.Cleanup(func() {
+					require.NoError(t, os.WriteFile(releaseFile, nil, privateFile))
+					select {
+					case <-done:
+					case <-time.After(metadataTimeout + time.Second):
+						t.Error("owned test command did not finish within its timeout")
+					}
+				})
+				var pid int
+				require.Eventually(t, func() bool {
+					data, err := os.ReadFile(pidFile)
+					if err != nil {
+						return false
+					}
+					pid, err = strconv.Atoi(string(data))
+					return err == nil
+				}, time.Second, 10*time.Millisecond)
+				// Open a stable handle while the parent still owns the live descendant.
+				// Even a failing regression test must never signal a reused PID.
+				pidfd, err := unix.PidfdOpen(pid, 0)
+				require.NoError(t, err)
+				t.Cleanup(func() {
+					signalErr := unix.PidfdSendSignal(pidfd, unix.SIGKILL, nil, 0)
+					require.True(t, signalErr == nil || errors.Is(signalErr, unix.ESRCH), "cleanup owned descendant: %v", signalErr)
+					require.NoError(t, unix.Close(pidfd))
+				})
+				require.NoError(t, os.WriteFile(releaseFile, nil, privateFile))
+				require.NoError(t, <-result, "leader exit must not wait for inherited pipes to hit WaitDelay")
+				require.Eventually(t, func() bool {
+					fds := []unix.PollFd{{Fd: int32(pidfd), Events: unix.POLLIN}}
+					n, pollErr := unix.Poll(fds, 0)
+					return pollErr == nil && n == 1 && fds[0].Revents&unix.POLLIN != 0
+				}, time.Second, 10*time.Millisecond, "owned descendant survived leader exit")
+			})
+		}
+	}
+}
+
+func requirePidfdObservation(t *testing.T) {
+	t.Helper()
+	check := func(err error) {
+		t.Helper()
+		if (errors.Is(err, unix.ENOSYS) || errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES)) &&
+			os.Getenv("MICROFAT_CODEC_FIXTURES") != "required" {
+			t.Skipf("pidfd observation unavailable on this host: %v", err)
+		}
+		require.NoError(t, err)
+	}
+	pidfd, err := unix.PidfdOpen(os.Getpid(), 0)
+	check(err)
+	defer func() { require.NoError(t, unix.Close(pidfd)) }()
+	check(unix.PidfdSendSignal(pidfd, 0, nil, 0))
+}
+
+func TestCancellationDrainsBeforeLeaderReap(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	readyFile, releaseFile := filepath.Join(dir, "ready"), filepath.Join(dir, "release")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cmd := ownedCommand(ctx, "/bin/sh", "-c", `printf ready > "$1"; while [ ! -e "$2" ]; do sleep 0.01; done`,
+		"owned-cancellation-test", readyFile, releaseFile)
+	cmd.Env = cleanEnv()
+	entered, allowCancel := make(chan int, 1), make(chan struct{}, 1)
+	cmd.Cancel = func() error {
+		entered <- cmd.Process.Pid
+		<-allowCancel
+		return os.ErrProcessDone
+	}
+	result := make(chan error, 1)
+	done := make(chan struct{})
+	go func() { defer close(done); result <- runOwned(cmd) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case allowCancel <- struct{}{}:
+		default:
+		}
+		require.NoError(t, os.WriteFile(releaseFile, nil, privateFile))
+		select {
+		case <-done:
+		case <-time.After(metadataTimeout):
+			t.Error("owned cancellation test did not finish")
+		}
+	})
+	require.Eventually(t, func() bool {
+		info, err := os.Stat(readyFile)
+		return err == nil && info.Size() > 0
+	}, time.Second, 10*time.Millisecond)
+	cancel()
+	var pid int
+	select {
+	case pid = <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("custom cancellation callback did not start")
+	}
+	require.NoError(t, os.WriteFile(releaseFile, nil, privateFile))
+	observe := func() (unix.Siginfo, error) {
+		var info unix.Siginfo
+		for {
+			err := unix.Waitid(unix.P_PID, pid, &info, unix.WEXITED|unix.WNOWAIT|unix.WNOHANG, nil)
+			if !errors.Is(err, unix.EINTR) {
+				return info, err
+			}
+		}
+	}
+	require.Eventually(t, func() bool {
+		info, err := observe()
+		return err == nil && info.Signo == int32(unix.SIGCHLD)
+	}, time.Second, time.Millisecond, "leader must exit without being reaped while cancellation is in flight")
+	require.Never(t, func() bool {
+		_, err := observe()
+		return err != nil
+	}, 100*time.Millisecond, time.Millisecond, "leader was reaped before the cancellation callback drained")
+	allowCancel <- struct{}{}
+	require.NoError(t, <-result)
 }
 
 func TestFailuresNeverQualify(t *testing.T) {

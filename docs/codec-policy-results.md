@@ -41,7 +41,8 @@ There were no imposed CPU/memory caps or isolation guarantees. Raw host,
 ancestor-cgroup, source/configuration, compiler/linker/collector, CLI, full/minimal
 stub and input identities are archived. Production packer, codec and launcher
 sources are unchanged from main `67624ef9644242be74556f28c7ed134292a33aab`.
-The later report and CI-contract commits are distinct from the measured sources.
+The later report, CI-contract and owned-process cleanup commits are distinct
+from the measured sources.
 
 ## Original failure and diagnostic boundary
 
@@ -80,6 +81,18 @@ observed budgets passed, not that a replacement policy qualified.
 No timing difference between C1 and C2 is attributed to telemetry. Their host
 conditions, collection times and configurations differ. C2 does not rescue C1
 or establish telemetry-enabled compatibility.
+
+Later review identified a collector cleanup gap: when a command's leader exited
+early, a child in its process group could outlive the completed command, even
+with redirected output and a successful exit. The current collector observes
+leader exit without reaping it, disables and drains group-cancellation callbacks,
+cleans that owned group while its identity is still reserved, then reaps the
+leader. Regressions cover inherited and redirected child output and cancellation
+during leader exit. This fixes future collection; both frozen cohorts predate it and
+did not verify the absence of such survivors. No historical contamination or
+isolation is inferred, no timings are replaced, and C1 remains failed. Descendants
+that leave the owned process group, including by creating a separate session,
+remain outside this mechanism.
 
 ## Complete artifact bytes
 
@@ -251,7 +264,8 @@ They retain source snapshots at the measured commits, corpus build information,
 worker inputs and logs; large payload/artifact binaries are excluded. C2 also
 contains the telemetry source audit, independent Pack/launch audits and separate
 bootstrap implementation. No observed record or frozen protocol is rewritten by
-this report or the later RSS-scope annotation in the current collector.
+this report, the later RSS-scope annotation or the owned-process cleanup fix in
+the current collector.
 
 | Archive | SHA-256 |
 | --- | --- |
