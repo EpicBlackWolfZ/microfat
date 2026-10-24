@@ -128,9 +128,7 @@ func TestConcurrentCacheRacingStress(t *testing.T) {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			err := executeViaCache(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil,
-				newLaunchDiagnostics(),
-			)
+			err := executeViaCache(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now())
 			if err != nil {
 				errCh <- fmt.Errorf("worker %d failed: %w", workerID, err)
 			}
@@ -195,9 +193,7 @@ func TestCorruptedCacheEvictionAndRecovery(t *testing.T) {
 	policyRes := microarch.PolicyResult{}
 
 	// Execute should detect size mismatch, re-extract cleanly, and execute
-	err := executeViaCache(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil,
-		newLaunchDiagnostics(),
-	)
+	err := executeViaCache(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now())
 	if err != nil {
 		t.Fatalf("executeViaCache failed on corrupted cache recovery: %v", err)
 	}
@@ -232,9 +228,7 @@ func TestReadOnlyCacheDirectoryHandling(t *testing.T) {
 	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
 	policyRes := microarch.PolicyResult{}
 
-	err := executeViaCache(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil,
-		newLaunchDiagnostics(),
-	)
+	err := executeViaCache(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now())
 	if err == nil {
 		t.Fatal("expected error on read-only cache dir, got nil")
 	}
@@ -289,7 +283,7 @@ func TestSimulatedSeccompMemfdFallback(t *testing.T) {
 	policyRes := microarch.PolicyResult{}
 
 	// executeVariant should try memfd, encounter EPERM, and seamlessly fall back to cache
-	err := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, newLaunchDiagnostics())
+	err := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
 	if err != nil {
 		t.Fatalf("executeVariant failed on seccomp fallback: %v", err)
 	}
@@ -328,7 +322,7 @@ func TestMaliciousPathTraversalChecksumBlocked(t *testing.T) {
 
 	err := executeViaCache(
 		fatFile.Name(), fatFile, maliciousEntry, idx,
-		[]string{testAppArg}, []string{}, hostInfo, policyRes, nil, newLaunchDiagnostics(),
+		[]string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now(),
 	)
 	if err == nil {
 		t.Fatal("expected error on malicious path traversal checksum, got nil")
@@ -383,9 +377,7 @@ func TestDecompressionBombPayloadBlocked(t *testing.T) {
 
 	t.Run("Blocked on memfd path", func(t *testing.T) {
 		execveCalled = false
-		err := executeViaMemfd(fatFile.Name(), fatFile, hostileEntry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes,
-			newLaunchDiagnostics(),
-		)
+		err := executeViaMemfd(fatFile.Name(), fatFile, hostileEntry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
 		if err == nil {
 			t.Fatal("expected error decompressing bomb payload into memfd, got nil")
 		}
@@ -399,9 +391,7 @@ func TestDecompressionBombPayloadBlocked(t *testing.T) {
 
 	t.Run("Blocked on cache path", func(t *testing.T) {
 		execveCalled = false
-		err := executeViaCache(fatFile.Name(), fatFile, hostileEntry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil,
-			newLaunchDiagnostics(),
-		)
+		err := executeViaCache(fatFile.Name(), fatFile, hostileEntry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now())
 		if err == nil {
 			t.Fatal("expected error decompressing bomb payload into cache, got nil")
 		}
@@ -466,9 +456,7 @@ func TestPayloadChecksumMismatchAbort(t *testing.T) {
 
 	t.Run("Blocked on memfd path", func(t *testing.T) {
 		execveCalled = false
-		err := executeViaMemfd(fatFile.Name(), fatFile, tamperedEntry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes,
-			newLaunchDiagnostics(),
-		)
+		err := executeViaMemfd(fatFile.Name(), fatFile, tamperedEntry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
 		if err == nil {
 			t.Fatal("expected error executing tampered entry via memfd, got nil")
 		}
@@ -484,7 +472,7 @@ func TestPayloadChecksumMismatchAbort(t *testing.T) {
 		execveCalled = false
 		err := executeViaCache(
 			fatFile.Name(), fatFile, tamperedEntry, idx,
-			[]string{testAppArg}, []string{}, hostInfo, policyRes, nil, newLaunchDiagnostics(),
+			[]string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now(),
 		)
 		if err == nil {
 			t.Fatal("expected error executing tampered entry via cache, got nil")
@@ -499,9 +487,7 @@ func TestPayloadChecksumMismatchAbort(t *testing.T) {
 
 	t.Run("executeVariant aborts fast without attempting cache fallback", func(t *testing.T) {
 		execveCalled = false
-		err := executeVariant(fatFile.Name(), fatFile, tamperedEntry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes,
-			newLaunchDiagnostics(),
-		)
+		err := executeVariant(fatFile.Name(), fatFile, tamperedEntry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
 		if err == nil {
 			t.Fatal("expected error executing tampered entry via executeVariant, got nil")
 		}
@@ -555,9 +541,7 @@ func TestWarmCacheVerifyOption(t *testing.T) {
 	t.Run("Warm cache hit unconditionally verifies checksum and rejects tampered file even if MICROFAT_VERIFY_CACHE=0", func(t *testing.T) {
 		t.Setenv(format.EnvVerifyCache, "0")
 		executedPath = ""
-		err := executeViaCache(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil,
-			newLaunchDiagnostics(),
-		)
+		err := executeViaCache(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now())
 		if err != nil {
 			t.Fatalf("executeViaCache failed: %v", err)
 		}
@@ -581,9 +565,7 @@ func TestWarmCacheVerifyOption(t *testing.T) {
 		}
 		executedPath = ""
 
-		err := executeViaCache(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil,
-			newLaunchDiagnostics(),
-		)
+		err := executeViaCache(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now())
 		if err != nil {
 			t.Fatalf("executeViaCache with verify failed: %v", err)
 		}
@@ -636,9 +618,7 @@ func TestOversizedDictionaryChaos(t *testing.T) {
 
 	t.Run("Blocked on memfd path", func(t *testing.T) {
 		execveCalled = false
-		err := executeViaMemfd(fatFile.Name(), fatFile, entry, &oversizedIdx, []string{testAppArg}, []string{}, hostInfo, policyRes,
-			newLaunchDiagnostics(),
-		)
+		err := executeViaMemfd(fatFile.Name(), fatFile, entry, &oversizedIdx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
 		if err == nil {
 			t.Fatal("expected error executing oversized dictionary entry via memfd, got nil")
 		}
@@ -654,7 +634,7 @@ func TestOversizedDictionaryChaos(t *testing.T) {
 		execveCalled = false
 		err := executeViaCache(
 			fatFile.Name(), fatFile, entry, &oversizedIdx,
-			[]string{testAppArg}, []string{}, hostInfo, policyRes, nil, newLaunchDiagnostics(),
+			[]string{testAppArg}, []string{}, hostInfo, policyRes, nil, time.Now(),
 		)
 		if err == nil {
 			t.Fatal("expected error executing oversized dictionary entry via cache, got nil")
@@ -707,7 +687,7 @@ func TestMemfdSealingVerificationAndImmutability(t *testing.T) {
 	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
 	policyRes := microarch.PolicyResult{}
 
-	err := executeViaMemfd(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, newLaunchDiagnostics())
+	err := executeViaMemfd(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
 	if err != nil {
 		t.Fatalf("executeViaMemfd failed: %v", err)
 	}
@@ -772,9 +752,7 @@ func TestMemfdSealingGracefulFallback(t *testing.T) {
 				return tc.sealErr
 			}
 
-			err := executeViaMemfd(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes,
-				newLaunchDiagnostics(),
-			)
+			err := executeViaMemfd(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
 			if err == nil {
 				t.Fatalf("expected executeViaMemfd to fail on seal error %v, got nil", tc.sealErr)
 			}
@@ -808,7 +786,7 @@ func TestMemfdSealingGracefulFallback(t *testing.T) {
 				return tc.sealErr
 			}
 
-			err := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, newLaunchDiagnostics())
+			err := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
 			if err != nil {
 				t.Fatalf("expected executeVariant to cleanly fallback to cache on seal error %v, got: %v", tc.sealErr, err)
 			}
@@ -830,7 +808,7 @@ func TestMemfdSealingGracefulFallback(t *testing.T) {
 				return tc.sealErr
 			}
 
-			err := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, newLaunchDiagnostics())
+			err := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
 			if err == nil {
 				t.Fatalf("expected executeVariant to fail in explicit memfd mode on seal error %v, got nil", tc.sealErr)
 			}
@@ -876,9 +854,7 @@ func TestRedTeam_FormatV1_EmptySHA256_Rejected(t *testing.T) {
 
 	// Also verify executeVariant rejects it in memfd mode
 	t.Setenv(format.EnvExecMode, format.ExecModeMemfd)
-	execErr := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes,
-		newLaunchDiagnostics(),
-	)
+	execErr := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
 	if execErr == nil {
 		t.Fatal("expected executeVariant to fail when variant has empty SHA-256")
 	}
@@ -1024,9 +1000,7 @@ func TestRedTeam_DecompressionError_DoesNotFallbackToPreExistingCache(t *testing
 	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
 	policyRes := microarch.PolicyResult{SelectedVariant: entry.Level}
 
-	execErr := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes,
-		newLaunchDiagnostics(),
-	)
+	execErr := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
 	if execErr == nil {
 		t.Fatal("expected executeVariant to fail on corrupted payload stream, but succeeded")
 	}
@@ -1091,9 +1065,7 @@ func TestRedTeam_ChecksumMismatch_DoesNotFallbackToPreExistingCache(t *testing.T
 	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
 	policyRes := microarch.PolicyResult{SelectedVariant: entry.Level}
 
-	execErr := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes,
-		newLaunchDiagnostics(),
-	)
+	execErr := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
 	if execErr == nil {
 		t.Fatal("expected executeVariant to fail on checksum mismatch, but succeeded")
 	}
@@ -1143,7 +1115,7 @@ func TestRedTeam_FileDescriptorHygiene_NoLeakOnExecveFailure(t *testing.T) {
 
 	// 1. Test in memfd mode
 	t.Setenv(format.EnvExecMode, format.ExecModeMemfd)
-	err := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, newLaunchDiagnostics())
+	err := executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
 	if err == nil || !errors.Is(err, format.ErrExecve) {
 		t.Fatalf("expected ErrExecve from executeVariant in memfd mode, got %v", err)
 	}
@@ -1159,7 +1131,7 @@ func TestRedTeam_FileDescriptorHygiene_NoLeakOnExecveFailure(t *testing.T) {
 
 	// 2. Test in cache mode
 	t.Setenv(format.EnvExecMode, format.ExecModeCache)
-	err = executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, newLaunchDiagnostics())
+	err = executeVariant(fatFile.Name(), fatFile, entry, idx, []string{testAppArg}, []string{}, hostInfo, policyRes, time.Now())
 	if err == nil || !errors.Is(err, format.ErrExecve) {
 		t.Fatalf("expected ErrExecve from executeVariant in cache mode, got %v", err)
 	}

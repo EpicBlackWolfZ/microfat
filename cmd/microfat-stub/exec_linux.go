@@ -136,7 +136,7 @@ func executeVariant(
 	baseEnv []string,
 	hostInfo microarch.Info,
 	policyRes microarch.PolicyResult,
-	diagnostics launchDiagnostics,
+	startTime time.Time,
 ) error {
 	if selfPath == "" && selfFile != nil {
 		selfPath = selfFile.Name()
@@ -144,13 +144,13 @@ func executeVariant(
 
 	requestedMode := resolveRequestedExecMode()
 	if requestedMode == format.ExecModeCache {
-		return executeViaCache(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, nil, diagnostics)
+		return executeViaCache(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, nil, startTime)
 	}
 	if requestedMode == format.ExecModeMemfd {
-		return executeViaMemfd(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, diagnostics)
+		return executeViaMemfd(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, startTime)
 	}
 
-	hit, cacheErr := executeExistingCache(selfPath, entry, args, baseEnv, hostInfo, policyRes, diagnostics)
+	hit, cacheErr := executeExistingCache(selfPath, entry, args, baseEnv, hostInfo, policyRes, startTime)
 	if hit && cacheErr == nil {
 		return nil
 	}
@@ -159,7 +159,7 @@ func executeVariant(
 	}
 
 	// A miss or denied warm-cache exec tries immutable in-memory execution.
-	err := executeViaMemfd(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, diagnostics)
+	err := executeViaMemfd(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, startTime)
 	if err == nil {
 		return nil
 	}
@@ -179,7 +179,7 @@ func executeVariant(
 	}
 
 	// 2. Fallback to cached file execution
-	return executeViaCache(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, err, diagnostics)
+	return executeViaCache(selfPath, selfFile, entry, idx, args, baseEnv, hostInfo, policyRes, err, startTime)
 }
 
 // executeExistingCache performs read-only discovery and verification. Corrupt regular entries
@@ -191,7 +191,7 @@ func executeExistingCache(
 	baseEnv []string,
 	hostInfo microarch.Info,
 	policyRes microarch.PolicyResult,
-	diagnostics launchDiagnostics,
+	startTime time.Time,
 ) (bool, error) {
 	if !format.ValidateChecksum(entry.SHA256) {
 		return false, nil // Source extraction reports invalid metadata without a cache filename open.
@@ -214,9 +214,7 @@ func executeExistingCache(
 	}
 	defer func() { _ = unix.Close(fd) }()
 	env, limits := buildAutoTunedEnviron(selfPath, baseEnv, entry, format.ExecModeCache, hostInfo, policyRes)
-	if diagnostics.mode != diagnosticOff {
-		logDiagnostics(diagnostics, entry, format.ExecModeCache, hostInfo, policyRes, env, limits, 0, diagnostics.totalElapsed())
-	}
+	logDiagnostics(entry, format.ExecModeCache, hostInfo, policyRes, env, limits, 0, time.Since(startTime))
 	procPath := "/proc/self/fd/" + strconv.Itoa(fd)
 	// #nosec G204, G702 -- execute the same descriptor whose bytes and metadata were verified.
 	if err := execveFunc(procPath, args, env); err != nil {
@@ -386,7 +384,6 @@ func applyRuntimeTuningPlan(env []string, keyIndex map[string]int, plan cgroup.T
 }
 
 func logDiagnostics(
-	diagnostics launchDiagnostics,
 	entry *format.VariantEntry,
 	execMode string,
 	hostInfo microarch.Info,
@@ -396,8 +393,15 @@ func logDiagnostics(
 	decompDuration time.Duration,
 	totalDuration time.Duration,
 ) {
-	if diagnostics.mode == diagnosticOff {
+	debugOpt := os.Getenv(format.EnvDebug)
+	logOpt := os.Getenv(format.EnvLog)
+	if debugOpt == "" && logOpt == "" {
 		return
+	}
+	if debugOpt == "0" || strings.EqualFold(debugOpt, "false") {
+		if logOpt == "" {
+			return
+		}
 	}
 
 	var memLimit, maxProcs, gogcVal, gcProfileVal string
@@ -416,7 +420,7 @@ func logDiagnostics(
 		}
 	}
 
-	if diagnostics.mode == diagnosticJSON {
+	if strings.EqualFold(logOpt, "json") {
 		d := format.DispatchTelemetry{
 			Event:                   format.EventDispatch,
 			TimestampUnixNano:       time.Now().UnixNano(),
@@ -623,7 +627,7 @@ func executeViaMemfd(
 	baseEnv []string,
 	hostInfo microarch.Info,
 	policyRes microarch.PolicyResult,
-	diagnostics launchDiagnostics,
+	startTime time.Time,
 ) error {
 	requestedMode := os.Getenv(format.EnvExecMode)
 	if requestedMode == "" {
@@ -658,12 +662,12 @@ func executeViaMemfd(
 	memFile := os.NewFile(uintptr(fd), "microfat_payload")
 	defer func() { _ = memFile.Close() }()
 
-	decompStart := diagnostics.startTimer()
+	decompStart := time.Now()
 	if err := extractVariantToWriter(selfFile, entry, idx, memFile); err != nil {
 		logErrorDiagnostics(format.StageMemfdExtract, err, hostInfo, entry, policyRes, "decompressing payload failed")
 		return fmt.Errorf("%w: decompressing into memfd: %w", format.ErrMemfdExtract, err)
 	}
-	decompDuration := diagnostics.elapsed(decompStart)
+	decompDuration := time.Since(decompStart)
 
 	// Seal anonymous memory file descriptor to prevent tampering prior to execution
 	if sealErr := memfdSealFunc(fd, memfdTargetSeals); sealErr != nil {
@@ -671,10 +675,7 @@ func executeViaMemfd(
 		return fmt.Errorf("%w: failed to seal memfd descriptor: %w", format.ErrMemfdSealingFailed, sealErr)
 	}
 
-	if diagnostics.mode != diagnosticOff {
-		logDiagnostics(diagnostics, entry, format.ExecModeMemfd, hostInfo, policyRes, env, limits,
-			decompDuration, diagnostics.totalElapsed())
-	}
+	logDiagnostics(entry, format.ExecModeMemfd, hostInfo, policyRes, env, limits, decompDuration, time.Since(startTime))
 
 	procPath := "/proc/self/fd/" + strconv.Itoa(fd)
 	// #nosec G204, G702 -- launcher stub explicitly forwards process execution to the payload
@@ -722,7 +723,7 @@ func executeViaCache(
 	hostInfo microarch.Info,
 	policyRes microarch.PolicyResult,
 	primaryErr error,
-	diagnostics launchDiagnostics,
+	startTime time.Time,
 ) error {
 	requestedMode := os.Getenv(format.EnvExecMode)
 	if requestedMode == "" {
@@ -779,7 +780,7 @@ func executeViaCache(
 		if err := checkExtractionBudget(entry, idx); err != nil {
 			return fmt.Errorf("%w: %w", format.ErrCacheExtract, err)
 		}
-		decompStart := diagnostics.startTimer()
+		decompStart := time.Now()
 		_, materializedFD, matErr := cache.MaterializeAndOpenVariantAtFDWithOpener(dirFD, cacheDir, entry, func(w io.Writer) error {
 			return extractVariantToWriter(selfFile, entry, idx, w)
 		}, openCachedBinaryAtFunc)
@@ -796,17 +797,14 @@ func executeViaCache(
 				primaryErr, requestedMode, hostInfo, entry, policyRes, "materializing cache binary failed",
 			)
 		}
-		decompDuration = diagnostics.elapsed(decompStart)
+		decompDuration = time.Since(decompStart)
 		// Execute the same descriptor validated after publication; do not reopen or rehash its pathname.
 		fd = materializedFD
 	}
 
 	defer func() { _ = unix.Close(fd) }()
 
-	if diagnostics.mode != diagnosticOff {
-		logDiagnostics(diagnostics, entry, format.ExecModeCache, hostInfo, policyRes, env, limits,
-			decompDuration, diagnostics.totalElapsed())
-	}
+	logDiagnostics(entry, format.ExecModeCache, hostInfo, policyRes, env, limits, decompDuration, time.Since(startTime))
 
 	procPath := "/proc/self/fd/" + strconv.Itoa(fd)
 	execErr := execveFunc(procPath, args, env)

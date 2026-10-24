@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
@@ -228,12 +229,10 @@ func TestLauncherOriginalExeWhitespace(t *testing.T) {
 
 				var err error
 				if mode == format.ExecModeMemfd {
-					err = executeViaMemfd(wsPath, rawFile, testEntry, nil, []string{"--test"}, []string{testExecPathEnv}, hostInfo, policyRes,
-						newLaunchDiagnostics(),
-					)
+					err = executeViaMemfd(wsPath, rawFile, testEntry, nil, []string{"--test"}, []string{testExecPathEnv}, hostInfo, policyRes, time.Now())
 				} else {
 					err = executeViaCache(
-						wsPath, rawFile, testEntry, nil, []string{"--test"}, []string{testExecPathEnv}, hostInfo, policyRes, nil, newLaunchDiagnostics(),
+						wsPath, rawFile, testEntry, nil, []string{"--test"}, []string{testExecPathEnv}, hostInfo, policyRes, nil, time.Now(),
 					)
 				}
 				require.NoError(t, err)
@@ -325,7 +324,7 @@ func TestExecuteViaMemfdAndCache_ErrorHandling(t *testing.T) {
 	errAuto := executeViaMemfd(
 		f.Name(), f, entry, nil,
 		[]string{testAppArg}, []string{testPathEnv},
-		hostInfo, policyRes, newLaunchDiagnostics(),
+		hostInfo, policyRes, time.Now(),
 	)
 	require.Error(t, errAuto)
 	assert.ErrorIs(t, errAuto, format.ErrMemfdCreate)
@@ -334,7 +333,7 @@ func TestExecuteViaMemfdAndCache_ErrorHandling(t *testing.T) {
 	errForced := executeViaMemfd(
 		f.Name(), f, entry, nil,
 		[]string{testAppArg}, []string{testPathEnv},
-		hostInfo, policyRes, newLaunchDiagnostics(),
+		hostInfo, policyRes, time.Now(),
 	)
 	require.Error(t, errForced)
 	assert.ErrorIs(t, errForced, format.ErrMemfdCreate)
@@ -353,7 +352,7 @@ func TestExecuteViaMemfdAndCache_ErrorHandling(t *testing.T) {
 	errCacheSuccess := executeViaCache(
 		f.Name(), f, entry, nil,
 		[]string{testAppArg}, []string{testPathEnv},
-		hostInfo, policyRes, primaryErr, newLaunchDiagnostics(),
+		hostInfo, policyRes, primaryErr, time.Now(),
 	)
 	require.NoError(t, errCacheSuccess)
 
@@ -364,7 +363,7 @@ func TestExecuteViaMemfdAndCache_ErrorHandling(t *testing.T) {
 	errExecFail := executeViaCache(
 		f.Name(), f, entry, nil,
 		[]string{testAppArg}, []string{testPathEnv},
-		hostInfo, policyRes, primaryErr, newLaunchDiagnostics(),
+		hostInfo, policyRes, primaryErr, time.Now(),
 	)
 	require.Error(t, errExecFail)
 	assert.ErrorIs(t, errExecFail, format.ErrExecve)
@@ -377,7 +376,7 @@ func TestExecuteViaMemfdAndCache_ErrorHandling(t *testing.T) {
 	errBadChecksum := executeViaCache(
 		f.Name(), f, invalidEntry, nil,
 		[]string{testAppArg}, []string{testPathEnv},
-		hostInfo, policyRes, primaryErr, newLaunchDiagnostics(),
+		hostInfo, policyRes, primaryErr, time.Now(),
 	)
 	require.Error(t, errBadChecksum)
 	assert.ErrorIs(t, errBadChecksum, format.ErrCacheWrite)
@@ -388,7 +387,7 @@ func TestExecuteViaMemfdAndCache_ErrorHandling(t *testing.T) {
 	errNoCache := executeViaCache(
 		f.Name(), f, entry, nil,
 		[]string{testAppArg}, []string{testPathEnv},
-		hostInfo, policyRes, primaryErr, newLaunchDiagnostics(),
+		hostInfo, policyRes, primaryErr, time.Now(),
 	)
 	require.Error(t, errNoCache)
 	assert.ErrorIs(t, errNoCache, format.ErrCacheInit)

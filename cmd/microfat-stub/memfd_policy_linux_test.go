@@ -94,9 +94,7 @@ func TestExecutableMemfdRealDispatch(t *testing.T) {
 			require.Equal(t, memfdTargetSeals, actual&memfdTargetSeals)
 			return nil
 		}
-		err = executeViaMemfd(path, f, entry, nil, []string{"true"}, os.Environ(), microarch.Info{}, microarch.PolicyResult{},
-			newLaunchDiagnostics(),
-		)
+		err = executeViaMemfd(path, f, entry, nil, []string{"true"}, os.Environ(), microarch.Info{}, microarch.PolicyResult{}, time.Now())
 		t.Fatalf("real exec must replace the helper process: %v", err)
 	}
 	data, err := os.ReadFile("/bin/true")

@@ -7,7 +7,7 @@ CPU-resource intervals failed qualification. Those failures do not prove a causa
 regression; they do prevent qualifying this candidate from this study. The
 initial disposition restored the baseline launcher sources and retained the
 evaluation, test-only probes and behavioral regressions. A distinct
-[single-snapshot candidate](disabled-telemetry-snapshot.md) addresses C1's
+[single-snapshot candidate](disabled-telemetry-snapshot-results.md) addresses C1's
 duplicate enabled-path environment checks. Its evaluation is separate; these
 original observations and decisions remain unchanged.
 
@@ -131,5 +131,6 @@ ordinary lint/security/race/coverage/runtime checks apply to the final delivery.
 The study above is native amd64 evidence only. No native arm64 performance
 qualification, complete-process improvement or service-p99 claim is made.
 Issue closure requires the reviewed, merged disposition; green CI alone does
-not turn C1 into a qualified optimization. See the separate snapshot report for
-the final implementation decision.
+not turn C1 into a qualified optimization. See the
+[separate snapshot report](disabled-telemetry-snapshot-results.md) for the final
+implementation decision.

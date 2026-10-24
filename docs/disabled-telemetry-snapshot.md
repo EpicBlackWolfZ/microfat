@@ -1,4 +1,11 @@
-# Launcher diagnostics mode snapshot: prospective C2 study
+# Launcher diagnostics mode snapshot: frozen C2 protocol
+
+**Disposition:** C2 was not adopted. All eighteen launcher wall comparisons and
+all resource gates passed, but the unchanged native control was inconclusive.
+The [completed C2 evaluation and full retained cohort](disabled-telemetry-snapshot-results.md)
+preserve that failed adoption outcome. The exact prospective protocol remains in
+the evidence archive and at frozen candidate
+`813d168661f5ad4e182011ee1dfcde451695ee39`; the thresholds below are unchanged.
 
 This is a new, source-specific experiment for #41. Freeze this protocol, fixture,
 harness and exact candidate commit before collecting C2 timing. The rejected
@@ -170,3 +177,15 @@ rechecks, host observations, all decisions and any failure text. Preserve focuse
 probe logs alongside this evidence. Routine CI must not silently rerun timing or
 replace a failed study with later green code checks. Exact-head lint, race/leak,
 coverage and native full compatibility/runtime qualification remain separate.
+
+## Recorded disposition
+
+The single completed C2 cohort recorded 12,160 correct attempts with
+`resource_pass=true`, `all_cells_equivalent=false` and
+`complete_process_qualified=false`. Its unchanged native wall interval exceeded
+the equivalence band, so the frozen contract requires baseline production behavior
+to remain. C1 and C2 stay separate, retained experiments. Reproduction uses the
+exact rejected source at `813d168`, never the final retention head, and any later
+collection cannot replace this failed control. See the
+[C2 results and archive](disabled-telemetry-snapshot-results.md) for every cell,
+focused probe, source identity and qualification boundary.
