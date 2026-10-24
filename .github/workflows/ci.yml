@@ -116,6 +116,10 @@ jobs:
         if: steps.changes.outputs.run-code-checks == 'true'
         run: task fmt-check tidy-check lint-shell
 
+      - name: Compile and exercise isolated runtime metadata recipes
+        if: steps.changes.outputs.run-code-checks == 'true'
+        run: task test-runtimeinfo-examples
+
       - name: Validate workflow and configuration contracts
         if: steps.changes.outputs.run-code-checks == 'true'
         run: |
@@ -131,7 +135,14 @@ jobs:
         with:
           version: ${{ steps.toolchain.outputs.golangci-lint }}
           install-mode: binary
-          args: --timeout=5m ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter ./tests/e2e/testdata/fd_handoff
+          args: --timeout=5m ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter ./tests/e2e/testdata/fd_handoff ./runtimeinfo/testdata/reporter
+
+      - name: Lint isolated runtime metadata recipes
+        if: steps.changes.outputs.run-code-checks == 'true'
+        run: |
+          for module in examples/runtimeinfo/prometheus examples/runtimeinfo/opentelemetry; do
+            (cd "$module" && golangci-lint run --config ../../../.golangci.yml ./...)
+          done
 
   test:
     name: Unit Tests & Coverage Gate (>= 95%)
@@ -389,6 +400,9 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@${{ steps.toolchain.outputs.govulncheck }}
           govulncheck ./...
+          for module in examples/runtimeinfo/prometheus examples/runtimeinfo/opentelemetry; do
+            (cd "$module" && govulncheck ./...)
+          done
 
   gitleaks:
     name: Secrets Detection (gitleaks)

@@ -42,7 +42,7 @@ func TestMountHelpersLintedLocallyAndInCI(t *testing.T) {
 	t.Parallel()
 	want := []string{"./...", "./tests/e2e/testdata/mount_runner", "./tests/e2e/testdata/mount_reporter",
 		"./tests/e2e/testdata/mountfixture", "./tests/e2e/testdata/descriptor_probe", "./tests/e2e/testdata/userns_runner",
-		"./tests/e2e/testdata/cpu_quota_reporter", "./tests/e2e/testdata/fd_handoff"}
+		"./tests/e2e/testdata/cpu_quota_reporter", "./tests/e2e/testdata/fd_handoff", "./runtimeinfo/testdata/reporter"}
 	data, err := os.ReadFile(filepath.Join("..", "..", "Taskfile.yml"))
 	require.NoError(t, err)
 	var tasks struct {
