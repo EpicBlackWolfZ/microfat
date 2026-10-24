@@ -402,6 +402,10 @@ across both formats, stub profiles and all codecs with identical tuning.
 | `size` | `zstd:best` (+`--dict`) | Favor storage/transfer reduction; measure extraction cost |
 
 Startup latency and compression ratios depend on the payload, host and execution mode.
+The [complete-cost evaluation protocol](docs/codec-policy.md) compares these
+defaults with fixed explicit settings, including packing time, observed peak RSS
+and full process completion. Warm verified-cache launches still hash payloads;
+they do not decompress them.
 
 For full benchmarks and sizing recipes, see the [Advanced Optimizations Guide](docs/advanced-optimizations.md#4-compression-profiles--decision-matrix).
 

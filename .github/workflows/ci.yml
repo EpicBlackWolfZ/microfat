@@ -128,6 +128,7 @@ jobs:
           go test ./internal/cigate ./internal/cmd/ci-gate
           go test -race ./tests/e2e/testdata/fd_handoff
           go test -race ./tests/e2e/testdata/telemetry
+          task test-codec-policy-harness
           go test ./cmd/microfat -run '^TestGoReleaserConfiguration$' -count=1
 
       - name: Run golangci-lint
@@ -136,7 +137,7 @@ jobs:
         with:
           version: ${{ steps.toolchain.outputs.golangci-lint }}
           install-mode: binary
-          args: --timeout=5m ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter ./tests/e2e/testdata/fd_handoff ./tests/e2e/testdata/telemetry ./runtimeinfo/testdata/reporter
+          args: --timeout=5m ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter ./tests/e2e/testdata/fd_handoff ./tests/e2e/testdata/telemetry ./tests/e2e/testdata/codecpolicy ./tests/e2e/testdata/codecboundary ./runtimeinfo/testdata/reporter
 
       - name: Lint isolated runtime metadata recipes
         if: steps.changes.outputs.run-code-checks == 'true'
