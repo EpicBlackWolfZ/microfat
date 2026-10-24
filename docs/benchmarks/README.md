@@ -37,6 +37,12 @@ Failed trials produce evidence and a nonzero exit status. Interrupted journals a
 Raw trial JSON is deterministic and compact; the harness bounds retained trial data to 1 GiB and complete
 bundles to 1.5 GiB, allowing full cgroup telemetry and separate exec traces for a 200-trial release shard. Per-file limits still apply.
 Report, comparison, and verification commands operate offline.
+For historical comparisons, `--head-repository <checkout>` builds the shared native payloads and head
+packer/stub from that checkout; `--base-repository <checkout>` builds the base packer/stub around the
+same payload bytes. `--repository` still identifies the current measurement harness source. Each
+checkout's actual commit and cleanliness are recorded independently. Omitting `--head-repository`
+uses `--repository` for both harness and head builds. See the
+[bounded historical p99 investigation](../hosted-p99-investigation.md) for a complete protocol.
 `report` and `verify` also accept original v1 evidence files. For a raw v1 payload without its envelope, verification
 explicitly reports structural validation only; it cannot establish an absent checksum.
 
@@ -47,7 +53,8 @@ JSON suite files override validated defaults. Unknown fields and out-of-range se
 | Setting | Meaning |
 | --- | --- |
 | `workload` | `mixed`, `cpu`, or `memory`; deterministic handlers with bounded work |
-| `blocks`, `seed` | Matched trial blocks and reproducible counterbalanced schedule |
+| `blocks`, `seed` | Matched trial blocks; seed for workload inputs, bootstrap diagnostics and the default schedule |
+| `schedule_seed` | Optional independent schedule seed, including zero; omission reuses `seed` without changing workload inputs |
 | `duration_ms`, `warmup_ms` | Measured window and separately retained warmup |
 | `payload_bytes`, `iterations`, `concurrency` | Request work and maximum in-flight requests |
 | `qps` | Requested total QPS; zero selects maximum-throughput mode |
