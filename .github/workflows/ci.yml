@@ -19,7 +19,7 @@ permissions:
 
 concurrency:
   # Metadata edits must not cancel this delivery branch's prospective native study.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' && contains(fromJSON('["perf/verified-cache-descriptor", "perf/disabled-telemetry"]'), github.head_ref) && github.event.action == 'edited' && github.event.changes.base == null && 'metadata' || 'source' }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' && github.head_ref == 'perf/verified-cache-descriptor' && github.event.action == 'edited' && github.event.changes.base == null && 'metadata' || 'source' }}
   cancel-in-progress: true
 
 jobs:
@@ -658,7 +658,7 @@ jobs:
           retention-days: 7
 
   runtime:
-    name: ${{ github.event_name == 'pull_request' && contains(fromJSON('["perf/verified-cache-descriptor", "perf/disabled-telemetry"]'), github.head_ref) && github.event.action == 'edited' && github.event.changes.base == null && 'Native metadata runtime qualification' || 'Native runtime qualification' }} (${{ matrix.arch }})
+    name: ${{ github.event_name == 'pull_request' && github.head_ref == 'perf/verified-cache-descriptor' && github.event.action == 'edited' && github.event.changes.base == null && 'Native metadata runtime qualification' || 'Native runtime qualification' }} (${{ matrix.arch }})
     needs: [lint, test]
     if: needs.lint.outputs.run-code-checks == 'true'
     runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
@@ -708,25 +708,6 @@ jobs:
           set -o pipefail
           go test -race -v ./tests/e2e -run '^TestTelemetry' -count=1 -timeout=10m \
             | tee .work/runtime-qualification/telemetry-matrix.log
-      - name: Check out frozen telemetry baseline
-        if: (github.head_ref || github.ref_name) == 'perf/disabled-telemetry' && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: 6eb862b914e8b3dfdf820dcbd1bfa079e4275dd6
-          path: .work/telemetry-base
-          persist-credentials: false
-      - name: Measure attributable telemetry work and complete native processes
-        if: (github.head_ref || github.ref_name) == 'perf/disabled-telemetry' && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null)
-        env:
-          EXPECTED_ARCH: ${{ matrix.arch }}
-          EXPECTED_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -o pipefail
-          test "$(go env GOARCH)" = "$EXPECTED_ARCH"
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
-          go test ./cmd/microfat-stub -run '^$' -bench '^BenchmarkDispatchDiagnostics$' -benchmem -count=5 \
-            | tee .work/runtime-qualification/telemetry-probes.log
-          task qualify-telemetry
       - name: Check out frozen descriptor confirmation baseline
         if: (github.head_ref || github.ref_name) == 'perf/verified-cache-descriptor' && !(github.event_name == 'pull_request' && github.head_ref == 'perf/verified-cache-descriptor' && github.event.action == 'edited' && github.event.changes.base == null)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -751,7 +732,6 @@ jobs:
           path: |
             .work/runtime-qualification/
             .work/fd-handoff-confirmation/
-            .work/telemetry-confirmation/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
@@ -870,7 +850,7 @@ jobs:
     uses: ./.github/workflows/codeql.yml
 
   complete:
-    name: ${{ github.event_name == 'pull_request' && contains(fromJSON('["perf/verified-cache-descriptor", "perf/disabled-telemetry"]'), github.head_ref) && github.event.action == 'edited' && github.event.changes.base == null && 'CI Metadata Complete' || 'CI Complete' }}
+    name: ${{ github.event_name == 'pull_request' && github.head_ref == 'perf/verified-cache-descriptor' && github.event.action == 'edited' && github.event.changes.base == null && 'CI Metadata Complete' || 'CI Complete' }}
     if: always()
     needs: [pr-lint, lint, gitleaks, vulncheck, test, integration, dx, build, benchmark-smoke, kernel, codeql, archive-contracts, installer, mounts, qemu, homebrew, runtime]
     runs-on: ubuntu-latest

@@ -17,8 +17,7 @@ import (
 
 const (
 	handoffBranchCondition = "(github.head_ref || github.ref_name) == 'perf/verified-cache-descriptor' && " +
-		"!(github.event_name == 'pull_request' && github.head_ref == 'perf/verified-cache-descriptor' && " +
-		"github.event.action == 'edited' && github.event.changes.base == null)"
+		"!(" + ciMetadataCondition + ")"
 	handoffBaselineSHA    = "c28bbe73fb4a43ddab85443865ba52c6f3ef4e01"
 	handoffExpectedSource = "${{ github.event.pull_request.head.sha || github.sha }}"
 	handoffEvidencePath   = ".work/fd-handoff-confirmation/"
@@ -88,8 +87,7 @@ func TestVerifiedCacheConfirmationSharesFastGatesAndRetainsEveryOutcome(t *testi
 			if slices.Contains(strings.Fields(paths), handoffEvidencePath) {
 				evidenceIndex = index
 				assert.Equal(t, "always()", step.If)
-				assert.ElementsMatch(t, []string{".work/runtime-qualification/", handoffEvidencePath,
-					".work/telemetry-confirmation/"}, strings.Fields(paths))
+				assert.ElementsMatch(t, []string{".work/runtime-qualification/", handoffEvidencePath}, strings.Fields(paths))
 				assert.Equal(t, true, step.With["include-hidden-files"])
 				assert.Equal(t, "error", step.With["if-no-files-found"])
 				assert.Equal(t, 30, step.With["retention-days"])

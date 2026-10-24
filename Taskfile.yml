@@ -61,6 +61,7 @@ vars:
   HANDOFF_BASE: '{{.HANDOFF_BASE | default ".work/fd-handoff-base"}}'
   HANDOFF_OUTPUT: '{{.HANDOFF_OUTPUT | default ".work/fd-handoff-confirmation"}}'
   TELEMETRY_BASE: '{{.TELEMETRY_BASE | default ".work/telemetry-base"}}'
+  TELEMETRY_CANDIDATE: '{{.TELEMETRY_CANDIDATE | default ".work/telemetry-candidate"}}'
   TELEMETRY_OUTPUT: '{{.TELEMETRY_OUTPUT | default ".work/telemetry-confirmation"}}'
   BENCHMARK_BINARY: '{{.BENCHMARK_BINARY | default (printf "%s/microfat" .BIN_DIR)}}'
   TASK_ENV: |
@@ -92,13 +93,14 @@ vars:
 
 tasks:
   qualify-telemetry:
-    desc: Run the frozen disabled-telemetry study (TELEMETRY_BASE checkout required, TELEMETRY_OUTPUT must be new)
+    desc: Run the frozen telemetry study (TELEMETRY_BASE and TELEMETRY_CANDIDATE checkouts required, TELEMETRY_OUTPUT must be new)
     cmds:
     - |-
       {{.TASK_ENV}}
       export PATH={{printf "%s/bin" .GO_ROOT | shellQuote}}:"$PATH"
       {{.GO | shellQuote}} run ./tests/e2e/testdata/telemetry \
-        -base {{.TELEMETRY_BASE | shellQuote}} -candidate "$PWD" -output {{.TELEMETRY_OUTPUT | shellQuote}}
+        -base {{.TELEMETRY_BASE | shellQuote}} -candidate {{.TELEMETRY_CANDIDATE | shellQuote}} \
+        -output {{.TELEMETRY_OUTPUT | shellQuote}}
   qualify-cache-handoff:
     desc: Run the frozen native verified-descriptor experiment (HANDOFF_BASE checkout required, HANDOFF_OUTPUT must be new)
     cmds:

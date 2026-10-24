@@ -38,8 +38,7 @@ func TestWorkflowsReadGoVersionFromCheckedOutModule(t *testing.T) {
 	}
 }
 
-const ciMetadataCondition = "github.event_name == 'pull_request' && " +
-	"contains(fromJSON('[\"perf/verified-cache-descriptor\", \"perf/disabled-telemetry\"]'), github.head_ref) && " +
+const ciMetadataCondition = "github.event_name == 'pull_request' && github.head_ref == 'perf/verified-cache-descriptor' && " +
 	"github.event.action == 'edited' && " +
 	"github.event.changes.base == null"
 
