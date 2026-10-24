@@ -130,7 +130,9 @@ func summarize(plan []step, observations []observation) (map[string]any, bool) {
 	}
 	return map[string]any{"planned_attempts": len(plan), "recorded_attempts": len(observations), "failed_attempts": failures,
 		"cohort_pass": valid, "cells": cells, "default_policy_decision": "retain current defaults",
-		"scope":          "single native host; descriptive cellwise intervals; no fleet, p99, memory-cap or default-policy qualification",
+		"scope": "single native host; descriptive cellwise intervals; no fleet, p99, memory-cap or default-policy qualification",
+		"rss_scope": "wait4 can include pre-exec parent/shared-mm high-water RSS; " +
+			"not isolated encoder/decoder/payload memory or cgroup peak",
 		"bootstrap":      "2000 paired-round resamples, seed42; 95% percentile endpoints floor(p*(N-1)); no multiplicity adjustment",
 		"failure_policy": "all failures retained; successful-only metrics explicitly conditional; missing pairs never qualify"}, valid
 }

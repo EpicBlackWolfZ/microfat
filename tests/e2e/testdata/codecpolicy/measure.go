@@ -44,6 +44,7 @@ func execute(path string, args, env []string, timeout time.Duration) observation
 	if cmd.ProcessState != nil {
 		obs.CPUNS = (cmd.ProcessState.UserTime() + cmd.ProcessState.SystemTime()).Nanoseconds()
 		if usage, ok := cmd.ProcessState.SysUsage().(*syscall.Rusage); ok {
+			// Linux can retain the pre-exec shared-mm high-water mark; this does not isolate codec memory.
 			obs.MaxRSSKiB, obs.ResourcesObserved = usage.Maxrss, true
 		}
 	}

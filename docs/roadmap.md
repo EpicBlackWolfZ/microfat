@@ -201,7 +201,7 @@ Issue-local acceptance remains authoritative; these are pending release commitme
 | Explicit new-Pack epoch and CLI `SOURCE_DATE_EPOCH` | [#391](https://github.com/EpicBlackWolfZ/microfat/issues/391) |
 | Runtime metadata accessor/recipes and non-mutating doctor tuning preview | [#15](https://github.com/EpicBlackWolfZ/microfat/issues/15), [#156](https://github.com/EpicBlackWolfZ/microfat/issues/156) |
 | Attribute and reduce disabled-telemetry overhead | [#41](https://github.com/EpicBlackWolfZ/microfat/issues/41) |
-| Derive automatic codec policy from representative measurements | [#42](https://github.com/EpicBlackWolfZ/microfat/issues/42) |
+| Evaluate complete codec costs; retain defaults unless a replacement qualifies | [#42](https://github.com/EpicBlackWolfZ/microfat/issues/42), [evaluation](codec-policy-results.md) |
 | Per-variant CLI compression with existing manifest support and explicit precedence | [#43](https://github.com/EpicBlackWolfZ/microfat/issues/43) |
 | Requirements-exact selection qualification; masks only when measured work justifies them | [#153](https://github.com/EpicBlackWolfZ/microfat/issues/153), [evaluation](requirements-exact-selection-results.md) |
 
