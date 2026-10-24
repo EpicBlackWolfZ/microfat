@@ -64,6 +64,10 @@ vars:
   TELEMETRY_CANDIDATE: '{{.TELEMETRY_CANDIDATE | default ".work/telemetry-candidate"}}'
   TELEMETRY_OUTPUT: '{{.TELEMETRY_OUTPUT | default ".work/telemetry-confirmation"}}'
   TELEMETRY_STUDY: '{{.TELEMETRY_STUDY | default "original"}}'
+  CODEC_CORPUS: '{{.CODEC_CORPUS | default ".work/codec-policy-corpus"}}'
+  CODEC_OUTPUT: '{{.CODEC_OUTPUT | default ".work/codec-policy-cohort"}}'
+  CODEC_STUDY: '{{.CODEC_STUDY | default "original"}}'
+  CODEC_ARCH: '{{.CODEC_ARCH | default .HOST_ARCH}}'
   BENCHMARK_BINARY: '{{.BENCHMARK_BINARY | default (printf "%s/microfat" .BIN_DIR)}}'
   TASK_ENV: |
     export GO={{.GO | shellQuote}}
@@ -93,6 +97,26 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  codec-policy-corpus:
+    desc: Build the pinned native codec evaluation corpus outside measurement windows (output must be new)
+    cmds:
+    - |
+      {{.TASK_ENV}}
+      bash scripts/codec-policy-corpus.sh {{.CODEC_CORPUS | shellQuote}} {{.CODEC_ARCH | shellQuote}}
+
+  test-codec-policy-harness:
+    desc: Check the codec evaluation schedule, measurements and boundary fixture without collecting a cohort
+    cmds:
+    - |
+      {{.TASK_ENV}}
+      {{.GO | shellQuote}} test -race ./tests/e2e/testdata/codecpolicy ./tests/e2e/testdata/codecboundary
+
+  qualify-codec-policy:
+    desc: Collect the frozen codec study (CODEC_STUDY=original|isolated, prepared native corpus, new output)
+    cmds:
+    - |
+      bash scripts/codec-policy-collect.sh {{.GO | shellQuote}} {{.CODEC_CORPUS | shellQuote}} {{.CODEC_OUTPUT | shellQuote}} {{.CODEC_STUDY | shellQuote}}
+
   qualify-telemetry:
     desc: Run a frozen telemetry study (TELEMETRY_STUDY=original|snapshot, base/candidate checkouts required, output must be new)
     cmds:
@@ -175,6 +199,7 @@ tasks:
     - task: lint
     - task: vuln
     - task: test
+    - task: test-codec-policy-harness
     - task: test-runtimeinfo-examples
     - task: coverage
     - task: build
@@ -334,7 +359,7 @@ tasks:
     cmds:
     - |-
       {{.TASK_ENV}}
-      golangci-lint run ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter ./tests/e2e/testdata/fd_handoff ./tests/e2e/testdata/telemetry ./runtimeinfo/testdata/reporter
+      golangci-lint run ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter ./tests/e2e/testdata/fd_handoff ./tests/e2e/testdata/telemetry ./tests/e2e/testdata/codecpolicy ./tests/e2e/testdata/codecboundary ./runtimeinfo/testdata/reporter
       for module in examples/runtimeinfo/prometheus examples/runtimeinfo/opentelemetry; do
         (cd "$module" && golangci-lint run --config ../../../.golangci.yml ./...)
       done

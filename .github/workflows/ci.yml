@@ -128,6 +128,7 @@ jobs:
           go test ./internal/cigate ./internal/cmd/ci-gate
           go test -race ./tests/e2e/testdata/fd_handoff
           go test -race ./tests/e2e/testdata/telemetry
+          task test-codec-policy-harness
           go test ./cmd/microfat -run '^TestGoReleaserConfiguration$' -count=1
 
       - name: Run golangci-lint
@@ -136,7 +137,7 @@ jobs:
         with:
           version: ${{ steps.toolchain.outputs.golangci-lint }}
           install-mode: binary
-          args: --timeout=5m ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter ./tests/e2e/testdata/fd_handoff ./tests/e2e/testdata/telemetry ./runtimeinfo/testdata/reporter
+          args: --timeout=5m ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter ./tests/e2e/testdata/fd_handoff ./tests/e2e/testdata/telemetry ./tests/e2e/testdata/codecpolicy ./tests/e2e/testdata/codecboundary ./runtimeinfo/testdata/reporter
 
       - name: Lint isolated runtime metadata recipes
         if: steps.changes.outputs.run-code-checks == 'true'
@@ -696,6 +697,11 @@ jobs:
           set -o pipefail
           go test -race -v ./internal/microarch -run '^Test(Selection|RequirementsReference)' -count=1 \
             | tee .work/runtime-qualification/selection-requirements.log
+      - name: Validate native codec study fixtures and failure accounting
+        run: |
+          set -o pipefail
+          MICROFAT_CODEC_FIXTURES=required go test -race -v ./tests/e2e/testdata/codecboundary ./tests/e2e/testdata/codecpolicy -count=1 \
+            | tee .work/runtime-qualification/codec-study-fixtures.log
       - name: Qualify reproducible package epochs and native dispatch
         run: |
           set -o pipefail

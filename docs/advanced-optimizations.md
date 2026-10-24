@@ -152,6 +152,11 @@ These are configuration choices, not measured latency or compression guarantees.
 for the supported format/profile/codec/mode combinations and preserve raw results with host and commit
 metadata before publishing numbers.
 
+The [bounded complete-cost evaluation](codec-policy-results.md) retains current defaults.
+It counts stored dictionaries and metadata in complete bytes, preserves failed application
+compatibility checks, and explains why wait4 RSS does not isolate codec memory here.
+Its short-command completion measurements do not establish service p99 or disk-cold startup.
+
 ---
 
 ## 5. Programmatic CLI Integration
