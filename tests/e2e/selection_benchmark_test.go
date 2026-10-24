@@ -38,7 +38,7 @@ func BenchmarkSelectionCompleteProcessContext(b *testing.B) {
 				cmd.Env = env
 				var stderr bytes.Buffer
 				cmd.Stderr = &stderr
-				// Output fails on nonzero exit; ExitError retains child stderr.
+				// Output fails on nonzero exit; the supplied buffer retains child stderr.
 				b.StartTimer()
 				output, err := cmd.Output()
 				b.StopTimer()

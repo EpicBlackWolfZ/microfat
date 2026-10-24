@@ -10,8 +10,8 @@ own prospective evaluation.
 The [rerun amendment](requirements-exact-selection-rerun.md) was committed at
 measured source `44eac8365494739266f73aae50d117ad66a383a7` before either
 command. Only documentation changed from prior PR head `22d3d8b9766d1d36220d084f91c1a72b1d204974`.
-Production, reference and benchmark sources are unchanged from the earlier
-measured source `83ed54f4605a36bda222046bf0a611263b3824ed`. Before/after source
+At that measured commit, production, reference and benchmark sources are
+unchanged from the earlier measured source `83ed54f4605a36bda222046bf0a611263b3824ed`. Before/after source
 states are clean, and all nine recorded source hashes recheck successfully.
 All previous [local](requirements-exact-selection-results.md) and
 [hosted](requirements-exact-selection-hosted-results.md) observations remain
@@ -114,8 +114,11 @@ Extract and run `node analyze.cjs` to replay analysis without collecting new
 measurements. `sha256sum -c MANIFEST.sha256` checks the extracted files; the
 separate source manifest names repository files at the measured commit.
 
-Self-review of the production, reference, benchmark and native CI changes found
-no actionable implementation defects. Pinned full local qualification at the
-unchanged Go/CI sources and fresh final-head hosted checks remain distinct from
-performance evidence. Merge authorization is conditional on those final checks
+Self-review corrected an inaccurate process-benchmark comment: the explicitly
+supplied stderr buffer retains child stderr; `exec.Cmd.Output` only populates
+`ExitError.Stderr` when no stderr writer is supplied. This comment correction
+changes no executable code or measurement. Review of production, reference,
+benchmark and native CI behavior found no implementation defects. Pinned full
+local qualification at unchanged executable Go/CI code and fresh final-head
+hosted checks remain distinct from performance evidence. Merge authorization is conditional on those final checks
 and the completed review; no release is part of this evaluation.
