@@ -203,7 +203,7 @@ Issue-local acceptance remains authoritative; these are pending release commitme
 | Attribute and reduce disabled-telemetry overhead | [#41](https://github.com/EpicBlackWolfZ/microfat/issues/41) |
 | Derive automatic codec policy from representative measurements | [#42](https://github.com/EpicBlackWolfZ/microfat/issues/42) |
 | Per-variant CLI compression with existing manifest support and explicit precedence | [#43](https://github.com/EpicBlackWolfZ/microfat/issues/43) |
-| Exact compatible-level bitsets with independent requirements-based equivalence tests | [#153](https://github.com/EpicBlackWolfZ/microfat/issues/153) |
+| Requirements-exact selection qualification; masks only when measured work justifies them | [#153](https://github.com/EpicBlackWolfZ/microfat/issues/153), [evaluation](requirements-exact-selection-results.md) |
 
 Exit: metadata fields/profiles and unknowns are accurate, previews preserve safe GC prerequisites,
 and optimizations demonstrate useful benefit without weakening correctness. Include AMD64 missing-feature

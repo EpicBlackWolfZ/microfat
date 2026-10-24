@@ -691,6 +691,11 @@ jobs:
         run: |
           go test -race -v ./tests/e2e -run '^TestNativeARM64HighFeatureDetection$' -count=1 \
             | tee .work/runtime-qualification/arm64-features.log
+      - name: Check requirements-exact selection and architecture policy aliases
+        run: |
+          set -o pipefail
+          go test -race -v ./internal/microarch -run '^Test(Selection|RequirementsReference)' -count=1 \
+            | tee .work/runtime-qualification/selection-requirements.log
       - name: Qualify reproducible package epochs and native dispatch
         run: |
           set -o pipefail
