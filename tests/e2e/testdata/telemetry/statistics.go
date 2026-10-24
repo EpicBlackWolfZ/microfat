@@ -32,7 +32,11 @@ type decision struct {
 }
 
 func evaluate(observations []observation) ([]decision, bool, bool, bool) {
-	plan := schedule()
+	return evaluateStudy(observations, studyConfig{originalStudy, protocolPath, pairs})
+}
+
+func evaluateStudy(observations []observation, study studyConfig) ([]decision, bool, bool, bool) {
+	plan := scheduleFor(study)
 	correct := len(observations) == len(plan)
 	for i, obs := range observations {
 		if !validObservation(obs) || i >= len(plan) || obs.scheduled != plan[i] {
@@ -53,7 +57,7 @@ func evaluate(observations []observation) ([]decision, bool, bool, bool) {
 			byRound[obs.Round][obs.Arm] = obs
 		}
 		var wall, saving, cpu, rss, baseRSS []float64
-		for round := range pairs {
+		for round := range study.Pairs {
 			a, b := byRound[round][baseline], byRound[round][candidateArm]
 			if validObservation(a) && validObservation(b) {
 				wall = append(wall, float64(b.WallNS)/float64(a.WallNS))
@@ -63,18 +67,18 @@ func evaluate(observations []observation) ([]decision, bool, bool, bool) {
 				baseRSS = append(baseRSS, float64(a.MaxRSSKiB))
 			}
 		}
-		d := decision{cell: target, PlannedPairs: pairs, CompletePairs: len(wall), ConditionalOnSuccess: !correct,
+		d := decision{cell: target, PlannedPairs: study.Pairs, CompletePairs: len(wall), ConditionalOnSuccess: !correct,
 			WallClassification: "incomplete"}
 		if len(wall) > 0 {
 			d.WallRatio, d.SavingNS = bootstrap(wall), bootstrap(saving)
 			d.CPURatio, d.RSSIncreaseKiB = bootstrap(cpu), bootstrap(rss)
 			d.BaselineRSSMedianKiB = median(baseRSS)
-			d.ResourcePass = len(wall) == pairs && d.CPURatio.Upper95 <= cpuUpper &&
+			d.ResourcePass = len(wall) == study.Pairs && d.CPURatio.Upper95 <= cpuUpper &&
 				d.RSSIncreaseKiB.Upper95 <= rssRelativeAllowance*d.BaselineRSSMedianKiB+rssAbsoluteAllowanceKiB
-			if len(wall) == pairs {
+			if len(wall) == study.Pairs {
 				d.WallClassification = classify(d.WallRatio)
 			}
-			d.UsefulImprovement = len(wall) == pairs && target.Profile != native && target.Logging == off &&
+			d.UsefulImprovement = len(wall) == study.Pairs && target.Profile != native && target.Logging == off &&
 				d.WallRatio.Upper95 <= usefulRatio && d.SavingNS.Lower95 >= usefulSavingNS
 		}
 		resource = resource && d.ResourcePass

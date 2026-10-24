@@ -1,12 +1,15 @@
 # Disabled launcher diagnostics: measurement protocol
 
-**Disposition:** retain production's unconditional timing. The completed
+**Historical C1 disposition:** retain production's unconditional timing. The completed
 [evaluation and retained evidence](disabled-telemetry-results.md) did not qualify
 the conditional-clock candidate. The original prospective protocol is preserved
 in the evidence archive and at candidate commit
 `c1d47eaa9935fd481290617d49f9aa0a4502324d`; the thresholds below are unchanged.
 
-This is the fixed protocol for #41. Commit this protocol, its fixture and harness
+This is the original fixed protocol for #41. The distinct
+[single-snapshot candidate](disabled-telemetry-snapshot.md) has its own prospective
+protocol and cohort; its results cannot replace the observations below.
+Commit this protocol, its fixture and harness
 before collecting candidate timing. The existing demo startup matrix always
 enables JSON diagnostics and is exploratory evidence for a different question.
 The historical descriptor-handoff study retains its own frozen design and results.
@@ -16,8 +19,8 @@ The historical descriptor-handoff study retains its own frozen design and result
 The recorded comparison uses clean baseline
 `6eb862b914e8b3dfdf820dcbd1bfa079e4275dd6` and clean experimental candidate
 `c1d47eaa9935fd481290617d49f9aa0a4502324d`. Preserve both identities and all
-source/toolchain hashes. The final delivery restores baseline production code;
-it must not be substituted for the rejected candidate when reproducing the study.
+source/toolchain hashes. The initial retention commit restored baseline production
+code; it must not be substituted for the rejected candidate when reproducing the study.
 Recheck both exact source heads and clean status after build preparation immediately
 before timing and again after collection; abort with retained evidence if changed.
 Use native Linux amd64 or arm64 with Go 1.27.3, `CGO_ENABLED=0`, `-trimpath`,
@@ -170,8 +173,8 @@ clock shape around the current semantically equivalent logger. Its allocation an
 timing results isolate that shape and the diagnostics predicate; they do not
 measure full-launcher allocation, native startup or complete-process improvement.
 
-The final implementation keeps these candidate helpers in tests only. Ordinary CI
+The original retention implementation kept these candidate helpers in tests only. Ordinary CI
 checks the harness/statistics and requires the behavioral telemetry matrix on
 native amd64 and arm64. Actual study collection remains opt-in; a failed timing
 cohort is not silently retried by routine CI or replaced by a later green code
-check. Production keeps the original timing boundaries and logger behavior.
+check. This original study does not qualify a later implementation.

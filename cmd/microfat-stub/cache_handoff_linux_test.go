@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/cache"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
@@ -187,7 +186,7 @@ func TestCacheMaterializationFailureClosesDescriptors(t *testing.T) {
 			}
 			execveFunc = func(string, []string, []string) error { t.Fatal("failed materialization must not exec"); return nil }
 			err := executeViaCache(f.Name(), f, entry, nil, []string{testAppArg}, nil,
-				microarch.Info{}, microarch.PolicyResult{}, nil, time.Now())
+				microarch.Info{}, microarch.PolicyResult{}, nil, newLaunchDiagnostics())
 			require.Error(t, err)
 			if failure == "extraction" {
 				require.ErrorIs(t, err, format.ErrCacheExtract)
@@ -240,7 +239,7 @@ func TestCacheMaterializationCorruptionStages(t *testing.T) {
 						primary = format.ErrMemfdCreate
 					}
 					err = executeViaCache(f.Name(), f, entry, nil, []string{testAppArg}, nil,
-						microarch.Info{}, microarch.PolicyResult{}, primary, time.Now())
+						microarch.Info{}, microarch.PolicyResult{}, primary, newLaunchDiagnostics())
 					os.Stderr = oldStderr
 					require.ErrorIs(t, err, format.ErrPayloadCorrupted)
 					if stage == format.StageCacheExtract {

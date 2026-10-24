@@ -18,7 +18,7 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 )
 
-func measure(output string, item artifacts) ([]observation, error) {
+func measure(output string, item artifacts, study studyConfig) ([]observation, error) {
 	if err := os.Mkdir(filepath.Join(output, "attempts"), privateDirectory); err != nil {
 		return nil, err
 	}
@@ -29,7 +29,7 @@ func measure(output string, item artifacts) ([]observation, error) {
 	}
 	encoder := json.NewEncoder(f)
 	var observations []observation
-	plan := schedule()
+	plan := scheduleFor(study)
 	for _, step := range plan {
 		obs := attempt(output, step, item)
 		observations = append(observations, obs)

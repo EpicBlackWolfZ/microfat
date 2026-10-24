@@ -48,8 +48,9 @@ func command(dir string, env []string, name string, args ...string) ([]byte, err
 	return data, nil
 }
 
-func freezeSources(base, candidate, output string) error {
-	metadata := map[string]any{"fixed_baseline": baselineSHA, "pairs_per_cell": pairs, "bootstrap_seed": seed,
+func freezeSources(base, candidate, output string, study studyConfig) error {
+	metadata := map[string]any{"study": study.Name, "protocol": study.Protocol,
+		"fixed_baseline": baselineSHA, "pairs_per_cell": study.Pairs, "bootstrap_seed": seed,
 		"bootstrap_resamples": resamples}
 	for _, arm := range []struct{ name, dir string }{{baseline, base}, {candidateArm, candidate}} {
 		sha, err := command(arm.dir, cleanEnv(), "git", "rev-parse", "HEAD")
@@ -69,7 +70,7 @@ func freezeSources(base, candidate, output string) error {
 		metadata[arm.name+"_commit"] = strings.TrimSpace(string(sha))
 	}
 	var files []identity
-	for _, rel := range []string{protocolPath, "go.mod", "go.sum", ".config/tool-versions.env",
+	for _, rel := range []string{study.Protocol, "go.mod", "go.sum", ".config/tool-versions.env",
 		"tests/e2e/testdata/telemetry/main.go", "tests/e2e/testdata/telemetry/prepare.go",
 		"tests/e2e/testdata/telemetry/measure.go", "tests/e2e/testdata/telemetry/statistics.go",
 		"tests/e2e/testdata/telemetry/main_test.go", "tests/e2e/testdata/telemetry/fixture/main.go"} {
@@ -80,7 +81,7 @@ func freezeSources(base, candidate, output string) error {
 		files = append(files, id)
 	}
 	metadata["frozen_files"] = files
-	protocol, err := os.ReadFile(filepath.Join(candidate, protocolPath)) // #nosec G304 -- explicit local candidate checkout.
+	protocol, err := os.ReadFile(filepath.Join(candidate, study.Protocol)) // #nosec G304 -- explicit local candidate checkout.
 	if err != nil {
 		return err
 	}

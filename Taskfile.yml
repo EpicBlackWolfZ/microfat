@@ -63,6 +63,7 @@ vars:
   TELEMETRY_BASE: '{{.TELEMETRY_BASE | default ".work/telemetry-base"}}'
   TELEMETRY_CANDIDATE: '{{.TELEMETRY_CANDIDATE | default ".work/telemetry-candidate"}}'
   TELEMETRY_OUTPUT: '{{.TELEMETRY_OUTPUT | default ".work/telemetry-confirmation"}}'
+  TELEMETRY_STUDY: '{{.TELEMETRY_STUDY | default "original"}}'
   BENCHMARK_BINARY: '{{.BENCHMARK_BINARY | default (printf "%s/microfat" .BIN_DIR)}}'
   TASK_ENV: |
     export GO={{.GO | shellQuote}}
@@ -93,12 +94,13 @@ vars:
 
 tasks:
   qualify-telemetry:
-    desc: Run the frozen telemetry study (TELEMETRY_BASE and TELEMETRY_CANDIDATE checkouts required, TELEMETRY_OUTPUT must be new)
+    desc: Run a frozen telemetry study (TELEMETRY_STUDY=original|snapshot, base/candidate checkouts required, output must be new)
     cmds:
     - |-
       {{.TASK_ENV}}
       export PATH={{printf "%s/bin" .GO_ROOT | shellQuote}}:"$PATH"
       {{.GO | shellQuote}} run ./tests/e2e/testdata/telemetry \
+        -study {{.TELEMETRY_STUDY | shellQuote}} \
         -base {{.TELEMETRY_BASE | shellQuote}} -candidate {{.TELEMETRY_CANDIDATE | shellQuote}} \
         -output {{.TELEMETRY_OUTPUT | shellQuote}}
   qualify-cache-handoff:

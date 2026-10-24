@@ -1,12 +1,15 @@
-# Disabled launcher diagnostics: completed evaluation
+# Disabled launcher diagnostics: first candidate evaluation
 
-**Decision for #41: retain the current production timing and logging implementation.**
+**Historical C1 decision: reject the first conditional-clock implementation.**
 The conditional-clock candidate removed a small amount of isolated work but did not
 meet the frozen practical startup-benefit rule in any disabled-logging cell. Two
 CPU-resource intervals failed qualification. Those failures do not prove a causal
-regression; they do prevent qualifying this candidate from this study. The final
-delivery contains the evaluation, test-only probes and behavioral regressions.
-It restores the baseline launcher sources and introduces no new runtime policy.
+regression; they do prevent qualifying this candidate from this study. The
+initial disposition restored the baseline launcher sources and retained the
+evaluation, test-only probes and behavioral regressions. A distinct
+[single-snapshot candidate](disabled-telemetry-snapshot.md) addresses C1's
+duplicate enabled-path environment checks. Its evaluation is separate; these
+original observations and decisions remain unchanged.
 
 ## Source and retained evidence
 
@@ -109,14 +112,14 @@ post-hoc correction or dismissing unfavorable observations as noise.
 `correctness_pass=true`, `resource_pass=false`, `all_cells_equivalent=false`
 are retained verbatim. The harness exited nonzero as specified.
 
-## Disposition and verification boundary
+## Original disposition and verification boundary
 
-The useful effect is unestablished and resource qualification is unresolved.
-Keep the simpler existing implementation. The rejected candidate remains
+For C1, the useful effect is unestablished and resource qualification is unresolved.
+The original decision was to keep the existing implementation. C1 remains
 reproducible through its commit and archived production patch; its helpers live
-only in test code. A small microbenchmark saving does not justify promoting it
+only in test code. A small microbenchmark saving does not justify promoting C1
 over the failed frozen complete-process qualification. This is a completed
-bounded evaluation and retention decision, not proof of universal negligible
+bounded C1 evaluation and retention decision, not proof of universal negligible
 overhead or regression-free startup. It does not resolve the separate historical
 service-p99 investigation in #230.
 
@@ -128,4 +131,5 @@ ordinary lint/security/race/coverage/runtime checks apply to the final delivery.
 The study above is native amd64 evidence only. No native arm64 performance
 qualification, complete-process improvement or service-p99 claim is made.
 Issue closure requires the reviewed, merged disposition; green CI alone does
-not turn the rejected candidate into a qualified optimization.
+not turn C1 into a qualified optimization. See the separate snapshot report for
+the final implementation decision.

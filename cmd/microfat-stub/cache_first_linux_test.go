@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/cache"
 	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
@@ -61,7 +60,7 @@ func cacheFirstFixture(t *testing.T) (*os.File, *format.VariantEntry, string, []
 
 func dispatchCacheFirst(f *os.File, entry *format.VariantEntry) error {
 	return executeVariant(f.Name(), f, entry, nil, []string{"app", "argument"}, []string{"GOMAXPROCS=2"},
-		microarch.Info{}, microarch.PolicyResult{}, time.Now())
+		microarch.Info{}, microarch.PolicyResult{}, newLaunchDiagnostics())
 }
 
 func TestCacheFirstVerifiedHitPinsDescriptor(t *testing.T) {

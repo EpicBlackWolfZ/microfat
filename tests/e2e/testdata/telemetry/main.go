@@ -19,6 +19,9 @@ const (
 	goVersion          = "go1.27.3"
 	protocolPath       = "docs/disabled-telemetry.md"
 	pairs              = 80
+	snapshotPairs      = 320
+	originalStudy      = "original"
+	snapshotStudy      = "snapshot"
 	privateDirectory   = 0o700
 	privateFile        = 0o600
 	launchTimeout      = 10 * time.Second
@@ -33,6 +36,22 @@ const (
 	off                = "off"
 	ready              = "MICROFAT_TELEMETRY_STARTUP_READY_v1\n"
 )
+
+type studyConfig struct {
+	Name, Protocol string
+	Pairs          int
+}
+
+func selectStudy(name string) (studyConfig, error) {
+	switch name {
+	case originalStudy:
+		return studyConfig{originalStudy, protocolPath, pairs}, nil
+	case snapshotStudy:
+		return studyConfig{snapshotStudy, "docs/disabled-telemetry-snapshot.md", snapshotPairs}, nil
+	default:
+		return studyConfig{}, fmt.Errorf("unknown study %q: use original or snapshot", name)
+	}
+}
 
 type cell struct{ Profile, Path, Logging string }
 type scheduled struct {
@@ -60,26 +79,35 @@ func main() {
 	base := flag.String("base", "", "clean checkout of the fixed baseline")
 	candidate := flag.String("candidate", "", "clean checkout of the exact frozen candidate")
 	output := flag.String("output", "", "new evidence directory, never overwritten")
+	studyName := flag.String("study", originalStudy, "prospective design: original (C1) or snapshot (C2)")
 	flag.Parse()
-	if err := run(*base, *candidate, *output); err != nil {
+	study, err := selectStudy(*studyName)
+	if err == nil {
+		err = runStudy(*base, *candidate, *output, study)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(base, candidate, output string) (retErr error) {
+func run(base, candidate, output string) error {
+	study, err := selectStudy(originalStudy)
+	if err != nil {
+		return err
+	}
+	return runStudy(base, candidate, output, study)
+}
+
+func runStudy(base, candidate, output string, study studyConfig) (retErr error) {
 	if base == "" || candidate == "" || output == "" {
 		return errors.New("-base, -candidate and -output are required")
 	}
 	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") || runtime.Version() != goVersion {
 		return errors.New("requires native Linux amd64/arm64 and Go 1.27.3")
 	}
-	for _, path := range []*string{&base, &candidate, &output} {
-		absolute, err := filepath.Abs(*path)
-		if err != nil {
-			return err
-		}
-		*path = absolute
+	if err := absolutePaths(&base, &candidate, &output); err != nil {
+		return err
 	}
 	if err := os.Mkdir(output, privateDirectory); err != nil {
 		return err
@@ -90,10 +118,11 @@ func run(base, candidate, output string) (retErr error) {
 		}
 	}()
 	// Freeze all intended attempts before source/toolchain/fixture preparation.
-	if err := saveJSON(filepath.Join(output, "schedule.json"), schedule()); err != nil {
+	plan := scheduleFor(study)
+	if err := saveJSON(filepath.Join(output, "schedule.json"), plan); err != nil {
 		return err
 	}
-	if err := freezeSources(base, candidate, output); err != nil {
+	if err := freezeSources(base, candidate, output, study); err != nil {
 		return err
 	}
 	if err := verifyToolchain(output); err != nil {
@@ -109,7 +138,7 @@ func run(base, candidate, output string) (retErr error) {
 	if err := recheckSources(base, candidate, output, "before-timing"); err != nil {
 		return err
 	}
-	observations, err := measure(output, items)
+	observations, err := measure(output, items, study)
 	if err != nil {
 		return err
 	}
@@ -119,19 +148,42 @@ func run(base, candidate, output string) (retErr error) {
 	if err := recordHost(output, "after"); err != nil {
 		return err
 	}
-	decisions, correct, resource, equivalent := evaluate(observations)
+	decisions, correct, resource, equivalent := evaluateStudy(observations, study)
 	if err := saveJSON(filepath.Join(output, "decisions.json"), map[string]any{
-		"architecture": runtime.GOARCH, "planned_attempts": len(schedule()), "recorded_attempts": len(observations),
+		"study": study.Name, "architecture": runtime.GOARCH, "planned_attempts": len(plan), "recorded_attempts": len(observations),
 		"correctness_pass": correct, "resource_pass": resource, "all_cells_equivalent": equivalent,
-		"decisions": decisions, "scope": "one fixed complete-process startup fixture; no p99 or fleet claim",
+		"complete_process_qualified": correct && resource && equivalent,
+		"acceptance_scope":           "complete-process nonregression; focused attribution/zero-allocation evidence is separate",
+		"decisions":                  decisions, "scope": "one fixed complete-process startup fixture; no p99 or fleet claim",
 	}); err != nil {
 		return err
 	}
-	if !correct || !resource {
-		return errors.New("correctness/resource qualification failed; retain every attempt")
+	if err := qualificationError(study, correct, resource, equivalent); err != nil {
+		return err
 	}
 	if !equivalent {
 		fmt.Println("Timing equivalence is unresolved or outside the declared band; see decisions.json")
+	}
+	return nil
+}
+
+func absolutePaths(paths ...*string) error {
+	for _, path := range paths {
+		absolute, err := filepath.Abs(*path)
+		if err != nil {
+			return err
+		}
+		*path = absolute
+	}
+	return nil
+}
+
+func qualificationError(study studyConfig, correct, resource, equivalent bool) error {
+	if !correct || !resource {
+		return errors.New("correctness/resource qualification failed; retain every attempt")
+	}
+	if study.Name == snapshotStudy && !equivalent {
+		return errors.New("snapshot timing/control equivalence failed or is inconclusive")
 	}
 	return nil
 }
@@ -149,8 +201,12 @@ func cells() []cell {
 }
 
 func schedule() []scheduled {
+	return scheduleFor(studyConfig{originalStudy, protocolPath, pairs})
+}
+
+func scheduleFor(study studyConfig) []scheduled {
 	var result []scheduled
-	for round := range pairs {
+	for round := range study.Pairs {
 		visits := cells()
 		arms := []string{baseline, candidateArm}
 		if round%2 != 0 {

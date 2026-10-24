@@ -49,6 +49,75 @@ func TestScheduleIsCompleteAdjacentAndCounterbalanced(t *testing.T) {
 	}
 }
 
+func TestNamedStudiesKeepIndependentFrozenSchedules(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{originalStudy, snapshotStudy} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			study, err := selectStudy(name)
+			require.NoError(t, err)
+			wantPairs := pairs
+			if name == snapshotStudy {
+				wantPairs = snapshotPairs
+			}
+			assert.Equal(t, wantPairs, study.Pairs)
+			assert.Contains(t, study.Protocol, "disabled-telemetry")
+			plan := scheduleFor(study)
+			require.Len(t, plan, wantPairs*len(cells())*2)
+			counts := map[string]int{}
+			for i := 0; i < len(plan); i += 2 {
+				a, b := plan[i], plan[i+1]
+				assert.Equal(t, a.cell, b.cell)
+				assert.Equal(t, a.Round, b.Round)
+				wantArm := baseline
+				if a.Round%2 != 0 {
+					wantArm = candidateArm
+				}
+				assert.Equal(t, wantArm, a.Arm)
+				assert.NotEqual(t, a.Arm, b.Arm)
+				counts[fmt.Sprintf("%v", a.cell)]++
+			}
+			for _, count := range counts {
+				assert.Equal(t, wantPairs, count)
+			}
+			// Per-run copies cannot modify a subsequent selection or another parallel run.
+			study.Pairs = 1
+			again, err := selectStudy(name)
+			require.NoError(t, err)
+			assert.Equal(t, wantPairs, again.Pairs)
+		})
+	}
+	_, err := selectStudy("unfrozen")
+	assert.Error(t, err)
+}
+
+func TestSnapshotRejectsOriginalCohortAndUnresolvedControls(t *testing.T) {
+	t.Parallel()
+	original, err := selectStudy(originalStudy)
+	require.NoError(t, err)
+	snapshot, err := selectStudy(snapshotStudy)
+	require.NoError(t, err)
+	var originalObservations []observation
+	for _, step := range scheduleFor(original) {
+		originalObservations = append(originalObservations,
+			observation{scheduled: step, Success: true, WallNS: 1_000_000, CPUNS: 1_000_000, MaxRSSKiB: 1024})
+	}
+	decisions, correct, resource, equivalent := evaluateStudy(originalObservations, snapshot)
+	assert.False(t, correct)
+	assert.False(t, resource)
+	assert.False(t, equivalent)
+	for _, decision := range decisions {
+		assert.Equal(t, snapshotPairs, decision.PlannedPairs)
+		assert.Equal(t, pairs, decision.CompletePairs)
+		assert.Equal(t, "incomplete", decision.WallClassification)
+	}
+	assert.NoError(t, qualificationError(original, true, true, false), "original outcome semantics stay intact")
+	assert.Error(t, qualificationError(snapshot, true, true, false), "C2 needs every wall/control equivalence gate")
+	assert.Error(t, qualificationError(snapshot, true, false, true))
+	assert.Error(t, qualificationError(snapshot, false, true, true))
+	assert.NoError(t, qualificationError(snapshot, true, true, true))
+}
+
 func TestEnvironmentRejectsInheritedControls(t *testing.T) {
 	for _, key := range []string{"MICROFAT_LOG", "MICROFAT_DEBUG", "MICROFAT_EXEC_MODE", "MICROFAT_CACHE_DIR",
 		"XDG_CACHE_HOME", "GODEBUG", "GOMEMLIMIT", "GOGC", "GOMAXPROCS", "GOFLAGS", "GOENV"} {
