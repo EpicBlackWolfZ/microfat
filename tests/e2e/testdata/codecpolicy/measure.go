@@ -162,7 +162,7 @@ func packAttempt(input workerInput, items prepared) observation {
 	if err != nil {
 		return observation{Error: err.Error()}
 	}
-	obs := execute(harness, []string{"-worker", inputPath}, cleanEnv(), packTimeout)
+	obs := execute(harness, []string{"-worker", inputPath}, items.Study.env(), packTimeout)
 	var report workerResult
 	reportErr := json.Unmarshal([]byte(obs.Stdout), &report)
 	obs.Warnings = report.Warnings
@@ -265,7 +265,7 @@ func launchAttempt(output string, visit step, items prepared, artifacts map[arti
 	if visit.Mode == memfdMode {
 		mode = memfdMode
 	}
-	env := cleanEnv("MICROFAT_CACHE_DIR="+cache, "MICROFAT_FORCE_LEVEL="+baselineLevel(), "MICROFAT_EXEC_MODE="+mode,
+	env := items.Study.env("MICROFAT_CACHE_DIR="+cache, "MICROFAT_FORCE_LEVEL="+baselineLevel(), "MICROFAT_EXEC_MODE="+mode,
 		"MICROFAT_AUTOTUNE=0")
 	obs := execute(path, versionArgs(visit.Family, output), env, launchTimeout)
 	control := items.Controls[visit.group]

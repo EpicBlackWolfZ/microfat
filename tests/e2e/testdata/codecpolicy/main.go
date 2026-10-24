@@ -143,13 +143,18 @@ func schedule() []step {
 func main() {
 	corpus := flag.String("corpus", "", "prepared schema-2 native corpus directory")
 	output := flag.String("output", "", "new evidence directory, never overwritten")
+	studyName := flag.String("study", originalStudy, "prospective study: original or isolated")
 	worker := flag.String("worker", "", "internal: immutable pack input JSON")
 	flag.Parse()
 	var err error
 	if *worker != "" {
 		err = runWorker(*worker)
 	} else {
-		err = run(*corpus, *output)
+		var study studyConfig
+		study, err = selectStudy(*studyName)
+		if err == nil {
+			err = runStudy(*corpus, *output, study)
+		}
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -177,7 +182,7 @@ func runWorker(path string) error {
 	return errors.Join(err, json.NewEncoder(os.Stdout).Encode(result))
 }
 
-func run(corpusDir, output string) (retErr error) {
+func runStudy(corpusDir, output string, study studyConfig) (retErr error) {
 	if corpusDir == "" || output == "" {
 		return errors.New("-corpus and -output are required")
 	}
@@ -201,23 +206,27 @@ func run(corpusDir, output string) (retErr error) {
 	if err := saveJSON(filepath.Join(output, "schedule.json"), plan); err != nil {
 		return err
 	}
-	root, err := repositoryRoot()
+	study, err = prepareStudy(study, output)
+	if err != nil {
+		return err
+	}
+	root, err := repositoryRoot(study)
 	if err != nil {
 		return err
 	}
 	finalChecksDone := false
 	defer func() {
 		if !finalChecksDone {
-			retErr = errors.Join(retErr, sourceState(root, output, "after"), recordHost(output, "after"))
+			retErr = errors.Join(retErr, sourceState(root, output, "after", study), recordHost(output, "after", study))
 		}
 	}()
-	if err := sourceState(root, output, "before"); err != nil {
+	if err := sourceState(root, output, "before", study); err != nil {
 		return err
 	}
-	if err := recordHost(output, "before"); err != nil {
+	if err := recordHost(output, "before", study); err != nil {
 		return err
 	}
-	if err := freeze(root, corpusDir, output); err != nil {
+	if err := freeze(root, corpusDir, output, study); err != nil {
 		return err
 	}
 	defer func() {
@@ -225,22 +234,24 @@ func run(corpusDir, output string) (retErr error) {
 			retErr = errors.Join(retErr, recheckInputs(output, "after"))
 		}
 	}()
-	items, err := prepare(corpusDir, output, root)
+	items, err := prepare(corpusDir, output, root, study)
 	if err != nil {
 		return err
 	}
-	if err := sourceState(root, output, "before-timing"); err != nil {
+	if err := sourceState(root, output, "before-timing", study); err != nil {
 		return err
 	}
 	if err := recheckInputs(output, "before-timing"); err != nil {
 		return err
 	}
 	observations, measureErr := measure(output, plan, items)
-	measureErr = errors.Join(measureErr, recheckInputs(output, "after"), sourceState(root, output, "after"), recordHost(output, "after"))
+	measureErr = errors.Join(measureErr, recheckInputs(output, "after"),
+		sourceState(root, output, "after", study), recordHost(output, "after", study))
 	finalChecksDone = true
 	summary, valid := summarize(plan, observations)
 	summary["cohort_pass"], summary["qualification_pass"] = valid && measureErr == nil, valid && measureErr == nil
 	summary["collection_error"] = errorText(measureErr)
+	summary["study"] = study
 	if err := saveJSON(filepath.Join(output, "summary.json"), summary); err != nil {
 		return errors.Join(measureErr, err)
 	}

@@ -48,6 +48,7 @@ type corpus struct {
 	} `json:"synthetic_sources"`
 }
 type prepared struct {
+	Study    studyConfig
 	Corpus   corpus
 	Stubs    map[string]string
 	Variants map[group]map[string]variant
@@ -69,7 +70,7 @@ func cleanEnv(extra ...string) []string {
 		"GOARCH="+runtime.GOARCH, "GOMAXPROCS=4", "SOURCE_DATE_EPOCH=0"), extra...)
 }
 
-func command(dir, name string, args ...string) ([]byte, error) {
+func command(study studyConfig, dir, name string, args ...string) ([]byte, error) {
 	timeout := metadataTimeout
 	if name == "go" && len(args) > 0 && args[0] == "build" {
 		timeout = preparationTimeout
@@ -77,7 +78,7 @@ func command(dir, name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := ownedCommand(ctx, name, args...)
-	cmd.Dir, cmd.Env = dir, cleanEnv()
+	cmd.Dir, cmd.Env = dir, study.env()
 	data, err := cmd.CombinedOutput()
 	if err != nil {
 		return data, fmt.Errorf("%s %v: %w: %s", name, args, err, data)
@@ -85,8 +86,8 @@ func command(dir, name string, args ...string) ([]byte, error) {
 	return data, nil
 }
 
-func repositoryRoot() (string, error) {
-	data, err := command("", "git", "rev-parse", "--show-toplevel")
+func repositoryRoot(study studyConfig) (string, error) {
+	data, err := command(study, "", "git", "rev-parse", "--show-toplevel")
 	return strings.TrimSpace(string(data)), err
 }
 
@@ -101,9 +102,9 @@ func identify(path string) (identity, error) {
 	return identity{path, hex.EncodeToString(hash.Sum(nil)), n}, err
 }
 
-func sourceState(root, output, stage string) error {
-	head, headErr := command(root, "git", "rev-parse", "HEAD")
-	status, statusErr := command(root, "git", "status", "--porcelain", "--untracked-files=all")
+func sourceState(root, output, stage string, study studyConfig) error {
+	head, headErr := command(study, root, "git", "rev-parse", "HEAD")
+	status, statusErr := command(study, root, "git", "status", "--porcelain", "--untracked-files=all")
 	state := map[string]string{"head": strings.TrimSpace(string(head)), "status": string(status)}
 	err := errors.Join(headErr, statusErr)
 	if len(status) != 0 {
@@ -121,7 +122,7 @@ func sourceState(root, output, stage string) error {
 	return errors.Join(err, saveJSON(filepath.Join(output, "source-"+stage+".json"), state))
 }
 
-func freeze(root, corpusDir, output string) error {
+func freeze(root, corpusDir, output string, study studyConfig) error {
 	var c corpus
 	if err := readJSON(filepath.Join(corpusDir, "manifest.json"), &c); err != nil {
 		return err
@@ -133,7 +134,8 @@ func freeze(root, corpusDir, output string) error {
 	if err := validateManifest(c, state["head"]); err != nil {
 		return err
 	}
-	files := []string{filepath.Join(root, protocol), filepath.Join(root, "go.mod"), filepath.Join(root, "go.sum"),
+	files := []string{filepath.Join(root, study.Protocol), filepath.Join(root, "go.mod"), filepath.Join(root, "go.sum"),
+		filepath.Join(output, "study.json"),
 		filepath.Join(root, "scripts/codec-policy-corpus.sh"), filepath.Join(root, "experiments/codecpolicy/sources.lock.json"),
 		filepath.Join(root, "scripts/codec-policy-collect.sh"),
 		filepath.Join(root, "tests/e2e/testdata/codecboundary/main.go"),
@@ -145,6 +147,7 @@ func freeze(root, corpusDir, output string) error {
 		return err
 	}
 	files = append(files, harnessFiles...)
+	files = append(files, study.frozenFiles()...)
 	goPath, err := exec.LookPath("go")
 	if err != nil {
 		return err
@@ -173,9 +176,10 @@ func freeze(root, corpusDir, output string) error {
 		}
 		identities = append(identities, id)
 	}
-	version, versionErr := command(root, "go", "version")
-	settings, settingsErr := command(root, "go", "env", "-json", "GOVERSION", "GOHOSTOS", "GOHOSTARCH", "GOROOT", "GOENV", "GOTOOLCHAIN")
-	machine, machineErr := command(root, "uname", "-m")
+	version, versionErr := command(study, root, "go", "version")
+	settings, settingsErr := command(study, root, "go", "env", "-json",
+		"GOVERSION", "GOHOSTOS", "GOHOSTARCH", "GOROOT", "GOENV", "GOTOOLCHAIN")
+	machine, machineErr := command(study, root, "uname", "-m")
 	var goEnv map[string]string
 	if err := errors.Join(versionErr, settingsErr, machineErr); err != nil {
 		return err
@@ -200,7 +204,7 @@ func freeze(root, corpusDir, output string) error {
 		}
 		identities = append(identities, id)
 	}
-	data, err := os.ReadFile(filepath.Join(root, protocol)) // #nosec G304 -- fixed protocol in the explicit source root.
+	data, err := os.ReadFile(filepath.Join(root, study.Protocol)) // #nosec G304 -- fixed protocol in the explicit source root.
 	if err != nil {
 		return err
 	}
@@ -210,15 +214,17 @@ func freeze(root, corpusDir, output string) error {
 	}
 	return saveJSON(filepath.Join(output, "freeze.json"), map[string]any{"identities": identities, "go_version": string(version),
 		"collector_build_settings": harnessSettings,
+		"study":                    study,
 		"go_env":                   goEnv, "bootstrap_resamples": bootstrapResamples, "bootstrap_seed": bootstrapSeed, "gomaxprocs": fixedProcs,
 		"resource_scope": "observed wait4 child-process MaxRSS ceilings; no imposed memory limit"})
 }
 
-func prepare(dir, output, root string) (prepared, error) {
+func prepare(dir, output, root string, study studyConfig) (prepared, error) {
 	items, err := loadCorpus(dir, root)
 	if err != nil {
 		return items, err
 	}
+	items.Study = study
 	wanted := groups()
 	// Rebuild all current tools outside timing; reproducible byte equality binds manifest provenance to source.
 	for _, stub := range []string{fullStub, minimalStub, "microfat"} {
@@ -232,7 +238,7 @@ func prepare(dir, output, root string) (prepared, error) {
 			args = append(args, "-tags=minimal")
 		}
 		args = append(args, "-o", target, pkg)
-		if _, err := command(root, "go", args...); err != nil {
+		if _, err := command(study, root, "go", args...); err != nil {
 			return items, err
 		}
 		original, err := identify(filepath.Join(dir, name))
@@ -256,7 +262,7 @@ func prepare(dir, output, root string) (prepared, error) {
 	}
 	for _, g := range wanted {
 		v := items.Variants[g][baselineLevel()]
-		obs := execute(v.Path, versionArgs(g.Family, output), cleanEnv("MICROFAT_AUTOTUNE=0"), launchTimeout)
+		obs := execute(v.Path, versionArgs(g.Family, output), study.env("MICROFAT_AUTOTUNE=0"), launchTimeout)
 		if !obs.Success {
 			return items, fmt.Errorf("native readiness %v: %s", g, obs.Error)
 		}
@@ -333,7 +339,7 @@ func prepareVersionDB(output string) error {
 		"actionlint": versionArgs("actionlint", output), "govulncheck": versionArgs("govulncheck", output), boundaryFamily: []string{}})
 }
 
-func recordHost(output, stage string) error {
+func recordHost(output, stage string, study studyConfig) error {
 	data := map[string]any{"utc": time.Now().UTC().Format(time.RFC3339Nano), "go": runtime.Version(),
 		"arch": runtime.GOARCH, "cpus": runtime.NumCPU()}
 	for _, path := range []string{"/proc/cpuinfo", "/proc/meminfo", "/proc/self/cgroup", "/proc/self/status",
@@ -365,7 +371,7 @@ func recordHost(output, stage string) error {
 	data["unified_cgroup_ancestors"] = ancestors
 	limits, limitsErr := cgroup.ReadLimits()
 	data["launcher_resolved_limits"], data["launcher_limits_error"] = limits, errorText(limitsErr)
-	uname, unameErr := command("", "uname", "-a")
+	uname, unameErr := command(study, "", "uname", "-a")
 	data["uname"], data["uname_error"] = string(uname), errorText(unameErr)
 	return saveJSON(filepath.Join(output, "host-"+stage+".json"), data)
 }
@@ -375,7 +381,10 @@ func jsonDecode(data []byte, value any) error {
 }
 
 func recheckInputs(output, stage string) error {
-	var frozen struct{ Identities []identity }
+	var frozen struct {
+		Identities []identity
+		Study      studyConfig
+	}
 	if err := readJSON(filepath.Join(output, "freeze.json"), &frozen); err != nil {
 		return err
 	}
@@ -387,6 +396,9 @@ func recheckInputs(output, stage string) error {
 		frozen.Identities = append(frozen.Identities, commands.Database...)
 	}
 	var failures []string
+	if err := frozen.Study.validateConfig(); err != nil {
+		failures = append(failures, err.Error())
+	}
 	for _, expected := range frozen.Identities {
 		actual, err := identify(expected.Path)
 		if err != nil || actual != expected {

@@ -66,6 +66,7 @@ vars:
   TELEMETRY_STUDY: '{{.TELEMETRY_STUDY | default "original"}}'
   CODEC_CORPUS: '{{.CODEC_CORPUS | default ".work/codec-policy-corpus"}}'
   CODEC_OUTPUT: '{{.CODEC_OUTPUT | default ".work/codec-policy-cohort"}}'
+  CODEC_STUDY: '{{.CODEC_STUDY | default "original"}}'
   CODEC_ARCH: '{{.CODEC_ARCH | default .HOST_ARCH}}'
   BENCHMARK_BINARY: '{{.BENCHMARK_BINARY | default (printf "%s/microfat" .BIN_DIR)}}'
   TASK_ENV: |
@@ -111,12 +112,10 @@ tasks:
       {{.GO | shellQuote}} test -race ./tests/e2e/testdata/codecpolicy ./tests/e2e/testdata/codecboundary
 
   qualify-codec-policy:
-    desc: Collect the frozen complete-cost codec study (prepared native corpus required, output must be new)
+    desc: Collect the frozen codec study (CODEC_STUDY=original|isolated, prepared native corpus, new output)
     cmds:
     - |
-      {{.TASK_ENV}}
-      export PATH={{printf "%s/bin" .GO_ROOT | shellQuote}}:"$PATH"
-      bash scripts/codec-policy-collect.sh "$GO" {{.CODEC_CORPUS | shellQuote}} {{.CODEC_OUTPUT | shellQuote}}
+      bash scripts/codec-policy-collect.sh {{.GO | shellQuote}} {{.CODEC_CORPUS | shellQuote}} {{.CODEC_OUTPUT | shellQuote}} {{.CODEC_STUDY | shellQuote}}
 
   qualify-telemetry:
     desc: Run a frozen telemetry study (TELEMETRY_STUDY=original|snapshot, base/candidate checkouts required, output must be new)

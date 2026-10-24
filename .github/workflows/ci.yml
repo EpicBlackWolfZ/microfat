@@ -697,6 +697,11 @@ jobs:
           set -o pipefail
           go test -race -v ./internal/microarch -run '^Test(Selection|RequirementsReference)' -count=1 \
             | tee .work/runtime-qualification/selection-requirements.log
+      - name: Validate native codec study fixtures and failure accounting
+        run: |
+          set -o pipefail
+          go test -race -v ./tests/e2e/testdata/codecboundary ./tests/e2e/testdata/codecpolicy -count=1 \
+            | tee .work/runtime-qualification/codec-study-fixtures.log
       - name: Qualify reproducible package epochs and native dispatch
         run: |
           set -o pipefail
