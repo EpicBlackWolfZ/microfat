@@ -60,6 +60,8 @@ vars:
   QEMU_AARCH64: '{{.QEMU_AARCH64 | default ""}}'
   HANDOFF_BASE: '{{.HANDOFF_BASE | default ".work/fd-handoff-base"}}'
   HANDOFF_OUTPUT: '{{.HANDOFF_OUTPUT | default ".work/fd-handoff-confirmation"}}'
+  TELEMETRY_BASE: '{{.TELEMETRY_BASE | default ".work/telemetry-base"}}'
+  TELEMETRY_OUTPUT: '{{.TELEMETRY_OUTPUT | default ".work/telemetry-confirmation"}}'
   BENCHMARK_BINARY: '{{.BENCHMARK_BINARY | default (printf "%s/microfat" .BIN_DIR)}}'
   TASK_ENV: |
     export GO={{.GO | shellQuote}}
@@ -89,6 +91,14 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  qualify-telemetry:
+    desc: Run the frozen disabled-telemetry study (TELEMETRY_BASE checkout required, TELEMETRY_OUTPUT must be new)
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      export PATH={{printf "%s/bin" .GO_ROOT | shellQuote}}:"$PATH"
+      {{.GO | shellQuote}} run ./tests/e2e/testdata/telemetry \
+        -base {{.TELEMETRY_BASE | shellQuote}} -candidate "$PWD" -output {{.TELEMETRY_OUTPUT | shellQuote}}
   qualify-cache-handoff:
     desc: Run the frozen native verified-descriptor experiment (HANDOFF_BASE checkout required, HANDOFF_OUTPUT must be new)
     cmds:
@@ -320,7 +330,7 @@ tasks:
     cmds:
     - |-
       {{.TASK_ENV}}
-      golangci-lint run ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter ./tests/e2e/testdata/fd_handoff ./runtimeinfo/testdata/reporter
+      golangci-lint run ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter ./tests/e2e/testdata/fd_handoff ./tests/e2e/testdata/telemetry ./runtimeinfo/testdata/reporter
       for module in examples/runtimeinfo/prometheus examples/runtimeinfo/opentelemetry; do
         (cd "$module" && golangci-lint run --config ../../../.golangci.yml ./...)
       done

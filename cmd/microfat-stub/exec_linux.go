@@ -214,7 +214,9 @@ func executeExistingCache(
 	}
 	defer func() { _ = unix.Close(fd) }()
 	env, limits := buildAutoTunedEnviron(selfPath, baseEnv, entry, format.ExecModeCache, hostInfo, policyRes)
-	logDiagnostics(entry, format.ExecModeCache, hostInfo, policyRes, env, limits, 0, time.Since(startTime))
+	if !startTime.IsZero() {
+		logDiagnostics(entry, format.ExecModeCache, hostInfo, policyRes, env, limits, 0, diagnosticElapsed(startTime))
+	}
 	procPath := "/proc/self/fd/" + strconv.Itoa(fd)
 	// #nosec G204, G702 -- execute the same descriptor whose bytes and metadata were verified.
 	if err := execveFunc(procPath, args, env); err != nil {
@@ -393,15 +395,9 @@ func logDiagnostics(
 	decompDuration time.Duration,
 	totalDuration time.Duration,
 ) {
-	debugOpt := os.Getenv(format.EnvDebug)
 	logOpt := os.Getenv(format.EnvLog)
-	if debugOpt == "" && logOpt == "" {
+	if !diagnosticOptionsEnabled(os.Getenv(format.EnvDebug), logOpt) {
 		return
-	}
-	if debugOpt == "0" || strings.EqualFold(debugOpt, "false") {
-		if logOpt == "" {
-			return
-		}
 	}
 
 	var memLimit, maxProcs, gogcVal, gcProfileVal string
@@ -662,12 +658,12 @@ func executeViaMemfd(
 	memFile := os.NewFile(uintptr(fd), "microfat_payload")
 	defer func() { _ = memFile.Close() }()
 
-	decompStart := time.Now()
+	decompStart := startDiagnosticTimer(!startTime.IsZero())
 	if err := extractVariantToWriter(selfFile, entry, idx, memFile); err != nil {
 		logErrorDiagnostics(format.StageMemfdExtract, err, hostInfo, entry, policyRes, "decompressing payload failed")
 		return fmt.Errorf("%w: decompressing into memfd: %w", format.ErrMemfdExtract, err)
 	}
-	decompDuration := time.Since(decompStart)
+	decompDuration := diagnosticElapsed(decompStart)
 
 	// Seal anonymous memory file descriptor to prevent tampering prior to execution
 	if sealErr := memfdSealFunc(fd, memfdTargetSeals); sealErr != nil {
@@ -675,7 +671,9 @@ func executeViaMemfd(
 		return fmt.Errorf("%w: failed to seal memfd descriptor: %w", format.ErrMemfdSealingFailed, sealErr)
 	}
 
-	logDiagnostics(entry, format.ExecModeMemfd, hostInfo, policyRes, env, limits, decompDuration, time.Since(startTime))
+	if !startTime.IsZero() {
+		logDiagnostics(entry, format.ExecModeMemfd, hostInfo, policyRes, env, limits, decompDuration, diagnosticElapsed(startTime))
+	}
 
 	procPath := "/proc/self/fd/" + strconv.Itoa(fd)
 	// #nosec G204, G702 -- launcher stub explicitly forwards process execution to the payload
@@ -780,7 +778,7 @@ func executeViaCache(
 		if err := checkExtractionBudget(entry, idx); err != nil {
 			return fmt.Errorf("%w: %w", format.ErrCacheExtract, err)
 		}
-		decompStart := time.Now()
+		decompStart := startDiagnosticTimer(!startTime.IsZero())
 		_, materializedFD, matErr := cache.MaterializeAndOpenVariantAtFDWithOpener(dirFD, cacheDir, entry, func(w io.Writer) error {
 			return extractVariantToWriter(selfFile, entry, idx, w)
 		}, openCachedBinaryAtFunc)
@@ -797,14 +795,16 @@ func executeViaCache(
 				primaryErr, requestedMode, hostInfo, entry, policyRes, "materializing cache binary failed",
 			)
 		}
-		decompDuration = time.Since(decompStart)
+		decompDuration = diagnosticElapsed(decompStart)
 		// Execute the same descriptor validated after publication; do not reopen or rehash its pathname.
 		fd = materializedFD
 	}
 
 	defer func() { _ = unix.Close(fd) }()
 
-	logDiagnostics(entry, format.ExecModeCache, hostInfo, policyRes, env, limits, decompDuration, time.Since(startTime))
+	if !startTime.IsZero() {
+		logDiagnostics(entry, format.ExecModeCache, hostInfo, policyRes, env, limits, decompDuration, diagnosticElapsed(startTime))
+	}
 
 	procPath := "/proc/self/fd/" + strconv.Itoa(fd)
 	execErr := execveFunc(procPath, args, env)

@@ -69,7 +69,7 @@ func runImage(selfPath, imagePath string) error {
 	if err := checkLauncherPrivilegeFunc(); err != nil {
 		return err
 	}
-	launcherStart := time.Now()
+	launcherStart := startDiagnosticTimer(diagnosticsEnabled())
 
 	// #nosec G304 -- launcher opens its own binary image to read payload index
 	selfFile, err := inputfile.Open(filepath.Clean(imagePath))

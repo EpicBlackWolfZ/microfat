@@ -47,6 +47,7 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 | 💻 [**CLI & Launcher Stub Reference**](docs/cli-reference.md) | Complete reference for `microfat` CLI commands, flags, launcher stub meta-commands, exit codes, and environment variables. |
 | ⚙️ [**Container Resource Auto-Tuning**](docs/runtime-tuning.md) | Linux cgroup v1/v2 auto-tuning (`GOMEMLIMIT` / `GOMAXPROCS`), GC mechanics, and workload `GOGC` tuning recipes. |
 | [**Application Runtime Metadata**](docs/runtimeinfo.md) | Supported read-only accessor, source/unknown semantics, and runnable Prometheus/OpenTelemetry recipes. |
+| [**Launcher Diagnostics Cost**](docs/disabled-telemetry.md) | Disabled timing behavior, allocation probes, and a fixed complete-process measurement protocol. |
 | 🔄 [**Binary Lifecycle Modes**](docs/lifecycle-modes.md) | Comprehensive comparison and workflows for Universal Fat, Trimmed Fat, Raw Native ELF, and node cache prewarming. |
 | 🚀 [**Advanced Optimizations & Compression Matrix**](docs/advanced-optimizations.md) | AVX-512 downclocking mitigation, Compression Decision Matrix, declarative PGO matrices, and high-performance C allocators. |
 | 🩺 [**Troubleshooting & Runbook**](docs/troubleshooting.md) | Diagnostic workflows with `microfat doctor`, seccomp `memfd_create` remediation, read-only rootfs fallback, and FAQ. |
