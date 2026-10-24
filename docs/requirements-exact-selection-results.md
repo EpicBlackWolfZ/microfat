@@ -7,6 +7,15 @@ alias defects are fixed: `x86-64` now matches an `amd64` host, and safe AVX-512
 policy applies consistently to `amd64`, `x86_64` and `x86-64` architecture names.
 Forced selection retains its existing precedence over caps/disabled/safe policy.
 
+**Local contention disclosure:** after collection, the user reported gaming on
+this workstation during the same session. Exact overlap was not logged, so
+contention during timing cannot be excluded. Treat this local cohort as
+exploratory: its observed gate failures do not establish mask-caused regressions
+or idle-host performance. The original archive and all observations are preserved.
+A [separate hosted native characterization](requirements-exact-selection-hosted.md)
+uses a prospective fixed cohort on each architecture; cohorts are never pooled,
+and later results cannot rescue the failed local promotion decision.
+
 The [prospective protocol](requirements-exact-selection.md), candidate, independent
 reference and process-context benchmark were committed at measured source
 `83ed54f4605a36bda222046bf0a611263b3824ed` before collection. Both source-state
@@ -50,9 +59,9 @@ synthetic inputs executed on this amd64 host, not native ARM timing evidence.
 | ARM unknown (expected error) | 158 [156–163] | 395 [376–401] | 1 → 1 |
 | ARM unavailable (expected error) | 2,301 [2,259–2,340] | 435 [374–451] | 6 → 1 |
 
-Sparse ARM median savings are **0.162, 1.372 and 3.490 µs**: all miss the
+Observed sparse ARM median savings are **0.162, 1.372 and 3.490 µs**: all miss the
 preselected 100 µs saving threshold. The v8.0 case also misses the 25% reduction
-and fewer-allocation requirements. All six successful AMD fixtures regress by
+and fewer-allocation requirements. All six successful AMD fixtures have slower timings by
 **11.7–15.2%** in these medians; normalization grows from 456 to 472 B/op and
 21 to 22 allocations. The dense ARM improvement cannot rescue the failed gates.
 Unknown/error paths also include regressions, retained in the table. These are
@@ -102,8 +111,8 @@ The [retained archive](benchmarks/selection-153/local-83ed54f.tar.gz) contains t
 frozen protocol, all raw measurements, replay script/JSON summary, toolchain/source
 hashes, before/after state, initial/post-cohort host observations, original failing
 alias test output and independent audit. Its adjacent
-[SHA-256](benchmarks/selection-153/SHA256SUMS) authenticates archive bytes, not the
-producer or statistical assumptions. Extract it and run `node analyze.cjs` to
+[SHA-256](benchmarks/selection-153/SHA256SUMS) checks archive integrity, not
+producer identity or statistical assumptions. Extract it and run `node analyze.cjs` to
 recompute the summary without new measurements. Full repository qualification
 and final-head hosted checks are recorded in the associated PR; this bounded
 evaluation does not authorize merge or release.

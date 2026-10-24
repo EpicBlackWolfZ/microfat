@@ -713,6 +713,53 @@ jobs:
           set -o pipefail
           go test -race -v ./tests/e2e -run '^TestTelemetry' -count=1 -timeout=10m \
             | tee .work/runtime-qualification/telemetry-matrix.log
+      - name: Characterize requirements-exact selection on independent native hosts
+        if: (github.head_ref || github.ref_name) == 'perf/requirements-exact-selection'
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+          EXPECTED_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(go env GOARCH)" = "$EXPECTED_ARCH"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          output=.work/runtime-qualification/selection-study
+          mkdir -p "$output"
+          git rev-parse HEAD > "$output/source.txt"
+          git status --porcelain=v1 > "$output/status-before.txt"
+          test ! -s "$output/status-before.txt"
+          sha256sum docs/requirements-exact-selection-hosted.md internal/microarch/microarch.go \
+            internal/microarch/selection_benchmark_test.go internal/microarch/selection_reference_test.go \
+            tests/e2e/selection_benchmark_test.go go.mod go.sum > "$output/source-sha256.txt"
+          go version > "$output/toolchain.txt"
+          GOTOOLCHAIN=local go env GOOS GOARCH GOROOT GOTOOLCHAIN >> "$output/toolchain.txt"
+          sha256sum "$(go env GOROOT)/bin/go" "$(go env GOTOOLDIR)/compile" "$(go env GOTOOLDIR)/link" \
+            >> "$output/toolchain.txt"
+          uname -smr > "$output/host.txt"
+          lscpu >> "$output/host.txt"
+          taskset -pc $$ >> "$output/host.txt"
+          cat /proc/self/cgroup > "$output/cgroup.txt"
+          current="/sys/fs/cgroup$(awk -F: '$1 == "0" {print $3}' /proc/self/cgroup)"
+          while [[ "$current" == /sys/fs/cgroup* ]]; do
+            for metric in cpu.max cpu.stat memory.max memory.high memory.current memory.events; do
+              printf '%s\n' "$current/$metric" >> "$output/cgroup.txt"
+              if test -r "$current/$metric"; then
+                cat "$current/$metric" >> "$output/cgroup.txt"
+              else
+                printf 'unavailable\n' >> "$output/cgroup.txt"
+              fi
+            done
+            test "$current" != /sys/fs/cgroup || break
+            current="$(dirname "$current")"
+          done
+          GOTOOLCHAIN=local GOMAXPROCS=1 go test ./internal/microarch -run '^$' \
+            -bench '^BenchmarkSelectVariantForHost$' -benchmem -cpu=1 -benchtime=100ms -count=8 \
+            2>&1 | tee "$output/selection.txt"
+          GOTOOLCHAIN=local GOMAXPROCS=1 go test ./tests/e2e -run '^$' \
+            -bench '^BenchmarkSelectionCompleteProcessContext$' -benchmem -cpu=1 -benchtime=100ms -count=8 \
+            2>&1 | tee "$output/process-context.txt"
+          git status --porcelain=v1 > "$output/status-after.txt"
+          test ! -s "$output/status-after.txt"
+          sha256sum -c "$output/source-sha256.txt" > "$output/source-recheck.txt"
       - name: Check out frozen descriptor confirmation baseline
         if: (github.head_ref || github.ref_name) == 'perf/verified-cache-descriptor' && !(github.event_name == 'pull_request' && github.head_ref == 'perf/verified-cache-descriptor' && github.event.action == 'edited' && github.event.changes.base == null)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
