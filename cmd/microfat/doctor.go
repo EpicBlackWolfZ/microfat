@@ -42,26 +42,28 @@ var (
 
 // DoctorOptions contains user-specified flags for the doctor command.
 type DoctorOptions struct {
-	JSONOutput bool
-	CacheDir   string
-	Strict     bool
-	Out        io.Writer
+	JSONOutput   bool
+	CacheDir     string
+	Strict       bool
+	Out          io.Writer
+	tuningInputs doctorTuningInputs
 }
 
 // DoctorReport contains full diagnostic environment telemetry.
 type DoctorReport struct {
-	Ready     bool            `json:"ready"`
-	Policy    string          `json:"policy"`
-	Scope     string          `json:"scope"`
-	CPU       CPUReport       `json:"cpu"`
-	Memfd     MemfdReport     `json:"memfd"`
-	Cache     CacheReport     `json:"cache"`
-	Execution ExecutionReport `json:"execution"`
-	Cgroup    *CgroupReport   `json:"cgroup,omitempty"`
-	Toolchain ToolchainReport `json:"toolchain"`
-	Summary   string          `json:"summary"`
-	Warnings  []string        `json:"warnings,omitempty"`
-	Errors    []string        `json:"errors,omitempty"`
+	Ready         bool                 `json:"ready"`
+	Policy        string               `json:"policy"`
+	Scope         string               `json:"scope"`
+	CPU           CPUReport            `json:"cpu"`
+	Memfd         MemfdReport          `json:"memfd"`
+	Cache         CacheReport          `json:"cache"`
+	Execution     ExecutionReport      `json:"execution"`
+	Cgroup        *CgroupReport        `json:"cgroup,omitempty"`
+	TuningPreview *DoctorTuningPreview `json:"tuning_preview,omitempty"`
+	Toolchain     ToolchainReport      `json:"toolchain"`
+	Summary       string               `json:"summary"`
+	Warnings      []string             `json:"warnings,omitempty"`
+	Errors        []string             `json:"errors,omitempty"`
 }
 
 // ExecutionReport clarifies execution status vs prerequisite verification.
@@ -124,6 +126,8 @@ type CacheReport struct {
 
 // CgroupReport contains Linux container resource limits and computed Go tuning parameters.
 type CgroupReport struct {
+	Status                    string  `json:"status,omitempty"`
+	Error                     string  `json:"error,omitempty"`
 	Detected                  bool    `json:"detected"`
 	Version                   int     `json:"version"`
 	MemoryLimitBytes          int64   `json:"memory_limit_bytes"`
@@ -148,6 +152,7 @@ type ToolchainReport struct {
 
 func newDoctorCmd() *cobra.Command {
 	var opts DoctorOptions
+	var gcProfile, liveHeapEstimate string
 
 	cmd := &cobra.Command{
 		Use:   "doctor",
@@ -155,9 +160,16 @@ func newDoctorCmd() *cobra.Command {
 		Long: `doctor inspects the local runtime environment to verify host CPU microarchitecture level,
 in-memory anonymous execution (memfd_create) prerequisites, disk cache fallback prerequisites, and container cgroup limits.
 
-Doctor evaluates environment prerequisites. Runtime process execution is not tested during doctor probes.`,
+Doctor evaluates environment prerequisites. Runtime process execution is not tested during doctor probes.
+Use --gc-profile and --live-heap-estimate to preview runtime tuning without applying settings.`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			inputs, err := resolveDoctorTuningInputs(gcProfile, liveHeapEstimate,
+				cmd.Flags().Changed("gc-profile"), cmd.Flags().Changed("live-heap-estimate"), os.LookupEnv)
+			if err != nil {
+				return err
+			}
+			opts.tuningInputs = inputs
 			if opts.Out == nil {
 				opts.Out = cmd.OutOrStdout()
 			}
@@ -186,6 +198,10 @@ Doctor evaluates environment prerequisites. Runtime process execution is not tes
 
 	cmd.Flags().BoolVar(&opts.JSONOutput, "json", false, "Output diagnostic results in JSON format")
 	cmd.Flags().StringVar(&opts.CacheDir, "cache-dir", "", "Custom cache directory to verify")
+	cmd.Flags().StringVar(&gcProfile, "gc-profile", "",
+		"Preview default, latency_critical, memory_constrained, batch_etl or adaptive (overrides MICROFAT_GC_PROFILE)")
+	cmd.Flags().StringVar(&liveHeapEstimate, "live-heap-estimate", "",
+		"Supplied live-heap estimate, e.g. 150MiB (overrides MICROFAT_LIVE_HEAP_ESTIMATE; not measured)")
 	cmd.Flags().BoolVar(
 		&opts.Strict,
 		"strict",
@@ -221,7 +237,7 @@ func runDoctor(opts DoctorOptions) *DoctorReport {
 
 	memfdRep := probeMemfd()
 	cacheRep := probeCache(opts.CacheDir)
-	cgroupRep := probeCgroup()
+	cgroupRep, tuningPreview := probeDoctorCgroup(opts.tuningInputs)
 
 	toolchainRep := ToolchainReport{
 		Version: version.Version,
@@ -254,11 +270,12 @@ func runDoctor(opts DoctorOptions) *DoctorReport {
 			Reason: "not_tested",
 			Notice: "Doctor inspects environment prerequisites; runtime process execution is not tested during doctor probes.",
 		},
-		Cgroup:    cgroupRep,
-		Toolchain: toolchainRep,
-		Summary:   verdict.Summary,
-		Warnings:  verdict.Warnings,
-		Errors:    verdict.Errors,
+		Cgroup:        cgroupRep,
+		TuningPreview: tuningPreview,
+		Toolchain:     toolchainRep,
+		Summary:       verdict.Summary,
+		Warnings:      verdict.Warnings,
+		Errors:        verdict.Errors,
 	}
 }
 
@@ -429,6 +446,7 @@ func printDoctorReport(w io.Writer, rep *DoctorReport) error {
 	printMemfdSection(&b, &rep.Memfd)
 	printCacheSection(&b, &rep.Cache)
 	printCgroupSection(&b, rep.Cgroup)
+	printDoctorTuningPreview(&b, rep.TuningPreview)
 	printToolchainSection(&b, &rep.Toolchain)
 	printIssuesAndSummary(&b, rep)
 
@@ -554,15 +572,24 @@ func printCgroupSection(b *strings.Builder, cg *CgroupReport) {
 		if cg.MemoryLimitFinite || cg.MemoryLimitBytes > 0 {
 			appendFormat(b, "    • Memory Limit:   %s\n", formatBytes(cg.MemoryLimitBytes))
 		} else {
-			appendLine(b, "    • Memory Limit:   unlimited")
+			appendLine(b, "    • Memory Limit:   unknown (unavailable or unlimited)")
 		}
 		if cg.MemoryHighFinite || cg.MemoryHighBytes > 0 {
-			appendFormat(b, "    • Memory High:    %s\n", formatBytes(cg.MemoryHighBytes))
+			appendFormat(b, "    • Memory High:    %s (throttle watermark)\n", formatBytes(cg.MemoryHighBytes))
+		}
+		if cg.MemoryLimitFinite || cg.MemoryHighFinite || cg.MemoryLimitBytes > 0 || cg.MemoryHighBytes > 0 {
+			boundary := "hard OOM ceiling (max)"
+			if cg.ConstrainingLimit == "high" {
+				boundary = "throttle watermark (high)"
+			}
+			appendFormat(b, "    • Effective Boundary: %s [%s]\n", formatBytes(cg.EffectiveMemoryLimitBytes), boundary)
+		} else {
+			appendLine(b, "    • Effective Boundary: unknown (unavailable or unlimited)")
 		}
 		if cg.CPUQuota > 0 {
 			appendFormat(b, "    • CFS CPU Quota:  %.2f cores\n", cg.CPUQuota)
 		} else {
-			appendLine(b, "    • CFS CPU Quota:  unlimited")
+			appendLine(b, "    • CFS CPU Quota:  unknown (unavailable or unlimited)")
 		}
 		if cg.GOMEMLIMITStr != "" {
 			constraintNote := ""
@@ -582,7 +609,10 @@ func printCgroupSection(b *strings.Builder, cg *CgroupReport) {
 		}
 	} else {
 		appendFormat(b, "%s Container Resource Limits\n", glyphInfo)
-		appendLine(b, "    • Status:         No container cgroup limits detected (bare-metal / unconstrained host)")
+		appendLine(b, "    • Status:         Container cgroup discovery unavailable; limits are unknown")
+		if cg != nil && cg.Error != "" {
+			appendFormat(b, "    • Collection:     %s\n", cg.Error)
+		}
 	}
 	appendLine(b)
 }

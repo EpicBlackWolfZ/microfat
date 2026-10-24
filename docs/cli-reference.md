@@ -101,7 +101,9 @@ microfat detect --json
 
 ### `microfat doctor`
 
-Verify the local host runtime environment readiness for high-performance Microfat dispatch, checking CPU capabilities, in-memory execution (`memfd_create`), disk cache execution permissions, and Linux container cgroup limits.
+Inspect local CPU capabilities, `memfd_create` and disk cache prerequisites, Linux container
+cgroup limits, and a dry-run runtime tuning plan. Doctor does not execute a payload; passing
+prerequisite checks does not prove that the application will execute successfully.
 
 ```bash
 # Standard environment inspection
@@ -110,11 +112,17 @@ microfat doctor
 # Machine-readable JSON output (recommended for CI/CD gates)
 microfat doctor --json
 
-# Strict mode (fails if memfd_create is unavailable)
+# Strict mode (requires both memfd and disk cache prerequisites)
 microfat doctor --strict
 
 # Custom cache directory audit
 microfat doctor --cache-dir /var/cache/microfat
+
+# Preview adaptive GC tuning using a supplied peak live-heap estimate
+microfat doctor --gc-profile adaptive --live-heap-estimate 150MiB
+
+# Inspect candidate tuning and the effective environment separately
+microfat doctor --json --gc-profile memory_constrained
 ```
 
 #### Flags
@@ -122,9 +130,52 @@ microfat doctor --cache-dir /var/cache/microfat
 | :--- | :--- | :--- | :--- | :--- |
 | `--json` | *(none)* | `bool` | `false` | Output complete diagnostic report in JSON. |
 | `--cache-dir` | *(none)* | `string` | *(unset)* | Custom disk cache directory path to probe and verify. |
-| `--strict` | *(none)* | `bool` | `false` | Require both `memfd_create` and disk cache to be functional; fail if either is blocked. |
+| `--strict` | *(none)* | `bool` | `false` | Require both `memfd_create` and disk cache prerequisites to pass. |
+| `--gc-profile` | *(none)* | `string` | `MICROFAT_GC_PROFILE`, then `default` | Preview `default`, `latency_critical`, `memory_constrained`, `batch_etl`, or `adaptive` GC tuning. |
+| `--live-heap-estimate` | *(none)* | `string` | `MICROFAT_LIVE_HEAP_ESTIMATE`, then unset | Supplied peak live-heap estimate, such as `150MiB`, for adaptive tuning. |
 
-#### Human-Readable Output:
+#### Tuning Preview and Input Precedence
+
+Each preview flag overrides its corresponding environment variable. An absent profile uses
+`default`; an absent live-heap estimate remains unavailable. Invalid profiles and negative,
+malformed, or overflowing estimates fail before doctor runs environment probes.
+
+Both text and JSON reports include the preview. JSON always includes a top-level
+`tuning_preview` with `applied: false`. Its `inputs` records raw values, their sources, parse
+status, and parsed values, so automation can distinguish a supplied estimate from a missing
+one. The estimate is operator input, not a measurement of this process or the application.
+
+The preview separates two views:
+
+- `tuning` is the calculated candidate plan, including the selected GC profile and any reason
+  for skipping a batch GC adjustment.
+- `effective_environment` contains `GOMEMLIMIT`, `GOMAXPROCS`, and `GOGC`. Each entry records
+  `present`, `value`, and `source` (`inherited`, `autotune`, or `unset`). An explicitly empty Go
+  environment variable remains present and inherited. Reasons explain settings that would
+  remain inherited, unset, or suppressed.
+
+Candidate values do not imply application. The effective view honors explicit Go environment
+settings, `MICROFAT_CPU_POLICY`, `MICROFAT_AUTOTUNE`, and `MICROFAT_DRY_RUN`. Native CPU policy
+does not inject `GOMAXPROCS`; disabled tuning and dry-run controls do not inject candidate
+values. The `batch_etl` profile only proposes `GOGC=off` when a finite effective memory limit
+supports it; an inherited `GOGC` still takes precedence.
+
+The existing `cgroup` report remains the observed limits and legacy default recommendations;
+its `gomemlimit_*` and `gomaxprocs` fields are not the profile-specific effective preview.
+An observation without a finite limit means unlimited or unavailable, not confirmed unlimited.
+Doctor does not select a payload, so this preview excludes retained executable storage that
+can reduce a launcher's memory budget. `GOMEMLIMIT` is a soft Go runtime budget, not a cap on
+RSS or container memory. See [runtime tuning](runtime-tuning.md) for these constraints.
+
+The preview changes no runtime settings or permissions. Doctor's existing prerequisite probes
+may still create and remove temporary files or memfd descriptors; previewing tuning does not
+turn those probes into a side-effect-free host audit.
+
+#### Human-Readable Prerequisite Output (Excerpt)
+
+Resource values and available CPU features vary by host. The full report also includes the
+tuning preview described above.
+
 ```text
 === Microfat Host Environment Doctor ===
 
@@ -134,13 +185,15 @@ microfat doctor --cache-dir /var/cache/microfat
     • Key Features:   cx16, popcnt, sse3, ssse3, sse4.1, sse4.2, avx, avx2, bmi1, bmi2, fma, osxsave
     • AVX-512 Status: not present (no downclock risk)
 
-[✔] In-Memory Execution (memfd_create)
+[✔] In-Memory Execution (memfd_create) Prerequisites
     • Kernel Support: Available (Linux 6.8.0-generic)
-    • Seccomp Filter: Permitted
+    • Seccomp Filter: Unknown (not independently tested)
+    • Execution Test: not_tested
 
-[✔] Disk Cache Execution Fallback
+[✔] Disk Cache Execution Fallback Prerequisites
     • Resolved Path:  /home/deployer/.cache/microfat
     • Permissions:    0700 (read/write OK)
+    • Execution Test: unknown (prerequisite check only; payload execution was not tested)
 
 [✔] Container Resource Limits (cgroup v2)
     • Memory Limit:   2147483648 B (2.00 GiB)
@@ -153,7 +206,7 @@ microfat doctor --cache-dir /var/cache/microfat
     • Commit:         7cba82c
     • Build Date:     2026-09-02T20:00:00Z
 
-Summary: Environment is fully ready for high-performance Microfat dispatch!
+...
 ```
 
 ---
