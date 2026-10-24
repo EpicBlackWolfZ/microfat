@@ -4,10 +4,8 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
-	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
 	"github.com/EpicBlackWolfZ/microfat/internal/memfd"
 	"golang.org/x/sys/unix"
@@ -62,29 +60,6 @@ func probeMemfd() MemfdReport {
 	return rep
 }
 
-func probeCgroup() *CgroupReport {
-	limits, err := readCgroupLimitsFunc()
-	if err != nil || limits.CgroupVersion == cgroup.VersionUnknown {
-		return &CgroupReport{
-			Detected: false,
-			Version:  cgroup.VersionUnknown,
-		}
-	}
-
-	plan := cgroup.ResolveTuningPlan(limits, os.Getenv(format.EnvMemRatio), cgroup.DefaultMemoryRatio, cgroup.DefaultMinHeadroomBytes)
-
-	return &CgroupReport{
-		Detected:                  true,
-		Version:                   limits.CgroupVersion,
-		MemoryLimitBytes:          limits.MemoryLimitBytes,
-		MemoryHighBytes:           limits.MemoryHighBytes,
-		MemoryLimitFinite:         limits.HasMemoryLimit(),
-		MemoryHighFinite:          limits.HasMemoryHigh(),
-		EffectiveMemoryLimitBytes: limits.EffectiveMemoryLimitBytes,
-		ConstrainingLimit:         plan.ConstrainingLimit,
-		CPUQuota:                  limits.CPUQuota,
-		GOMEMLIMITBytes:           plan.GOMEMLIMITBytes,
-		GOMEMLIMITStr:             plan.GOMEMLIMITStr,
-		GOMAXPROCS:                plan.GOMAXPROCS,
-	}
+func readDoctorCgroupLimits() (cgroup.Limits, error) {
+	return readCgroupLimitsFunc()
 }
