@@ -12,9 +12,10 @@ this workstation during the same session. Exact overlap was not logged, so
 contention during timing cannot be excluded. Treat this local cohort as
 exploratory: its observed gate failures do not establish mask-caused regressions
 or idle-host performance. The original archive and all observations are preserved.
-A [separate hosted native characterization](requirements-exact-selection-hosted.md)
-uses a prospective fixed cohort on each architecture; cohorts are never pooled,
-and later results cannot rescue the failed local promotion decision.
+The [separate hosted native characterizations](requirements-exact-selection-hosted-results.md)
+also miss both fixed gates. Their [prospective protocol](requirements-exact-selection-hosted.md)
+keeps each architecture independent; later results cannot rescue the failed local
+promotion decision.
 
 The [prospective protocol](requirements-exact-selection.md), candidate, independent
 reference and process-context benchmark were committed at measured source
