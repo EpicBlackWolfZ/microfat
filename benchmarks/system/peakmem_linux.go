@@ -34,17 +34,23 @@ const (
 	microsecondsToDuration = 1000
 )
 
+var (
+	newIsolatedPipe   = os.Pipe
+	killProcessGroup  = syscall.Kill
+	maxIsolatedOutput = process.MaxOutput
+)
+
 // RunIsolated executes spec through trampolinePath so the target process forks from a 2-page static
 // ELF rather than inheriting a high-RSS Go parent's VmHWM in Linux wait4(2) rusage accounting.
 func RunIsolated(ctx context.Context, trampolinePath string, spec IsolatedSpec) (IsolatedResult, error) {
 	if !filepath.IsAbs(trampolinePath) || !filepath.IsAbs(spec.Path) {
 		return IsolatedResult{}, errors.New("trampoline and target paths must be absolute")
 	}
-	reportR, reportW, err := os.Pipe()
+	reportR, reportW, err := newIsolatedPipe()
 	if err != nil {
 		return IsolatedResult{}, err
 	}
-	execErrR, execErrW, err := os.Pipe()
+	execErrR, execErrW, err := newIsolatedPipe()
 	if err != nil {
 		return IsolatedResult{}, errors.Join(err, reportR.Close(), reportW.Close())
 	}
@@ -57,20 +63,13 @@ func RunIsolated(ctx context.Context, trampolinePath string, spec IsolatedSpec) 
 	cmd.WaitDelay = process.WaitDelay
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
-		if cmd.Process == nil || cmd.Process.Pid <= 0 {
-			return nil
-		}
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
-		}
-		return err
+		return cancelIsolatedProcess(cmd)
 	}
 	cmd.ExtraFiles = []*os.File{reportW, execErrW}
 
 	var stdout, stderr limitedBuffer
-	stdout.limit = process.MaxOutput
-	stderr.limit = process.MaxOutput
+	stdout.limit = maxIsolatedOutput
+	stderr.limit = maxIsolatedOutput
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -115,6 +114,17 @@ func RunIsolated(ctx context.Context, trampolinePath string, spec IsolatedSpec) 
 		return res, errors.Join(waitErr, fmt.Errorf("incomplete isolated wait4 report (%d bytes)", len(reportBytes)))
 	}
 	return decodeIsolatedReport(res, reportBytes)
+}
+
+func cancelIsolatedProcess(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil || cmd.Process.Pid <= 0 {
+		return nil
+	}
+	err := killProcessGroup(-cmd.Process.Pid, syscall.SIGKILL)
+	if errors.Is(err, syscall.ESRCH) {
+		return os.ErrProcessDone
+	}
+	return err
 }
 
 func decodeIsolatedReport(res IsolatedResult, report []byte) (IsolatedResult, error) {

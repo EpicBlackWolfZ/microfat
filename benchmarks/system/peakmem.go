@@ -22,6 +22,8 @@ const (
 	trampolineCodeOffset        = 4096
 	trampolineLoadAddress       = 0x400000
 	trampolineBinaryName        = "microfat-peakmem-trampoline"
+	trampolineArchAMD64         = "amd64"
+	trampolineArchARM64         = "arm64"
 	trampolineMode              = 0o700
 
 	elfIdentVersionOffset = 6
@@ -167,15 +169,19 @@ func BuildTrampolineELF(arch string) ([]byte, error) {
 	var machine elf.Machine
 	var encoded string
 	switch arch {
-	case "amd64":
+	case trampolineArchAMD64:
 		machine = elf.EM_X86_64
 		encoded = trampolineAMD64Hex
-	case "arm64":
+	case trampolineArchARM64:
 		machine = elf.EM_AARCH64
 		encoded = trampolineARM64Hex
 	default:
 		return nil, fmt.Errorf("unsupported trampoline architecture %q", arch)
 	}
+	return buildTrampolineELFWithHex(machine, encoded)
+}
+
+func buildTrampolineELFWithHex(machine elf.Machine, encoded string) ([]byte, error) {
 	code, err := hex.DecodeString(encoded)
 	if err != nil {
 		return nil, err

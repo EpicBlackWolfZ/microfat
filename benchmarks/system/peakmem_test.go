@@ -70,21 +70,24 @@ func TestBuildAndWriteTrampolineELF(t *testing.T) {
 	_, err := BuildTrampolineELF("riscv64")
 	require.ErrorContains(t, err, "unsupported trampoline architecture")
 
-	_, err = WriteTrampolineELF("relative/dir", "amd64")
+	_, err = buildTrampolineELFWithHex(elf.EM_X86_64, "zz-invalid-hex")
+	require.Error(t, err)
+
+	_, err = WriteTrampolineELF("relative/dir", trampolineArchAMD64)
 	require.ErrorContains(t, err, "must be absolute")
 
 	_, err = WriteTrampolineELF(t.TempDir(), "mips64")
 	require.ErrorContains(t, err, "unsupported trampoline architecture")
 
-	_, err = WriteTrampolineELF(filepath.Join(t.TempDir(), "nonexistent-subdir"), "amd64")
+	_, err = WriteTrampolineELF(filepath.Join(t.TempDir(), "nonexistent-subdir"), trampolineArchAMD64)
 	require.Error(t, err)
 
 	cases := []struct {
 		arch    string
 		machine elf.Machine
 	}{
-		{arch: "amd64", machine: elf.EM_X86_64},
-		{arch: "arm64", machine: elf.EM_AARCH64},
+		{arch: trampolineArchAMD64, machine: elf.EM_X86_64},
+		{arch: trampolineArchARM64, machine: elf.EM_AARCH64},
 	}
 	for _, tc := range cases {
 		t.Run(tc.arch, func(t *testing.T) {

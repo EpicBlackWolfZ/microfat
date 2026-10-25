@@ -39,7 +39,7 @@ func buildTinyStaticELF(t *testing.T, arch string, exitCode byte, infiniteLoop b
 	var machine elf.Machine
 	var code []byte
 	switch arch {
-	case "amd64":
+	case trampolineArchAMD64:
 		machine = elf.EM_X86_64
 		if infiniteLoop {
 			code = []byte{0xeb, 0xfe} // jmp $
@@ -55,7 +55,7 @@ func buildTinyStaticELF(t *testing.T, arch string, exitCode byte, infiniteLoop b
 				0x0f, 0x05, // syscall
 			}
 		}
-	case "arm64":
+	case trampolineArchARM64:
 		machine = elf.EM_AARCH64
 		var insns []uint32
 		if infiniteLoop {
@@ -251,4 +251,56 @@ func TestDecodeIsolatedReportAndLimitedBuffer(t *testing.T) {
 	_, writeErr = lb.Write([]byte("overflow"))
 	require.ErrorIs(t, writeErr, process.ErrOutputLimit)
 	require.ErrorIs(t, lb.err, process.ErrOutputLimit)
+}
+
+func TestRunIsolatedPipeOutputLimitAndCancelBranches(t *testing.T) {
+	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
+		t.Skipf("unsupported Linux architecture %s", runtime.GOARCH)
+	}
+
+	assert.NoError(t, cancelIsolatedProcess(nil))
+	assert.NoError(t, cancelIsolatedProcess(&exec.Cmd{}))
+
+	oldKill := killProcessGroup
+	t.Cleanup(func() { killProcessGroup = oldKill })
+	killProcessGroup = func(int, syscall.Signal) error {
+		return syscall.ESRCH
+	}
+	err := cancelIsolatedProcess(&exec.Cmd{Process: &os.Process{Pid: 42}})
+	require.ErrorIs(t, err, os.ErrProcessDone)
+	killProcessGroup = oldKill
+
+	trampolinePath, err := WriteTrampolineELF(t.TempDir(), runtime.GOARCH)
+	require.NoError(t, err)
+	payloadPath := buildTinyStaticELF(t, runtime.GOARCH, 0, false)
+
+	oldPipe := newIsolatedPipe
+	t.Cleanup(func() { newIsolatedPipe = oldPipe })
+
+	// 1. First pipe creation failure.
+	newIsolatedPipe = func() (*os.File, *os.File, error) {
+		return nil, nil, syscall.EMFILE
+	}
+	_, err = RunIsolated(context.Background(), trampolinePath, IsolatedSpec{Path: payloadPath})
+	require.ErrorIs(t, err, syscall.EMFILE)
+
+	// 2. Second pipe creation failure closes the first pipe pair cleanly.
+	calls := 0
+	newIsolatedPipe = func() (*os.File, *os.File, error) {
+		calls++
+		if calls == 1 {
+			return oldPipe()
+		}
+		return nil, nil, syscall.ENFILE
+	}
+	_, err = RunIsolated(context.Background(), trampolinePath, IsolatedSpec{Path: payloadPath})
+	require.ErrorIs(t, err, syscall.ENFILE)
+	newIsolatedPipe = oldPipe
+
+	// 3. Stdout exceeding maxIsolatedOutput triggers closeErr return path.
+	oldMax := maxIsolatedOutput
+	t.Cleanup(func() { maxIsolatedOutput = oldMax })
+	maxIsolatedOutput = 4
+	_, err = RunIsolated(context.Background(), trampolinePath, IsolatedSpec{Path: payloadPath})
+	require.ErrorIs(t, err, process.ErrOutputLimit)
 }
