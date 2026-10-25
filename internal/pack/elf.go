@@ -5,7 +5,19 @@ import (
 	"debug/elf"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
+)
+
+const (
+	elfEhdrVersionOff = 20
+	elfEhdrVersionEnd = 24
+	elfEhdrEntryOff   = 24
+	elfEhdrEntryEnd   = 32
+	phFlagsFieldEnd   = 8
+	phPaddrFieldOff   = 24
+	phAlignFieldOff   = 48
+	phAlignFieldEnd   = 56
 )
 
 // readExecutableELF reads only the headers used for executable validation.
@@ -13,55 +25,65 @@ import (
 // section name, which can amplify a small input beyond the metadata budgets.
 // Auxiliary section contents and names are not part of the execution contract.
 func readExecutableELF(data []byte) (*elf.File, error) {
-	if err := PreflightELFHeaders(data); err != nil {
+	return readExecutableELFReaderAt(bytes.NewReader(data), uint64(len(data)))
+}
+
+func readExecutableELFReaderAt(r io.ReaderAt, fileSize uint64) (*elf.File, error) {
+	headerBytes, err := preflightELFHeadersReaderAtWithAccounting(&inputAccounting{}, r, fileSize)
+	if err != nil {
 		return nil, err
 	}
 	order := binary.ByteOrder(binary.LittleEndian)
-	if data[elf.EI_DATA] == byte(elf.ELFDATA2MSB) {
+	if headerBytes[elf.EI_DATA] == byte(elf.ELFDATA2MSB) {
 		order = binary.BigEndian
 	}
-	var header elf.Header64
-	if err := binary.Read(bytes.NewReader(data), order, &header); err != nil {
-		return nil, err
+	version := order.Uint32(headerBytes[elfEhdrVersionOff:elfEhdrVersionEnd])
+	if version != uint32(elf.EV_CURRENT) {
+		return nil, fmt.Errorf("invalid ELF version %d", version)
 	}
-	if header.Version != uint32(elf.EV_CURRENT) {
-		return nil, fmt.Errorf("invalid ELF version %d", header.Version)
+	phoff := order.Uint64(headerBytes[elfEhdrPhoffOff:elfEhdrPhoffEnd])
+	if phoff > math.MaxInt64 {
+		return nil, fmt.Errorf("invalid program header offset %d", phoff)
 	}
-	if header.Phoff > math.MaxInt64 {
-		return nil, fmt.Errorf("invalid program header offset %d", header.Phoff)
-	}
+	phnum := order.Uint16(headerBytes[elfEhdrPhnumOff:elfEhdrPhnumEnd])
+	phentsize := order.Uint16(headerBytes[elfEhdrPhentsizeOff:elfEhdrPhentsizeEnd])
 	f := &elf.File{
 		FileHeader: elf.FileHeader{
-			Class:      elf.Class(header.Ident[elf.EI_CLASS]),
-			Data:       elf.Data(header.Ident[elf.EI_DATA]),
-			Version:    elf.Version(header.Version),
-			OSABI:      elf.OSABI(header.Ident[elf.EI_OSABI]),
-			ABIVersion: header.Ident[elf.EI_ABIVERSION],
+			Class:      elf.Class(headerBytes[elf.EI_CLASS]),
+			Data:       elf.Data(headerBytes[elf.EI_DATA]),
+			Version:    elf.Version(version),
+			OSABI:      elf.OSABI(headerBytes[elf.EI_OSABI]),
+			ABIVersion: headerBytes[elf.EI_ABIVERSION],
 			ByteOrder:  order,
-			Type:       elf.Type(header.Type),
-			Machine:    elf.Machine(header.Machine),
-			Entry:      header.Entry,
+			Type:       elf.Type(order.Uint16(headerBytes[elfEhdrTypeOff:elfEhdrTypeEnd])),
+			Machine:    elf.Machine(order.Uint16(headerBytes[elfEhdrMachineOff:elfEhdrMachineEnd])),
+			Entry:      order.Uint64(headerBytes[elfEhdrEntryOff:elfEhdrEntryEnd]),
 		},
-		Progs: make([]*elf.Prog, 0, header.Phnum),
+		Progs: make([]*elf.Prog, 0, phnum),
 	}
-	for i := range header.Phnum {
-		offset := header.Phoff + uint64(i)*uint64(header.Phentsize)
-		var program elf.Prog64
-		if err := binary.Read(bytes.NewReader(data[offset:]), order, &program); err != nil {
-			return nil, err
-		}
-		if program.Off > math.MaxInt64 || program.Filesz > math.MaxInt64 {
+	if phnum == 0 {
+		return f, nil
+	}
+	phTableBytes, err := readExactAt(r, phoff, uint64(phnum)*uint64(phentsize))
+	if err != nil {
+		return nil, err
+	}
+	for i := range phnum {
+		ent := phTableBytes[uint64(i)*uint64(phentsize):]
+		pOff := order.Uint64(ent[phOffsetFieldOff:phVaddrFieldOff])
+		pFilesz := order.Uint64(ent[phFileszFieldOff:phMemszFieldOff])
+		if pOff > math.MaxInt64 || pFilesz > math.MaxInt64 {
 			return nil, fmt.Errorf("invalid program offset or file size")
 		}
 		f.Progs = append(f.Progs, &elf.Prog{ProgHeader: elf.ProgHeader{
-			Type:   elf.ProgType(program.Type),
-			Flags:  elf.ProgFlag(program.Flags),
-			Off:    program.Off,
-			Vaddr:  program.Vaddr,
-			Paddr:  program.Paddr,
-			Filesz: program.Filesz,
-			Memsz:  program.Memsz,
-			Align:  program.Align,
+			Type:   elf.ProgType(order.Uint32(ent[:phTypeFieldEnd])),
+			Flags:  elf.ProgFlag(order.Uint32(ent[phTypeFieldEnd:phFlagsFieldEnd])),
+			Off:    pOff,
+			Vaddr:  order.Uint64(ent[phVaddrFieldOff:phPaddrFieldOff]),
+			Paddr:  order.Uint64(ent[phPaddrFieldOff:phFileszFieldOff]),
+			Filesz: pFilesz,
+			Memsz:  order.Uint64(ent[phMemszFieldOff:phAlignFieldOff]),
+			Align:  order.Uint64(ent[phAlignFieldOff:phAlignFieldEnd]),
 		}})
 	}
 	return f, nil
