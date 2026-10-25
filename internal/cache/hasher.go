@@ -1,13 +1,10 @@
 package cache
 
-import (
-	"crypto/sha256"
-	"hash"
-)
-
-// Hasher constructors used by streaming temporary-file materialization and descriptor-bound
-// post-publication / cache-hit verification. Tests override these to assert exact hash pass counts.
+// Hash observers allow tests to count streaming materialization and descriptor
+// verification passes without replacing the concrete SHA-256 implementation.
+// Keeping SHA-256 construction at each call site lets the compiler retain scratch
+// buffers on the stack. Observers are nil during normal operation.
 var (
-	NewStreamHasherFunc func() hash.Hash = sha256.New
-	NewVerifyHasherFunc func() hash.Hash = sha256.New
+	StreamHashStartedFunc func()
+	VerifyHashStartedFunc func()
 )
