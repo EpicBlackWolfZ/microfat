@@ -97,6 +97,18 @@ func TestResolveCodecResourcesWith(t *testing.T) {
 		assert.Equal(t, 4, res.effectiveCPUs)
 		assert.False(t, res.hasMemoryCap)
 	})
+
+	t.Run("zero gomemlimit remains a finite cap", func(t *testing.T) {
+		t.Parallel()
+		res := resolveCodecResourcesWith(8, 0, func() (cgroup.Limits, error) {
+			return cgroup.Limits{}, nil
+		})
+		assert.True(t, res.hasMemoryCap)
+		assert.Zero(t, res.memoryBytes)
+		assert.Equal(t, singleThreadConcurrency, computeLZ4Concurrency(lz4DefaultBlockSize*2, res))
+		assert.Equal(t, singleThreadConcurrency,
+			computeZstdEncodePlan(zstdDefaultSingleBlockLimit*2, zstd.SpeedDefault, false, res).concurrency)
+	})
 }
 
 func TestComputeLZ4Concurrency(t *testing.T) {
@@ -185,6 +197,29 @@ func TestComputeZstdEncodePlan(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tc.want, computeZstdEncodePlan(tc.payloadLen, tc.level, tc.hasDict, tc.res))
+		})
+	}
+}
+
+func TestLZ4EncoderWorkspaceBytes(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		payloadLen int64
+		want       int64
+	}{
+		{"negative payload", -1, lz4BytesPerWorker},
+		{"empty payload", 0, lz4BytesPerWorker},
+		{"single block", lz4DefaultBlockSize, lz4BytesPerWorker},
+		{"two blocks and pending buffer", lz4DefaultBlockSize + 1, 3 * lz4BytesPerWorker},
+		{"eight blocks and pending buffer", 8 * lz4DefaultBlockSize, 9 * lz4BytesPerWorker},
+		{"nine blocks and pending buffer", 9 * lz4DefaultBlockSize, 10 * lz4BytesPerWorker},
+		{"huge payload remains bounded", math.MaxInt64, 10 * lz4BytesPerWorker},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, LZ4EncoderWorkspaceBytes(tc.payloadLen))
 		})
 	}
 }

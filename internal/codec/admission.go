@@ -65,7 +65,7 @@ func resolveCodecResourcesWith(gomaxprocs int, goMemLimit int64, readLimits func
 
 	var memCap int64
 	hasMem := false
-	if goMemLimit > 0 && goMemLimit < math.MaxInt64 {
+	if goMemLimit >= 0 && goMemLimit < math.MaxInt64 {
 		memCap = goMemLimit
 		hasMem = true
 	}
@@ -119,6 +119,21 @@ func computeLZ4Concurrency(payloadLen int, res codecResources) int {
 
 	blocks := (payloadLen + lz4DefaultBlockSize - 1) / lz4DefaultBlockSize
 	return max(min(cpus, blocks, maxLZ4BlockConcurrency), singleThreadConcurrency)
+}
+
+// LZ4EncoderWorkspaceBytes conservatively estimates encoder workspace, excluding
+// the caller-owned payload. Parallel callers must reserve this per active encoder.
+// The upstream writer can hold concurrency queued blocks plus one draining block,
+// and a further pending input buffer. Budget each at the conservative per-worker
+// allowance, even if the current CPU or memory limits would choose fewer workers,
+// so a subsequent resource-limit increase cannot invalidate admission.
+func LZ4EncoderWorkspaceBytes(payloadLen int64) int64 {
+	if payloadLen <= lz4DefaultBlockSize {
+		return lz4BytesPerWorker
+	}
+	blocks := (payloadLen-1)/lz4DefaultBlockSize + 1
+	inFlightBlocks := min(blocks, int64(maxLZ4BlockConcurrency+1))
+	return (inFlightBlocks + 1) * lz4BytesPerWorker
 }
 
 func zstdSingleBlockLimit(level zstd.EncoderLevel) int {
