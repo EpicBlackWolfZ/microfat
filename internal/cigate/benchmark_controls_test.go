@@ -126,7 +126,7 @@ func newBenchmarkControlsFixture(t *testing.T) benchmarkControlsFixture {
 		"stat": "#!/bin/bash\nprintf 'cgroup2fs\\n'\n",
 		"go":   benchmarkControlsGo,
 	} {
-		require.NoError(t, os.WriteFile(filepath.Join(tools, name), []byte(script), 0o755))
+		writeExecutableTestStub(t, filepath.Join(tools, name), script)
 	}
 	unrelated := filepath.Join(state, "unrelated")
 	require.NoError(t, os.Mkdir(unrelated, 0o755))
@@ -156,7 +156,7 @@ func (f benchmarkControlsFixture) run(t *testing.T, failure string, failStdout b
 		t.Cleanup(func() { require.NoError(t, full.Close()) })
 		cmd.Stdout = full
 	}
-	err := cmd.Run()
+	err := runCommandSafe(cmd)
 	if err != nil {
 		var exit *exec.ExitError
 		require.ErrorAs(t, err, &exit, "script must exit normally: %s", stderr.String())
@@ -288,7 +288,7 @@ func TestBenchmarkControlsSuccessfulSetupHandsOffUsableEnvironment(t *testing.T)
 		`source "$1"; printf '%s\n' "$MICROFAT_BENCH_CGROUP_ROOT" "$MICROFAT_BENCH_CGROUP_VERSION" "$MICROFAT_BENCH_REQUIRE_CONTROLS"`,
 		"test-export", fixture.environment)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
-	exported, err := cmd.CombinedOutput()
+	exported, err := combinedOutputSafe(cmd)
 	require.NoError(t, err, "%s", exported)
 	assert.Equal(t, string(root)+"v2\n1\n", string(exported))
 	fixture.assertConfined(t)
@@ -303,7 +303,7 @@ func TestBenchmarkControlsRejectsNoncanonicalIdentityBeforeMutation(t *testing.T
 			cmd := exec.CommandContext(t.Context(), "bash", "../../scripts/benchmark-controls.sh", fixture.output)
 			cmd.Env = []string{"PATH=" + fixture.tools + string(os.PathListSeparator) + os.Getenv("PATH"),
 				"GITHUB_RUN_ID=" + identity[0], "GITHUB_RUN_ATTEMPT=" + identity[1]}
-			output, err := cmd.CombinedOutput()
+			output, err := combinedOutputSafe(cmd)
 			require.Error(t, err, "%s", output)
 			assert.NoFileExists(t, filepath.Join(fixture.state, "operations"))
 			assert.NoDirExists(t, filepath.Join(fixture.state, "evidence"))
