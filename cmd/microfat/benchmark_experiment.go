@@ -72,7 +72,7 @@ func newExperimentQualifyCmd() *cobra.Command {
 }
 
 func newExperimentRunCmd() *cobra.Command {
-	var configPath, output, fortio, repository, baseRepository, goTool string
+	var configPath, output, fortio, repository, headRepository, baseRepository, goTool string
 	cmd := &cobra.Command{Use: "run --config <suite.json> --output-dir <directory>",
 		Short: "Run paired server trials with an external Fortio process", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -86,7 +86,7 @@ func newExperimentRunCmd() *cobra.Command {
 			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
 			result, runErr := executeExperiment(ctx, cfg, runner.RunOptions{Repository: repository,
-				BaseRepository: baseRepository, Go: goTool,
+				HeadRepository: headRepository, BaseRepository: baseRepository, Go: goTool,
 				Fortio: fortio, OutputDir: output, LogWriter: cmd.ErrOrStderr()})
 			if result != nil {
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Bundle)
@@ -96,7 +96,8 @@ func newExperimentRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&configPath, "config", "", "Versioned experiment suite JSON")
 	cmd.Flags().StringVar(&output, "output-dir", "results/benchmarks", "Parent directory for immutable evidence bundles")
 	cmd.Flags().StringVar(&fortio, "fortio", os.Getenv("MICROFAT_BENCH_FORTIO"), "Path to pinned Fortio "+load.Version())
-	cmd.Flags().StringVar(&repository, "repository", ".", "Source repository used for native and fat builds")
+	cmd.Flags().StringVar(&repository, "repository", ".", "Harness source repository; default source for native and fat builds")
+	cmd.Flags().StringVar(&headRepository, "head-repository", "", "Head payload/packer/stub checkout (defaults to --repository)")
 	cmd.Flags().StringVar(&baseRepository, "base-repository", "", "Base checkout for counterbalanced packer/stub revision comparison")
 	cmd.Flags().StringVar(&goTool, "go", "go", "Go "+microfat.GoVersion()+" executable")
 	return cmd

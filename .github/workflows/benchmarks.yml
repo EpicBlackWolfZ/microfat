@@ -11,7 +11,7 @@ on:
       tier:
         description: Benchmark tier (branch dispatch never publishes)
         type: choice
-        options: [smoke, nightly, release, calibration, compatibility]
+        options: [smoke, nightly, release, calibration, compatibility, historical-p99]
         default: smoke
 
 permissions:
@@ -103,6 +103,85 @@ jobs:
           path: .work/benchmark-matrix
           include-hidden-files: true
           retention-days: 14
+
+  historical-p99:
+    name: Historical service p99 (${{ matrix.scenario }}, cohort ${{ matrix.cohort }})
+    if: github.event_name == 'workflow_dispatch' && inputs.tier == 'historical-p99'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        scenario: [memory32, mixed4]
+        cohort: [0, 1]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Read shared tool versions
+        id: toolchain
+        uses: ./.github/actions/toolchain-config
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Install pinned Task
+        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        with:
+          version: ${{ steps.toolchain.outputs.task }}
+      - name: Build pinned investigation tools
+        run: |
+          mkdir -p .work/p99-investigation
+          lscpu --json > .work/p99-investigation/host-cpu.json
+          uname -a > .work/p99-investigation/host-kernel.txt
+          cp /etc/os-release .work/p99-investigation/host-os-release.txt
+          task benchmark-tools build 2>&1 | tee .work/p99-investigation/tool-build.log
+      - name: Prepare hosted resource controls
+        run: |
+          bash scripts/benchmark-controls.sh .work/controls.json 2>&1 | tee .work/p99-investigation/controls.log
+      - name: Freeze historical sources and schedule
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+          COHORT: ${{ matrix.cohort }}
+        run: |
+          go run ./internal/cmd/p99-investigation prepare --scenario "$SCENARIO" --cohort "$COHORT" \
+            --controls .work/controls.json --output .work/p99-investigation \
+            2>&1 | tee .work/p99-investigation/prepare.log
+      - name: Measure historical paired revisions
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          bash scripts/benchmark-enter.sh "$MICROFAT_BENCH_CGROUP_ROOT" \
+            go run ./internal/cmd/p99-investigation measure --output .work/p99-investigation \
+            2>&1 | tee .work/p99-investigation/measure.log
+      - name: Drain owned delegation
+        if: always()
+        run: bash scripts/benchmark-cleanup.sh
+      - name: Summarize all retained outcomes
+        if: always()
+        run: |
+          mkdir -p .work/p99-investigation
+          go run ./internal/cmd/p99-investigation summarize --output .work/p99-investigation \
+            2>&1 | tee .work/p99-investigation/summarize.log
+      - name: Preserve historical investigation evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: historical-p99-${{ matrix.scenario }}-${{ matrix.cohort }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .work/p99-investigation
+            .work/controls.json
+            .work/benchmark-tools/SHA256SUMS
+            .work/benchmark-tools/module.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
   calibration:
     name: Independent calibration (${{ matrix.repetition }})
     if: inputs.tier == 'calibration'

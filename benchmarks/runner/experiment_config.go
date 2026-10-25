@@ -49,6 +49,7 @@ type ExperimentConfig struct {
 	WarmupMS         int            `json:"warmup_ms"`
 	SampleMS         int            `json:"sample_ms"`
 	Seed             uint64         `json:"seed"`
+	ScheduleSeed     *uint64        `json:"schedule_seed,omitempty"`
 	PayloadBytes     int            `json:"payload_bytes"`
 	Iterations       int            `json:"iterations"`
 	Concurrency      int            `json:"concurrency"`
@@ -117,6 +118,7 @@ func (c ExperimentConfig) Validate() error {
 
 type RunOptions struct {
 	Repository     string
+	HeadRepository string
 	BaseRepository string
 	Go             string
 	Fortio         string
@@ -128,6 +130,9 @@ type RunOptions struct {
 func (o *RunOptions) resolve() error {
 	if o.Repository == "" {
 		o.Repository = "."
+	}
+	if o.HeadRepository == "" {
+		o.HeadRepository = o.Repository
 	}
 	if o.Go == "" {
 		o.Go = "go"
@@ -156,7 +161,11 @@ func (o *RunOptions) resolve() error {
 	if o.OutputDir == "" {
 		return errors.New("output directory required")
 	}
-	for _, field := range []*string{&o.Repository, &o.Fortio, &o.Helper, &o.OutputDir} {
+	fields := []*string{&o.Repository, &o.HeadRepository, &o.Fortio, &o.Helper, &o.OutputDir}
+	if o.BaseRepository != "" {
+		fields = append(fields, &o.BaseRepository)
+	}
+	for _, field := range fields {
 		absolute, err := filepath.Abs(*field)
 		if err != nil {
 			return fmt.Errorf("resolving path: %w", err)
@@ -164,6 +173,13 @@ func (o *RunOptions) resolve() error {
 		*field = absolute
 	}
 	return nil
+}
+
+func (c ExperimentConfig) scheduleSeed() uint64 {
+	if c.ScheduleSeed != nil {
+		return *c.ScheduleSeed
+	}
+	return c.Seed
 }
 
 func (c ExperimentConfig) validateTiming() error {

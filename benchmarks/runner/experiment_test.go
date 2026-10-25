@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/benchmarks/compare"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/internal/testfixture"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/load"
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/process"
@@ -114,6 +115,8 @@ func TestExperimentEndToEnd(t *testing.T) {
 	require.NoError(t, testfixture.WriteExecutable(tool, []byte(script)))
 	cfg := DefaultExperimentConfig()
 	cfg.Blocks = 1
+	scheduleSeed := uint64(0)
+	cfg.ScheduleSeed = &scheduleSeed
 	cfg.GOMEMLIMIT, cfg.GOGC = " 1.5gb ", "+0100"
 	options := RunOptions{Repository: repository, Fortio: tool, OutputDir: t.TempDir(), LogWriter: io.Discard}
 	result, err := RunExperiment(context.Background(), cfg, options)
@@ -123,6 +126,10 @@ func TestExperimentEndToEnd(t *testing.T) {
 	assert.False(t, result.Experiment.ReleaseEligible)
 	verified, err := report.ReadBundle(result.Bundle)
 	require.NoError(t, err)
+	expectedSchedule, err := compare.Schedule(verified.Configurations, cfg.Blocks, scheduleSeed)
+	require.NoError(t, err)
+	assert.Equal(t, expectedSchedule, verified.Schedule)
+	assert.Equal(t, cfg.Seed, verified.Seed, "bootstrap seed remains separate from schedule seed")
 	assert.Len(t, verified.Trials, len(verified.Configurations))
 	for _, configuration := range verified.Configurations {
 		assert.Equal(t, "1610612736", configuration.Environment["GOMEMLIMIT"])
@@ -134,9 +141,11 @@ func TestExperimentEndToEnd(t *testing.T) {
 		assert.NotEqual(t, trial.Target.PID, trial.Generator.PID)
 		assert.Positive(t, trial.SampleCount)
 		assert.NotEmpty(t, trial.TelemetryPath)
+		assert.Equal(t, "1", trial.Target.Arguments[len(trial.Target.Arguments)-1], "workload seed remains fixed")
 	}
 	// Exercise base/head with the same source as a no-change orchestration check.
 	cfg.Profile, cfg.Dictionary, cfg.ExecDiagnostics = minimalProfile, true, true
+	cfg.ScheduleSeed = nil
 	options.BaseRepository = repository
 	result, err = RunExperiment(context.Background(), cfg, options)
 	require.NoError(t, err)
