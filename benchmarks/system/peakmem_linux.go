@@ -56,6 +56,8 @@ func RunIsolated(ctx context.Context, trampolinePath string, spec IsolatedSpec) 
 	}
 
 	cmdArgs := append([]string{spec.Path}, spec.Args...)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	// #nosec G204 -- explicitly validated absolute benchmark trampoline and target executable.
 	cmd := exec.CommandContext(ctx, trampolinePath, cmdArgs...)
 	cmd.Dir = spec.Dir
@@ -70,6 +72,8 @@ func RunIsolated(ctx context.Context, trampolinePath string, spec IsolatedSpec) 
 	var stdout, stderr limitedBuffer
 	stdout.limit = maxIsolatedOutput
 	stderr.limit = maxIsolatedOutput
+	stdout.cancel = cancel
+	stderr.cancel = cancel
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -113,7 +117,8 @@ func RunIsolated(ctx context.Context, trampolinePath string, spec IsolatedSpec) 
 	if len(reportBytes) != trampolineReportBytes {
 		return res, errors.Join(waitErr, fmt.Errorf("incomplete isolated wait4 report (%d bytes)", len(reportBytes)))
 	}
-	return decodeIsolatedReport(res, reportBytes)
+	res, decodeErr := decodeIsolatedReport(res, reportBytes)
+	return res, errors.Join(waitErr, decodeErr)
 }
 
 func cancelIsolatedProcess(cmd *exec.Cmd) error {
@@ -159,14 +164,18 @@ func decodeIsolatedReport(res IsolatedResult, report []byte) (IsolatedResult, er
 }
 
 type limitedBuffer struct {
-	buf   bytes.Buffer
-	limit int
-	err   error
+	buf    bytes.Buffer
+	limit  int
+	err    error
+	cancel context.CancelFunc
 }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
 	if len(p) > b.limit-b.buf.Len() {
 		b.err = process.ErrOutputLimit
+		if b.cancel != nil {
+			b.cancel()
+		}
 		return 0, process.ErrOutputLimit
 	}
 	return b.buf.Write(p)

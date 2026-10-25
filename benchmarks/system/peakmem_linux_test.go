@@ -20,18 +20,19 @@ import (
 )
 
 const (
-	testParentBallastBytes   = 64 * 1024 * 1024
-	testPageStep             = 4096
-	testStaticPayloadBytes   = 64 * 1024
-	testIsolatedRSSCeiling   = 8 * 1024 * 1024
-	testParentMinExpectedRSS = 32 * 1024 * 1024
-	testPayloadMarker        = "isolated-peak-ok\n"
-	testCustomExitCode       = 7
-	testArm64InsnBytes       = 4
-	testArm64ImmShift        = 5
-	testSignalShift          = 0
-	testRawSignalKill        = 9
-	testTimeoutWindow        = 80 * time.Millisecond
+	testParentBallastBytes     = 64 * 1024 * 1024
+	testPageStep               = 4096
+	testStaticPayloadBytes     = 64 * 1024
+	testIsolatedRSSCeiling     = 8 * 1024 * 1024
+	testParentMinExpectedRSS   = 32 * 1024 * 1024
+	testPayloadMarker          = "isolated-peak-ok\n"
+	testCustomExitCode         = 7
+	testArm64InsnBytes         = 4
+	testArm64ImmShift          = 5
+	testSignalShift            = 0
+	testRawSignalKill          = 9
+	testTimeoutWindow          = 80 * time.Millisecond
+	testIsolatedCleanupTimeout = 5 * time.Second
 )
 
 func buildTinyStaticELF(t *testing.T, arch string, exitCode byte, infiniteLoop bool) string {
@@ -303,4 +304,54 @@ func TestRunIsolatedPipeOutputLimitAndCancelBranches(t *testing.T) {
 	maxIsolatedOutput = 4
 	_, err = RunIsolated(context.Background(), trampolinePath, IsolatedSpec{Path: payloadPath})
 	require.ErrorIs(t, err, process.ErrOutputLimit)
+}
+
+func TestRunIsolatedPropagatesWaitDelay(t *testing.T) {
+	t.Parallel()
+	if runtime.GOARCH != trampolineArchAMD64 && runtime.GOARCH != trampolineArchARM64 {
+		t.Skipf("unsupported Linux architecture %s", runtime.GOARCH)
+	}
+	shPath, err := exec.LookPath("sh")
+	require.NoError(t, err)
+	trampolinePath, err := WriteTrampolineELF(t.TempDir(), runtime.GOARCH)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), testIsolatedCleanupTimeout)
+	defer cancel()
+
+	// The target exits successfully, but its background child keeps the output pipe open.
+	// Preserve cmd.Wait's ErrWaitDelay instead of reporting a successful measurement.
+	res, err := RunIsolated(ctx, trampolinePath, IsolatedSpec{
+		Path: shPath,
+		Args: []string{"-c", "sleep 30 & exit 0"},
+	})
+	require.ErrorIs(t, err, exec.ErrWaitDelay)
+	assert.Equal(t, 0, res.ExitCode)
+	assert.Greater(t, res.PID, 0)
+}
+
+func TestRunIsolatedOutputLimitCancelsWorkload(t *testing.T) {
+	if runtime.GOARCH != trampolineArchAMD64 && runtime.GOARCH != trampolineArchARM64 {
+		t.Skipf("unsupported Linux architecture %s", runtime.GOARCH)
+	}
+	shPath, err := exec.LookPath("sh")
+	require.NoError(t, err)
+	trampolinePath, err := WriteTrampolineELF(t.TempDir(), runtime.GOARCH)
+	require.NoError(t, err)
+	oldMax := maxIsolatedOutput
+	maxIsolatedOutput = 4
+	t.Cleanup(func() { maxIsolatedOutput = oldMax })
+
+	for _, output := range []string{"stdout", "stderr"} {
+		t.Run(output, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), testIsolatedCleanupTimeout)
+			defer cancel()
+			script := "printf overflow; exec sleep 30"
+			if output == "stderr" {
+				script = "printf overflow >&2; exec sleep 30"
+			}
+			_, runErr := RunIsolated(ctx, trampolinePath, IsolatedSpec{Path: shPath, Args: []string{"-c", script}})
+			require.ErrorIs(t, runErr, process.ErrOutputLimit)
+			require.NoError(t, ctx.Err(), "output overflow must cancel the workload before the caller's deadline")
+		})
+	}
 }
