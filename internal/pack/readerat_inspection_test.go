@@ -71,6 +71,62 @@ type failingReaderAt struct {
 	calls      int
 }
 
+type changingELFHeaderReaderAt struct {
+	data   []byte
+	mutate func([]byte)
+}
+
+func (r *changingELFHeaderReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	n, err := bytes.NewReader(r.data).ReadAt(p, off)
+	if off == 0 {
+		r.mutate(r.data)
+	}
+	return n, err
+}
+
+func TestExecutableELFReaderAtRetainsValidatedHeader(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		mutate func([]byte)
+	}{
+		{
+			name: "program_entry_size_changes_to_zero",
+			mutate: func(data []byte) {
+				binary.LittleEndian.PutUint16(data[elfEhdrPhentsizeOff:elfEhdrPhentsizeEnd], 0)
+			},
+		},
+		{
+			name: "program_count_changes_beyond_budget",
+			mutate: func(data []byte) {
+				binary.LittleEndian.PutUint16(data[elfEhdrPhnumOff:elfEhdrPhnumEnd], math.MaxUint16)
+			},
+		},
+		{
+			name: "program_offset_changes_beyond_file",
+			mutate: func(data []byte) {
+				binary.LittleEndian.PutUint64(data[elfEhdrPhoffOff:elfEhdrPhoffEnd], uint64(len(data)))
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, data := compressionContractInput(t)
+			expected, err := readExecutableELF(data)
+			require.NoError(t, err)
+
+			// Model a file changing after its header was read. Parsing must use
+			// the validated header, never a second unvalidated set of bounds.
+			reader := &changingELFHeaderReaderAt{data: bytes.Clone(data), mutate: tc.mutate}
+			actual, err := readExecutableELFReaderAt(reader, uint64(len(data)))
+			require.NoError(t, err)
+			assert.Equal(t, expected, actual)
+		})
+	}
+}
+
 func (f *failingReaderAt) ReadAt(p []byte, off int64) (int, error) {
 	f.calls++
 	if f.calls >= f.failAtCall {

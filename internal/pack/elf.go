@@ -29,10 +29,7 @@ func readExecutableELF(data []byte) (*elf.File, error) {
 }
 
 func readExecutableELFReaderAt(r io.ReaderAt, fileSize uint64) (*elf.File, error) {
-	if err := PreflightELFHeadersReaderAt(r, fileSize); err != nil {
-		return nil, err
-	}
-	headerBytes, err := readExactAt(r, 0, minELFHeaderSize)
+	headerBytes, err := preflightELFHeadersReaderAtWithAccounting(&inputAccounting{}, r, fileSize)
 	if err != nil {
 		return nil, err
 	}
