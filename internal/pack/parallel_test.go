@@ -255,6 +255,33 @@ func TestResolvePackWorkerCountAdmissionPolicy(t *testing.T) {
 		assert.Equal(t, 1, resolvePackWorkerCount(plans))
 	})
 
+	t.Run("zero_gomemlimit_stays_serial", func(t *testing.T) {
+		plans := makePlans(3, 1024, codec.AlgorithmNone, "")
+		installPackResourceHooks(t, testParallelWorkersFour, cgroup.Limits{}, nil, 0, testParallelMem2GiB, true)
+		assert.Equal(t, 1, resolvePackWorkerCount(plans))
+	})
+
+	t.Run("host_available_memory_tighter_than_configured_caps", func(t *testing.T) {
+		plans := makePlans(3, testParallelSize28MiB, codec.AlgorithmZstd, "default")
+		for _, available := range []int64{0, testParallelMem128MiB} {
+			installPackResourceHooks(
+				t, testParallelWorkersFour,
+				cgroup.Limits{MemoryLimitBytes: testParallelMem2GiB, MemoryLimitFinite: true},
+				nil, testParallelMem2GiB, available, true,
+			)
+			assert.Equal(t, 1, resolvePackWorkerCount(plans), "host available=%d", available)
+		}
+	})
+
+	t.Run("lz4_inner_block_buffers_limit_outer_workers", func(t *testing.T) {
+		plans := makePlans(testParallelWorkersFour, testParallelSize28MiB, codec.AlgorithmLZ4, "fast")
+		installPackResourceHooks(
+			t, testParallelWorkersEight, cgroup.Limits{}, nil, testParallelMem512MiB, testParallelMem2GiB, true,
+		)
+		assert.Equal(t, 2, resolvePackWorkerCount(plans),
+			"four outer workers would admit four independent multi-block LZ4 pipelines against the same memory budget")
+	})
+
 	t.Run("unlimited_all_sources_uses_max_workers", func(t *testing.T) {
 		plans := makePlans(3, testParallelSize28MiB, codec.AlgorithmZstd, "default")
 		installPackResourceHooks(
@@ -286,10 +313,16 @@ func TestEncoderWorkspaceAndMeminfoParsing(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, int64(2097152)*packKibiByte, avail)
 
+	zeroMeminfo := filepath.Join(dir, "meminfo-zero")
+	require.NoError(t, os.WriteFile(zeroMeminfo, []byte("MemAvailable: 0 kB\n"), 0o600))
+	avail, ok = parseMemAvailableFromFile(zeroMeminfo)
+	assert.True(t, ok, "zero available memory is a known exhausted budget")
+	assert.Zero(t, avail)
+
 	for name, content := range map[string]string{
 		"empty-val": "MemAvailable:\n",
 		"bad-num":   "MemAvailable: notanumber kB\n",
-		"zero":      "MemAvailable: 0 kB\n",
+		"negative":  "MemAvailable: -1 kB\n",
 		"missing":   "MemTotal: 1024 kB\n",
 	} {
 		p := filepath.Join(dir, name)

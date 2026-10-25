@@ -159,15 +159,15 @@ func effectivePackMemoryCeiling(limits cgroup.Limits, limitsValid bool) (int64, 
 	}
 
 	gomemlimit := readPackGOMEMLIMITFunc()
-	if gomemlimit > 0 && gomemlimit < math.MaxInt64 {
+	if gomemlimit >= 0 && gomemlimit < math.MaxInt64 {
 		if !hasCeiling || gomemlimit < ceiling {
 			ceiling = gomemlimit
 			hasCeiling = true
 		}
 	}
 
-	if !hasCeiling {
-		if availBytes, ok := readHostMemAvailableFunc(); ok && availBytes > 0 {
+	if availBytes, ok := readHostMemAvailableFunc(); ok && availBytes >= 0 {
+		if !hasCeiling || availBytes < ceiling {
 			ceiling = availBytes
 			hasCeiling = true
 		}
@@ -219,6 +219,11 @@ func admitWorkersByMemory(plans []variantWorkPlan, maxWorkers int, ceilingBytes 
 func estimateVariantWorkerMemoryBytes(uncompressedSize int64, codecName, resolvedLevel string) int64 {
 	rawSize := max(uncompressedSize, int64(0))
 	workspace := encoderWorkspaceBytes(codecName, resolvedLevel)
+	if codecName == codec.AlgorithmLZ4 {
+		// Include every block buffer the codec can keep in flight. Each
+		// outer variant worker gets its own inner compression pipeline.
+		workspace = max(workspace, codec.LZ4EncoderWorkspaceBytes(rawSize))
+	}
 	if rawSize > (math.MaxInt64-workspace)/packRawPayloadGCFactor {
 		return math.MaxInt64
 	}
@@ -284,7 +289,7 @@ func parseMemAvailableFromFile(path string) (int64, bool) {
 			return 0, false
 		}
 		kb, parseErr := strconv.ParseInt(fields[0], 10, 64)
-		if parseErr != nil || kb <= 0 || kb > math.MaxInt64/packKibiByte {
+		if parseErr != nil || kb < 0 || kb > math.MaxInt64/packKibiByte {
 			return 0, false
 		}
 		return kb * packKibiByte, true
