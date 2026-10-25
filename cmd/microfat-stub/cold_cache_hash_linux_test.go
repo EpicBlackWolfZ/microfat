@@ -371,3 +371,41 @@ func boolLabel(v bool) string {
 	}
 	return "false"
 }
+
+func TestDecompressVariantToWriterBoundsAllProfiles(t *testing.T) {
+	t.Parallel()
+	payload := []byte("minimal-profile-bounds-check")
+	srcFile, baseEntry, baseIdx, _ := buildCompressedStubSource(t, payload, true)
+
+	t.Run("dictionary_bounds", func(t *testing.T) {
+		t.Parallel()
+		idx := *baseIdx
+		idx.DictionaryOffset = -1
+		err := decompressVariantToWriter(srcFile, baseEntry, &idx, &bytes.Buffer{})
+		require.ErrorIs(t, err, format.ErrInvalidDictionary)
+	})
+
+	t.Run("payload_size_bounds", func(t *testing.T) {
+		t.Parallel()
+		entry := *baseEntry
+		entry.UncompressedSize = 0
+		err := decompressVariantToWriter(srcFile, &entry, nil, &bytes.Buffer{})
+		require.ErrorIs(t, err, format.ErrPayloadTooLarge)
+	})
+
+	t.Run("invalid_entry_checksum", func(t *testing.T) {
+		t.Parallel()
+		entry := *baseEntry
+		entry.SHA256 = "bad"
+		err := decompressVariantToWriter(srcFile, &entry, nil, &bytes.Buffer{})
+		require.ErrorIs(t, err, format.ErrInvalidChecksum)
+	})
+
+	t.Run("unsupported_codec", func(t *testing.T) {
+		t.Parallel()
+		entry := *baseEntry
+		entry.Compression = "unsupported-codec"
+		err := decompressVariantToWriter(srcFile, &entry, nil, &bytes.Buffer{})
+		require.ErrorIs(t, err, codec.ErrUnsupportedCodec)
+	})
+}
