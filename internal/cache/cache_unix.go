@@ -255,7 +255,7 @@ func validateCacheMetadata(stat unix.Stat_t, expectedUID int) error {
 }
 
 func verifyCachedFD(fd int, expectedHex string) bool {
-	hasher := sha256.New()
+	hasher := NewVerifyHasherFunc()
 	var buf [verifyBufferSize]byte
 	offset := int64(0)
 	for {
@@ -496,7 +496,7 @@ func materializeAndOpenVariantAtFD(
 		}
 	}()
 
-	hasher := sha256.New()
+	hasher := NewStreamHasherFunc()
 	mw := io.MultiWriter(tmpFile, hasher)
 	if err := writePayload(mw); err != nil {
 		return "", -1, fmt.Errorf("%w: writing variant payload: %w", format.ErrCacheExtract, err)

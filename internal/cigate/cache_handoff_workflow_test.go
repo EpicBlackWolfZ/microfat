@@ -130,7 +130,7 @@ func TestVerifiedCacheConfirmationCannotHideQualificationOrIdentityFailure(t *te
 				"git":  "#!/bin/bash\nprintf '%s\\n' \"$HANDOFF_GIT_SOURCE\"\n",
 				"task": "#!/bin/bash\nprintf 'verified descriptor confirmation ran\\n'\nexit \"$HANDOFF_TASK_EXIT\"\n",
 			} {
-				require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755))
+				writeExecutableTestStub(t, filepath.Join(dir, name), script)
 			}
 			script := filepath.Join(dir, "qualification.sh")
 			require.NoError(t, os.WriteFile(script, []byte(body), 0o600))
@@ -140,7 +140,7 @@ func TestVerifiedCacheConfirmationCannotHideQualificationOrIdentityFailure(t *te
 				"EXPECTED_ARCH=amd64", "EXPECTED_SOURCE=candidate-head", "HANDOFF_GO_ARCH=" + tc.arch,
 				"HANDOFF_GIT_SOURCE=" + tc.source, "HANDOFF_TASK_EXIT=" + strconv.Itoa(tc.taskExit),
 			}
-			output, err := cmd.CombinedOutput()
+			output, err := combinedOutputSafe(cmd)
 			if tc.wantExit == 0 {
 				require.NoError(t, err, "%s", output)
 			} else {

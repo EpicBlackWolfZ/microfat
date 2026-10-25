@@ -70,7 +70,7 @@ func TestCreationEpochQualificationPropagatesFailuresAndRetainsEvidence(t *testi
 			dir := t.TempDir()
 			tools := filepath.Join(dir, "tools")
 			require.NoError(t, os.Mkdir(tools, 0o755))
-			require.NoError(t, os.WriteFile(filepath.Join(tools, "go"), []byte(creationEpochFakeGo), 0o755))
+			writeExecutableTestStub(t, filepath.Join(tools, "go"), creationEpochFakeGo)
 			require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(dir, creationEpochLog)), 0o755))
 			script := filepath.Join(dir, "qualification.sh")
 			require.NoError(t, os.WriteFile(script, []byte(qualification.Run), 0o600))
@@ -83,7 +83,7 @@ func TestCreationEpochQualificationPropagatesFailuresAndRetainsEvidence(t *testi
 				"PATH=" + tools + string(os.PathListSeparator) + os.Getenv("PATH"),
 				"CREATION_EPOCH_TEST_EXIT=" + strconv.Itoa(tc.exit),
 			}
-			output, err := cmd.CombinedOutput()
+			output, err := combinedOutputSafe(cmd)
 			if tc.exit == 0 {
 				require.NoError(t, err, "%s", output)
 			} else {
