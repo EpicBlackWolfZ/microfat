@@ -30,6 +30,7 @@ const (
 	privateExecMode     = 0o700
 	extraEnvCapacity    = 16
 	maxTempFileAttempts = 1000
+	sha256HexDigestLen  = 64
 	// memfdTargetSeals defines the mandatory Linux kernel memory file descriptor seals applied to
 	// anonymous RAM payloads prior to execution via /proc/self/fd/<fd>.
 	// - F_SEAL_WRITE: prevents any modification of the decompressed binary code in memory.
@@ -40,9 +41,10 @@ const (
 )
 
 var (
-	execveFunc      = syscall.Exec
-	memfdCreateFunc = unix.MemfdCreate
-	memfdSealFunc   = func(fd int, seals int) error {
+	execveFunc           = syscall.Exec
+	memfdCreateFunc      = unix.MemfdCreate
+	memfdPreallocateFunc = unix.Ftruncate
+	memfdSealFunc        = func(fd int, seals int) error {
 		_, err := unix.FcntlInt(uintptr(fd), unix.F_ADD_SEALS, seals)
 		return err
 	}
@@ -77,9 +79,10 @@ func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, idx *
 			return fmt.Errorf("reading shared dictionary: %w", err)
 		}
 		h := sha256.Sum256(dictBytes)
-		actualHex := hex.EncodeToString(h[:])
-		if actualHex != idx.DictionarySHA256 {
-			return fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, actualHex)
+		var dictHex [sha256HexDigestLen]byte
+		hex.Encode(dictHex[:], h[:])
+		if string(dictHex[:]) != idx.DictionarySHA256 {
+			return fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, string(dictHex[:]))
 		}
 	}
 
@@ -102,9 +105,11 @@ func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, idx *
 		return fmt.Errorf("decompressing variant payload: %w", err)
 	}
 
-	actualHex := hex.EncodeToString(hasher.Sum(nil))
-	if actualHex != entry.SHA256 {
-		return fmt.Errorf("%w: expected %s, got %s", format.ErrPayloadCorrupted, entry.SHA256, actualHex)
+	var sum [sha256.Size]byte
+	var hexBuf [sha256HexDigestLen]byte
+	hex.Encode(hexBuf[:], hasher.Sum(sum[:0]))
+	if string(hexBuf[:]) != entry.SHA256 {
+		return fmt.Errorf("%w: expected %s, got %s", format.ErrPayloadCorrupted, entry.SHA256, string(hexBuf[:]))
 	}
 
 	return nil
@@ -661,6 +666,10 @@ func executeViaMemfd(
 
 	memFile := os.NewFile(uintptr(fd), "microfat_payload")
 	defer func() { _ = memFile.Close() }()
+
+	// Best-effort pre-sizing avoids incremental shmem inode extension on multi-MiB writes;
+	// extractVariantToWriter still strictly verifies exact uncompressed byte count and SHA-256 before sealing.
+	_ = memfdPreallocateFunc(fd, entry.UncompressedSize)
 
 	decompStart := time.Now()
 	if err := extractVariantToWriter(selfFile, entry, idx, memFile); err != nil {
