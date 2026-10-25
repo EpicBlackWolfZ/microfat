@@ -7,11 +7,13 @@ import (
 	"sync"
 )
 
-const noneCopyBufferSize = 128 * 1024
+// NoneCopyBufferSize bounds the scratch buffer used by non-WriterTo readers.
+// Extraction admission must include this allocation before decompression begins.
+const NoneCopyBufferSize = 128 * 1024
 
 var noneCopyBufferPool = sync.Pool{
 	New: func() any {
-		buf := make([]byte, noneCopyBufferSize)
+		buf := make([]byte, NoneCopyBufferSize)
 		return &buf
 	},
 }

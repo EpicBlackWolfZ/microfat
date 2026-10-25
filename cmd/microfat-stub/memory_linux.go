@@ -35,6 +35,8 @@ func checkExtractionBudget(entry *format.VariantEntry, idx *format.Index) error 
 	const lz4Buffers = int64(12 * 1024 * 1024)
 	decoder := copyBuffer
 	switch entry.Compression {
+	case codec.AlgorithmNone:
+		decoder = int64(codec.NoneCopyBufferSize)
 	case codec.AlgorithmZstd:
 		decoder += int64(codec.DefaultDecoderMaxMemory)
 	case codec.AlgorithmLZ4:
