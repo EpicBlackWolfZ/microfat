@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"hash"
 	"io"
 	"os"
 
@@ -14,11 +13,9 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 )
 
-// newExtractHasherFunc constructs the streaming SHA-256 hasher for extraction paths that own
-// their own in-flight digest check (such as sealed memfd execution). Cold cache materialization
-// delegates in-flight temporary-file hashing to internal/cache so decompressed bytes are hashed
-// once during extraction and once on the reopened read-only descriptor after publication.
-var newExtractHasherFunc func() hash.Hash = sha256.New
+// extractHashStartedFunc observes the streaming SHA-256 pass used by sealed
+// memfd extraction. Cold cache materialization owns its hash in internal/cache.
+var extractHashStartedFunc func()
 
 // decompressVariantToWriter validates optional shared-dictionary metadata and checksums, checks
 // variant bounds and checksum format, and streams the decompressed payload into w without wrapping
@@ -39,9 +36,10 @@ func decompressVariantToWriter(selfFile *os.File, entry *format.VariantEntry, id
 			return fmt.Errorf("reading shared dictionary: %w", err)
 		}
 		h := sha256.Sum256(dictBytes)
-		actualHex := hex.EncodeToString(h[:])
-		if actualHex != idx.DictionarySHA256 {
-			return fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, actualHex)
+		var dictHex [sha256HexDigestLen]byte
+		hex.Encode(dictHex[:], h[:])
+		if string(dictHex[:]) != idx.DictionarySHA256 {
+			return fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, string(dictHex[:]))
 		}
 	}
 
@@ -68,15 +66,20 @@ func decompressVariantToWriter(selfFile *os.File, entry *format.VariantEntry, id
 // extractVariantToWriter seeks to the variant offset and streams decompressed bytes to w,
 // verifying the payload SHA-256 digest concurrently during decompression.
 func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, idx *format.Index, w io.Writer) error {
-	hasher := newExtractHasherFunc()
+	hasher := sha256.New()
+	if extractHashStartedFunc != nil {
+		extractHashStartedFunc()
+	}
 	mw := io.MultiWriter(w, hasher)
 	if err := decompressVariantToWriter(selfFile, entry, idx, mw); err != nil {
 		return err
 	}
 
-	actualHex := hex.EncodeToString(hasher.Sum(nil))
-	if actualHex != entry.SHA256 {
-		return fmt.Errorf("%w: expected %s, got %s", format.ErrPayloadCorrupted, entry.SHA256, actualHex)
+	var sum [sha256.Size]byte
+	var hexBuf [sha256HexDigestLen]byte
+	hex.Encode(hexBuf[:], hasher.Sum(sum[:0]))
+	if string(hexBuf[:]) != entry.SHA256 {
+		return fmt.Errorf("%w: expected %s, got %s", format.ErrPayloadCorrupted, entry.SHA256, string(hexBuf[:]))
 	}
 
 	return nil

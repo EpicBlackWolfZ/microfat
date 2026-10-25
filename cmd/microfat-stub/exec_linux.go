@@ -29,6 +29,7 @@ const (
 	privateExecMode     = 0o700
 	extraEnvCapacity    = 16
 	maxTempFileAttempts = 1000
+	sha256HexDigestLen  = 64
 	// memfdTargetSeals defines the mandatory Linux kernel memory file descriptor seals applied to
 	// anonymous RAM payloads prior to execution via /proc/self/fd/<fd>.
 	// - F_SEAL_WRITE: prevents any modification of the decompressed binary code in memory.
@@ -39,9 +40,10 @@ const (
 )
 
 var (
-	execveFunc      = syscall.Exec
-	memfdCreateFunc = unix.MemfdCreate
-	memfdSealFunc   = func(fd int, seals int) error {
+	execveFunc           = syscall.Exec
+	memfdCreateFunc      = unix.MemfdCreate
+	memfdPreallocateFunc = unix.Ftruncate
+	memfdSealFunc        = func(fd int, seals int) error {
 		_, err := unix.FcntlInt(uintptr(fd), unix.F_ADD_SEALS, seals)
 		return err
 	}
@@ -610,6 +612,10 @@ func executeViaMemfd(
 
 	memFile := os.NewFile(uintptr(fd), "microfat_payload")
 	defer func() { _ = memFile.Close() }()
+
+	// Best-effort pre-sizing avoids incremental shmem inode extension on multi-MiB writes;
+	// extractVariantToWriter still strictly verifies exact uncompressed byte count and SHA-256 before sealing.
+	_ = memfdPreallocateFunc(fd, entry.UncompressedSize)
 
 	decompStart := time.Now()
 	if err := extractVariantToWriter(selfFile, entry, idx, memFile); err != nil {

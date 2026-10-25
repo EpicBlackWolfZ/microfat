@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"hash"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,25 +35,22 @@ type hashCounters struct {
 func installHashCounters(t *testing.T) *hashCounters {
 	t.Helper()
 	counts := &hashCounters{}
-	oldExtract := newExtractHasherFunc
-	oldStream := cache.NewStreamHasherFunc
-	oldVerify := cache.NewVerifyHasherFunc
+	oldExtract := extractHashStartedFunc
+	oldStream := cache.StreamHashStartedFunc
+	oldVerify := cache.VerifyHashStartedFunc
 	t.Cleanup(func() {
-		newExtractHasherFunc = oldExtract
-		cache.NewStreamHasherFunc = oldStream
-		cache.NewVerifyHasherFunc = oldVerify
+		extractHashStartedFunc = oldExtract
+		cache.StreamHashStartedFunc = oldStream
+		cache.VerifyHashStartedFunc = oldVerify
 	})
-	newExtractHasherFunc = func() hash.Hash {
+	extractHashStartedFunc = func() {
 		counts.extract++
-		return sha256.New()
 	}
-	cache.NewStreamHasherFunc = func() hash.Hash {
+	cache.StreamHashStartedFunc = func() {
 		counts.stream++
-		return sha256.New()
 	}
-	cache.NewVerifyHasherFunc = func() hash.Hash {
+	cache.VerifyHashStartedFunc = func() {
 		counts.verify++
-		return sha256.New()
 	}
 	return counts
 }

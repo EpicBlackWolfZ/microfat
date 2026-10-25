@@ -129,6 +129,7 @@ var userHomeDirFunc = os.UserHomeDir
 var (
 	ErrBinaryTooSmall      = errors.New("binary size is smaller than trailer size")
 	ErrInvalidMagic        = errors.New("invalid microfat magic bytes at EOF")
+	ErrTrailerRead         = errors.New("reading binary trailer")
 	ErrUnsupportedVersion  = errors.New("unsupported microfat format version")
 	ErrInvalidIndexOffset  = errors.New("invalid index offset in trailer")
 	ErrInvalidIndexSize    = errors.New("invalid index size in trailer")
@@ -1251,9 +1252,9 @@ func ReadTrailerAndIndex(r io.ReaderAt, totalSize int64) (*Index, error) {
 			ErrBinaryTooSmall, totalSize, TrailerSize)
 	}
 
-	trailerBuf := make([]byte, TrailerSize)
-	if _, err := r.ReadAt(trailerBuf, totalSize-TrailerSize); err != nil {
-		return nil, fmt.Errorf("reading trailer from file: %w", err)
+	var trailerBuf [TrailerSize]byte
+	if _, err := r.ReadAt(trailerBuf[:], totalSize-TrailerSize); err != nil {
+		return nil, fmt.Errorf("%w: reading trailer from file: %w", ErrTrailerRead, err)
 	}
 
 	offset := OffsetLen + SizeLen
@@ -1470,11 +1471,17 @@ func IsFatBinary(r io.ReaderAt, totalSize int64) bool {
 	if totalSize < TrailerSize {
 		return false
 	}
-	buf := make([]byte, MagicLen)
-	if _, err := r.ReadAt(buf, totalSize-MagicLen); err != nil {
+	var buf [MagicLen]byte
+	if _, err := r.ReadAt(buf[:], totalSize-MagicLen); err != nil {
 		return false
 	}
-	return bytes.Equal(buf, []byte(MagicString))
+	return string(buf[:]) == MagicString
+}
+
+// IsMissingTrailerError reports whether err from ReadTrailerAndIndex indicates an absent
+// or non-fat trailer (size smaller than TrailerSize or missing EOF magic bytes).
+func IsMissingTrailerError(err error) bool {
+	return errors.Is(err, ErrBinaryTooSmall) || errors.Is(err, ErrInvalidMagic)
 }
 
 // ResolveCacheDirFD resolves, creates, and securely validates the microfat cache directory,

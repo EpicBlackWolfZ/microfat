@@ -4,6 +4,7 @@ package cache
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -254,11 +255,14 @@ func validateCacheMetadata(stat unix.Stat_t, expectedUID int) error {
 }
 
 func verifyCachedFD(fd int, expectedHex string) bool {
-	hasher := NewVerifyHasherFunc()
-	buf := make([]byte, verifyBufferSize)
+	hasher := sha256.New()
+	if VerifyHashStartedFunc != nil {
+		VerifyHashStartedFunc()
+	}
+	var buf [verifyBufferSize]byte
 	offset := int64(0)
 	for {
-		n, err := unix.Pread(fd, buf, offset)
+		n, err := unix.Pread(fd, buf[:], offset)
 		if n > 0 {
 			hasher.Write(buf[:n])
 			offset += int64(n)
@@ -270,7 +274,10 @@ func verifyCachedFD(fd int, expectedHex string) bool {
 			break
 		}
 	}
-	return hex.EncodeToString(hasher.Sum(nil)) == expectedHex
+	var sum [sha256.Size]byte
+	var hexBuf [verifyHexDigestLen]byte
+	hex.Encode(hexBuf[:], hasher.Sum(sum[:0]))
+	return string(hexBuf[:]) == expectedHex
 }
 
 // VerifyBinary validates that a cached binary exists, is a regular file (not a symlink),
@@ -492,15 +499,20 @@ func materializeAndOpenVariantAtFD(
 		}
 	}()
 
-	hasher := NewStreamHasherFunc()
+	hasher := sha256.New()
+	if StreamHashStartedFunc != nil {
+		StreamHashStartedFunc()
+	}
 	mw := io.MultiWriter(tmpFile, hasher)
 	if err := writePayload(mw); err != nil {
 		return "", -1, fmt.Errorf("%w: writing variant payload: %w", format.ErrCacheExtract, err)
 	}
 
-	actualHex := hex.EncodeToString(hasher.Sum(nil))
-	if actualHex != entry.SHA256 {
-		return "", -1, fmt.Errorf("%w: expected %s, got %s", format.ErrPayloadCorrupted, entry.SHA256, actualHex)
+	var sum [sha256.Size]byte
+	var hexBuf [verifyHexDigestLen]byte
+	hex.Encode(hexBuf[:], hasher.Sum(sum[:0]))
+	if string(hexBuf[:]) != entry.SHA256 {
+		return "", -1, fmt.Errorf("%w: expected %s, got %s", format.ErrPayloadCorrupted, entry.SHA256, string(hexBuf[:]))
 	}
 
 	if err := fileOps.chmod(tmpFile, format.PrivateExecMode); err != nil {
