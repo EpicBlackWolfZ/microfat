@@ -321,15 +321,13 @@ func Pack(opts Options) (*format.Index, error) {
 		idx.DictionaryID = codec.DefaultDictionaryID
 	}
 
-	// 3. Compress and write each variant payload
-	for _, lvl := range levels {
-		entry, newOffset, err := writeVariantPayload(tmpFile, lvl, opts.Variants[lvl], &opts, currentOffset, dictBytes)
-		if err != nil {
-			return nil, err
-		}
-		currentOffset = newOffset
-		idx.Variants = append(idx.Variants, entry)
+	// 3. Compress and write each variant payload (parallelized under bounded CPU/memory admission)
+	variantEntries, newOffset, err := writeAllVariantPayloads(tmpFile, outDir, levels, &opts, currentOffset, dictBytes)
+	if err != nil {
+		return nil, err
 	}
+	currentOffset = newOffset
+	idx.Variants = append(idx.Variants, variantEntries...)
 
 	// 4. Write Index and Trailer
 	if _, err := format.WriteIndexAndTrailerWithVersion(tmpFile, idx, currentOffset, opts.FormatVersion); err != nil {
@@ -488,20 +486,8 @@ func writeVariantPayload(
 		return format.VariantEntry{}, 0, err
 	}
 
-	if len(dict) > 0 {
-		if dc, ok := c.(codec.DictCodec); ok {
-			if err := dc.CompressWithDict(tmpFile, variantBytes, resolvedLevel, dict); err != nil {
-				return format.VariantEntry{}, 0, fmt.Errorf("compressing variant %s with dict: %w", lvl, err)
-			}
-		} else {
-			if err := c.Compress(tmpFile, variantBytes, resolvedLevel); err != nil {
-				return format.VariantEntry{}, 0, fmt.Errorf("compressing variant %s with codec %s: %w", lvl, c.Name(), err)
-			}
-		}
-	} else {
-		if err := c.Compress(tmpFile, variantBytes, resolvedLevel); err != nil {
-			return format.VariantEntry{}, 0, fmt.Errorf("compressing variant %s with codec %s: %w", lvl, c.Name(), err)
-		}
+	if err := compressVariantIntoWriter(tmpFile, lvl, c, resolvedLevel, variantBytes, dict); err != nil {
+		return format.VariantEntry{}, 0, err
 	}
 
 	newOffset, err := tmpFile.Seek(0, io.SeekCurrent)
