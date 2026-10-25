@@ -687,6 +687,11 @@ jobs:
         run: |
           mkdir -p .work/runtime-qualification
           task test-runtime-fixtures MOUNT_BACKEND=sudo | tee .work/runtime-qualification/fixture-tests.log
+      - name: Validate native isolated peak-memory measurement and process cleanup
+        run: |
+          set -o pipefail
+          go test -race -v ./benchmarks/system -count=1 \
+            | tee .work/runtime-qualification/isolated-peak-memory.log
       - name: Check native ARM64 feature diagnostics against kernel auxv
         if: matrix.arch == 'arm64'
         run: |
