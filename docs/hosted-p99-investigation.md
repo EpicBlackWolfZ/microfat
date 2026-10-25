@@ -8,6 +8,10 @@ changes. Requests and observer samples inside a trial are not independent
 repetitions. Process-completion clocks, launcher subphases and fixed-SLO
 binomial bounds do not replace this endpoint.
 
+The [results and retained evidence](hosted-p99-investigation-results.md) record
+the disposition of the frozen collection; this protocol's measurement source
+remains pinned in that report.
+
 ## Immutable historical comparison
 
 [Run 35549234214, attempt 1](https://github.com/EpicBlackWolfZ/microfat/actions/runs/35549234214)

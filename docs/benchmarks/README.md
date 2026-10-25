@@ -42,7 +42,8 @@ packer/stub from that checkout; `--base-repository <checkout>` builds the base p
 same payload bytes. `--repository` still identifies the current measurement harness source. Each
 checkout's actual commit and cleanliness are recorded independently. Omitting `--head-repository`
 uses `--repository` for both harness and head builds. See the
-[bounded historical p99 investigation](../hosted-p99-investigation.md) for a complete protocol.
+[bounded historical p99 investigation](../hosted-p99-investigation.md) for a complete protocol
+and its [results and retained evidence](../hosted-p99-investigation-results.md).
 `report` and `verify` also accept original v1 evidence files. For a raw v1 payload without its envelope, verification
 explicitly reports structural validation only; it cannot establish an absent checksum.
 
