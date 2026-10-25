@@ -264,11 +264,6 @@ func Pack(opts Options) (*format.Index, error) {
 	}
 	defer cleanup()
 
-	stubBytes, err := readBoundedInput(opts.StubPath, format.MaxPayloadSize)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrStubMissing, err)
-	}
-
 	levels := sortVariantLevels(opts.Variants, opts.TargetArch)
 
 	if err := validatePayloadABIs(&opts, levels); err != nil {
@@ -292,12 +287,11 @@ func Pack(opts Options) (*format.Index, error) {
 		_ = os.Remove(tmpPath)
 	}()
 
-	// 1. Write Stub Binary
-	if _, err := tmpFile.Write(stubBytes); err != nil {
-		return nil, fmt.Errorf("writing stub binary: %w", err)
+	// 1. Stream Stub Binary into tmpFile without retaining a heap copy across variant compression
+	currentOffset, err := writeStubBinaryFromPath(tmpFile, opts.StubPath)
+	if err != nil {
+		return nil, err
 	}
-
-	currentOffset := int64(len(stubBytes))
 	idx := &format.Index{
 		Version:     opts.FormatVersion,
 		AppName:     opts.AppName,
@@ -774,14 +768,9 @@ func validatePayloadABIs(opts *Options, levels []string) error {
 	variantReports := make([]*VariantABIReport, 0, len(levels))
 	sharedAcc := NewArtifactMetadataAccounting(MaxArtifactMetadataBytes)
 	for _, lvl := range levels {
-		varData, err := readBoundedInput(opts.Variants[lvl], format.MaxPayloadSize)
+		rep, err := inspectVariantABIFile(lvl, opts.Variants[lvl], sharedAcc)
 		if err != nil {
-			return fmt.Errorf("reading snapshotted variant %s: %w", lvl, err)
-		}
-
-		rep, err := InspectELFABIWithAccounting(varData, sharedAcc)
-		if err != nil {
-			return fmt.Errorf("inspecting declared ABI for variant %s: %w", lvl, err)
+			return err
 		}
 		rep.Level = lvl
 		rep.Path = opts.Variants[lvl]
@@ -804,6 +793,37 @@ func validatePayloadABIs(opts *Options, levels []string) error {
 	return nil
 }
 
+func writeStubBinaryFromPath(tmpFile *os.File, stubPath string) (int64, error) {
+	f, size, err := openBoundedReaderAt(stubPath, format.MaxPayloadSize)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %w", ErrStubMissing, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if err := copyBoundedInput(tmpFile, f, format.MaxPayloadSize, size); err != nil {
+		return 0, fmt.Errorf("writing stub binary: %w", err)
+	}
+	return size, nil
+}
+
+func inspectVariantABIFile(lvl, path string, shared *ArtifactMetadataAccounting) (*VariantABIReport, error) {
+	f, size, err := openBoundedReaderAt(path, format.MaxPayloadSize)
+	if err != nil {
+		return nil, fmt.Errorf("reading snapshotted variant %s: %w", lvl, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	unsignedSize := uint64(size) // #nosec G115 -- openBoundedReaderAt guarantees 0 < size <= MaxPayloadSize.
+	rep, err := InspectELFABIReaderAtWithAccounting(f, unsignedSize, shared)
+	if err != nil {
+		return nil, fmt.Errorf("inspecting declared ABI for variant %s: %w", lvl, err)
+	}
+	if err := verifyBoundedReaderAtUnchanged(f, size, format.MaxPayloadSize); err != nil {
+		return nil, fmt.Errorf("reading snapshotted variant %s: %w", lvl, err)
+	}
+	return rep, nil
+}
+
 // ValidateELFBinary checks if the file at path is a valid 64-bit ELF binary matching targetOS and targetArch.
 func ValidateELFBinary(path string, targetOS, targetArch string) error {
 	osName, err := NormalizeTargetOS(targetOS)
@@ -814,39 +834,41 @@ func ValidateELFBinary(path string, targetOS, targetArch string) error {
 	if err != nil {
 		return err
 	}
-	data, err := readBoundedInput(path, format.MaxPayloadSize)
+	f, size, err := openBoundedReaderAt(path, format.MaxPayloadSize)
 	if err != nil {
 		return err
 	}
-	f, err := readExecutableELF(data)
+	defer func() { _ = f.Close() }()
+
+	unsignedSize := uint64(size) // #nosec G115 -- openBoundedReaderAt guarantees 0 < size <= MaxPayloadSize.
+	elfFile, err := readExecutableELFReaderAt(f, unsignedSize)
 	if err != nil {
 		return fmt.Errorf("%w (%s): %w", ErrInvalidELF, path, err)
 	}
 
-	if f.Class != elf.ELFCLASS64 {
-		return fmt.Errorf("%w (%s): expected 64-bit ELF, got class %v", ErrInvalidELF, path, f.Class)
+	if elfFile.Class != elf.ELFCLASS64 {
+		return fmt.Errorf("%w (%s): expected 64-bit ELF, got class %v", ErrInvalidELF, path, elfFile.Class)
 	}
 
 	switch arch {
 	case microarch.ArchAMD64:
-		if f.Machine != elf.EM_X86_64 {
+		if elfFile.Machine != elf.EM_X86_64 {
 			return fmt.Errorf("%w (%s): machine type %v does not match target architecture %s (expected EM_X86_64)",
-				ErrInvalidELF, path, f.Machine, targetArch)
+				ErrInvalidELF, path, elfFile.Machine, targetArch)
 		}
 	case microarch.ArchARM64:
-		if f.Machine != elf.EM_AARCH64 {
+		if elfFile.Machine != elf.EM_AARCH64 {
 			return fmt.Errorf("%w (%s): machine type %v does not match target architecture %s (expected EM_AARCH64)",
-				ErrInvalidELF, path, f.Machine, targetArch)
+				ErrInvalidELF, path, elfFile.Machine, targetArch)
 		}
 	}
-	if err := validateExecutableELF(f, uint64(len(data))); err != nil {
+	if err := validateExecutableELF(elfFile, unsignedSize); err != nil {
 		return fmt.Errorf("%w (%s): %w", ErrInvalidELF, path, err)
 	}
-	if err := validateELFPlatform(data, f, osName); err != nil {
+	if err := validateELFPlatformReaderAt(f, unsignedSize, elfFile, osName); err != nil {
 		return fmt.Errorf("%w (%s): %w", ErrInvalidELF, path, err)
 	}
-
-	return nil
+	return verifyBoundedReaderAtUnchanged(f, size, format.MaxPayloadSize)
 }
 
 // PrewarmVariant extracts and validates an embedded variant into the specified cache directory.

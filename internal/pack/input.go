@@ -111,30 +111,75 @@ func copyBoundedInput(output io.Writer, input io.Reader, limit, expectedSize int
 	return nil
 }
 
-func readBoundedInput(path string, limit int64) ([]byte, error) {
+func openBoundedReaderAt(path string, limit int64) (*os.File, int64, error) {
+	if limit <= 0 || limit > format.MaxPayloadSize {
+		return nil, 0, format.ErrPayloadTooLarge
+	}
 	f, err := openInput(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	stat, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, 0, err
+	}
+	if !stat.Mode().IsRegular() || stat.Size() <= 0 {
+		_ = f.Close()
+		return nil, 0, fmt.Errorf("%w: empty or non-regular input", ErrInvalidELF)
+	}
+	if stat.Size() > limit {
+		_ = f.Close()
+		return nil, 0, format.ErrPayloadTooLarge
+	}
+	return f, stat.Size(), nil
+}
+
+func verifyBoundedReaderAtUnchanged(f *os.File, expectedSize, limit int64) error {
+	stat, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if stat.Size() > limit {
+		return format.ErrPayloadTooLarge
+	}
+	if stat.Size() != expectedSize {
+		return fmt.Errorf("%w: input size changed", ErrSizeMismatch)
+	}
+	return nil
+}
+
+func readBoundedInput(path string, limit int64) ([]byte, error) {
+	f, size, err := openBoundedReaderAt(path, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	stat, err := f.Stat()
+	return readBoundedFromFile(f, size, limit)
+}
+
+func readBoundedFromFile(f *os.File, size, limit int64) ([]byte, error) {
+	data := make([]byte, size)
+	n, err := io.ReadFull(f, data)
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, fmt.Errorf("%w: input size changed", ErrSizeMismatch)
+	}
 	if err != nil {
 		return nil, err
 	}
-	if !stat.Mode().IsRegular() || stat.Size() <= 0 {
-		return nil, fmt.Errorf("%w: empty or non-regular input", ErrInvalidELF)
+
+	var extra [1]byte
+	extraN, extraErr := f.Read(extra[:])
+	if extraErr != nil && !errors.Is(extraErr, io.EOF) {
+		return nil, extraErr
 	}
-	if stat.Size() > limit {
-		return nil, format.ErrPayloadTooLarge
-	}
-	data, err := io.ReadAll(io.LimitReader(f, limit+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(data)) > limit {
-		return nil, format.ErrPayloadTooLarge
-	}
-	if int64(len(data)) != stat.Size() {
+	if extraN > 0 {
+		if int64(n)+int64(extraN) > limit {
+			return nil, format.ErrPayloadTooLarge
+		}
+		if stat, statErr := f.Stat(); statErr == nil && stat.Size() > limit {
+			return nil, format.ErrPayloadTooLarge
+		}
 		return nil, fmt.Errorf("%w: input size changed", ErrSizeMismatch)
 	}
 	return data, nil
