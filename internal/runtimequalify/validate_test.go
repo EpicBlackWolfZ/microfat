@@ -145,7 +145,7 @@ func validSummary(t *testing.T) Summary {
 
 func TestCompleteMatrixAndEvidence(t *testing.T) {
 	t.Parallel()
-	require.Len(t, Configurations(), 16)
+	require.Len(t, Configurations(), 8)
 	seen := map[string]bool{}
 	for _, c := range Cases() {
 		require.False(t, seen[c.ID], "duplicate case %s", c.ID)

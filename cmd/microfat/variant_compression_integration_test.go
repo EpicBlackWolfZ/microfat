@@ -86,7 +86,7 @@ func main() {
 		levels = []string{microarch.ARM64v8_0, microarch.ARM64v8_1, microarch.ARM64v8_2}
 	}
 	algorithms := []string{codec.AlgorithmNone, codec.AlgorithmLZ4, codec.AlgorithmZstd}
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, profile := range []string{"full", "minimal"} {
 			for _, dictionary := range []bool{false, true} {
 				t.Run(fmt.Sprintf("format%d/%s/dictionary=%t", version, profile, dictionary), func(t *testing.T) {

@@ -90,7 +90,7 @@ func TestPackCreatedUnixReproducibleArtifacts(t *testing.T) {
 	stub, inputs := reproduciblePackInputs(t)
 	levels := []string{"v1", "v2", "v3"}
 	const dictSize = 8 * 1024
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, compression := range reproducibleCompressionCases() {
 			for _, dictionary := range []bool{false, true} {
 				t.Run(fmt.Sprintf("format%d/%s/dictionary=%t", version, compression.name, dictionary), func(t *testing.T) {
@@ -134,7 +134,7 @@ func TestPackCreatedUnixExactEpoch(t *testing.T) {
 		{"negative", -123456789}, {"zero", 0}, {"positive", reproducibleEpoch},
 		{"minimum", math.MinInt64}, {"maximum", math.MaxInt64},
 	}
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, tc := range epochs {
 			t.Run(fmt.Sprintf("format%d/%s", version, tc.name), func(t *testing.T) {
 				t.Parallel()
@@ -158,7 +158,7 @@ func TestPackCreatedUnixExactEpoch(t *testing.T) {
 func TestPackCreatedUnixChangedEpochChangesArtifact(t *testing.T) {
 	t.Parallel()
 	input, _ := compressionContractInput(t)
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		t.Run(fmt.Sprintf("format%d", version), func(t *testing.T) {
 			t.Parallel()
 			epoch := reproducibleEpoch

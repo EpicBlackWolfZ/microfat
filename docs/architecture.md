@@ -24,7 +24,7 @@ A Microfat fat executable is a composite single-file binary composed of sequenti
 |   - Variant 3 (e.g., GOAMD64=v3 / GOARM64=v9.0)                   |
 |   - Variant 4 (e.g., GOAMD64=v4 / GOARM64=v9.2)                   |
 +-------------------------------------------------------------------+
-| Region 4: Metadata Index Table (Format v2 Binary / Format v1 JSON)|
+| Region 4: Metadata Index Table (Format v2 Binary)                 |
 +-------------------------------------------------------------------+
 | Region 5: Fixed 56-Byte Trailer & Payload Integrity (at EOF)      |
 |   - 8 Bytes uint64 LE : Index Offset                              |
@@ -64,7 +64,7 @@ for trusted actors, parser/resource bounds and the regression tests behind each 
 
 ## 3. Format v2: Reflection-Free Compact Binary Index Table
 
-**Format v2** (`IndexMagicV2 = "\x00\xFAM2"`) is the default metadata index format in Microfat. It uses a compact binary table instead of the legacy JSON schema. Measure index parsing separately from process cold-start latency; parser microbenchmarks do not establish end-to-end launch cost.
+**Format v2** (`IndexMagicV2 = "\x00\xFAM2"`) is the exclusive metadata index format in Microfat (`v0.4.0` and later). It uses a compact reflection-free binary table rather than the removed legacy Format v1 JSON schema. Measure index parsing separately from process cold-start latency; parser microbenchmarks do not establish end-to-end launch cost.
 
 ### Binary Header Layout
 
@@ -86,8 +86,7 @@ for trusted actors, parser/resource bounds and the regression tests behind each 
 | `+2..` | `AppName` | `[N]byte` | UTF-8 | Application name string. |
 | `+0..1`| `VariantCount` | `uint16` | Little Endian | Number of embedded variant records ($K$). |
 
-`CreatedUnix` preserves the full signed 64-bit range in both formats; its wire layout is
-unchanged. New Pack operations use an explicit `pack.Options.CreatedUnix` when supplied,
+`CreatedUnix` preserves the full signed 64-bit range; its wire layout is unchanged. New Pack operations use an explicit `pack.Options.CreatedUnix` when supplied,
 otherwise wall-clock seconds. The CLI resolves `SOURCE_DATE_EPOCH` into that option before
 building/snapshotting. The epoch is informational caller-supplied metadata, not an authenticity
 signal or measured build time. See [reproducible packaging](cli-reference.md#reproducible-creation-epoch)
@@ -107,7 +106,7 @@ for input validation and the limits of byte reproducibility.
 | `CompLen` | `uint8` | Byte length | Length $N_{\text{comp}}$ of compression codec string. |
 | `Compression` | `[N]byte` | UTF-8 | Codec identifier (e.g. `"zstd"`, `"lz4"`, `"none"`). |
 
-Payload and dictionary SHA-256 fields in both formats accept lowercase, uppercase, or mixed-case hexadecimal.
+Payload and dictionary SHA-256 fields accept lowercase, uppercase, or mixed-case hexadecimal.
 Readers normalize these digests to lowercase after verifying the original index bytes against the trailer hash.
 Verification and cache filenames use the normalized digest, so casing does not change integrity results or cache identity.
 
@@ -123,45 +122,9 @@ When packaging multi-variant matrices (e.g. `v1`, `v2`, `v3`, `v4`), embedded bi
 
 ---
 
-## 5. Format v1: Legacy JSON Manifest (Reference)
+## 5. Legacy Format v1 Removal
 
-For backward compatibility, Microfat can read and produce Format v1 JSON manifests:
-
-```json
-{
-  "version": 1,
-  "app_name": "myapp",
-  "os": "linux",
-  "arch": "amd64",
-  "created_unix": 1787730000,
-  "variants": [
-    {
-      "level": "v1",
-      "offset": 3264672,
-      "compressed_size": 2945120,
-      "uncompressed_size": 7397639,
-      "sha256": "f4e7f675b05979c3d4f82877543d994ebfe45b85a3c26027a07f0fefbb105e19",
-      "compression": "zstd"
-    },
-    {
-      "level": "v3",
-      "offset": 6209792,
-      "compressed_size": 2891240,
-      "uncompressed_size": 7389447,
-      "sha256": "fda5c10d86f6f90647c20c0258d4e414c243eb03a5e8f4955b0a70183b169542",
-      "compression": "zstd"
-    },
-    {
-      "level": "v4",
-      "offset": 9101032,
-      "compressed_size": 2892110,
-      "uncompressed_size": 7389447,
-      "sha256": "56b5656ccdd1d2938166b268571897c8cfbc760e5dfbf35fb54c93544d6dafe7",
-      "compression": "zstd"
-    }
-  ]
-}
-```
+Legacy Format v1 JSON manifests were deprecated in `v0.2.3` and permanently removed in `v0.4.0`. Packaging requests specifying `--format-version 1` and runtime/CLI attempts to inspect, verify, transform, or launch legacy Format v1 binaries fail closed with `ErrUnsupportedVersion`. Re-package legacy artifacts into Format v2 using `microfat pack`.
 
 ---
 

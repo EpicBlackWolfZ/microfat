@@ -330,10 +330,6 @@ func inspectFatBinary(fatPath, expectedArch string, contract *ReleaseContract, f
 		return fmt.Errorf("reading index and trailer: %w", err)
 	}
 
-	if idx.Version != format.FormatVersion2 {
-		return fmt.Errorf("expected format v2 index, got version %d", idx.Version)
-	}
-
 	if idx.TargetArch != expectedArch {
 		return fmt.Errorf("target arch mismatch: expected %s, got %s", expectedArch, idx.TargetArch)
 	}

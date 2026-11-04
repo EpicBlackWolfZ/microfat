@@ -19,12 +19,10 @@ for storage in disk memfd; do
     done
     expected+=("controls/native/${storage}/cloexec")
 done
-for version in 1 2; do
-    for profile in full minimal; do
-        for codec in none-dictfalse lz4-dictfalse zstd-dictfalse zstd-dicttrue; do
-            for mode in memfd cache-cold cache-warm auto lifecycle; do
-                expected+=("v${version}-${profile}-${codec}/${mode}")
-            done
+for profile in full minimal; do
+    for codec in none-dictfalse lz4-dictfalse zstd-dictfalse zstd-dicttrue; do
+        for mode in memfd cache-cold cache-warm auto lifecycle; do
+            expected+=("v2-${profile}-${codec}/${mode}")
         done
     done
 done

@@ -309,25 +309,31 @@ func TestTrailerOffsetAlignment(t *testing.T) {
 		t.Errorf("expected error unmarshaling invalid JSON index")
 	}
 
-	// Valid hash and JSON, but failing bounds validation
+	// Valid hash and binary Format v2 index, but failing bounds validation
 	outOfBoundsIdx := &Index{
-		Version:  FormatVersionCurrent,
-		Variants: []VariantEntry{{Level: "v1", Offset: 500, CompressedSize: 200, UncompressedSize: 300}},
+		Version:    FormatVersionCurrent,
+		TargetOS:   testOSLinux,
+		TargetArch: testArchAMD64,
+		Variants: []VariantEntry{{
+			Level: "v1", Offset: 500, CompressedSize: 200, UncompressedSize: 300,
+			SHA256: testSHA256Sample, Compression: testCompression,
+		}},
 	}
-	outOfBoundsJSON, _ := json.Marshal(outOfBoundsIdx)
-	outOfBoundsHash := sha256.Sum256(outOfBoundsJSON)
+	outOfBoundsBin, mErr := MarshalBinaryIndex(outOfBoundsIdx)
+	require.NoError(t, mErr)
+	outOfBoundsHash := sha256.Sum256(outOfBoundsBin)
 	trailerBounds := make([]byte, TrailerSize)
 	binary.LittleEndian.PutUint64(trailerBounds[0:OffsetLen], 100)
-	binary.LittleEndian.PutUint64(trailerBounds[OffsetLen:OffsetLen*2], uint64(len(outOfBoundsJSON)))
+	binary.LittleEndian.PutUint64(trailerBounds[OffsetLen:OffsetLen*2], uint64(len(outOfBoundsBin)))
 	copy(trailerBounds[OffsetLen*2:OffsetLen*2+HashLen], outOfBoundsHash[:])
 	copy(trailerBounds[OffsetLen*2+HashLen:], []byte(MagicString))
 
-	dataBounds := make([]byte, 100+len(outOfBoundsJSON)+TrailerSize)
-	copy(dataBounds[100:], outOfBoundsJSON)
-	copy(dataBounds[100+len(outOfBoundsJSON):], trailerBounds)
+	dataBounds := make([]byte, 100+len(outOfBoundsBin)+TrailerSize)
+	copy(dataBounds[100:], outOfBoundsBin)
+	copy(dataBounds[100+len(outOfBoundsBin):], trailerBounds)
 	_, err = ReadTrailerAndIndex(bytes.NewReader(dataBounds), int64(len(dataBounds)))
-	if err == nil {
-		t.Errorf("expected error when index bounds validation fails")
+	if !errors.Is(err, ErrOutOfBounds) {
+		t.Errorf("expected ErrOutOfBounds when index bounds validation fails, got %v", err)
 	}
 }
 
@@ -1141,11 +1147,10 @@ func TestFormatEmptyCompressionDefaultsToZstd(t *testing.T) {
 	}
 }
 
-func TestFormatVersion1JSONRoundTrip(t *testing.T) {
+func TestFormatVersion1RemovedAndRejected(t *testing.T) {
 	t.Parallel()
 
-	buf := bytes.NewBuffer(make([]byte, 1024))
-	originalIdx := &Index{
+	legacyIdx := &Index{
 		Version:     FormatVersion1,
 		AppName:     "json-legacy-app",
 		TargetOS:    testOSLinux,
@@ -1160,39 +1165,73 @@ func TestFormatVersion1JSONRoundTrip(t *testing.T) {
 				SHA256:           testSHA256Sample,
 				Compression:      "lz4",
 			},
-			{
-				Level:            "v3",
-				Offset:           500,
-				CompressedSize:   400,
-				UncompressedSize: 900,
-				SHA256:           testSHA256Sample2,
-				Compression:      testCompression,
-			},
 		},
 	}
 
-	writtenBytes, err := WriteIndexAndTrailerWithVersion(buf, originalIdx, 1024, FormatVersion1)
-	if err != nil {
-		t.Fatalf("WriteIndexAndTrailerWithVersion(v1) failed: %v", err)
-	}
+	t.Run("WriteIndexAndTrailerWithVersion rejects FormatVersion1", func(t *testing.T) {
+		t.Parallel()
+		buf := bytes.NewBuffer(make([]byte, 1024))
+		_, err := WriteIndexAndTrailerWithVersion(buf, legacyIdx, 1024, FormatVersion1)
+		require.ErrorIs(t, err, ErrUnsupportedVersion)
+		require.ErrorContains(t, err, "Format v1 was removed in v0.4.0; use Format v2")
+	})
 
-	reader := bytes.NewReader(buf.Bytes())
-	readIdx, err := ReadTrailerAndIndex(reader, 1024+writtenBytes)
-	if err != nil {
-		t.Fatalf("ReadTrailerAndIndex for v1 failed: %v", err)
-	}
+	t.Run("WriteIndexAndTrailer rejects Index with FormatVersion1", func(t *testing.T) {
+		t.Parallel()
+		buf := bytes.NewBuffer(make([]byte, 1024))
+		idxCopy := *legacyIdx
+		_, err := WriteIndexAndTrailer(buf, &idxCopy, 1024)
+		require.ErrorIs(t, err, ErrUnsupportedVersion)
+		require.ErrorContains(t, err, "Format v1 was removed in v0.4.0; use Format v2")
+	})
 
-	if readIdx.Version != FormatVersion1 {
-		t.Errorf("expected Version %d, got %d", FormatVersion1, readIdx.Version)
-	}
-	if readIdx.AppName != originalIdx.AppName {
-		t.Errorf("expected AppName %s, got %s", originalIdx.AppName, readIdx.AppName)
-	}
-	if len(readIdx.Variants) != 2 {
-		t.Fatalf("expected 2 variants, got %d", len(readIdx.Variants))
-	}
-	if readIdx.Variants[0].Compression != "lz4" || readIdx.Variants[1].Compression != testCompression {
-		t.Errorf("variant compressions mismatch: %+v", readIdx.Variants)
+	t.Run("ValidateBounds rejects FormatVersion1 and unknown versions", func(t *testing.T) {
+		t.Parallel()
+		err := legacyIdx.ValidateBounds(1024)
+		require.ErrorIs(t, err, ErrUnsupportedVersion)
+		require.ErrorContains(t, err, "Format v1 was removed in v0.4.0; use Format v2")
+
+		unknownIdx := *legacyIdx
+		unknownIdx.Version = 99
+		err = unknownIdx.ValidateBounds(1024)
+		require.ErrorIs(t, err, ErrUnsupportedVersion)
+		require.ErrorContains(t, err, "got version 99")
+	})
+
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "compact_json_index",
+			raw: `{"version":1,"app_name":"legacy","os":"linux","arch":"amd64","created_unix":1724541234,` +
+				`"variants":[{"level":"v1","offset":200,"compressed_size":300,"uncompressed_size":800,` +
+				`"sha256":"` + testSHA256Sample + `","compression":"zstd"}]}`,
+		},
+		{
+			name: "whitespace_prefixed_json_index",
+			raw:  " \n\t\r{\"version\":1,\"os\":\"linux\",\"arch\":\"amd64\",\"variants\":[]}",
+		},
+	} {
+		t.Run("ReadTrailerAndIndex_rejects_"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			const indexOffset = 1024
+			buf := bytes.NewBuffer(make([]byte, indexOffset))
+			jsonBytes := []byte(tc.raw)
+			buf.Write(jsonBytes)
+			sum := sha256.Sum256(jsonBytes)
+			var trailer [TrailerSize]byte
+			binary.LittleEndian.PutUint64(trailer[0:OffsetLen], indexOffset)
+			binary.LittleEndian.PutUint64(trailer[OffsetLen:OffsetLen*2], uint64(len(jsonBytes)))
+			copy(trailer[OffsetLen*2:OffsetLen*2+HashLen], sum[:])
+			copy(trailer[OffsetLen*2+HashLen:], []byte(MagicString))
+			buf.Write(trailer[:])
+
+			parsed, err := ReadTrailerAndIndex(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+			require.Nil(t, parsed)
+			require.ErrorIs(t, err, ErrUnsupportedVersion)
+			require.ErrorContains(t, err, "re-package with Format v2 using 'microfat pack'")
+		})
 	}
 }
 
@@ -1333,95 +1372,6 @@ func TestUnmarshalBinaryIndexErrors(t *testing.T) {
 	}
 }
 
-func TestUnmarshalJSONIndexErrorsAndEdges(t *testing.T) {
-	t.Parallel()
-
-	// Not an object
-	if _, err := unmarshalJSONIndex([]byte("[]")); !errors.Is(err, ErrInvalidJSONSyntax) {
-		t.Errorf("expected ErrInvalidJSONSyntax for array root, got %v", err)
-	}
-
-	// Unclosed root
-	if _, err := unmarshalJSONIndex([]byte("{ \"version\": 1")); !errors.Is(err, ErrInvalidJSONSyntax) {
-		t.Errorf("expected ErrInvalidJSONSyntax for unclosed root, got %v", err)
-	}
-
-	// Escapes and strings
-	jsonWithEscapes := []byte(`{
-		"version": 1,
-		"app_name": "app\"with\nquotes\\and\/slashes\b\f\r\t",
-		"os": "linux",
-		"arch": "amd64",
-		"created_unix": -12345,
-		"unknown_field": {"nested": [1, 2, "three", true, false, null]},
-		"variants": [
-			{
-				"level": "v1",
-				"offset": 100,
-				"compressed_size": 200,
-				"uncompressed_size": 300,
-				"sha256": "` + testSHA256Sample + `",
-				"compression": "lz4",
-				"extra": "ignore"
-			}
-		]
-	}`)
-
-	idx, err := unmarshalJSONIndex(jsonWithEscapes)
-	if err != nil {
-		t.Fatalf("unmarshalJSONIndex with escapes failed: %v", err)
-	}
-	if idx.AppName != "app\"with\nquotes\\and/slashes\b\f\r\t" {
-		t.Errorf("escaped AppName mismatch: %q", idx.AppName)
-	}
-	if idx.CreatedUnix != -12345 {
-		t.Errorf("negative CreatedUnix mismatch: %d", idx.CreatedUnix)
-	}
-	if len(idx.Variants) != 1 || idx.Variants[0].Compression != "lz4" {
-		t.Errorf("variant mismatch: %+v", idx.Variants)
-	}
-}
-
-func BenchmarkUnmarshalJSONIndex(b *testing.B) {
-	idx := &Index{
-		Version:     FormatVersion1,
-		AppName:     "benchmark-demo-service",
-		TargetOS:    testOSLinux,
-		TargetArch:  testArchAMD64,
-		CreatedUnix: 1724540000,
-		Variants: []VariantEntry{
-			{
-				Level: "v1", Offset: 1000, CompressedSize: 2000000, UncompressedSize: 5000000,
-				SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Compression: testCompression,
-			},
-			{
-				Level: "v2", Offset: 2001000, CompressedSize: 2100000, UncompressedSize: 5100000,
-				SHA256: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", Compression: testCompression,
-			},
-			{
-				Level: "v3", Offset: 4101000, CompressedSize: 2200000, UncompressedSize: 5200000,
-				SHA256: "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff", Compression: testCompression,
-			},
-			{
-				Level: "v4", Offset: 6301000, CompressedSize: 2300000, UncompressedSize: 5300000,
-				SHA256: "ffeeddccbbaa00998877665544332211ffeeddccbbaa00998877665544332211", Compression: testCompression,
-			},
-		},
-	}
-	jsonBytes, err := json.Marshal(idx)
-	if err != nil {
-		b.Fatalf("json.Marshal failed: %v", err)
-	}
-
-	b.ReportAllocs()
-	for b.Loop() {
-		_, err := unmarshalJSONIndex(jsonBytes)
-		if err != nil {
-			b.Fatalf("unmarshalJSONIndex failed: %v", err)
-		}
-	}
-}
-
 func BenchmarkUnmarshalBinaryIndex(b *testing.B) {
 	idx := &Index{
 		Version:     FormatVersion2,
@@ -1471,48 +1421,6 @@ func TestEscapeJSONString(t *testing.T) {
 	if !hasAll {
 		t.Fatalf("unexpected escape string result: %s", escaped)
 	}
-}
-
-func TestJSONParser_EdgeCases(t *testing.T) {
-	t.Run("escaped_characters", func(t *testing.T) {
-		jsonStr := `{"app_name":"app\n\t\r\b\f\"\\\/\u0041","version":1,"os":"linux","arch":"amd64","created_unix":100,"variants":[]}`
-		idx, err := unmarshalJSONIndex([]byte(jsonStr))
-		if err != nil {
-			t.Fatalf("unmarshal failed: %v", err)
-		}
-		if idx.AppName != "app\n\t\r\b\f\"\\/A" {
-			t.Fatalf("unexpected app name: %q", idx.AppName)
-		}
-	})
-
-	t.Run("skip_values", func(t *testing.T) {
-		jsonStr := `{"extra_bool":true,"extra_false":false,"extra_null":null,` +
-			`"extra_obj":{"k":"v","nested":[1,2,3]},"version":1,"os":"linux","arch":"amd64","created_unix":-100,"variants":[]}`
-		idx, err := unmarshalJSONIndex([]byte(jsonStr))
-		if err != nil {
-			t.Fatalf("unmarshal failed: %v", err)
-		}
-		if idx.CreatedUnix != -100 {
-			t.Fatalf("unexpected created unix: %d", idx.CreatedUnix)
-		}
-	})
-
-	t.Run("invalid_escape_sequences", func(t *testing.T) {
-		invalidCases := []string{
-			`{"app_name":"\u00"`,
-			`{"app_name":"\uZZZZ"`,
-			`{"app_name":"\x"`,
-			`{"app_name":"unterminated`,
-			`{"created_unix":-}`,
-			`{"variants":[unknown]}`,
-		}
-		for _, c := range invalidCases {
-			_, err := unmarshalJSONIndex([]byte(c))
-			if err == nil {
-				t.Fatalf("expected error for case %q, got nil", c)
-			}
-		}
-	})
 }
 
 func TestDictionaryBinaryIndexSerialization(t *testing.T) {
@@ -1578,55 +1486,6 @@ func TestDictionaryBinaryIndexSerialization(t *testing.T) {
 	}
 	if decoded.Variants[0].Level != "v1" || decoded.Variants[1].Level != "v3" {
 		t.Errorf("variant levels mismatch: %v", decoded.Variants)
-	}
-}
-
-func TestDictionaryJSONIndexSerialization(t *testing.T) {
-	t.Parallel()
-
-	idx := &Index{
-		Version:          FormatVersion1,
-		AppName:          "dict-json-app",
-		TargetOS:         "linux",
-		TargetArch:       "amd64",
-		CreatedUnix:      1700000000,
-		DictionaryOffset: 8192,
-		DictionarySize:   65536,
-		DictionarySHA256: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
-		DictionaryID:     0x12345678,
-		Variants: []VariantEntry{
-			{
-				Level:            "v1",
-				Offset:           73728,
-				CompressedSize:   5000,
-				UncompressedSize: 15000,
-				SHA256:           "1111111111111111111111111111111111111111111111111111111111111111",
-				Compression:      "zstd",
-			},
-		},
-	}
-
-	data, err := marshalJSONIndex(idx)
-	if err != nil {
-		t.Fatalf("marshalJSONIndex failed: %v", err)
-	}
-
-	decoded, err := unmarshalJSONIndex(data)
-	if err != nil {
-		t.Fatalf("unmarshalJSONIndex failed: %v", err)
-	}
-
-	if decoded.DictionaryOffset != idx.DictionaryOffset {
-		t.Errorf("expected DictOffset %d, got %d", idx.DictionaryOffset, decoded.DictionaryOffset)
-	}
-	if decoded.DictionarySize != idx.DictionarySize {
-		t.Errorf("expected DictSize %d, got %d", idx.DictionarySize, decoded.DictionarySize)
-	}
-	if decoded.DictionarySHA256 != idx.DictionarySHA256 {
-		t.Errorf("expected DictSHA256 %s, got %s", idx.DictionarySHA256, decoded.DictionarySHA256)
-	}
-	if decoded.DictionaryID != idx.DictionaryID {
-		t.Errorf("expected DictID 0x%x, got 0x%x", idx.DictionaryID, decoded.DictionaryID)
 	}
 }
 
@@ -1970,89 +1829,6 @@ func TestValidateChecksum(t *testing.T) {
 	}
 }
 
-func TestParseJSONString_Escapes(t *testing.T) {
-	t.Parallel()
-
-	t.Run("Valid JSON escapes and unicode", func(t *testing.T) {
-		t.Parallel()
-		raw := []byte(`"hello\nworld\t\"quotes\"\\slash\/back\bform\ffeed\rcarriage\u0041"`)
-		parsed, nextPos, err := parseJSONString(raw, 0)
-		if err != nil {
-			t.Fatalf("unexpected error parsing valid escapes: %v", err)
-		}
-		if nextPos != len(raw) {
-			t.Fatalf("expected nextPos %d, got %d", len(raw), nextPos)
-		}
-		expected := "hello\nworld\t\"quotes\"\\slash/back\bform\ffeed\rcarriageA"
-		if parsed != expected {
-			t.Fatalf("expected %q, got %q", expected, parsed)
-		}
-	})
-
-	t.Run("Invalid escape sequence \\q returns ErrInvalidJSONSyntax", func(t *testing.T) {
-		t.Parallel()
-		raw := []byte(`"invalid \q escape"`)
-		_, _, err := parseJSONString(raw, 0)
-		if !errors.Is(err, ErrInvalidJSONSyntax) {
-			t.Fatalf("expected ErrInvalidJSONSyntax for \\q, got %v", err)
-		}
-	})
-
-	t.Run("Invalid escape sequence \\a returns ErrInvalidJSONSyntax", func(t *testing.T) {
-		t.Parallel()
-		raw := []byte(`"invalid \a escape"`)
-		_, _, err := parseJSONString(raw, 0)
-		if !errors.Is(err, ErrInvalidJSONSyntax) {
-			t.Fatalf("expected ErrInvalidJSONSyntax for \\a, got %v", err)
-		}
-	})
-
-	t.Run("Invalid escape sequence \\1 returns ErrInvalidJSONSyntax", func(t *testing.T) {
-		t.Parallel()
-		raw := []byte(`"invalid \1 escape"`)
-		_, _, err := parseJSONString(raw, 0)
-		if !errors.Is(err, ErrInvalidJSONSyntax) {
-			t.Fatalf("expected ErrInvalidJSONSyntax for \\1, got %v", err)
-		}
-	})
-
-	t.Run("Invalid escape sequence \\x returns ErrInvalidJSONSyntax", func(t *testing.T) {
-		t.Parallel()
-		raw := []byte(`"invalid \x hex escape"`)
-		_, _, err := parseJSONString(raw, 0)
-		if !errors.Is(err, ErrInvalidJSONSyntax) {
-			t.Fatalf("expected ErrInvalidJSONSyntax for \\x, got %v", err)
-		}
-	})
-
-	t.Run("Unterminated escape sequence at EOF", func(t *testing.T) {
-		t.Parallel()
-		raw := []byte(`"trailing escape \`)
-		_, _, err := parseJSONString(raw, 0)
-		if !errors.Is(err, ErrInvalidJSONSyntax) {
-			t.Fatalf("expected ErrInvalidJSONSyntax for trailing escape, got %v", err)
-		}
-	})
-
-	t.Run("Invalid unicode escape digits", func(t *testing.T) {
-		t.Parallel()
-		raw := []byte(`"invalid unicode \u00GZ"`)
-		_, _, err := parseJSONString(raw, 0)
-		if !errors.Is(err, ErrInvalidJSONSyntax) {
-			t.Fatalf("expected ErrInvalidJSONSyntax for bad unicode escape, got %v", err)
-		}
-	})
-
-	t.Run("Truncated unicode escape", func(t *testing.T) {
-		t.Parallel()
-		raw := []byte(`"truncated unicode \u00"`)
-		_, _, err := parseJSONString(raw, 0)
-		if !errors.Is(err, ErrInvalidJSONSyntax) {
-			t.Fatalf("expected ErrInvalidJSONSyntax for truncated unicode escape, got %v", err)
-		}
-	})
-}
-
 func TestNormalizeVariant(t *testing.T) {
 	t.Parallel()
 
@@ -2343,21 +2119,6 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 		}
 	})
 
-	t.Run("Format v1 rejects variant with empty SHA256 in ValidateBounds", func(t *testing.T) {
-		t.Parallel()
-		idx := &Index{
-			Version:    FormatVersion1,
-			TargetArch: testArchAMD64,
-			Variants: []VariantEntry{
-				{Level: "v1", Offset: 100, CompressedSize: 100, UncompressedSize: 200, SHA256: ""},
-			},
-		}
-		err := idx.ValidateBounds(1000)
-		if !errors.Is(err, ErrInvalidChecksum) {
-			t.Fatalf("expected ErrInvalidChecksum for Format v1 with empty SHA256, got %v", err)
-		}
-	})
-
 	t.Run("Format v2 MarshalBinaryIndex rejects missing SHA256", func(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
@@ -2387,116 +2148,6 @@ func TestValidateBounds_VariantValidation(t *testing.T) {
 			t.Fatalf("expected ErrInvalidChecksum from MarshalBinaryIndex with invalid SHA256, got %v", err)
 		}
 	})
-}
-
-func TestParseJSONInt64_BoundsAndOverflow(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name        string
-		input       string
-		wantVal     int64
-		wantErr     bool
-		errSentinel error
-	}{
-		{name: "zero", input: "0", wantVal: 0, wantErr: false},
-		{name: "negative zero", input: "-0", wantVal: 0, wantErr: false},
-		{name: "leading zeroes", input: "000042", wantVal: 42, wantErr: false},
-		{name: "standard positive", input: "123456789", wantVal: 123456789, wantErr: false},
-		{name: "standard negative", input: "-123456789", wantVal: -123456789, wantErr: false},
-		{name: "max int64", input: "9223372036854775807", wantVal: math.MaxInt64, wantErr: false},
-		{name: "min int64", input: "-9223372036854775808", wantVal: math.MinInt64, wantErr: false},
-		{name: "max int64 plus 1 overflow", input: "9223372036854775808", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
-		{name: "min int64 minus 1 underflow", input: "-9223372036854775809", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
-		{name: "huge positive overflow", input: "99999999999999999999999999999999", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
-		{name: "huge negative underflow", input: "-99999999999999999999999999999999", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
-		{name: "empty input", input: "", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
-		{name: "whitespace only", input: "   ", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
-		{name: "minus sign only", input: "-", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
-		{name: "minus sign with non-digit", input: "-abc", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
-		{name: "non-digit character", input: "abc", wantErr: true, errSentinel: ErrInvalidJSONSyntax},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got, nextPos, err := parseJSONInt64([]byte(tt.input), 0)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("parseJSONInt64(%q) expected error, got val=%d, nextPos=%d", tt.input, got, nextPos)
-				}
-				if tt.errSentinel != nil && !errors.Is(err, tt.errSentinel) {
-					t.Fatalf("parseJSONInt64(%q) error %v does not wrap sentinel %v", tt.input, err, tt.errSentinel)
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("parseJSONInt64(%q) unexpected error: %v", tt.input, err)
-				}
-				if got != tt.wantVal {
-					t.Fatalf("parseJSONInt64(%q) = %d; want %d", tt.input, got, tt.wantVal)
-				}
-			}
-		})
-	}
-}
-
-func TestUnmarshalJSONIndex_IntegerOverflow(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		json string
-	}{
-		{
-			name: "overflow in version",
-			json: `{"version": 99999999999999999999, "variants": []}`,
-		},
-		{
-			name: "overflow in created_unix",
-			json: `{"version": 1, "created_unix": 99999999999999999999, "variants": []}`,
-		},
-		{
-			name: "overflow in dictionary_offset",
-			json: `{"version": 1, "dictionary_offset": 99999999999999999999, "variants": []}`,
-		},
-		{
-			name: "overflow in dictionary_size",
-			json: `{"version": 1, "dictionary_size": 99999999999999999999, "variants": []}`,
-		},
-		{
-			name: "overflow in dictionary_id",
-			json: `{"version": 1, "dictionary_id": 99999999999999999999, "variants": []}`,
-		},
-		{
-			name: "overflow in variant offset",
-			json: `{"version": 1, "variants": [{"level": "v1", "offset": 99999999999999999999}]}`,
-		},
-		{
-			name: "overflow in variant compressed_size",
-			json: `{"version": 1, "variants": [{"level": "v1", "compressed_size": 99999999999999999999}]}`,
-		},
-		{
-			name: "overflow in variant uncompressed_size",
-			json: `{"version": 1, "variants": [{"level": "v1", "uncompressed_size": 99999999999999999999}]}`,
-		},
-		{
-			name: "underflow in variant offset",
-			json: `{"version": 1, "variants": [{"level": "v1", "offset": -99999999999999999999}]}`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			_, err := unmarshalJSONIndex([]byte(tt.json))
-			if err == nil {
-				t.Fatalf("unmarshalJSONIndex expected error for %s, got nil", tt.name)
-			}
-			if !errors.Is(err, ErrInvalidJSONSyntax) {
-				t.Fatalf("unmarshalJSONIndex expected ErrInvalidJSONSyntax for %s, got %v", tt.name, err)
-			}
-		})
-	}
 }
 
 func TestReadTrailerAndIndex_IndexBoundsBoundaryEnforcement(t *testing.T) {
@@ -2548,57 +2199,8 @@ func TestReadTrailerAndIndex_IndexBoundsBoundaryEnforcement(t *testing.T) {
 			expectErrorSubstr: "variant v1 payload extends past index offset 1000",
 		},
 		{
-			name:    "Format v1 rejects variant extending past indexOffset by 1 byte",
-			version: FormatVersion1,
-			buildIndex: func() *Index {
-				return &Index{
-					AppName:    testAppName,
-					TargetOS:   testOSLinux,
-					TargetArch: testArchAMD64,
-					Variants: []VariantEntry{
-						{
-							Level:            "v1",
-							Offset:           payloadStartOffset,
-							CompressedSize:   overrunByOneLength,
-							UncompressedSize: uncompressedTestSize,
-							SHA256:           testSHA256Sample,
-							Compression:      testCompression,
-						},
-					},
-				}
-			},
-			expectError:       ErrOutOfBounds,
-			expectErrorSubstr: "variant v1 payload extends past index offset 1000",
-		},
-		{
 			name:    "Format v2 rejects dictionary extending past indexOffset by 1 byte",
 			version: FormatVersion2,
-			buildIndex: func() *Index {
-				return &Index{
-					AppName:          testAppName,
-					TargetOS:         testOSLinux,
-					TargetArch:       testArchAMD64,
-					DictionaryOffset: testDictOffset,
-					DictionarySize:   testDictOverrunByOne,
-					DictionarySHA256: testSHA256Sample,
-					Variants: []VariantEntry{
-						{
-							Level:            "v1",
-							Offset:           dummyFutureOffset,
-							CompressedSize:   dummyVariantLength,
-							UncompressedSize: uncompressedTestSize,
-							SHA256:           testSHA256Sample,
-							Compression:      testCompression,
-						},
-					},
-				}
-			},
-			expectError:       ErrOutOfBounds,
-			expectErrorSubstr: "dictionary payload extends past index offset 1000",
-		},
-		{
-			name:    "Format v1 rejects dictionary extending past indexOffset by 1 byte",
-			version: FormatVersion1,
 			buildIndex: func() *Index {
 				return &Index{
 					AppName:          testAppName,
@@ -2645,55 +2247,8 @@ func TestReadTrailerAndIndex_IndexBoundsBoundaryEnforcement(t *testing.T) {
 			expectError: nil,
 		},
 		{
-			name:    "Format v1 accepts variant payload terminating exactly at indexOffset",
-			version: FormatVersion1,
-			buildIndex: func() *Index {
-				return &Index{
-					AppName:    testAppName,
-					TargetOS:   testOSLinux,
-					TargetArch: testArchAMD64,
-					Variants: []VariantEntry{
-						{
-							Level:            "v1",
-							Offset:           payloadStartOffset,
-							CompressedSize:   exactBoundaryLength,
-							UncompressedSize: uncompressedTestSize,
-							SHA256:           testSHA256Sample,
-							Compression:      testCompression,
-						},
-					},
-				}
-			},
-			expectError: nil,
-		},
-		{
 			name:    "Format v2 accepts dictionary and variant terminating exactly at indexOffset",
 			version: FormatVersion2,
-			buildIndex: func() *Index {
-				return &Index{
-					AppName:          testAppName,
-					TargetOS:         testOSLinux,
-					TargetArch:       testArchAMD64,
-					DictionaryOffset: testDictOffset,
-					DictionarySize:   testDictValidLength,
-					DictionarySHA256: testSHA256Sample,
-					Variants: []VariantEntry{
-						{
-							Level:            "v1",
-							Offset:           testVariantPostDict,
-							CompressedSize:   testVariantPostDictLen,
-							UncompressedSize: uncompressedTestSize,
-							SHA256:           testSHA256Sample,
-							Compression:      testCompression,
-						},
-					},
-				}
-			},
-			expectError: nil,
-		},
-		{
-			name:    "Format v1 accepts dictionary and variant terminating exactly at indexOffset",
-			version: FormatVersion1,
 			buildIndex: func() *Index {
 				return &Index{
 					AppName:          testAppName,
@@ -2854,44 +2409,6 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 		require.NoError(t, idx.ValidateBounds(boundaryMax), "expected valid bounds with zero-size dictionary, got")
 	})
 
-	t.Run("Format v1 rejects empty dictionary SHA256 when DictionarySize is non-zero", func(t *testing.T) {
-		t.Parallel()
-		idx := &Index{
-			Version:          FormatVersion1,
-			TargetArch:       testArchAMD64,
-			DictionaryOffset: dictOffset,
-			DictionarySize:   dictSize,
-			DictionarySHA256: "",
-			Variants:         []VariantEntry{validVariant},
-		}
-		err := idx.ValidateBounds(boundaryMax)
-		if !errors.Is(err, ErrInvalidChecksum) {
-			t.Fatalf("expected ErrInvalidChecksum for Format v1 with empty dict SHA256, got %v", err)
-		}
-		if !strings.Contains(err.Error(), "dictionary missing or invalid sha256 checksum") {
-			t.Fatalf("unexpected error message: %v", err)
-		}
-	})
-
-	t.Run("Format v1 rejects malformed dictionary SHA256 when non-empty", func(t *testing.T) {
-		t.Parallel()
-		idx := &Index{
-			Version:          FormatVersion1,
-			TargetArch:       testArchAMD64,
-			DictionaryOffset: dictOffset,
-			DictionarySize:   dictSize,
-			DictionarySHA256: "invalid-hash",
-			Variants:         []VariantEntry{validVariant},
-		}
-		err := idx.ValidateBounds(boundaryMax)
-		if !errors.Is(err, ErrInvalidChecksum) {
-			t.Fatalf("expected ErrInvalidChecksum for malformed dict SHA in Format v1, got %v", err)
-		}
-		if !strings.Contains(err.Error(), "dictionary missing or invalid sha256 checksum") {
-			t.Fatalf("unexpected error message: %v", err)
-		}
-	})
-
 	t.Run("Format v2 MarshalBinaryIndex rejects non-zero dictionary with empty SHA256", func(t *testing.T) {
 		t.Parallel()
 		idx := &Index{
@@ -3022,60 +2539,6 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 		_, err = ReadTrailerAndIndex(bytes.NewReader(buf.Bytes()), totalSize)
 		if !errors.Is(err, ErrInvalidChecksum) {
 			t.Fatalf("expected ErrInvalidChecksum from ReadTrailerAndIndex, got %v", err)
-		}
-	})
-
-	t.Run("ReadTrailerAndIndex rejects Format v1 binary with non-zero dictionary and empty SHA256", func(t *testing.T) {
-		t.Parallel()
-		idxV1 := &Index{
-			Version:          FormatVersion1,
-			AppName:          testAppName,
-			TargetOS:         testOSLinux,
-			TargetArch:       testArchAMD64,
-			CreatedUnix:      1724540000,
-			DictionaryOffset: dictOffset,
-			DictionarySize:   dictSize,
-			DictionarySHA256: "",
-			Variants:         []VariantEntry{validVariant},
-		}
-
-		buf := bytes.NewBuffer(make([]byte, boundaryMax))
-		written, err := WriteIndexAndTrailerWithVersion(buf, idxV1, boundaryMax, FormatVersion1)
-		require.NoError(t, err, "WriteIndexAndTrailerWithVersion failed")
-
-		totalSize := boundaryMax + written
-		_, err = ReadTrailerAndIndex(bytes.NewReader(buf.Bytes()), totalSize)
-		if !errors.Is(err, ErrInvalidChecksum) {
-			t.Fatalf("expected ErrInvalidChecksum for Format v1 with empty dict SHA256, got %v", err)
-		}
-	})
-
-	t.Run("ReadTrailerAndIndex accepts Format v1 binary with non-zero dictionary and valid SHA256", func(t *testing.T) {
-		t.Parallel()
-		idxV1 := &Index{
-			Version:          FormatVersion1,
-			AppName:          testAppName,
-			TargetOS:         testOSLinux,
-			TargetArch:       testArchAMD64,
-			CreatedUnix:      1724540000,
-			DictionaryOffset: dictOffset,
-			DictionarySize:   dictSize,
-			DictionarySHA256: testSHA256Sample,
-			Variants:         []VariantEntry{validVariant},
-		}
-
-		buf := bytes.NewBuffer(make([]byte, boundaryMax))
-		written, err := WriteIndexAndTrailerWithVersion(buf, idxV1, boundaryMax, FormatVersion1)
-		require.NoError(t, err, "WriteIndexAndTrailerWithVersion failed")
-
-		totalSize := boundaryMax + written
-		parsed, err := ReadTrailerAndIndex(bytes.NewReader(buf.Bytes()), totalSize)
-		require.NoError(t, err, "expected clean parse for Format v1 with valid dict SHA256, got")
-		if parsed.DictionarySize != dictSize {
-			t.Fatalf("expected DictionarySize %d, got %d", dictSize, parsed.DictionarySize)
-		}
-		if parsed.DictionarySHA256 != testSHA256Sample {
-			t.Fatalf("expected DictionarySHA256 %q, got %q", testSHA256Sample, parsed.DictionarySHA256)
 		}
 	})
 }

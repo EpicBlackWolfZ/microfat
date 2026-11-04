@@ -6,14 +6,11 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 
@@ -44,7 +41,7 @@ const (
 	// IndexMagicV2 is the 4-byte magic signature at the start of Format v2 binary indices.
 	IndexMagicV2 = "\x00\xFAM2"
 
-	// FormatVersion1 is the legacy JSON manifest format.
+	// FormatVersion1 identifies the removed legacy JSON manifest format (rejected since v0.4.0).
 	FormatVersion1 = 1
 
 	// FormatVersion2 is the reflection-free compact binary index table format.
@@ -138,7 +135,6 @@ var (
 	ErrPayloadTooLarge     = errors.New("variant payload size exceeds safety limit")
 	ErrOverlappingVariant  = errors.New("variant payloads overlap or are unsorted")
 	ErrTruncatedIndex      = errors.New("truncated index data")
-	ErrInvalidJSONSyntax   = errors.New("invalid json syntax in manifest index")
 	ErrDictionaryCorrupted = errors.New("shared dictionary SHA-256 checksum mismatch")
 	ErrPayloadCorrupted    = errors.New("variant payload SHA-256 checksum mismatch")
 	ErrInvalidDictionary   = errors.New("invalid shared dictionary offset or size")
@@ -478,8 +474,11 @@ func (idx *Index) FindVariant(level string) (*VariantEntry, bool) {
 
 // ValidateBounds verifies that all variants and offsets in the index are within safe boundaries.
 func (idx *Index) ValidateBounds(indexOffset int64) error {
-	if idx.Version != FormatVersion1 && idx.Version != FormatVersion2 {
-		return fmt.Errorf("%w: got version %d, expected %d or %d", ErrUnsupportedVersion, idx.Version, FormatVersion1, FormatVersion2)
+	if idx.Version == FormatVersion1 {
+		return fmt.Errorf("%w: Format v1 was removed in v0.4.0; use Format v2", ErrUnsupportedVersion)
+	}
+	if idx.Version != FormatVersion2 {
+		return fmt.Errorf("%w: got version %d, expected %d", ErrUnsupportedVersion, idx.Version, FormatVersion2)
 	}
 
 	if indexOffset < 0 {
@@ -567,8 +566,6 @@ const (
 	defaultCompressionAlgorithm = "zstd"
 	minBinaryHeaderSize         = 34
 	binaryHeaderFixedSize       = 34
-	initialVariantCap           = 4
-	decimalBase                 = 10
 	asciiControlCutoff          = 0x20
 	uint16LenPrefixSize         = 2
 	uint64FieldSize             = 8
@@ -866,386 +863,13 @@ func decodeBinaryVariant(data []byte, offset int, i int) (VariantEntry, int, err
 	}, offset, nil
 }
 
-func skipJSONWhitespace(data []byte, pos int) int {
-	for pos < len(data) {
-		c := data[pos]
-		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
-			pos++
-			continue
-		}
-		break
-	}
-	return pos
-}
-
-func parseJSONString(data []byte, pos int) (string, int, error) {
-	pos = skipJSONWhitespace(data, pos)
-	if pos >= len(data) || data[pos] != '"' {
-		return "", pos, fmt.Errorf("%w: expected string opening quote at byte %d", ErrInvalidJSONSyntax, pos)
-	}
-	start := pos
-	pos++
-	for pos < len(data) {
-		switch data[pos] {
-		case '\\':
-			pos += 2 // json.Unmarshal validates the escape, including surrogate pairs.
-			continue
-		case '"':
-			var value string
-			if err := json.Unmarshal(data[start:pos+1], &value); err != nil {
-				return "", pos, fmt.Errorf("%w: %v", ErrInvalidJSONSyntax, err)
-			}
-			return value, pos + 1, nil
-		}
-		pos++
-	}
-	return "", pos, fmt.Errorf("%w: unterminated string at byte %d", ErrInvalidJSONSyntax, start)
-}
-
-func parseJSONInt64(data []byte, pos int) (int64, int, error) {
-	pos = skipJSONWhitespace(data, pos)
-	if pos >= len(data) {
-		return 0, pos, fmt.Errorf("%w: expected number at end of input", ErrInvalidJSONSyntax)
-	}
-	start := pos
-	isNeg := false
-	if data[pos] == '-' {
-		isNeg = true
-		pos++
-	}
-	if pos >= len(data) || data[pos] < '0' || data[pos] > '9' {
-		return 0, pos, fmt.Errorf("%w: expected digit at byte %d", ErrInvalidJSONSyntax, pos)
-	}
-	var val int64
-	if isNeg {
-		for pos < len(data) && data[pos] >= '0' && data[pos] <= '9' {
-			digit := int64(data[pos] - '0')
-			if val < (math.MinInt64+digit)/decimalBase {
-				return 0, pos, fmt.Errorf("%w: integer overflow at byte %d", ErrInvalidJSONSyntax, start)
-			}
-			val = val*decimalBase - digit
-			pos++
-		}
-	} else {
-		for pos < len(data) && data[pos] >= '0' && data[pos] <= '9' {
-			digit := int64(data[pos] - '0')
-			if val > (math.MaxInt64-digit)/decimalBase {
-				return 0, pos, fmt.Errorf("%w: integer overflow at byte %d", ErrInvalidJSONSyntax, start)
-			}
-			val = val*decimalBase + digit
-			pos++
-		}
-	}
-	return val, pos, nil
-}
-
-// MaxJSONDepth bounds legacy manifest nesting, including unknown fields.
-const MaxJSONDepth = 128
-
-// validateJSONSyntax uses the standard grammar and a linear, nonrecursive depth check.
-// The schema parser below intentionally restricts known numeric fields to int64.
-func validateJSONSyntax(data []byte) error {
-	depth := 0
-	quoted, escaped := false, false
-	for _, c := range data {
-		if quoted {
-			switch {
-			case escaped:
-				escaped = false
-			case c == '\\':
-				escaped = true
-			case c == '"':
-				quoted = false
-			}
-			continue
-		}
-		switch c {
-		case '"':
-			quoted = true
-		case '{', '[':
-			depth++
-			if depth > MaxJSONDepth {
-				return fmt.Errorf("%w: nesting exceeds %d", ErrInvalidJSONSyntax, MaxJSONDepth)
-			}
-		case '}', ']':
-			depth--
-		}
-	}
-	if !json.Valid(data) {
-		return fmt.Errorf("%w: malformed JSON value", ErrInvalidJSONSyntax)
-	}
-	return nil
-}
-
-func skipJSONValue(data []byte, pos int) (int, error) {
-	pos = skipJSONWhitespace(data, pos)
-	if pos >= len(data) {
-		return pos, fmt.Errorf("%w: unexpected end of json", ErrInvalidJSONSyntax)
-	}
-	// The complete manifest has already passed the depth and syntax checks. RawMessage
-	// validates the skipped value without interpreting its schema or converting numbers.
-	decoder := json.NewDecoder(bytes.NewReader(data[pos:]))
-	var value json.RawMessage
-	if err := decoder.Decode(&value); err != nil {
-		return pos, fmt.Errorf("%w: %v", ErrInvalidJSONSyntax, err)
-	}
-	if err := validateJSONSyntax(value); err != nil {
-		return pos, err
-	}
-	next := pos + int(decoder.InputOffset())
-	if next <= pos {
-		return pos, fmt.Errorf("%w: value did not advance", ErrInvalidJSONSyntax)
-	}
-	return next, nil
-}
-
-// unmarshalJSONIndex validates JSON syntax and reads the legacy Format v1 manifest schema with lowercase SHA-256 digests.
-func unmarshalJSONIndex(data []byte) (*Index, error) {
-	if err := validateJSONSyntax(data); err != nil {
-		return nil, err
-	}
-	pos := skipJSONWhitespace(data, 0)
-	if pos >= len(data) || data[pos] != '{' {
-		return nil, fmt.Errorf("%w: root must be object", ErrInvalidJSONSyntax)
-	}
-	pos++
-
-	idx := &Index{
-		Version:  FormatVersion1,
-		Variants: make([]VariantEntry, 0, initialVariantCap),
-	}
-
-	for {
-		pos = skipJSONWhitespace(data, pos)
-		if pos >= len(data) {
-			return nil, fmt.Errorf("%w: unclosed root object", ErrInvalidJSONSyntax)
-		}
-		if data[pos] == '}' {
-			break
-		}
-
-		key, nextPos, err := parseJSONString(data, pos)
-		if err != nil {
-			return nil, err
-		}
-		pos = skipJSONWhitespace(data, nextPos)
-		if pos >= len(data) || data[pos] != ':' {
-			return nil, fmt.Errorf("%w: expected ':' after key %s", ErrInvalidJSONSyntax, key)
-		}
-		pos++
-		pos = skipJSONWhitespace(data, pos)
-
-		nPos, fErr := parseJSONIndexField(key, data, pos, idx)
-		if fErr != nil {
-			return nil, fErr
-		}
-		pos = nPos
-
-		pos = skipJSONWhitespace(data, pos)
-		if pos < len(data) && data[pos] == ',' {
-			pos++
-		}
-	}
-
-	return idx, nil
-}
-
-func parseJSONIndexField(key string, data []byte, pos int, idx *Index) (int, error) {
-	switch key {
-	case "version":
-		v, nPos, err := parseJSONInt64(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		idx.Version = int(v)
-		return nPos, nil
-	case "app_name":
-		s, nPos, err := parseJSONString(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		idx.AppName = s
-		return nPos, nil
-	case "os":
-		s, nPos, err := parseJSONString(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		idx.TargetOS = s
-		return nPos, nil
-	case "arch":
-		s, nPos, err := parseJSONString(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		idx.TargetArch = s
-		return nPos, nil
-	case "created_unix":
-		v, nPos, err := parseJSONInt64(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		idx.CreatedUnix = v
-		return nPos, nil
-	case "dictionary_offset":
-		v, nPos, err := parseJSONInt64(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		idx.DictionaryOffset = v
-		return nPos, nil
-	case "dictionary_size":
-		v, nPos, err := parseJSONInt64(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		idx.DictionarySize = v
-		return nPos, nil
-	case "dictionary_sha256":
-		s, nPos, err := parseJSONString(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		idx.DictionarySHA256 = strings.ToLower(s)
-		return nPos, nil
-	case "dictionary_id":
-		v, nPos, err := parseJSONInt64(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		// #nosec G115 -- integer conversion for dictionary_id
-		idx.DictionaryID = uint32(v)
-		return nPos, nil
-	case "variants":
-		variants, nPos, err := parseJSONVariantArray(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		idx.Variants = variants
-		return nPos, nil
-	default:
-		return skipJSONValue(data, pos)
-	}
-}
-
-func parseJSONVariantArray(data []byte, pos int) ([]VariantEntry, int, error) {
-	if pos >= len(data) || data[pos] != '[' {
-		return nil, pos, fmt.Errorf("%w: expected '[' for variants array", ErrInvalidJSONSyntax)
-	}
-	pos++
-	variants := make([]VariantEntry, 0, initialVariantCap)
-	for {
-		pos = skipJSONWhitespace(data, pos)
-		if pos >= len(data) {
-			return nil, pos, fmt.Errorf("%w: unclosed variants array", ErrInvalidJSONSyntax)
-		}
-		if data[pos] == ']' {
-			return variants, pos + 1, nil
-		}
-		if data[pos] != '{' {
-			return nil, pos, fmt.Errorf("%w: expected variant object '{'", ErrInvalidJSONSyntax)
-		}
-		entry, nPos, err := parseJSONVariantObject(data, pos)
-		if err != nil {
-			return nil, pos, err
-		}
-		variants = append(variants, entry)
-		pos = skipJSONWhitespace(data, nPos)
-		if pos < len(data) && data[pos] == ',' {
-			pos++
-		}
-	}
-}
-
-func parseJSONVariantObject(data []byte, pos int) (VariantEntry, int, error) {
-	pos++
-	var entry VariantEntry
-	for {
-		pos = skipJSONWhitespace(data, pos)
-		if pos >= len(data) {
-			return entry, pos, fmt.Errorf("%w: unclosed variant object", ErrInvalidJSONSyntax)
-		}
-		if data[pos] == '}' {
-			if entry.Compression == "" {
-				entry.Compression = defaultCompressionAlgorithm
-			}
-			return entry, pos + 1, nil
-		}
-		vKey, vnPos, err := parseJSONString(data, pos)
-		if err != nil {
-			return entry, pos, err
-		}
-		pos = skipJSONWhitespace(data, vnPos)
-		if pos >= len(data) || data[pos] != ':' {
-			return entry, pos, fmt.Errorf("%w: expected ':' after variant key %s", ErrInvalidJSONSyntax, vKey)
-		}
-		pos++
-		pos = skipJSONWhitespace(data, pos)
-
-		nPos, fErr := parseJSONVariantField(vKey, data, pos, &entry)
-		if fErr != nil {
-			return entry, pos, fErr
-		}
-		pos = nPos
-
-		pos = skipJSONWhitespace(data, pos)
-		if pos < len(data) && data[pos] == ',' {
-			pos++
-		}
-	}
-}
-
-func parseJSONVariantField(vKey string, data []byte, pos int, entry *VariantEntry) (int, error) {
-	switch vKey {
-	case "level":
-		s, snPos, err := parseJSONString(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		entry.Level = s
-		return snPos, nil
-	case "offset":
-		v, vnPos, err := parseJSONInt64(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		entry.Offset = v
-		return vnPos, nil
-	case "compressed_size":
-		v, vnPos, err := parseJSONInt64(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		entry.CompressedSize = v
-		return vnPos, nil
-	case "uncompressed_size":
-		v, vnPos, err := parseJSONInt64(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		entry.UncompressedSize = v
-		return vnPos, nil
-	case "sha256":
-		s, snPos, err := parseJSONString(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		entry.SHA256 = strings.ToLower(s)
-		return snPos, nil
-	case "compression":
-		s, snPos, err := parseJSONString(data, pos)
-		if err != nil {
-			return pos, err
-		}
-		entry.Compression = s
-		return snPos, nil
-	default:
-		return skipJSONValue(data, pos)
-	}
+func looksLikeLegacyJSONIndex(data []byte) bool {
+	trimmed := bytes.TrimLeft(data, " \t\r\n")
+	return len(trimmed) > 0 && trimmed[0] == '{'
 }
 
 // ReadTrailerAndIndex reads the trailing 56 bytes of the binary, verifies magic and index SHA-256 hash,
-// deserializes the index table (binary Format v2 or JSON Format v1), and enforces bounds checks.
+// deserializes the Format v2 compact binary index table, and enforces bounds checks.
 func ReadTrailerAndIndex(r io.ReaderAt, totalSize int64) (*Index, error) {
 	if totalSize < TrailerSize {
 		return nil, fmt.Errorf("%w: file size %d bytes is smaller than trailer size %d bytes",
@@ -1289,21 +913,15 @@ func ReadTrailerAndIndex(r io.ReaderAt, totalSize int64) (*Index, error) {
 		return nil, fmt.Errorf("%w: expected %x, got %x", ErrIndexCorrupted, expectedHash, actualHash)
 	}
 
-	var idx *Index
-	var err error
-	if len(idxBytes) >= 4 && string(idxBytes[0:4]) == IndexMagicV2 {
-		idx, err = UnmarshalBinaryIndex(idxBytes)
-	} else {
-		idx, err = unmarshalJSONIndex(idxBytes)
+	if looksLikeLegacyJSONIndex(idxBytes) {
+		return nil, fmt.Errorf(
+			"deserializing index: %w: legacy Format v1 JSON manifests were removed in v0.4.0; re-package with Format v2 using 'microfat pack'",
+			ErrUnsupportedVersion,
+		)
 	}
+	idx, err := UnmarshalBinaryIndex(idxBytes)
 	if err != nil {
 		return nil, fmt.Errorf("deserializing index: %w", err)
-	}
-
-	for i := range idx.Variants {
-		if idx.Variants[i].Compression == "" {
-			idx.Variants[i].Compression = defaultCompressionAlgorithm
-		}
 	}
 
 	if err := idx.ValidateBounds(indexOffset); err != nil {
@@ -1322,69 +940,8 @@ func WriteIndexAndTrailer(w io.Writer, idx *Index, currentOffset int64) (int64, 
 	return WriteIndexAndTrailerWithVersion(w, idx, currentOffset, version)
 }
 
-// marshalJSONIndex serializes an Index struct to JSON without using Go reflection.
-func marshalJSONIndex(idx *Index) ([]byte, error) {
-	var sb strings.Builder
-	sb.WriteString(`{"version":`)
-	sb.WriteString(strconv.Itoa(idx.Version))
-	if idx.AppName != "" {
-		sb.WriteString(`,"app_name":"`)
-		sb.WriteString(EscapeJSONString(idx.AppName))
-		sb.WriteString(`"`)
-	}
-	sb.WriteString(`,"os":"`)
-	sb.WriteString(EscapeJSONString(idx.TargetOS))
-	sb.WriteString(`","arch":"`)
-	sb.WriteString(EscapeJSONString(idx.TargetArch))
-	sb.WriteString(`","created_unix":`)
-	sb.WriteString(strconv.FormatInt(idx.CreatedUnix, 10))
-	if idx.DictionarySize > 0 {
-		sb.WriteString(`,"dictionary_offset":`)
-		sb.WriteString(strconv.FormatInt(idx.DictionaryOffset, 10))
-		sb.WriteString(`,"dictionary_size":`)
-		sb.WriteString(strconv.FormatInt(idx.DictionarySize, 10))
-		if idx.DictionarySHA256 != "" {
-			sb.WriteString(`,"dictionary_sha256":"`)
-			sb.WriteString(EscapeJSONString(idx.DictionarySHA256))
-			sb.WriteString(`"`)
-		}
-		if idx.DictionaryID > 0 {
-			sb.WriteString(`,"dictionary_id":`)
-			sb.WriteString(strconv.FormatInt(int64(idx.DictionaryID), 10))
-		}
-	}
-	sb.WriteString(`,"variants":[`)
-	for i, v := range idx.Variants {
-		if i > 0 {
-			sb.WriteString(`,`)
-		}
-		sb.WriteString(`{"level":"`)
-		sb.WriteString(EscapeJSONString(v.Level))
-		sb.WriteString(`","offset":`)
-		sb.WriteString(strconv.FormatInt(v.Offset, 10))
-		sb.WriteString(`,"compressed_size":`)
-		sb.WriteString(strconv.FormatInt(v.CompressedSize, 10))
-		sb.WriteString(`,"uncompressed_size":`)
-		sb.WriteString(strconv.FormatInt(v.UncompressedSize, 10))
-		if v.SHA256 != "" {
-			sb.WriteString(`,"sha256":"`)
-			sb.WriteString(EscapeJSONString(v.SHA256))
-			sb.WriteString(`"`)
-		}
-		comp := v.Compression
-		if comp == "" {
-			comp = defaultCompressionAlgorithm
-		}
-		sb.WriteString(`,"compression":"`)
-		sb.WriteString(EscapeJSONString(comp))
-		sb.WriteString(`"}`)
-	}
-	sb.WriteString(`]}`)
-	return []byte(sb.String()), nil
-}
-
 // EscapeJSONString escapes JSON string content without adding quotes or using reflection.
-// The format writer and launcher telemetry share this byte-preserving encoder.
+// Launcher telemetry uses this byte-preserving encoder.
 func EscapeJSONString(s string) string {
 	var sb strings.Builder
 	for i := 0; i < len(s); i++ {
@@ -1415,29 +972,22 @@ func EscapeJSONString(s string) string {
 	return sb.String()
 }
 
-// WriteIndexAndTrailerWithVersion writes the serialized index in the specified format version followed by the 56-byte trailer.
+// WriteIndexAndTrailerWithVersion writes the serialized Format v2 binary index followed by the 56-byte trailer.
 func WriteIndexAndTrailerWithVersion(w io.Writer, idx *Index, currentOffset int64, version int) (int64, error) {
 	if currentOffset < 0 {
 		return 0, fmt.Errorf("invalid negative offset %d", currentOffset)
 	}
-
-	var idxBytes []byte
-	var err error
-
-	idx.Version = version
-	switch version {
-	case FormatVersion1:
-		idxBytes, err = marshalJSONIndex(idx)
-		if err != nil {
-			return 0, fmt.Errorf("marshaling index json: %w", err)
-		}
-	case FormatVersion2:
-		idxBytes, err = MarshalBinaryIndex(idx)
-		if err != nil {
-			return 0, fmt.Errorf("marshaling binary index: %w", err)
-		}
-	default:
+	if version == FormatVersion1 {
+		return 0, fmt.Errorf("%w: Format v1 was removed in v0.4.0; use Format v2", ErrUnsupportedVersion)
+	}
+	if version != FormatVersion2 {
 		return 0, fmt.Errorf("%w: %d", ErrUnsupportedVersion, version)
+	}
+
+	idx.Version = FormatVersion2
+	idxBytes, err := MarshalBinaryIndex(idx)
+	if err != nil {
+		return 0, fmt.Errorf("marshaling binary index: %w", err)
 	}
 
 	indexSize := int64(len(idxBytes))

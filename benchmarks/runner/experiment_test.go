@@ -68,6 +68,7 @@ func TestSuiteConfiguration(t *testing.T) {
 		"duration":    func(c *ExperimentConfig) { c.DurationMS = 0 },
 		"budget":      func(c *ExperimentConfig) { c.Blocks = 1000; c.DurationMS = 120000 },
 		"format":      func(c *ExperimentConfig) { c.Format = 0 },
+		"format_v1":   func(c *ExperimentConfig) { c.Format = 1 },
 		"profile":     func(c *ExperimentConfig) { c.Profile = unknownConfig },
 		"codec":       func(c *ExperimentConfig) { c.Codec = unknownConfig },
 		"dictionary":  func(c *ExperimentConfig) { c.Codec = "none"; c.Dictionary = true },

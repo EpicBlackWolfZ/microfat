@@ -40,7 +40,7 @@ func TestVerifiedCacheDescriptorCompatibility(t *testing.T) {
 	profiles := []cacheFirstProfile{{name: launcherFullProfile, path: stubPath}, {name: launcherMinimalProfile, path: minimal}}
 	levels := creationEpochLevels()
 	require.NotEmpty(t, levels)
-	for _, version := range []int{1, 2} {
+	for _, version := range []int{2} {
 		for _, profile := range profiles {
 			for _, compression := range cacheHandoffCodecs() {
 				name := fmt.Sprintf("format%d/%s/%s/dict%t", version, profile.name, compression.spec, compression.dictionary)

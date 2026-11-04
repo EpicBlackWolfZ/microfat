@@ -16,7 +16,7 @@ import (
 
 func TestCLIPackNameJSONRoundTrip(t *testing.T) {
 	t.Parallel()
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, tc := range []struct {
 			name, appName string
 			valid         bool

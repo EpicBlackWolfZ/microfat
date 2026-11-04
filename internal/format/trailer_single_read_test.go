@@ -34,7 +34,7 @@ func (f failingOffsetReaderAt) ReadAt([]byte, int64) (int, error) {
 func TestReadTrailerAndIndexSingleTrailerReadAndSentinels(t *testing.T) {
 	t.Parallel()
 
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
 			t.Parallel()
 			payload := []byte("payload-bytes")

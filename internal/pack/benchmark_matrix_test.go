@@ -124,8 +124,6 @@ func packBenchmarkMatrixCases() []packMatrixCase {
 		{name: "v2/zstd-best-nodict", formatVersion: format.FormatVersion2, profile: codec.ProfileBalanced,
 			compression: codec.AlgorithmZstd + ":" + compressionBest},
 		{name: "v2/size-dict", formatVersion: format.FormatVersion2, profile: codec.ProfileSize, expectDict: true},
-		{name: "v1/balanced", formatVersion: format.FormatVersion1, profile: codec.ProfileBalanced},
-		{name: "v1/size-dict", formatVersion: format.FormatVersion1, profile: codec.ProfileSize, expectDict: true},
 	}
 }
 
@@ -179,7 +177,7 @@ func TestPackValidatedBenchmarkFixtures(t *testing.T) {
 	}
 }
 
-// BenchmarkPackValidatedMatrix measures end-to-end in-process Pack across FormatVersion1/FormatVersion2,
+// BenchmarkPackValidatedMatrix measures end-to-end in-process Pack across FormatVersion2,
 // ELF header/platform validation, ABI note/dynamic inspection, and latency/balanced/size profiles
 // (distinct from child process cold-start and HTTP service p99 benchmarks).
 func BenchmarkPackValidatedMatrix(b *testing.B) {

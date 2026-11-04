@@ -113,7 +113,7 @@ func TestPackParallelByteForByteEquivalence(t *testing.T) {
 		},
 	}
 
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, tc := range cases {
 			t.Run(fmt.Sprintf("v%d/%s", version, tc.name), func(t *testing.T) {
 				epoch := testParallelEpoch

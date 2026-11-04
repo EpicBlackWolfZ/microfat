@@ -69,7 +69,7 @@ type Options struct {
 	MaxSpoolBytes      int64             // Optional staging spool limit in bytes for DictProfitable (0 uses MaxDictProfitabilitySpoolBytes)
 	VariantCompression map[string]VariantCompressionOptions
 	Permissions        os.FileMode
-	FormatVersion      int                                       // FormatVersion1 (JSON) or FormatVersion2 (Binary, default)
+	FormatVersion      int                                       // FormatVersion2 (compact binary table, default)
 	CreatedUnix        *int64                                    // Optional creation epoch in Unix seconds; nil uses the wall clock
 	SkipELFValidation  bool                                      // Optional flag to bypass ELF header validation (primarily for testing)
 	AllowMixedABI      bool                                      // Allow packaging variants with differing declared ABI requirements
@@ -438,9 +438,12 @@ func validateDictionaryAndFormatOptions(opts *Options) error {
 	if opts.MaxSpoolBytes < 0 {
 		return fmt.Errorf("%w: negative max spool bytes %d", ErrSpoolBudgetExceeded, opts.MaxSpoolBytes)
 	}
-	if opts.FormatVersion != 0 && opts.FormatVersion != format.FormatVersion1 && opts.FormatVersion != format.FormatVersion2 {
-		return fmt.Errorf("%w: got version %d, expected %d or %d",
-			format.ErrUnsupportedVersion, opts.FormatVersion, format.FormatVersion1, format.FormatVersion2)
+	if opts.FormatVersion == format.FormatVersion1 {
+		return fmt.Errorf("%w: Format v1 was removed in v0.4.0; use Format v2", format.ErrUnsupportedVersion)
+	}
+	if opts.FormatVersion != 0 && opts.FormatVersion != format.FormatVersion2 {
+		return fmt.Errorf("%w: got version %d, expected %d",
+			format.ErrUnsupportedVersion, opts.FormatVersion, format.FormatVersion2)
 	}
 	if opts.FormatVersion == 0 {
 		opts.FormatVersion = format.FormatVersionCurrent

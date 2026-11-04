@@ -68,7 +68,6 @@ func creationEpochCommand(t *testing.T, epoch *string, args ...string) {
 
 func inspectCreationEpoch(t *testing.T, path string) creationEpochIndex {
 	t.Helper()
-	// Output keeps Format v1's deprecation warning on stderr, outside JSON.
 	out, err := exec.Command(cliPath, "inspect", "--json", path).Output()
 	require.NoError(t, err)
 	var index creationEpochIndex
@@ -113,7 +112,7 @@ func TestReproducibleEpochDirectCompatibility(t *testing.T) {
 	require.GreaterOrEqual(t, len(levels), pairSize)
 	levels = levels[:pairSize]
 	stubs := []struct{ name, path string }{{launcherFullProfile, stubPath}, {launcherMinimalProfile, minimalStub}}
-	for _, version := range []int{1, 2} {
+	for _, version := range []int{2} {
 		for _, stub := range stubs {
 			for _, compression := range []string{creationEpochNone, creationEpochLZ4, creationEpochZstd} {
 				t.Run(fmt.Sprintf("format%d/%s/%s", version, stub.name, compression), func(t *testing.T) {
@@ -153,7 +152,7 @@ func TestReproducibleEpochManifestCompatibility(t *testing.T) {
 	levels = levels[:mixedVariantCount]
 	stubs := []struct{ name, path string }{{launcherFullProfile, stubPath}, {launcherMinimalProfile, minimalStub}}
 	for _, command := range []string{inputPackCommand, inputPGOPackCommand} {
-		for _, version := range []int{1, 2} {
+		for _, version := range []int{2} {
 			for _, stub := range stubs {
 				t.Run(fmt.Sprintf("%s/format%d/%s", command, version, stub.name), func(t *testing.T) {
 					caseDir := t.TempDir()
@@ -200,7 +199,7 @@ func TestReproducibleEpochManifestCompatibility(t *testing.T) {
 func TestCreationEpochNumericMetadata(t *testing.T) {
 	t.Parallel()
 	level := creationEpochLevels()[0]
-	for _, version := range []int{1, 2} {
+	for _, version := range []int{2} {
 		t.Run(fmt.Sprintf("format%d", version), func(t *testing.T) {
 			output := filepath.Join(t.TempDir(), "app.fat")
 			args := []string{inputPackCommand, mountArchFlag, currentHostArch, inputStubFlag, stubPath,
