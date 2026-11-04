@@ -231,6 +231,28 @@ allocation or RSS, and does not reserve space. Admission rejection makes no cach
 operational failure may leave already completed entries; results and exit status report that outcome.
 See the [CLI reference](cli-reference.md#microfat-prewarm-binary) for JSON vocabulary and flag rules.
 
+### When Prewarming Repays Its Cost
+
+Choose selected-variant prewarm when repeated, latency-sensitive launches can repay its upfront
+setup cost. For one-off or infrequent use, prewarming adds preparation delay, decompression CPU
+work, and retained cache bytes; count these costs along with the descriptor SHA-256 hashing that
+continues on every warm launch. Use `microfat prewarm --plan` (optionally with
+`--max-payload-bytes`) to preview selected work and logical payload bytes before writing, and move
+prewarming before traffic only when deployment can afford the preparation work and you have
+validated the tradeoff on your workload—default `auto` dispatch already discovers verified cache
+entries without an execution-mode override. `microfat` performs no automatic cache retention,
+eviction, or physical disk quota enforcement.
+
+In the bounded prewarm study ([#388](https://github.com/EpicBlackWolfZ/microfat/pull/388),
+[pinned results](https://github.com/EpicBlackWolfZ/microfat/blob/43d7a121c78aab5ecb36f87bbab5e25e8f46d789/experiments/research380/RESULTS.md))
+across 1,200 confirmation episodes and 4,000 verified launches of `actionlint` and `Fortio` on one
+native `amd64` desktop (descriptive, non-IID), foreground medians improved and `Fortio` 20 ms
+short-command SLO misses fell from 100/100 to 0/100, while derived deployment-to-first-ready
+slowed and one-off child CPU increased by roughly 40%. That evidence covers short commands only
+and does not establish general startup or application service-p99 gains.
+
+### Verification and Auto Dispatch
+
 Verification opens existing cache directories without creating them or repairing permissions, and never extracts or removes entries. Missing or insecure explicit directories fail directly. Automatic discovery tries the configured XDG/home and temporary-directory candidates without modifying any of them; if none is secure and present it fails. Missing or corrupt entries produce a failing exit status and remain untouched. This contract also applies to the full launcher's verify meta-command and library cache verification with implicit directory selection.
 
 Auto dispatch also starts with read-only discovery, but missing or corrupt safe regular entries
