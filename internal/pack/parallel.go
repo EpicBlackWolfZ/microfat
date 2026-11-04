@@ -373,6 +373,16 @@ func stageCompressedVariant(
 	opts *Options,
 	dictBytes []byte,
 ) parallelVariantResult {
+	return stageCompressedVariantBounded(outDir, plan, opts, dictBytes, nil)
+}
+
+func stageCompressedVariantBounded(
+	outDir string,
+	plan *variantWorkPlan,
+	opts *Options,
+	dictBytes []byte,
+	tracker *spoolBudgetTracker,
+) parallelVariantResult {
 	variantBytes, err := readBoundedInput(plan.cleanPath, format.MaxPayloadSize)
 	if err != nil {
 		return parallelVariantResult{
@@ -402,7 +412,12 @@ func stageCompressedVariant(
 	}
 	stagePath := stageFile.Name()
 
-	compErr := compressVariantIntoWriter(stageFile, plan.level, c, resolvedLevel, variantBytes, dictBytes)
+	var dst io.Writer = stageFile
+	if tracker != nil {
+		dst = &spoolBoundedWriter{w: stageFile, tracker: tracker}
+	}
+
+	compErr := compressVariantIntoWriter(dst, plan.level, c, resolvedLevel, variantBytes, dictBytes)
 	// Allow GC to reclaim the uncompressed payload slice as soon as encoding finishes.
 	clearVariantRef(&variantBytes)
 	if compErr != nil {

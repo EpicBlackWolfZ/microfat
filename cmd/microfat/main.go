@@ -576,6 +576,9 @@ Set SOURCE_DATE_EPOCH to signed integer Unix seconds to supply reproducible crea
 			if err := validateEmptyStubFlags(cmd, flags); err != nil {
 				return err
 			}
+			if flags.EnableDict && flags.DictProfitable {
+				return pack.ErrConflictingDictOptions
+			}
 			if flags.SkipELFValidation {
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(),
 					"[microfat] Warning: ELF platform, architecture and declared ABI validation explicitly skipped via --skip-elf-validation")
@@ -718,6 +721,9 @@ func runDirectPack(
 	if flags.EnableDict {
 		opts.EnableDict = flags.EnableDict
 	}
+	if flags.DictProfitable {
+		opts.DictProfitable = flags.DictProfitable
+	}
 	if flags.DictSize > 0 {
 		opts.DictSize = flags.DictSize
 	}
@@ -772,6 +778,8 @@ func bindManifestBuildFlags(cmd *cobra.Command, flags *builder.BuildOptions, raw
 		"Per-variant override in level=codec[:level] format (repeat for each variant; e.g. v1=none or v3=zstd:best)")
 	cmd.Flags().BoolVar(&flags.EnableDict, "dict", false, "Enable shared Zstandard dictionary compression across variants")
 	cmd.Flags().BoolVar(&flags.EnableDict, "zstd-dict", false, "Alias for --dict")
+	cmd.Flags().BoolVar(&flags.DictProfitable, "dict-profitable", false,
+		"Embed a shared Zstandard dictionary only when it strictly reduces complete artifact bytes")
 	cmd.Flags().IntVar(&flags.DictSize, "dict-size", codec.DefaultDictSize,
 		"Target shared Zstandard dictionary size in bytes (default: 112 KB)")
 	cmd.Flags().IntVar(&flags.FormatVersion, "format-version", format.FormatVersionCurrent,
@@ -803,6 +811,9 @@ Set SOURCE_DATE_EPOCH to signed integer Unix seconds to supply reproducible crea
 			flags.CreatedUnix = epoch
 			if err := validateEmptyStubFlags(cmd, flags); err != nil {
 				return err
+			}
+			if flags.EnableDict && flags.DictProfitable {
+				return pack.ErrConflictingDictOptions
 			}
 			if flags.SkipELFValidation {
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(),

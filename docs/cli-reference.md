@@ -355,6 +355,7 @@ microfat pack --manifest pgo.yaml -o bin/myapp
 | `--compression-level` | *(none)* | `string` | `""` | Compression level override: `fastest`, `default`, `better`, `best`, or number. |
 | `--variant-compression` | *(none)* | `stringArray` | `[]` | Override one supplied variant with `<level>=<codec>[:<compression-level>]`; repeat for multiple variants. Available for direct `pack`, `pack --manifest`, and `pgo-pack`. |
 | `--dict`, `--zstd-dict` | *(none)* | `bool` | `false` | Enable shared Zstandard inter-variant dictionary compression. |
+| `--dict-profitable` | *(none)* | `bool` | `false` | Embed a shared Zstandard dictionary only when it strictly reduces complete artifact bytes. |
 | `--dict-size` | *(none)* | `int` | `114688` | Target shared dictionary size in bytes (default: 112 KB). |
 | `--format-version` | *(none)* | `int` | `2` | Binary format version: `2` (compact binary table, default) or `1` (legacy JSON, deprecated). |
 | `--skip-elf-validation` | *(none)* | `bool` | `false` | Skip ELF architecture, executable type, load segment and entry-point checks. |
@@ -465,13 +466,28 @@ Both Format v1 and v2 and the full and minimal launcher stubs support mixed code
 in `memfd` and `cache` execution modes. `--dict` (or manifest `compression.dict`)
 forces shared Zstandard dictionary training across the supplied payloads and
 requires at least two variants; only Zstandard frames consume the dictionary.
+`--dict-profitable` (or root manifest `compression.dict_profitable`) gates shared
+Zstandard dictionary embedding on complete artifact bytes (launcher stub, optional
+dictionary payload, compressed frames, metadata index, and 56-byte trailer): when
+at least two variants are supplied and at least one resolves to Zstandard, `Pack`
+trains a candidate dictionary, stages one no-dictionary and one with-dictionary
+frame per Zstandard variant within a bounded 2 GiB temporary spool while encoding
+non-dictionary (`none`, `lz4`) variants once, and embeds the dictionary only when
+the complete with-dictionary artifact is strictly smaller than the complete
+no-dictionary artifact (exact byte ties omit the dictionary). Winning staged
+frames are copied directly without re-encoding. Combining `--dict` and
+`--dict-profitable` in one CLI invocation or setting both `dict` and
+`dict_profitable` in the same manifest scope is rejected before compilation or
+packaging; across scopes, an explicit CLI `--dict` overrides manifest
+`compression.dict_profitable`, and an explicit CLI `--dict-profitable` overrides
+manifest `compression.dict`.
 The root `size` profile attempts automatic dictionary training when at least two
 variants are supplied and at least one resolves to Zstandard. If every variant
 resolves to `none` or `lz4`, no dictionary is trained automatically. Automatic
-training failure emits a warning and falls back to independent frames; explicit
-dictionary requests fail on training errors. Codec overrides leave dictionary
-settings in place, and explicit dictionary requests retain dictionary metadata
-even when all variants use `none` or `lz4`.
+and profitability-gated training failures on degenerate samples emit a warning and
+fall back to independent frames; explicit `--dict` requests fail on training errors.
+Codec overrides leave dictionary settings in place, and explicit `--dict` requests
+retain dictionary metadata even when all variants use `none` or `lz4`.
 
 The following manifest fragment illustrates omitting algorithms while selecting profiles at root and variant scopes:
 
@@ -555,9 +571,9 @@ variants:
 Accepts the manifest and compiler flags matching `microfat pack`: `--manifest`,
 `-o`, `--stub`, `--stub-profile`, `--concurrency`, `--profile`, `--compression`,
 `--compression-level`, repeated `--variant-compression`, `--dict`/`--zstd-dict`,
-`--dict-size`, `--format-version`, `--keep-intermediates`, `--go-binary`, and
-`--skip-elf-validation`. Per-variant CLI compression overrides follow the same
-precedence contract above for `pgo-pack` and `pack --manifest`.
+`--dict-profitable`, `--dict-size`, `--format-version`, `--keep-intermediates`,
+`--go-binary`, and `--skip-elf-validation`. Per-variant CLI compression overrides
+follow the same precedence contract above for `pgo-pack` and `pack --manifest`.
 
 > [!NOTE]
 > **Authoritative Target Policy**: `GOOS`, `GOARCH`, `GOAMD64`, and `GOARM64` are reserved target variables. Ambient values for these variables are sanitized during compilation. Contradictory values declared in manifest `env` (at root or variant level) are rejected before compilation begins. In addition, every compiled Go artifact is validated via `debug/buildinfo` prior to packaging to ensure binary settings match declared variant levels.
