@@ -28,16 +28,18 @@ const (
 
 // Common error definitions.
 var (
-	ErrNoVariantsSpecified = format.ErrNoVariantsSpecified
-	ErrDuplicateVariant    = format.ErrDuplicateVariant
-	ErrInvalidVariant      = format.ErrInvalidVariant
-	ErrStubMissing         = errors.New("stub binary path is required and must exist")
-	ErrVariantNotFound     = errors.New("variant binary file not found")
-	ErrChecksumMismatch    = errors.New("variant payload checksum mismatch")
-	ErrSizeMismatch        = codec.ErrSizeMismatch
-	ErrInvalidELF          = errors.New("invalid ELF binary")
-	ErrUnsupportedArch     = errors.New("unsupported target architecture")
-	ErrUnsupportedOS       = errors.New("unsupported target operating system")
+	ErrNoVariantsSpecified    = format.ErrNoVariantsSpecified
+	ErrDuplicateVariant       = format.ErrDuplicateVariant
+	ErrInvalidVariant         = format.ErrInvalidVariant
+	ErrStubMissing            = errors.New("stub binary path is required and must exist")
+	ErrVariantNotFound        = errors.New("variant binary file not found")
+	ErrChecksumMismatch       = errors.New("variant payload checksum mismatch")
+	ErrSizeMismatch           = codec.ErrSizeMismatch
+	ErrInvalidELF             = errors.New("invalid ELF binary")
+	ErrUnsupportedArch        = errors.New("unsupported target architecture")
+	ErrUnsupportedOS          = errors.New("unsupported target operating system")
+	ErrConflictingDictOptions = errors.New("cannot combine forced dictionary with dictionary profitability gating")
+	ErrSpoolBudgetExceeded    = errors.New("dictionary profitability staging spool budget exceeded")
 )
 
 // VariantCompressionOptions configures compression parameters for a specific variant level.
@@ -62,7 +64,9 @@ type Options struct {
 	Compression        string            // "zstd", "lz4", "none" (or "zstd:best")
 	CompressionLevel   string            // level string or numeric
 	EnableDict         bool              // Train and embed a shared Zstandard dictionary across variants
+	DictProfitable     bool              // Train a candidate dictionary and embed it only when strictly smaller than no-dictionary
 	DictSize           int               // Target dictionary size in bytes (default: 112 KB)
+	MaxSpoolBytes      int64             // Optional staging spool limit in bytes for DictProfitable (0 uses MaxDictProfitabilitySpoolBytes)
 	VariantCompression map[string]VariantCompressionOptions
 	Permissions        os.FileMode
 	FormatVersion      int                                       // FormatVersion1 (JSON) or FormatVersion2 (Binary, default)
@@ -166,7 +170,8 @@ func sampleInput(path string, budget int) ([][]byte, error) {
 
 func prepareSharedDictionary(opts *Options, levels []string) ([]byte, string, error) {
 	enableDict := opts.EnableDict
-	if !enableDict && strings.EqualFold(strings.TrimSpace(opts.Profile), codec.ProfileSize) && len(levels) >= minVariantsForDict {
+	autoCandidate := opts.DictProfitable || strings.EqualFold(strings.TrimSpace(opts.Profile), codec.ProfileSize)
+	if !enableDict && autoCandidate && len(levels) >= minVariantsForDict {
 		var err error
 		enableDict, err = hasDictionaryCapableVariant(opts, levels)
 		if err != nil {
@@ -301,31 +306,38 @@ func Pack(opts Options) (*format.Index, error) {
 		Variants:    make([]format.VariantEntry, 0, len(levels)),
 	}
 
-	// 2. Write Shared Dictionary (if trained)
-	if len(dictBytes) > 0 {
-		dictOffset := currentOffset
-		dictSize := int64(len(dictBytes))
-		if _, err := tmpFile.Write(dictBytes); err != nil {
-			return nil, fmt.Errorf("writing dictionary payload: %w", err)
+	if opts.DictProfitable && len(dictBytes) > 0 {
+		idx, err = assembleProfitableArtifact(tmpFile, outDir, levels, &opts, currentOffset, idx, dictBytes, dictSHAHex)
+		if err != nil {
+			return nil, err
 		}
-		currentOffset += dictSize
-		idx.DictionaryOffset = dictOffset
-		idx.DictionarySize = dictSize
-		idx.DictionarySHA256 = dictSHAHex
-		idx.DictionaryID = codec.DefaultDictionaryID
-	}
+	} else {
+		// 2. Write Shared Dictionary (if trained)
+		if len(dictBytes) > 0 {
+			dictOffset := currentOffset
+			dictSize := int64(len(dictBytes))
+			if _, err := tmpFile.Write(dictBytes); err != nil {
+				return nil, fmt.Errorf("writing dictionary payload: %w", err)
+			}
+			currentOffset += dictSize
+			idx.DictionaryOffset = dictOffset
+			idx.DictionarySize = dictSize
+			idx.DictionarySHA256 = dictSHAHex
+			idx.DictionaryID = codec.DefaultDictionaryID
+		}
 
-	// 3. Compress and write each variant payload (parallelized under bounded CPU/memory admission)
-	variantEntries, newOffset, err := writeAllVariantPayloads(tmpFile, outDir, levels, &opts, currentOffset, dictBytes)
-	if err != nil {
-		return nil, err
-	}
-	currentOffset = newOffset
-	idx.Variants = append(idx.Variants, variantEntries...)
+		// 3. Compress and write each variant payload (parallelized under bounded CPU/memory admission)
+		variantEntries, newOffset, err := writeAllVariantPayloads(tmpFile, outDir, levels, &opts, currentOffset, dictBytes)
+		if err != nil {
+			return nil, err
+		}
+		currentOffset = newOffset
+		idx.Variants = append(idx.Variants, variantEntries...)
 
-	// 4. Write Index and Trailer
-	if _, err := format.WriteIndexAndTrailerWithVersion(tmpFile, idx, currentOffset, opts.FormatVersion); err != nil {
-		return nil, fmt.Errorf("writing index and trailer: %w", err)
+		// 4. Write Index and Trailer
+		if _, err := format.WriteIndexAndTrailerWithVersion(tmpFile, idx, currentOffset, opts.FormatVersion); err != nil {
+			return nil, fmt.Errorf("writing index and trailer: %w", err)
+		}
 	}
 
 	// 5. Sync, chmod and atomically move
@@ -365,12 +377,8 @@ func validateOptions(opts *Options) error {
 	if opts.Permissions == 0 {
 		opts.Permissions = defaultFileMode
 	}
-	if opts.FormatVersion != 0 && opts.FormatVersion != format.FormatVersion1 && opts.FormatVersion != format.FormatVersion2 {
-		return fmt.Errorf("%w: got version %d, expected %d or %d",
-			format.ErrUnsupportedVersion, opts.FormatVersion, format.FormatVersion1, format.FormatVersion2)
-	}
-	if opts.FormatVersion == 0 {
-		opts.FormatVersion = format.FormatVersionCurrent
+	if err := validateDictionaryAndFormatOptions(opts); err != nil {
+		return err
 	}
 
 	seenLevels := make(map[string]string, len(opts.Variants))
@@ -420,6 +428,23 @@ func validateOptions(opts *Options) error {
 		if err := ValidateELFBinary(opts.StubPath, opts.TargetOS, opts.TargetArch); err != nil {
 			return fmt.Errorf("validating stub: %w", err)
 		}
+	}
+	return nil
+}
+
+func validateDictionaryAndFormatOptions(opts *Options) error {
+	if opts.EnableDict && opts.DictProfitable {
+		return ErrConflictingDictOptions
+	}
+	if opts.MaxSpoolBytes < 0 {
+		return fmt.Errorf("%w: negative max spool bytes %d", ErrSpoolBudgetExceeded, opts.MaxSpoolBytes)
+	}
+	if opts.FormatVersion != 0 && opts.FormatVersion != format.FormatVersion1 && opts.FormatVersion != format.FormatVersion2 {
+		return fmt.Errorf("%w: got version %d, expected %d or %d",
+			format.ErrUnsupportedVersion, opts.FormatVersion, format.FormatVersion1, format.FormatVersion2)
+	}
+	if opts.FormatVersion == 0 {
+		opts.FormatVersion = format.FormatVersionCurrent
 	}
 	return nil
 }

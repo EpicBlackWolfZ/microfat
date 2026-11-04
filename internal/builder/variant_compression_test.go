@@ -1,12 +1,14 @@
 package builder
 
 import (
+	"context"
 	"maps"
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -198,6 +200,23 @@ func TestAssemblePackOptionsVariantCompressionPreservesGlobals(t *testing.T) {
 				EnableDict: true, DictSize: cliDictSize,
 			},
 		},
+		{
+			name: "manifest dict_profitable preserved when CLI omits dictionary flags",
+			root: &CompressionConfig{Profile: codec.ProfileSize, DictProfitable: true, DictSize: manifestDictSize},
+			want: CompressionConfig{Profile: codec.ProfileSize, DictProfitable: true, DictSize: manifestDictSize},
+		},
+		{
+			name: "CLI EnableDict overrides manifest dict_profitable",
+			root: &CompressionConfig{Profile: codec.ProfileSize, DictProfitable: true},
+			cli:  BuildOptions{EnableDict: true},
+			want: CompressionConfig{Profile: codec.ProfileSize, EnableDict: true, DictProfitable: false},
+		},
+		{
+			name: "CLI DictProfitable overrides manifest dict",
+			root: &CompressionConfig{Profile: codec.ProfileSize, EnableDict: true},
+			cli:  BuildOptions{DictProfitable: true},
+			want: CompressionConfig{Profile: codec.ProfileSize, EnableDict: false, DictProfitable: true},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -210,7 +229,7 @@ func TestAssemblePackOptionsVariantCompressionPreservesGlobals(t *testing.T) {
 			opts := assemblePackOptions(m, "stub", "out", "app", nil, tc.cli)
 			assert.Equal(t, tc.want, CompressionConfig{
 				Profile: opts.Profile, Algorithm: opts.Compression, Level: opts.CompressionLevel,
-				EnableDict: opts.EnableDict, DictSize: opts.DictSize,
+				EnableDict: opts.EnableDict, DictProfitable: opts.DictProfitable, DictSize: opts.DictSize,
 			})
 			assert.Equal(t, map[string]pack.VariantCompressionOptions{
 				"v1": {Profile: codec.ProfileSize, Compression: codec.AlgorithmNone},
@@ -218,4 +237,38 @@ func TestAssemblePackOptionsVariantCompressionPreservesGlobals(t *testing.T) {
 			assert.Equal(t, beforeManifest, m)
 		})
 	}
+}
+
+func TestDictionaryProfitabilityManifestAndBuildValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("manifest root conflicting dict and dict_profitable rejected", func(t *testing.T) {
+		t.Parallel()
+		m := &Manifest{
+			Package:    ".",
+			TargetArch: testArchAMD64,
+			Compression: &CompressionConfig{
+				EnableDict:     true,
+				DictProfitable: true,
+			},
+			Variants: []VariantConfig{{Level: "v1"}, {Level: "v3"}},
+		}
+		err := ValidateManifest(m)
+		require.ErrorIs(t, err, ErrInvalidManifest)
+		require.ErrorIs(t, err, pack.ErrConflictingDictOptions)
+	})
+
+	t.Run("build options conflicting EnableDict and DictProfitable rejected", func(t *testing.T) {
+		t.Parallel()
+		m := &Manifest{
+			Package:    ".",
+			TargetArch: testArchAMD64,
+			Variants:   []VariantConfig{{Level: "v1"}, {Level: "v3"}},
+		}
+		_, err := BuildAndPack(context.Background(), m, BuildOptions{
+			EnableDict:     true,
+			DictProfitable: true,
+		})
+		require.ErrorIs(t, err, pack.ErrConflictingDictOptions)
+	})
 }

@@ -3,19 +3,28 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat"
+	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
+	"github.com/EpicBlackWolfZ/microfat/internal/pack"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	subcmdPack    = "pack"
+	subcmdPgoPack = "pgo-pack"
 )
 
 func TestManifestDictionaryPrecedence(t *testing.T) {
 	t.Parallel()
-	for _, command := range []string{"pack", "pgo-pack"} {
+	for _, command := range []string{subcmdPack, subcmdPgoPack} {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
@@ -83,4 +92,85 @@ func main() { fmt.Println("dictionary payload") }
 			require.NotEqual(t, digests["manifest"], digests["default"])
 		})
 	}
+}
+
+func TestDictionaryProfitabilityCLIFlagsAndDirectPack(t *testing.T) {
+	t.Parallel()
+
+	t.Run("conflicting flags rejected on pack and pgo-pack", func(t *testing.T) {
+		t.Parallel()
+		for _, subcmd := range []string{subcmdPack, subcmdPgoPack} {
+			cmd := newRootCmd()
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&out)
+			cmd.SetArgs([]string{subcmd, "--dict", "--dict-profitable"})
+			err := cmd.Execute()
+			require.ErrorIs(t, err, pack.ErrConflictingDictOptions)
+		}
+	})
+
+	t.Run("direct pack --dict-profitable omits unprofitable dictionary", func(t *testing.T) {
+		t.Parallel()
+		const noiseLen = 16 * 1024
+		dir := t.TempDir()
+		stubPath, err := os.Executable()
+		require.NoError(t, err)
+
+		rng := rand.New(rand.NewPCG(409, 2))
+		makeVariant := func(name string) string {
+			p := filepath.Join(dir, name)
+			buf := make([]byte, noiseLen)
+			for i := range buf {
+				buf[i] = byte(rng.UintN(256))
+			}
+			require.NoError(t, os.WriteFile(p, buf, 0o755))
+			return p
+		}
+		v1 := makeVariant("v1")
+		v3 := makeVariant("v3")
+
+		defaultOut := filepath.Join(dir, "size-default")
+		cmdDefault := newRootCmd()
+		var outDefault bytes.Buffer
+		cmdDefault.SetOut(&outDefault)
+		cmdDefault.SetErr(&outDefault)
+		cmdDefault.SetArgs([]string{
+			subcmdPack, flagStub, stubPath, flagOutput, defaultOut,
+			flagProfile, codec.ProfileSize, flagSkipELF,
+			"--variant", "v1=" + v1, "--variant", "v3=" + v3,
+		})
+		require.NoError(t, cmdDefault.Execute(), outDefault.String())
+
+		profOut := filepath.Join(dir, "size-profitable")
+		cmdProf := newRootCmd()
+		var outProf bytes.Buffer
+		cmdProf.SetOut(&outProf)
+		cmdProf.SetErr(&outProf)
+		cmdProf.SetArgs([]string{
+			subcmdPack, flagStub, stubPath, flagOutput, profOut,
+			flagProfile, codec.ProfileSize, "--dict-profitable", flagSkipELF,
+			"--variant", "v1=" + v1, "--variant", "v3=" + v3,
+		})
+		require.NoError(t, cmdProf.Execute(), outProf.String())
+
+		fDef, err := os.Open(defaultOut)
+		require.NoError(t, err)
+		defer fDef.Close()
+		sDef, err := fDef.Stat()
+		require.NoError(t, err)
+		idxDef, err := format.ReadTrailerAndIndex(fDef, sDef.Size())
+		require.NoError(t, err)
+		assert.Positive(t, idxDef.DictionarySize)
+
+		fProf, err := os.Open(profOut)
+		require.NoError(t, err)
+		defer fProf.Close()
+		sProf, err := fProf.Stat()
+		require.NoError(t, err)
+		idxProf, err := format.ReadTrailerAndIndex(fProf, sProf.Size())
+		require.NoError(t, err)
+		assert.Zero(t, idxProf.DictionarySize)
+		assert.Less(t, sProf.Size(), sDef.Size())
+	})
 }

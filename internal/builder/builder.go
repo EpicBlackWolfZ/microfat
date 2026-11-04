@@ -43,6 +43,7 @@ type BuildOptions struct {
 	CompressionLevel   string
 	VariantCompression map[string]pack.VariantCompressionOptions
 	EnableDict         bool
+	DictProfitable     bool
 	DictSize           int
 	FormatVersion      int
 	CreatedUnix        *int64 // Optional creation metadata for Pack; nil retains wall-clock time.
@@ -66,6 +67,9 @@ type BuildResult struct {
 func BuildAndPack(ctx context.Context, m *Manifest, opts BuildOptions) (*BuildResult, error) {
 	if m == nil {
 		return nil, ErrInvalidManifest
+	}
+	if opts.EnableDict && opts.DictProfitable {
+		return nil, pack.ErrConflictingDictOptions
 	}
 
 	mOwned := cloneManifest(m)
@@ -463,6 +467,9 @@ func assemblePackOptions(
 		if m.Compression.EnableDict {
 			packOpts.EnableDict = true
 		}
+		if m.Compression.DictProfitable {
+			packOpts.DictProfitable = true
+		}
 		if m.Compression.DictSize > 0 {
 			packOpts.DictSize = m.Compression.DictSize
 		}
@@ -482,6 +489,11 @@ func assemblePackOptions(
 	}
 	if opts.EnableDict {
 		packOpts.EnableDict = true
+		packOpts.DictProfitable = false
+	}
+	if opts.DictProfitable {
+		packOpts.DictProfitable = true
+		packOpts.EnableDict = false
 	}
 	if opts.DictSize > 0 {
 		packOpts.DictSize = opts.DictSize
