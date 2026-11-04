@@ -5,9 +5,10 @@ completed 400 successful memory/v3 trials across two independent hosted jobs.
 Neither primary interval establishes improvement, regression or practical
 equivalence under the prespecified rule. Both mixed/v4 jobs stopped before
 timing because their hosts lack v4, providing **zero service observations**.
-No runtime fix is justified by this investigation, and
-[#230](https://github.com/EpicBlackWolfZ/microfat/issues/230) retains unresolved
-acceptance for maintainer review.
+No runtime fix is justified by this investigation. For `v0.4.0`, maintainer
+disposition accepts this explicitly inconclusive bounded report and closes
+[#230](https://github.com/EpicBlackWolfZ/microfat/issues/230) with its caveats
+preserved (`release_eligible=false`).
 
 ## Frozen source and scope
 
@@ -238,15 +239,19 @@ It establishes orchestration feasibility and provides no latency inference.
 Source CI and hosted evidence qualification do not establish a p99 improvement
 or release hardware qualification; `release_eligible=false` remains explicit.
 
-The bounded collection/report deliverable is ready for review with **both
-signals unresolved**. Unmet acceptance is precise, independent confirmation
-of the memory signal and any new measurement of the original mixed/v4 signal.
-Maintainer disposition may accept the explicitly inconclusive bounded report
-or request a separately frozen follow-up. A follow-up would need v4-capable
-hosts for mixed, stronger precision/control planning for memory, retained
-current failures and explicit tool/host identity departures. It cannot silently
-replace these cohorts, extend their sample budget or declare equivalence from
-intervals containing zero. A production fix requires a control-supported repeat
+**Accepted `v0.4.0` maintainer disposition:** both historical signals remain
+explicitly inconclusive under the frozen protocol—`memory32` completed 400
+trials whose paired intervals span beyond the ±250 µs practical-equivalence
+margin without reproducing a causal launcher regression, and `mixed4` had zero
+timed observations because the assigned GitHub-hosted runners lacked `amd64_v4`.
+Maintainer review accepts this bounded report for `v0.4.0` and closes
+[#230](https://github.com/EpicBlackWolfZ/microfat/issues/230) without a
+speculative runtime change (`release_eligible=false` remains explicit). Any
+future follow-up (tracked under general tail-calibration research
+[#377](https://github.com/EpicBlackWolfZ/microfat/issues/377)) must use a
+separately frozen protocol with `v4`-capable hosts for `mixed4`, stronger
+precision/control planning for `memory32`, retained current pretrial failures,
+and explicit tool/host identity departures; it cannot silently replace these
+cohorts, extend their sample budget, or declare equivalence from intervals
+containing zero. A production fix still requires a control-supported repeat
 and its own bounded before/after evidence.
-
-This report does not close #230 or authorize merge or release.
