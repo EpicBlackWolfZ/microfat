@@ -38,7 +38,7 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 | [**v0.3.0 Release Notes**](docs/releases/v0.3.0.md) | Verified installation, updates, Linux Homebrew and release acceptance evidence. |
 | [**v0.3.1 Release Notes**](docs/releases/v0.3.1.md) | Installer and dictionary fixes, dependency updates, and release acceptance evidence. |
 | [**v0.2.5 Release Notes**](docs/releases/v0.2.5.md) | Go/Task tooling, modern SBOMs, staged CI and benchmark correctness. |
-| [**Release Artifacts Guide**](docs/release-artifacts.md) | Universal fat archives, bundled launcher stubs, and Format v1 deprecation. |
+| [**Release Artifacts Guide**](docs/release-artifacts.md) | Universal fat archives, bundled launcher stubs, and Format v2 binary index migration. |
 | [**Native Runtime Qualification**](docs/runtime-qualification.md) | Concurrent cache and kernel-policy testing, replay, and signed-candidate release gates. |
 | [**Production Roadmap**](docs/roadmap.md) | Release priorities, safety gates and experimental scope. |
 | 📊 [**Demo & Benchmark Suite**](examples/demo/README.md) | Multi-workload benchmark application testing SIMD vector math, JSON/Zstd processing, and concurrent workers. |

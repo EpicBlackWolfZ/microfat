@@ -62,14 +62,28 @@ type BuildResult struct {
 	VariantPGOApplied map[string]string // level -> pgo flag applied
 }
 
+func validateBuildOptions(m *Manifest, opts BuildOptions) error {
+	if m == nil {
+		return ErrInvalidManifest
+	}
+	if opts.EnableDict && opts.DictProfitable {
+		return pack.ErrConflictingDictOptions
+	}
+	if opts.FormatVersion == format.FormatVersion1 {
+		return fmt.Errorf("%w: Format v1 was removed in v0.4.0; use Format v2", format.ErrUnsupportedVersion)
+	}
+	if opts.FormatVersion != 0 && opts.FormatVersion != format.FormatVersion2 {
+		return fmt.Errorf("%w: got version %d, expected %d",
+			format.ErrUnsupportedVersion, opts.FormatVersion, format.FormatVersion2)
+	}
+	return nil
+}
+
 // BuildAndPack orchestrates concurrent Go compilation of all manifest variants with Profile-Guided
 // Optimization flags, then packages the resulting ELF binaries into a self-dispatching fat executable.
 func BuildAndPack(ctx context.Context, m *Manifest, opts BuildOptions) (*BuildResult, error) {
-	if m == nil {
-		return nil, ErrInvalidManifest
-	}
-	if opts.EnableDict && opts.DictProfitable {
-		return nil, pack.ErrConflictingDictOptions
+	if err := validateBuildOptions(m, opts); err != nil {
+		return nil, err
 	}
 
 	mOwned := cloneManifest(m)

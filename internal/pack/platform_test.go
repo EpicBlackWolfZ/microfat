@@ -34,7 +34,7 @@ const (
 func TestPackTargetOS(t *testing.T) {
 	t.Parallel()
 	for _, target := range []string{"", testOSLinux, "LINUX", "LiNuX", "freebsd", "windows", "darwin", "banana", " linux "} {
-		for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+		for _, version := range []int{format.FormatVersion2} {
 			t.Run(fmt.Sprintf("%q/format%d", target, version), func(t *testing.T) {
 				t.Parallel()
 				valid := target == "" || target == testOSLinux || target == "LINUX" || target == "LiNuX"
@@ -115,7 +115,7 @@ func TestELFOSABIPlatform(t *testing.T) {
 					require.ErrorIs(t, err, ErrInvalidELF)
 					assert.Contains(t, err.Error(), "OSABI")
 				}
-				for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+				for _, version := range []int{format.FormatVersion2} {
 					for _, role := range []string{"custom launcher", "variant"} {
 						opts := DefaultOptions()
 						opts.TargetArch = arch.name
@@ -287,7 +287,7 @@ func TestGoELFPlatformEvidencePreservesOutput(t *testing.T) {
 	t.Parallel()
 	good := createDummyELF(t, t.TempDir(), "good", uint16(elf.EM_X86_64), byte(elf.ELFCLASS64))
 	wrong := writePlatformELF(t, inlinePlatformELF(t, "path\tapp\nbuild\tGOOS=freebsd\n"))
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, role := range []string{"custom launcher", "variant"} {
 			t.Run(fmt.Sprintf("format%d/%s", version, role), func(t *testing.T) {
 				t.Parallel()

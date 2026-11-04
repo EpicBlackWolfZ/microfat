@@ -326,9 +326,6 @@ func verifyOriginalExecutableAndIndex(origExe, variant string, actualSize int64,
 	if err != nil {
 		return "", fmt.Errorf("reading index from %q: %w", physicalOrigExe, err)
 	}
-	if idx.Version != format.FormatVersion2 {
-		return "", fmt.Errorf("original executable %q format version %d is not v2", physicalOrigExe, idx.Version)
-	}
 	if idx.TargetArch != runtime.GOARCH {
 		return "", fmt.Errorf("original executable %q target arch %q does not match host %q", physicalOrigExe, idx.TargetArch, runtime.GOARCH)
 	}

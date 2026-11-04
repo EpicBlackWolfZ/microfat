@@ -200,7 +200,7 @@ func TestDictProfitabilityNetPositiveAndUnprofitable(t *testing.T) {
 	t.Parallel()
 	epoch := reproducibleEpoch
 
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		t.Run(fmt.Sprintf("format%d/net_positive_retains_dictionary", version), func(t *testing.T) {
 			t.Parallel()
 			stub, variants := netPositiveVariantSet(t)
@@ -299,7 +299,7 @@ func TestDictProfitabilityExactTieFavorsNoDictionary(t *testing.T) {
 	t.Parallel()
 	epoch := reproducibleEpoch
 
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		t.Run(fmt.Sprintf("format%d", version), func(t *testing.T) {
 			t.Parallel()
 			stub, v1, v3 := structuredTailPaddedELF(t, profitableSmallDictSize*2)
@@ -329,7 +329,7 @@ func TestDictProfitabilityExactTieFavorsNoDictionary(t *testing.T) {
 			overhead := int(forcedZeroStat.Size() - noDictStat.Size())
 			require.Positive(t, overhead)
 
-			// Calibrate exact complete-byte tie (accounting for Format v1 JSON integer digit width changes if any).
+			// Calibrate exact complete-byte tie across no-dictionary and with-dictionary Format v2 indices.
 			firstShrink := overhead / 2
 			secondShrink := overhead - firstShrink
 			calName := fmt.Sprintf("test-tie-cal-v%d", version)
@@ -540,7 +540,7 @@ func TestDictProfitabilitySpoolBudgetAndFallbacks(t *testing.T) {
 func TestZstdDecodeBoundsAcrossFormatVersions(t *testing.T) {
 	t.Parallel()
 	payload, _ := codecPolicyInput(t, multiBlockTestSize)
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, dictProfitable := range []bool{false, true} {
 			t.Run(fmt.Sprintf("format%d/profitable_%v", version, dictProfitable), func(t *testing.T) {
 				t.Parallel()
@@ -603,15 +603,20 @@ func TestProfitabilityInternalErrorAndEdgeCoverage(t *testing.T) {
 		assert.Zero(t, sw.tracker.used.Load())
 	})
 
-	t.Run("invalid_format_version_in_options_rejected", func(t *testing.T) {
+	t.Run("invalid_and_removed_format_versions_in_options_rejected", func(t *testing.T) {
 		t.Parallel()
 		input, _ := dictionaryContractInput(t)
 		opts := DefaultOptions()
 		opts.StubPath = input
 		opts.OutputPath = filepath.Join(t.TempDir(), "out")
 		opts.Variants = map[string]string{"v1": input, "v3": input}
-		opts.FormatVersion = invalidFormatVer
+		opts.FormatVersion = format.FormatVersion1
 		_, err := Pack(opts)
+		require.ErrorIs(t, err, format.ErrUnsupportedVersion)
+		require.ErrorContains(t, err, "Format v1 was removed in v0.4.0; use Format v2")
+
+		opts.FormatVersion = invalidFormatVer
+		_, err = Pack(opts)
 		require.ErrorIs(t, err, format.ErrUnsupportedVersion)
 	})
 

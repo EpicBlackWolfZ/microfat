@@ -360,7 +360,7 @@ func TestPackReaderAtDeterministicEquivalenceAndLowAllocation(t *testing.T) {
 	v3Path := createDummyELF(t, dir, "variant-v3-payload", uint16(elf.EM_X86_64), byte(elf.ELFCLASS64))
 	epoch := int64(testFixedCreatedUnix)
 
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, profile := range []string{codec.ProfileLatency, codec.ProfileBalanced, codec.ProfileSize} {
 			outA := filepath.Join(dir, "out-a")
 			outB := filepath.Join(dir, "out-b")

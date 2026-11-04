@@ -59,7 +59,7 @@ func TestPlanPrewarmBinaryFormatsAndAccounting(t *testing.T) {
 	t.Parallel()
 	payload := []byte("shared payload")
 	otherPayload := []byte("other selected payload")
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, dictionary := range [][]byte{nil, []byte("shared dictionary declaration")} {
 			t.Run(fmt.Sprintf("format%d/dictionary%t", version, dictionary != nil), func(t *testing.T) {
 				t.Parallel()

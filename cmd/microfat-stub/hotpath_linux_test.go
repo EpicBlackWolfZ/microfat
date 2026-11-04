@@ -48,7 +48,7 @@ func TestRunImageSinglePassTrailerAndManifestErrors(t *testing.T) {
 		level = "v8.0"
 	}
 
-	for _, ver := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, ver := range []int{format.FormatVersion2} {
 		fatPath := filepath.Join(dir, "valid-v"+string(rune('0'+ver)))
 		_, err := pack.Pack(pack.Options{
 			StubPath:          stubPath,

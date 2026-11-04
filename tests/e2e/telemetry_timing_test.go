@@ -61,7 +61,7 @@ func TestTelemetryTimingCompatibility(t *testing.T) {
 	require.NotEmpty(t, levels)
 	for _, profile := range profiles {
 		for _, codec := range codecs {
-			for _, version := range []int{1, 2} {
+			for _, version := range []int{2} {
 				name := fmt.Sprintf("%s/%s/format%d", profile.name, codec.name, version)
 				t.Run(name, func(t *testing.T) {
 					fat := filepath.Join(t.TempDir(), "telemetry.fat")

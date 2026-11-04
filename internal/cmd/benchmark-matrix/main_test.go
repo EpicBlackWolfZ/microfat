@@ -23,7 +23,7 @@ func TestCommand(t *testing.T) {
 		var cases []any
 		require.NoError(t, json.Unmarshal(out.Bytes(), &cases))
 		if tier == "compatibility" {
-			require.Len(t, cases, 16)
+			require.Len(t, cases, 8)
 		} else {
 			require.Len(t, cases, 2)
 		}

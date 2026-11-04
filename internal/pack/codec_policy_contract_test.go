@@ -41,7 +41,7 @@ func TestPackLatencyPolicyBoundary(t *testing.T) {
 		{name: "variant none above", size: threshold + 1, global: codec.AlgorithmLZ4,
 			variant: codec.AlgorithmNone, want: codec.AlgorithmNone},
 	}
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, tc := range cases {
 			t.Run(fmt.Sprintf("format%d/%s", version, tc.name), func(t *testing.T) {
 				t.Parallel()
@@ -75,7 +75,7 @@ func TestPackSizePolicyMatchedDictionaryControls(t *testing.T) {
 	effectiveLevelDictionary, err := codec.TrainDictionary(samples, dictSize, compressionBest)
 	require.NoError(t, err)
 	require.False(t, bytes.Equal(expectedDictionary, effectiveLevelDictionary), "fixture must distinguish raw and resolved training levels")
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		t.Run(fmt.Sprintf("format%d", version), func(t *testing.T) {
 			t.Parallel()
 			epoch := reproducibleEpoch
@@ -129,7 +129,7 @@ func TestPackUnavailableCodecPreservesOutput(t *testing.T) {
 		{name: "automatic dictionary selection", profile: codec.ProfileSize,
 			overrides: map[string]VariantCompressionOptions{"v1": {Compression: unavailable}}},
 	}
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, tc := range cases {
 			t.Run(fmt.Sprintf("format%d/%s", version, tc.name), func(t *testing.T) {
 				t.Parallel()

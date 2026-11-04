@@ -46,7 +46,7 @@ func TestChecksumCasingRuntimeMatrix(t *testing.T) {
 	for _, profile := range profiles {
 		for _, codec := range codecs {
 			base := packChecksumCasingFixture(t, dir, profile, codec)
-			for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+			for _, version := range []int{format.FormatVersion2} {
 				for _, casing := range casings {
 					t.Run(profile.name+"/"+codec.name+"/v"+strconv.Itoa(version)+"/"+casing.name, func(t *testing.T) {
 						t.Parallel()
@@ -96,11 +96,7 @@ func rewriteChecksumCasingFixture(
 	_, err := format.WriteIndexAndTrailerWithVersion(&metadata, index, trailer.IndexOffset, version)
 	require.NoError(t, err)
 	wire := metadata.Bytes()[:metadata.Len()-format.TrailerSize]
-	if version == format.FormatVersion2 {
-		require.True(t, bytes.HasPrefix(wire, []byte(format.IndexMagicV2)), "fixture must use the actual binary v2 index")
-	} else {
-		require.True(t, bytes.HasPrefix(wire, []byte("{")), "fixture must use the legacy JSON v1 index")
-	}
+	require.True(t, bytes.HasPrefix(wire, []byte(format.IndexMagicV2)), "fixture must use the actual binary v2 index")
 	// Inspect serialized bytes rather than reparsing: parser normalization must
 	// not silently turn the uppercase/mixed-case fixtures into lowercase inputs.
 	for _, variant := range index.Variants {

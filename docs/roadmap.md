@@ -206,6 +206,7 @@ Issue-local acceptance remains authoritative; these are pending release commitme
 | Per-variant CLI compression with existing manifest support and explicit precedence | [#43](https://github.com/EpicBlackWolfZ/microfat/issues/43) |
 | Requirements-exact selection qualification; masks only when measured work justifies them | [#153](https://github.com/EpicBlackWolfZ/microfat/issues/153), [evaluation](requirements-exact-selection-results.md) |
 | Controlled historical service-p99 investigation and explicit inconclusive disposition | [#230](https://github.com/EpicBlackWolfZ/microfat/issues/230), [results](hosted-p99-investigation-results.md) |
+| Permanent removal of deprecated legacy Format v1 JSON manifest support | [#427](https://github.com/EpicBlackWolfZ/microfat/issues/427), [migration](release-artifacts.md#4-legacy-format-v1-removal-notice) |
 
 Exit: metadata fields/profiles and unknowns are accurate, previews preserve safe GC prerequisites,
 and optimizations demonstrate useful benefit without weakening correctness. Include AMD64 missing-feature

@@ -100,7 +100,7 @@ func (c ExperimentConfig) Validate() error {
 	if err := c.validateTiming(); err != nil {
 		return err
 	}
-	if c.Format != 1 && c.Format != defaultFormat || c.Profile != "full" && c.Profile != minimalProfile ||
+	if c.Format != defaultFormat || c.Profile != "full" && c.Profile != minimalProfile ||
 		c.Codec != "zstd" && c.Codec != "lz4" && c.Codec != "none" || c.Dictionary && c.Codec != "zstd" {
 		return errors.New("unsupported format/profile/codec/dictionary combination")
 	}

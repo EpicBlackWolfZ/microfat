@@ -32,7 +32,7 @@ func TestPrewarmPlanCompatibility(t *testing.T) {
 	for _, profile := range profiles {
 		for _, compression := range codecs {
 			base := packChecksumCasingFixture(t, dir, profile, compression)
-			for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+			for _, version := range []int{format.FormatVersion2} {
 				t.Run(profile.name+"/"+compression.name+"/format"+strconv.Itoa(version), func(t *testing.T) {
 					t.Parallel()
 					fat, _ := rewriteChecksumCasingFixture(t, base, version, strings.ToLower, compression.dictionary)

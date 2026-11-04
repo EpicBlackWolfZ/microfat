@@ -40,6 +40,7 @@ const (
 	pprofReadHeaderTimeout  = pprofHeaderTimeoutSec * time.Second
 	sourceDateEpochEnv      = "SOURCE_DATE_EPOCH"
 	creationDateUnavailable = "unavailable"
+	flagNameFormatVersion   = "format-version"
 	// UTC RFC3339 dates have four-digit years, from 0000 through 9999.
 	minCreationDateUnix int64 = -62167219200
 	maxCreationDateUnix int64 = 253402300799
@@ -228,15 +229,6 @@ func newInspectCmd() *cobra.Command {
 			idx, err := format.ReadTrailerAndIndex(f, stat.Size())
 			if err != nil {
 				return fmt.Errorf("reading binary manifest: %w", err)
-			}
-
-			if idx.Version == format.FormatVersion1 {
-				_, _ = fmt.Fprintf(
-					cmd.ErrOrStderr(),
-					"[microfat:warn] binary %q uses legacy Format v1 JSON manifest; "+
-						"Format v1 is deprecated and scheduled for removal in v0.4.0 (use Format v2 for production)\n",
-					path,
-				)
 			}
 
 			if jsonOutput {
@@ -576,6 +568,9 @@ Set SOURCE_DATE_EPOCH to signed integer Unix seconds to supply reproducible crea
 			if err := validateEmptyStubFlags(cmd, flags); err != nil {
 				return err
 			}
+			if err := validateFormatVersionFlag(cmd, flags.FormatVersion); err != nil {
+				return err
+			}
 			if flags.EnableDict && flags.DictProfitable {
 				return pack.ErrConflictingDictOptions
 			}
@@ -611,6 +606,19 @@ func explicitDictionarySize(cmd *cobra.Command, size int) int {
 		return size
 	}
 	return 0
+}
+
+func validateFormatVersionFlag(cmd *cobra.Command, version int) error {
+	if !cmd.Flags().Changed(flagNameFormatVersion) {
+		return nil
+	}
+	if version == format.FormatVersion1 {
+		return fmt.Errorf("%w: Format v1 was removed in v0.4.0; use Format v2", format.ErrUnsupportedVersion)
+	}
+	if version != format.FormatVersion2 {
+		return fmt.Errorf("%w: got version %d, expected %d", format.ErrUnsupportedVersion, version, format.FormatVersion2)
+	}
+	return nil
 }
 
 func runManifestPack(cmd *cobra.Command, flags builder.BuildOptions, rawCompression []string) error {
@@ -782,8 +790,8 @@ func bindManifestBuildFlags(cmd *cobra.Command, flags *builder.BuildOptions, raw
 		"Embed a shared Zstandard dictionary only when it strictly reduces complete artifact bytes")
 	cmd.Flags().IntVar(&flags.DictSize, "dict-size", codec.DefaultDictSize,
 		"Target shared Zstandard dictionary size in bytes (default: 112 KB)")
-	cmd.Flags().IntVar(&flags.FormatVersion, "format-version", format.FormatVersionCurrent,
-		"Binary format specification version (1 for JSON, 2 for binary table)")
+	cmd.Flags().IntVar(&flags.FormatVersion, flagNameFormatVersion, format.FormatVersionCurrent,
+		"Binary format specification version (only 2 is supported; Format v1 was removed in v0.4.0)")
 	cmd.Flags().BoolVar(&flags.SkipELFValidation, "skip-elf-validation", false,
 		"Skip ELF platform, architecture and executable structure validation")
 	cmd.Flags().BoolVar(&flags.AllowMixedABI, "allow-mixed-abi", false,
@@ -810,6 +818,9 @@ Set SOURCE_DATE_EPOCH to signed integer Unix seconds to supply reproducible crea
 			}
 			flags.CreatedUnix = epoch
 			if err := validateEmptyStubFlags(cmd, flags); err != nil {
+				return err
+			}
+			if err := validateFormatVersionFlag(cmd, flags.FormatVersion); err != nil {
 				return err
 			}
 			if flags.EnableDict && flags.DictProfitable {
@@ -870,12 +881,8 @@ func printABIReport(out io.Writer, report *pack.ArtifactABIReport) error {
 }
 
 func formatVersionName(version int) string {
-	switch version {
-	case format.FormatVersion1:
-		return "legacy JSON manifest"
-	case format.FormatVersion2:
+	if version == format.FormatVersion2 {
 		return "compact binary table"
-	default:
-		return "unknown"
 	}
+	return "unknown"
 }

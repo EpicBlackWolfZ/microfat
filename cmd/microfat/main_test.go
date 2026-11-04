@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"debug/elf"
 	"encoding/binary"
 	"encoding/json"
@@ -51,6 +52,7 @@ const (
 	testArchAMD64      = "amd64"
 	testArchARM64      = "arm64"
 	subcmdDetect       = "detect"
+	subcmdInspect      = "inspect"
 	testOutPath        = "out"
 	testVariantV1P     = "v1=p"
 )
@@ -1125,53 +1127,71 @@ func TestTrim_DestinationInNewDirectory(t *testing.T) {
 	}
 }
 
-func TestInspect_FormatV1DeprecationWarning(t *testing.T) {
+func writeSyntheticLegacyFormatV1Binary(t *testing.T, destPath string, stubBytes, payloadBytes []byte) {
+	t.Helper()
+	payloadSum := sha256.Sum256(payloadBytes)
+	rawJSON := fmt.Sprintf(
+		`{"version":1,"app_name":"legacy-v1","os":"linux","arch":"amd64","created_unix":1724540000,`+
+			`"variants":[{"level":"v1","offset":%d,"compressed_size":%d,"uncompressed_size":%d,"sha256":"%x","compression":"none"}]}`,
+		len(stubBytes), len(payloadBytes), len(payloadBytes), payloadSum,
+	)
+	var buf bytes.Buffer
+	buf.Write(stubBytes)
+	buf.Write(payloadBytes)
+	indexOffset := uint64(buf.Len())
+	buf.WriteString(rawJSON)
+	indexSum := sha256.Sum256([]byte(rawJSON))
+	var trailer [format.TrailerSize]byte
+	binary.LittleEndian.PutUint64(trailer[0:format.OffsetLen], indexOffset)
+	binary.LittleEndian.PutUint64(trailer[format.OffsetLen:format.OffsetLen*2], uint64(len(rawJSON)))
+	copy(trailer[format.OffsetLen*2:format.OffsetLen*2+format.HashLen], indexSum[:])
+	copy(trailer[format.OffsetLen*2+format.HashLen:], []byte(format.MagicString))
+	buf.Write(trailer[:])
+	require.NoError(t, os.WriteFile(destPath, buf.Bytes(), 0o755))
+}
+
+func TestPackAndInspect_FormatV1Removed(t *testing.T) {
 	tempDir := t.TempDir()
 	stubPath := filepath.Join(tempDir, "stub")
-	_ = os.WriteFile(stubPath, []byte("STUB_BIN"), 0o755)
+	require.NoError(t, os.WriteFile(stubPath, []byte("STUB_BIN"), 0o755))
 	v1Path := filepath.Join(tempDir, "v1")
-	_ = os.WriteFile(v1Path, []byte("PAYLOAD_V1"), 0o755)
+	require.NoError(t, os.WriteFile(v1Path, []byte("PAYLOAD_V1"), 0o755))
 	fatV1Path := filepath.Join(tempDir, "app_v1.fat")
 
-	packCmd := newPackCmd()
-	packCmd.SetArgs([]string{
-		flagStub, stubPath,
-		flagOutput, fatV1Path,
-		flagName, "v1-app",
-		"-v", "v1=" + v1Path,
-		flagSkipELF,
-		"--format-version", "1",
-	})
-	if err := packCmd.Execute(); err != nil {
-		t.Fatalf("pack format v1 failed: %v", err)
+	for _, badVer := range []string{"1", "0", "99"} {
+		packCmd := newPackCmd()
+		packCmd.SetArgs([]string{
+			flagStub, stubPath,
+			flagOutput, fatV1Path,
+			flagName, "v1-app",
+			"-v", "v1=" + v1Path,
+			flagSkipELF,
+			"--format-version", badVer,
+		})
+		err := packCmd.Execute()
+		require.ErrorIs(t, err, format.ErrUnsupportedVersion)
+		if badVer == "1" {
+			require.ErrorContains(t, err, "Format v1 was removed in v0.4.0; use Format v2")
+		}
 	}
 
-	var stderrBuf bytes.Buffer
-	inspectCmd := newInspectCmd()
-	inspectCmd.SetErr(&stderrBuf)
-	inspectCmd.SetArgs([]string{fatV1Path})
-	if err := inspectCmd.Execute(); err != nil {
-		t.Fatalf("inspect format v1 failed: %v", err)
+	pgoCmd := newPgoPackCmd()
+	pgoCmd.SetArgs([]string{"--manifest", filepath.Join(tempDir, "missing.yaml"), "--format-version", "1"})
+	pgoErr := pgoCmd.Execute()
+	require.ErrorIs(t, pgoErr, format.ErrUnsupportedVersion)
+	require.ErrorContains(t, pgoErr, "Format v1 was removed in v0.4.0; use Format v2")
+
+	writeSyntheticLegacyFormatV1Binary(t, fatV1Path, []byte("STUB_BIN"), []byte("PAYLOAD_V1"))
+
+	for _, sub := range []string{subcmdInspect, "info", "verify"} {
+		rootCmd := newRootCmd()
+		rootCmd.SetArgs([]string{sub, fatV1Path})
+		err := rootCmd.Execute()
+		require.ErrorIs(t, err, format.ErrUnsupportedVersion)
+		require.ErrorContains(t, err, "re-package with Format v2 using 'microfat pack'")
 	}
 
-	output := stderrBuf.String()
-	if !strings.Contains(output, "[microfat:warn]") || !strings.Contains(output, "Format v1 is deprecated") {
-		t.Errorf("expected Format v1 deprecation warning in stderr, got: %q", output)
-	}
-
-	// Verify info alias also triggers inspect and prints warning
-	rootCmd := newRootCmd()
-	stderrBuf.Reset()
-	rootCmd.SetErr(&stderrBuf)
-	rootCmd.SetArgs([]string{"info", fatV1Path})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("info alias failed: %v", err)
-	}
-	if !strings.Contains(stderrBuf.String(), "[microfat:warn]") {
-		t.Errorf("expected deprecation warning when calling 'microfat info', got: %q", stderrBuf.String())
-	}
-
-	// Verify Format v2 binary does not emit deprecation warning
+	// Verify Format v2 binary succeeds cleanly
 	fatV2Path := filepath.Join(tempDir, "app_v2.fat")
 	packV2Cmd := newPackCmd()
 	packV2Cmd.SetArgs([]string{
@@ -1182,20 +1202,14 @@ func TestInspect_FormatV1DeprecationWarning(t *testing.T) {
 		flagSkipELF,
 		"--format-version", "2",
 	})
-	if err := packV2Cmd.Execute(); err != nil {
-		t.Fatalf("pack format v2 failed: %v", err)
-	}
+	require.NoError(t, packV2Cmd.Execute())
 
-	stderrBuf.Reset()
+	var stderrBuf bytes.Buffer
 	inspectV2Cmd := newInspectCmd()
 	inspectV2Cmd.SetErr(&stderrBuf)
 	inspectV2Cmd.SetArgs([]string{fatV2Path})
-	if err := inspectV2Cmd.Execute(); err != nil {
-		t.Fatalf("inspect format v2 failed: %v", err)
-	}
-	if strings.Contains(stderrBuf.String(), "Format v1 is deprecated") {
-		t.Errorf("Format v2 binary should not emit deprecation warning, got: %q", stderrBuf.String())
-	}
+	require.NoError(t, inspectV2Cmd.Execute())
+	assert.Empty(t, stderrBuf.String())
 }
 
 func TestStubAutoDiscovery(t *testing.T) {
@@ -1605,18 +1619,9 @@ func TestInspectAndInfo_SubprocessStreams(t *testing.T) {
 	})
 	require.NoError(t, p2.Execute())
 
-	// Create Format v1 binary
+	// Create synthetic legacy Format v1 binary (must now fail closed)
 	fatV1 := filepath.Join(tempDir, "app_v1.fat")
-	p1 := newPackCmd()
-	p1.SetArgs([]string{
-		flagStub, stubPath,
-		flagOutput, fatV1,
-		flagName, "v1-app",
-		"-v", "v1=" + v1Path,
-		flagSkipELF,
-		"--format-version", "1",
-	})
-	require.NoError(t, p1.Execute())
+	writeSyntheticLegacyFormatV1Binary(t, fatV1, []byte("STUB_BIN"), []byte("PAYLOAD_V1"))
 
 	// Build the real microfat CLI binary to run as a subprocess
 	cliBin := filepath.Join(tempDir, "microfat_cli")
@@ -1630,16 +1635,15 @@ func TestInspectAndInfo_SubprocessStreams(t *testing.T) {
 		cmdSub       string // "inspect" or "info"
 		target       string
 		wantExitCode int
-		isV1         bool
-		isInvalid    bool
+		isLegacyV1   bool
 	}{
-		{name: "Inspect_V2_JSON_StdoutPureJSON", cmdSub: "inspect", target: fatV2, wantExitCode: 0, isV1: false},
-		{name: "Info_V2_JSON_StdoutPureJSON", cmdSub: "info", target: fatV2, wantExitCode: 0, isV1: false},
-		{name: "Inspect_V1_JSON_StderrWarning", cmdSub: "inspect", target: fatV1, wantExitCode: 0, isV1: true},
-		{name: "Info_V1_JSON_StderrWarning", cmdSub: "info", target: fatV1, wantExitCode: 0, isV1: true},
-		{name: "Inspect_NonFat_NonZeroExit", cmdSub: "inspect", target: stubPath, wantExitCode: 1, isInvalid: true},
-		{name: "Info_NonFat_NonZeroExit", cmdSub: "info", target: stubPath, wantExitCode: 1, isInvalid: true},
-		{name: "Inspect_MissingFile_NonZeroExit", cmdSub: "inspect", target: filepath.Join(tempDir, "missing"), wantExitCode: 1, isInvalid: true},
+		{name: "Inspect_V2_JSON_StdoutPureJSON", cmdSub: "inspect", target: fatV2, wantExitCode: 0},
+		{name: "Info_V2_JSON_StdoutPureJSON", cmdSub: "info", target: fatV2, wantExitCode: 0},
+		{name: "Inspect_V1_Rejected_NonZeroExit", cmdSub: "inspect", target: fatV1, wantExitCode: 1, isLegacyV1: true},
+		{name: "Info_V1_Rejected_NonZeroExit", cmdSub: "info", target: fatV1, wantExitCode: 1, isLegacyV1: true},
+		{name: "Inspect_NonFat_NonZeroExit", cmdSub: "inspect", target: stubPath, wantExitCode: 1},
+		{name: "Info_NonFat_NonZeroExit", cmdSub: "info", target: stubPath, wantExitCode: 1},
+		{name: "Inspect_MissingFile_NonZeroExit", cmdSub: "inspect", target: filepath.Join(tempDir, "missing"), wantExitCode: 1},
 	}
 
 	for _, tc := range subtests {
@@ -1658,13 +1662,7 @@ func TestInspectAndInfo_SubprocessStreams(t *testing.T) {
 				var parsed map[string]any
 				err := json.Unmarshal(stdout.Bytes(), &parsed)
 				require.NoError(t, err, "stdout must be strictly valid JSON: %s", stdout.String())
-
-				if tc.isV1 {
-					assert.Contains(t, stderr.String(), "[microfat:warn]", "stderr must contain warning")
-					assert.Contains(t, stderr.String(), "Format v1 is deprecated")
-				} else {
-					assert.NotContains(t, stderr.String(), "deprecated")
-				}
+				assert.Empty(t, strings.TrimSpace(stderr.String()))
 			} else {
 				require.Error(t, runErr)
 				var exitErr *exec.ExitError
@@ -1672,6 +1670,9 @@ func TestInspectAndInfo_SubprocessStreams(t *testing.T) {
 				assert.Equal(t, tc.wantExitCode, exitErr.ExitCode())
 				assert.Empty(t, strings.TrimSpace(stdout.String()), "stdout must be empty on error")
 				assert.NotEmpty(t, strings.TrimSpace(stderr.String()), "stderr must contain error details")
+				if tc.isLegacyV1 {
+					assert.Contains(t, stderr.String(), "re-package with Format v2 using 'microfat pack'")
+				}
 			}
 		})
 	}
@@ -1679,7 +1680,7 @@ func TestInspectAndInfo_SubprocessStreams(t *testing.T) {
 
 func TestFormatVersionName(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "legacy JSON manifest", formatVersionName(format.FormatVersion1))
+	assert.Equal(t, "unknown", formatVersionName(format.FormatVersion1))
 	assert.Equal(t, "compact binary table", formatVersionName(format.FormatVersion2))
 	assert.Equal(t, "unknown", formatVersionName(999))
 }

@@ -226,8 +226,8 @@ microfat info bin/myapp
 microfat inspect bin/myapp --json
 ```
 
-> [!WARNING]
-> **Format v1 Deprecation**: Inspecting binaries packed with the legacy Format v1 JSON manifest displays a deprecation warning on stderr. Format v1 will be removed in a future release. Please repack using Format v2 (the default).
+> [!NOTE]
+> **Format v1 Removed**: Legacy Format v1 JSON manifests were permanently removed in `v0.4.0`. Inspecting, verifying, or launching a Format v1 binary fails closed with an unsupported-version error; re-package using `microfat pack` (Format v2).
 
 #### Flags
 | Flag | Shorthand | Type | Default | Description |
@@ -357,7 +357,7 @@ microfat pack --manifest pgo.yaml -o bin/myapp
 | `--dict`, `--zstd-dict` | *(none)* | `bool` | `false` | Enable shared Zstandard inter-variant dictionary compression. |
 | `--dict-profitable` | *(none)* | `bool` | `false` | Embed a shared Zstandard dictionary only when it strictly reduces complete artifact bytes. |
 | `--dict-size` | *(none)* | `int` | `114688` | Target shared dictionary size in bytes (default: 112 KB). |
-| `--format-version` | *(none)* | `int` | `2` | Binary format version: `2` (compact binary table, default) or `1` (legacy JSON, deprecated). |
+| `--format-version` | *(none)* | `int` | `2` | Binary format version (`2` compact binary table; Format `1` was removed in `v0.4.0`). |
 | `--skip-elf-validation` | *(none)* | `bool` | `false` | Skip ELF architecture, executable type, load segment and entry-point checks. |
 | `--manifest` | `-m` | `string` | `""` | Path to YAML or JSON declarative build manifest. |
 | `--concurrency` | `-j` | `int` | `NumCPU` | Concurrent compiler workers when building via manifest. |
@@ -388,7 +388,7 @@ microfat pgo-pack --manifest pgo.yaml -o bin/myapp-pgo
 With identical stub/payload bytes, effective compression settings, dictionary inputs, epoch,
 other metadata/options, and pinned toolchain/codec, repeated packaging produces identical
 complete bytes and SHA-256.
-The same epoch is preserved in Format v1 and v2. This controls new package metadata; it does
+The epoch is preserved in Format v2. This controls new package metadata; it does
 not normalize ELF build IDs, source paths, compiler provenance or signatures, and does not
 guarantee identical arbitrary source builds or output across different toolchains/codecs.
 Trim/optimize transformations retain their existing timestamp and filesystem metadata policies.
@@ -462,7 +462,7 @@ and `--variant-compression v3=lz4` uses LZ4 level 9. Adding `:fastest` to that C
 override selects LZ4 fast mode. A global `--compression=lz4` does not replace a
 manifest variant's explicit algorithm.
 
-Both Format v1 and v2 and the full and minimal launcher stubs support mixed codecs
+Format v2 and both the full and minimal launcher stubs support mixed codecs
 in `memfd` and `cache` execution modes. `--dict` (or manifest `compression.dict`)
 forces shared Zstandard dictionary training across the supplied payloads and
 requires at least two variants; only Zstandard frames consume the dictionary.

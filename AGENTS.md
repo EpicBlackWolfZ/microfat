@@ -11,7 +11,7 @@ Welcome to `microfat`! This document serves as the primary technical runbook, ar
 ### Core Architecture
 - **`cmd/microfat`**: The primary developer CLI for detecting host CPU capabilities, packing fat binaries, inspecting embedded manifests, verifying integrity, and trimming variants.
 - **`cmd/microfat-stub`**: The minimal launcher stub stitched to the front of fat executables. At launch time, it probes the host CPU via `internal/microarch`, detects container resource limits via `internal/cgroup`, and checks an existing cache entry read-only before using sealed Linux `memfd_create`. Every cache hit verifies size, owner, mode and SHA-256 on the executed descriptor. Missing or corrupt safe regular entries remain untouched on a successful memfd path; unsafe entries fail closed. Cold memfd denial can materialize verified cache. Explicit `memfd` bypasses cache; explicit `cache` materializes it. See [the dispatch contract](docs/architecture.md#7-cache-first-auto-dispatch--descriptor-bound-execution).
-- **`internal/format`**: Binary format definition (Format v2 compact binary table and Format v1 JSON manifest), shared dictionary metadata, and fixed 56-byte trailer verification (`\x00\xFA\x7FMICRO` magic).
+- **`internal/format`**: Binary format definition (Format v2 compact binary table), shared dictionary metadata, and fixed 56-byte trailer verification (`\x00\xFA\x7FMICRO` magic).
 - **`internal/pack`**: Compression engine utilizing `klauspost/compress/zstd` for parallel frame compression, trained dictionary compression, variant sorting, ELF header validation, and atomic file replacement.
 - **`internal/cgroup`**: Linux cgroup v1 and v2 memory/CPU limit parser. Computes optimal runtime parameters (`GOMEMLIMIT` at 90% container ceiling, `GOMAXPROCS` matching CPU CFS quotas).
 - **`internal/microarch`**: Dynamic runtime CPU microarchitecture level detection (AMD64 v1-v4, ARM64 v8.0-v9.5) and ranking engine.
@@ -34,7 +34,7 @@ A `microfat` fat binary consists of contiguous segments:
 +-------------------------------------------------------------+
 | ...                                                         |
 +-------------------------------------------------------------+
-| Metadata Index Table (Format v2 Binary / Format v1 JSON)    |
+| Metadata Index Table (Format v2 Binary)                     |
 +-------------------------------------------------------------+
 | Trailer (56 Bytes Fixed at EOF)                             |
 |  - 8 Bytes uint64 LE : Index Offset                         |

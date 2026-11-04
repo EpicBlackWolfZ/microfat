@@ -79,7 +79,7 @@ func Cases(options Options) ([]Case, error) {
 
 func compatibilityCases() []Case {
 	var cases []Case
-	for _, version := range []int{1, 2} {
+	for _, version := range []int{2} {
 		for _, profile := range []string{"full", "minimal"} {
 			for _, codec := range []string{"none", "lz4", "zstd"} {
 				dictionaries := []bool{false}

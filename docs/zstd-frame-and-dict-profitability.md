@@ -138,8 +138,8 @@ an isolated encoder allocation reading.
 `assembleProfitableArtifact` stages each Zstandard variant once without a
 dictionary and once with the candidate dictionary inside `MaxDictProfitabilitySpoolBytes`
 (`2 GiB`), encodes non-dictionary (`none`, `lz4`) override variants only once,
-computes exact complete candidate bytes (including `FormatVersion1` or
-`FormatVersion2` index and 56-byte trailer), copies the winning staged frames
+computes exact complete candidate bytes (including the `FormatVersion2` binary
+index and 56-byte trailer), copies the winning staged frames
 without a third compression pass, and removes all staged files before returning.
 
 ## Paired launch completion intervals
