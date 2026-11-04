@@ -204,6 +204,7 @@ Issue-local acceptance remains authoritative; these are pending release commitme
 | Evaluate complete codec costs; retain defaults unless a replacement qualifies | [#42](https://github.com/EpicBlackWolfZ/microfat/issues/42), [evaluation](codec-policy-results.md) |
 | Per-variant CLI compression with existing manifest support and explicit precedence | [#43](https://github.com/EpicBlackWolfZ/microfat/issues/43) |
 | Requirements-exact selection qualification; masks only when measured work justifies them | [#153](https://github.com/EpicBlackWolfZ/microfat/issues/153), [evaluation](requirements-exact-selection-results.md) |
+| Controlled historical service-p99 investigation and explicit inconclusive disposition | [#230](https://github.com/EpicBlackWolfZ/microfat/issues/230), [results](hosted-p99-investigation-results.md) |
 
 Exit: metadata fields/profiles and unknowns are accurate, previews preserve safe GC prerequisites,
 and optimizations demonstrate useful benefit without weakening correctness. Include AMD64 missing-feature
