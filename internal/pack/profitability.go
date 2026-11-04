@@ -47,6 +47,27 @@ func (sw *spoolBoundedWriter) Write(p []byte) (int, error) {
 	return sw.w.Write(p)
 }
 
+func assembleAndFinalizeProfitableArtifact(
+	tmpFile *os.File,
+	tmpPath string,
+	outDir string,
+	levels []string,
+	opts *Options,
+	stubOffset int64,
+	baseIdx *format.Index,
+	dictBytes []byte,
+	dictSHAHex string,
+) (*format.Index, error) {
+	idx, err := assembleProfitableArtifact(tmpFile, outDir, levels, opts, stubOffset, baseIdx, dictBytes, dictSHAHex)
+	if err != nil {
+		return nil, err
+	}
+	if err := finalizeOutputFile(tmpFile, tmpPath, opts.OutputPath, opts.Permissions); err != nil {
+		return nil, err
+	}
+	return idx, nil
+}
+
 func assembleProfitableArtifact(
 	tmpFile *os.File,
 	outDir string,
@@ -67,15 +88,7 @@ func assembleProfitableArtifact(
 
 	var createdPaths []string
 	defer func() {
-		seen := make(map[string]struct{}, len(createdPaths))
 		for _, p := range createdPaths {
-			if p == "" {
-				continue
-			}
-			if _, ok := seen[p]; ok {
-				continue
-			}
-			seen[p] = struct{}{}
 			_ = os.Remove(p)
 		}
 	}()
@@ -173,10 +186,6 @@ func stagePlanSubset(
 	tracker *spoolBudgetTracker,
 ) ([]parallelVariantResult, error) {
 	results := make([]parallelVariantResult, len(indices))
-	if len(indices) == 0 {
-		return results, nil
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

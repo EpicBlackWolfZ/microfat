@@ -307,37 +307,36 @@ func Pack(opts Options) (*format.Index, error) {
 	}
 
 	if opts.DictProfitable && len(dictBytes) > 0 {
-		idx, err = assembleProfitableArtifact(tmpFile, outDir, levels, &opts, currentOffset, idx, dictBytes, dictSHAHex)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		// 2. Write Shared Dictionary (if trained)
-		if len(dictBytes) > 0 {
-			dictOffset := currentOffset
-			dictSize := int64(len(dictBytes))
-			if _, err := tmpFile.Write(dictBytes); err != nil {
-				return nil, fmt.Errorf("writing dictionary payload: %w", err)
-			}
-			currentOffset += dictSize
-			idx.DictionaryOffset = dictOffset
-			idx.DictionarySize = dictSize
-			idx.DictionarySHA256 = dictSHAHex
-			idx.DictionaryID = codec.DefaultDictionaryID
-		}
+		return assembleAndFinalizeProfitableArtifact(
+			tmpFile, tmpPath, outDir, levels, &opts, currentOffset, idx, dictBytes, dictSHAHex,
+		)
+	}
 
-		// 3. Compress and write each variant payload (parallelized under bounded CPU/memory admission)
-		variantEntries, newOffset, err := writeAllVariantPayloads(tmpFile, outDir, levels, &opts, currentOffset, dictBytes)
-		if err != nil {
-			return nil, err
+	// 2. Write Shared Dictionary (if trained)
+	if len(dictBytes) > 0 {
+		dictOffset := currentOffset
+		dictSize := int64(len(dictBytes))
+		if _, err := tmpFile.Write(dictBytes); err != nil {
+			return nil, fmt.Errorf("writing dictionary payload: %w", err)
 		}
-		currentOffset = newOffset
-		idx.Variants = append(idx.Variants, variantEntries...)
+		currentOffset += dictSize
+		idx.DictionaryOffset = dictOffset
+		idx.DictionarySize = dictSize
+		idx.DictionarySHA256 = dictSHAHex
+		idx.DictionaryID = codec.DefaultDictionaryID
+	}
 
-		// 4. Write Index and Trailer
-		if _, err := format.WriteIndexAndTrailerWithVersion(tmpFile, idx, currentOffset, opts.FormatVersion); err != nil {
-			return nil, fmt.Errorf("writing index and trailer: %w", err)
-		}
+	// 3. Compress and write each variant payload (parallelized under bounded CPU/memory admission)
+	variantEntries, newOffset, err := writeAllVariantPayloads(tmpFile, outDir, levels, &opts, currentOffset, dictBytes)
+	if err != nil {
+		return nil, err
+	}
+	currentOffset = newOffset
+	idx.Variants = append(idx.Variants, variantEntries...)
+
+	// 4. Write Index and Trailer
+	if _, err := format.WriteIndexAndTrailerWithVersion(tmpFile, idx, currentOffset, opts.FormatVersion); err != nil {
+		return nil, fmt.Errorf("writing index and trailer: %w", err)
 	}
 
 	// 5. Sync, chmod and atomically move

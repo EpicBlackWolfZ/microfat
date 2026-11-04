@@ -585,3 +585,134 @@ func TestZstdDecodeBoundsAcrossFormatVersions(t *testing.T) {
 		}
 	}
 }
+
+func TestProfitabilityInternalErrorAndEdgeCoverage(t *testing.T) {
+	t.Parallel()
+	const (
+		invalidFormatVer = 99
+		stubOffsetVal    = 64
+	)
+
+	t.Run("spool_bounded_writer_zero_length_write", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		sw := &spoolBoundedWriter{w: &buf, tracker: newSpoolBudgetTracker(tinySpoolLimitBytes)}
+		n, err := sw.Write(nil)
+		require.NoError(t, err)
+		assert.Zero(t, n)
+		assert.Zero(t, sw.tracker.used.Load())
+	})
+
+	t.Run("invalid_format_version_in_options_rejected", func(t *testing.T) {
+		t.Parallel()
+		input, _ := dictionaryContractInput(t)
+		opts := DefaultOptions()
+		opts.StubPath = input
+		opts.OutputPath = filepath.Join(t.TempDir(), "out")
+		opts.Variants = map[string]string{"v1": input, "v3": input}
+		opts.FormatVersion = invalidFormatVer
+		_, err := Pack(opts)
+		require.ErrorIs(t, err, format.ErrUnsupportedVersion)
+	})
+
+	t.Run("with_dict_stage_spool_exhaustion_and_worker_cancel", func(t *testing.T) {
+		t.Parallel()
+		stub, v1, v3 := structuredTailPaddedELF(t, profitableSmallDictSize)
+		rawStat, err := os.Stat(v1)
+		require.NoError(t, err)
+
+		// Register custom dict codec so compressed size is exact (4 + rawStat.Size()).
+		codecName := "test-withdict-spool-exhaust"
+		codec.Register(&countingDictCodec{name: codecName})
+
+		outDir := t.TempDir()
+		opts := DefaultOptions()
+		opts.StubPath = stub
+		opts.OutputPath = filepath.Join(outDir, "out")
+		opts.Compression = codecName
+		opts.DictSize = profitableSmallDictSize
+		opts.DictProfitable = true
+		opts.Variants = map[string]string{"v1": v1, "v2": v1, "v3": v3, "v4": v3}
+		// Allow all 4 no-dictionary frames to finish, then fail mid-way through with-dictionary staging.
+		opts.MaxSpoolBytes = 4*(rawStat.Size()+4) + rawStat.Size()/2
+
+		_, err = Pack(opts)
+		require.ErrorIs(t, err, ErrSpoolBudgetExceeded)
+		entries, dirErr := os.ReadDir(outDir)
+		require.NoError(t, dirErr)
+		assert.Empty(t, entries)
+	})
+
+	t.Run("assemble_internal_error_branches", func(t *testing.T) {
+		t.Parallel()
+		_, v1, v3 := structuredTailPaddedELF(t, profitableSmallDictSize*2)
+		winCodec := &countingDictCodec{name: "test-internal-win", defaultShrink: profitableSmallDictSize * 2}
+		loseCodec := &countingDictCodec{name: "test-internal-lose", defaultShrink: 0}
+		codec.Register(winCodec)
+		codec.Register(loseCodec)
+
+		validDigest := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+		baseIdx := &format.Index{
+			Version:    format.FormatVersion2,
+			AppName:    "app",
+			TargetOS:   "linux",
+			TargetArch: "amd64",
+		}
+		levels := []string{"v1", "v3"}
+
+		// 1. Unknown codec fails prepareVariantWorkPlans.
+		badOpts := DefaultOptions()
+		badOpts.Variants = map[string]string{"v1": v1, "v3": v3}
+		badOpts.Compression = "nonexistent-codec-xyz"
+		f1, err := os.CreateTemp(t.TempDir(), "tmp")
+		require.NoError(t, err)
+		defer f1.Close()
+		_, err = assembleProfitableArtifact(f1, t.TempDir(), levels, &badOpts, stubOffsetVal, baseIdx, []byte("dict"), validDigest)
+		require.Error(t, err)
+
+		// 2. Invalid FormatVersion fails noDict measureCandidateCompleteBytes.
+		verOpts := DefaultOptions()
+		verOpts.Variants = map[string]string{"v1": v1, "v3": v3}
+		verOpts.Compression = loseCodec.name
+		verOpts.FormatVersion = invalidFormatVer
+		_, err = assembleProfitableArtifact(f1, t.TempDir(), levels, &verOpts, stubOffsetVal, baseIdx, []byte("dict"), validDigest)
+		require.ErrorIs(t, err, format.ErrUnsupportedVersion)
+
+		// 3. Invalid dictionary SHA-256 fails withDict measureCandidateCompleteBytes while noDict succeeds.
+		okOpts := DefaultOptions()
+		okOpts.Variants = map[string]string{"v1": v1, "v3": v3}
+		okOpts.Compression = winCodec.name
+		okOpts.FormatVersion = format.FormatVersion2
+		_, err = assembleProfitableArtifact(f1, t.TempDir(), levels, &okOpts, stubOffsetVal, baseIdx, []byte("dict"), "bad-sha")
+		require.Error(t, err)
+
+		// 4. Closed tmpFile fails writing dictionary when withDict wins.
+		closedWin, err := os.CreateTemp(t.TempDir(), "closed-win")
+		require.NoError(t, err)
+		require.NoError(t, closedWin.Close())
+		_, err = assembleProfitableArtifact(closedWin, t.TempDir(), levels, &okOpts, stubOffsetVal, baseIdx, []byte("dict"), validDigest)
+		require.Error(t, err)
+
+		// 5. Closed tmpFile fails appendStagedVariantFrame when noDict wins.
+		loseOpts := okOpts
+		loseOpts.Compression = loseCodec.name
+		closedLose, err := os.CreateTemp(t.TempDir(), "closed-lose")
+		require.NoError(t, err)
+		require.NoError(t, closedLose.Close())
+		_, err = assembleAndFinalizeProfitableArtifact(
+			closedLose, closedLose.Name(), t.TempDir(), levels, &loseOpts, stubOffsetVal, baseIdx, []byte("dict"), validDigest,
+		)
+		require.Error(t, err)
+
+		// 6. Missing destination parent directory fails finalizeOutputFile after successful assembly.
+		renameFailOpts := loseOpts
+		renameFailOpts.OutputPath = filepath.Join(t.TempDir(), "missing-parent", "out")
+		validTmp, err := os.CreateTemp(t.TempDir(), "valid-tmp")
+		require.NoError(t, err)
+		defer func() { _ = os.Remove(validTmp.Name()) }()
+		_, err = assembleAndFinalizeProfitableArtifact(
+			validTmp, validTmp.Name(), t.TempDir(), levels, &renameFailOpts, stubOffsetVal, baseIdx, []byte("dict"), validDigest,
+		)
+		require.Error(t, err)
+	})
+}
