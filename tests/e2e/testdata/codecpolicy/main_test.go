@@ -127,14 +127,66 @@ func TestTimeoutTerminatesOwnedDescendant(t *testing.T) {
 	require.NoError(t, err)
 	pid, err := strconv.Atoi(string(pidData))
 	require.NoError(t, err)
+	// SIGKILL delivery is asynchronous: exit_files() can close the inherited
+	// pipes (unblocking Wait) while do_exit() still reports state R. Poll for
+	// the terminal transition instead of sampling a single /proc snapshot.
+	terminated, last := descendantTerminated(t, pid, "sleep")
+	for deadline := time.Now().Add(2 * time.Second); !terminated && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+		terminated, last = descendantTerminated(t, pid, "sleep")
+	}
+	require.True(t, terminated, "owned descendant must be terminated (last state %q)", last)
+}
+
+// descendantTerminated reports whether pid has exited, is a zombie/dead task,
+// or was already reaped and reused by an unrelated command.
+func descendantTerminated(t *testing.T, pid int, command string) (bool, string) {
+	t.Helper()
 	state, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
 	if os.IsNotExist(err) || errors.Is(err, syscall.ESRCH) {
-		return
+		return true, "absent"
 	}
 	require.NoError(t, err)
-	fields := strings.Fields(string(state)[strings.LastIndex(string(state), ")")+1:])
-	require.NotEmpty(t, fields)
-	require.Contains(t, []string{"Z", "X"}, fields[0], "owned descendant must be terminated")
+	return statTerminated(string(state), command)
+}
+
+func statTerminated(stat, command string) (bool, string) {
+	open, closing := strings.IndexByte(stat, '('), strings.LastIndexByte(stat, ')')
+	if open < 0 || closing < open {
+		return false, "malformed"
+	}
+	fields := strings.Fields(stat[closing+1:])
+	if len(fields) == 0 {
+		return false, "malformed"
+	}
+	if stat[open+1:closing] != command {
+		return true, "reused"
+	}
+	return fields[0] == "Z" || fields[0] == "X", fields[0]
+}
+
+func TestStatTerminated(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		stat, state string
+		terminated  bool
+	}{
+		{"42 (sleep) Z 1 42", "Z", true},
+		{"42 (sleep) X 1 42", "X", true},
+		{"42 (sleep) R 1 42", "R", false},
+		{"42 (sleep) S 1 42", "S", false},
+		{"42 (other) S 1 42", "reused", true},
+		{"42 (a) b) S 1", "reused", true},
+		{"42 sleep R", "malformed", false},
+		{"42 (sleep)", "malformed", false},
+	} {
+		terminated, state := statTerminated(tc.stat, "sleep")
+		require.Equal(t, tc.terminated, terminated, tc.stat)
+		require.Equal(t, tc.state, state, tc.stat)
+	}
+	terminated, state := descendantTerminated(t, 1<<30, "sleep")
+	require.True(t, terminated)
+	require.Equal(t, "absent", state)
 }
 
 func TestLeaderExitTerminatesOwnedDescendants(t *testing.T) {
