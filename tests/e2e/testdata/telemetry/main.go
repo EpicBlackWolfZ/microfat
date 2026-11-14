@@ -83,7 +83,7 @@ func main() {
 	flag.Parse()
 	study, err := selectStudy(*studyName)
 	if err == nil {
-		err = runStudy(*base, *candidate, *output, study)
+		err = runStudy(*base, *candidate, *output, study, goVersion)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -91,20 +91,12 @@ func main() {
 	}
 }
 
-func run(base, candidate, output string) error {
-	study, err := selectStudy(originalStudy)
-	if err != nil {
-		return err
-	}
-	return runStudy(base, candidate, output, study)
-}
-
-func runStudy(base, candidate, output string, study studyConfig) (retErr error) {
+func runStudy(base, candidate, output string, study studyConfig, requiredGoVersion string) (retErr error) {
 	if base == "" || candidate == "" || output == "" {
 		return errors.New("-base, -candidate and -output are required")
 	}
-	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") || runtime.Version() != goVersion {
-		return errors.New("requires native Linux amd64/arm64 and Go 1.27.3")
+	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") || runtime.Version() != requiredGoVersion {
+		return fmt.Errorf("requires native Linux amd64/arm64 and %s", requiredGoVersion)
 	}
 	if err := absolutePaths(&base, &candidate, &output); err != nil {
 		return err
