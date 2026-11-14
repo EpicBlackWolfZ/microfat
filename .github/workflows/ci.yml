@@ -35,7 +35,7 @@ jobs:
         run: echo 'Title validation is required only for pull requests.'
       - name: Verify PR Title Conventional Commits Format
         if: github.event_name == 'pull_request'
-        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        uses: amannn/action-semantic-pull-request@2252a14e810aa9b85c2d560bd7070c802206ecf6 # v6.1.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -456,7 +456,7 @@ jobs:
           go test ./internal/releaseaudit ./internal/cmd/release-audit
 
       - name: Install independently pinned signature verifier
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: ${{ steps.toolchain.outputs.cosign }}
 
@@ -597,7 +597,7 @@ jobs:
           go test -race ./cmd/microfat-install ./internal/install ./internal/installrelease
           go test -race ./tests/e2e -run '^TestManagedGenerationPausedUpgrade$' -count=1
       - name: Install independently pinned updater verifier
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: ${{ steps.toolchain.outputs.cosign }}
       - name: Qualify native, full and minimal updater against signed historical releases
