@@ -76,6 +76,8 @@ type Options struct {
 	ABIReportCallback  func(report *ArtifactABIReport)           // Optional callback receiving the aggregate ABI report
 	WarnFunc           WarnFunc                                  // Optional diagnostic warning callback for non-fatal assembly telemetry
 	VariantValidator   func(level, snapshottedPath string) error // Optional validation callback on privately snapshotted variants
+	VariantWorkerLimit int                                       // Optional positive limit for outer variant workers
+	VariantWorkers     func(int)                                 // Optional callback reporting the selected outer worker count
 }
 
 func (o *Options) warnf(format string, args ...any) {

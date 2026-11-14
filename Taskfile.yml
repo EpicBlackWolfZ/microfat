@@ -111,6 +111,13 @@ tasks:
       {{.TASK_ENV}}
       {{.GO | shellQuote}} test -race ./tests/e2e/testdata/codecpolicy ./tests/e2e/testdata/codecboundary
 
+  test-parallel-pack-harness:
+    desc: Check the frozen parallel Pack schedule and decisions without collecting a cohort
+    cmds:
+    - |
+      {{.TASK_ENV}}
+      {{.GO | shellQuote}} test -race ./tests/e2e/testdata/packqualification
+
   qualify-codec-policy:
     desc: Collect the frozen codec study (CODEC_STUDY=original|isolated, prepared native corpus, new output)
     cmds:
@@ -200,6 +207,7 @@ tasks:
     - task: vuln
     - task: test
     - task: test-codec-policy-harness
+    - task: test-parallel-pack-harness
     - task: test-runtimeinfo-examples
     - task: coverage
     - task: build
