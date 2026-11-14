@@ -6,13 +6,16 @@ import (
 	"debug/buildinfo"
 	"debug/elf"
 	"encoding/hex"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/pack"
 	"github.com/EpicBlackWolfZ/microfat/internal/releasecheck"
@@ -271,39 +274,37 @@ func verifyReleaseArchivesExist(t *testing.T, distDir string) {
 	}
 }
 
-func verifySingleArchiveExecutables(t *testing.T, archPath string) {
+func verifyReleaseArtifactToolchain(t *testing.T, path string) {
 	t.Helper()
-	expectedArch := releasecheck.ArchAMD64
-	if strings.Contains(archPath, "arm64") {
-		expectedArch = releasecheck.ArchARM64
-	}
+	facts, err := releasecheck.ValidateArtifact(path)
+	require.NoError(t, err, "validating release artifact %s", path)
+	t.Cleanup(func() { assert.NoError(t, facts.Cleanup()) })
 
-	distDir := filepath.Dir(archPath)
-	version, err := releasecheck.DeriveVersion(distDir, "")
-	if err != nil {
-		t.Fatalf("deriving release version for %s: %v", archPath, err)
-	}
+	inventory, err := releasecheck.ExtractArchiveInventory(facts)
+	require.NoError(t, err, "extracting build information from %s", path)
 
-	contract, err := releasecheck.NewReleaseContract(version)
-	if err != nil {
-		t.Fatalf("creating release contract for %s: %v", archPath, err)
+	goVersion := microfat.GoVersion()
+	require.NotEmpty(t, goVersion, "root go.mod must pin a Go toolchain")
+	for _, name := range slices.Sorted(maps.Keys(inventory.Binaries)) {
+		compiler := inventory.Binaries[name].GoVersion
+		t.Logf("%s %s: compiler %s", inventory.ArchiveName, name, compiler)
+		assert.Equal(t, "go"+goVersion, compiler, "%s %s compiler must match go.mod", inventory.ArchiveName, name)
 	}
-
-	facts, err := releasecheck.ValidateArchive(archPath, expectedArch, contract)
-	if err != nil {
-		t.Fatalf("validating archive %s: %v", archPath, err)
-	}
-	defer func() { _ = facts.Cleanup() }()
 }
 
-func verifyReleaseArchiveRawEntries(t *testing.T, distDir string) {
+func verifyReleaseArtifactBuildInfo(t *testing.T, distDir string) {
 	t.Helper()
-	archives, err := filepath.Glob(filepath.Join(distDir, "*.tar.gz"))
-	if err != nil || len(archives) == 0 {
-		t.Fatalf("finding archives: %v", err)
-	}
-	for _, archPath := range archives {
-		verifySingleArchiveExecutables(t, archPath)
+	version, err := releasecheck.DeriveVersion(distDir, "")
+	require.NoError(t, err, "deriving release version for %s", distDir)
+	contract, err := releasecheck.NewReleaseContract(version)
+	require.NoError(t, err, "creating release contract for %s", version)
+
+	artifacts := slices.AppendSeq(slices.Collect(maps.Values(contract.ExpectedArchives)), maps.Values(contract.ExpectedHelpers))
+	slices.Sort(artifacts)
+	for _, name := range artifacts {
+		t.Run(name, func(t *testing.T) {
+			verifyReleaseArtifactToolchain(t, filepath.Join(distDir, name))
+		})
 	}
 }
 
@@ -720,7 +721,7 @@ func TestGoReleaserSnapshotArtifacts(t *testing.T) {
 	}
 
 	t.Run("VerifyArchivesExist", func(t *testing.T) { verifyReleaseArchivesExist(t, distDir) })
-	t.Run("VerifyArchiveRawEntries", func(t *testing.T) { verifyReleaseArchiveRawEntries(t, distDir) })
+	t.Run("VerifyArtifactBuildInfo", func(t *testing.T) { verifyReleaseArtifactBuildInfo(t, distDir) })
 	t.Run("VerifyChecksums", func(t *testing.T) { verifyReleaseChecksums(t, distDir, hasSBOMTool, releaseTestsRequired) })
 	t.Run("VerifySBOMs", func(t *testing.T) { verifyReleaseSBOMs(t, distDir, hasSBOMTool, releaseTestsRequired) })
 	t.Run("VerifyStubBehaviorAndSizes", func(t *testing.T) { verifyReleaseStubBehaviorAndSizes(t, distDir) })
@@ -792,7 +793,7 @@ func TestValidationOnly_DoesNotModifyCallerDistribution(t *testing.T) {
 
 	// Run static validation subtests
 	t.Run("VerifyArchivesExist", func(t *testing.T) { verifyReleaseArchivesExist(t, tempCopy) })
-	t.Run("VerifyArchiveRawEntries", func(t *testing.T) { verifyReleaseArchiveRawEntries(t, tempCopy) })
+	t.Run("VerifyArtifactBuildInfo", func(t *testing.T) { verifyReleaseArtifactBuildInfo(t, tempCopy) })
 	t.Run("VerifyChecksums", func(t *testing.T) { verifyReleaseChecksums(t, tempCopy, true, true) })
 	t.Run("VerifySBOMs", func(t *testing.T) { verifyReleaseSBOMs(t, tempCopy, true, true) })
 	t.Run("VerifyStubBehaviorAndSizes", func(t *testing.T) { verifyReleaseStubBehaviorAndSizes(t, tempCopy) })
