@@ -4,12 +4,6 @@ on:
   schedule:
     - cron: '37 4 * * *'
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.github/workflows/guest-kernel-updates.yml'
-      - 'benchmarks/kernel.lock.json'
-      - 'internal/cmd/benchmark-kernel-lock/**'
-      - 'internal/kernelsetup/**'
 
 permissions:
   contents: read
