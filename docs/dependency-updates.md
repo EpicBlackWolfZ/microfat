@@ -19,7 +19,7 @@ with one tuple per supported platform.
 | Fixture Docker base images | Dependabot `docker` | Image tag and manifest digest |
 | Go patch in the root `go.mod` | Renovate custom manager | One shared Go directive, restricted to Go 1.27 |
 | Task, GoReleaser, golangci-lint, govulncheck, actionlint, gotestsum and Codecov CLI | Renovate custom manager | Exact release or module version in the shared environment file |
-| ShellCheck, cdxgen and Cosign downloads | Renovate release attachments | Exact release version and SHA-256 of each platform's asset |
+| ShellCheck, Gitleaks, cdxgen and Cosign downloads | Renovate release attachments | Exact release version and SHA-256 of each platform's asset |
 | Homebrew qualification source | Renovate GitHub tags | Release tag and exact source commit in the shared environment file |
 | Fortio benchmark tool | Renovate Go datasource | Module version, source commit and source URL in `benchmarks/tools.lock.json` |
 
@@ -61,6 +61,12 @@ identifies the existing asset from its checksum, finds the corresponding asset
 in the next release and computes its replacement digest. Each architecture is
 matched separately; copies of the same package are updated in one PR. A
 version-only edit with the previous release's hash is incomplete.
+
+Renovate owns the Gitleaks engine and its Linux amd64 archive digest together.
+The secret detection job verifies that digest before unpacking and runs the
+installed engine directly. Review upstream rule changes when updating the pin.
+The job scans commits in the PR or push and uploads a redacted SARIF report.
+Manual CI runs scan the checked-out repository history.
 
 Homebrew uses the same tuple form with a 40-character commit instead of an
 asset SHA-256 and a `github-tags` annotation. `HOMEBREW_SOURCE` is its canonical
