@@ -5,12 +5,12 @@ go 1.27.3
 require (
 	github.com/CycloneDX/cyclonedx-go v0.12.0
 	github.com/dlclark/regexp2 v1.12.0
-	github.com/klauspost/compress v1.20.3
+	github.com/klauspost/compress v1.20.4
 	github.com/pierrec/lz4/v4 v4.1.33
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
