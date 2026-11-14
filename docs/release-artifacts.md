@@ -41,6 +41,11 @@ It records their SHA-256 hashes, architecture, variant tier, build settings, sou
 when present, and each binary's linked Go module versions, replacements and module sums.
 Different dependency versions in different variants remain separate components.
 
+The release gate logs the compiler in each Linux amd64 and arm64 archive executable,
+every embedded CLI variant and both installer helpers. Each binary's Go build
+information must match the exact Go version pinned in the tagged source's root
+`go.mod`.
+
 Native helper SBOMs use the explicit `native-installer` artifact kind and contain one native
 executable with its actual linked Go dependencies. They declare the project Apache-2.0 license
 without pretending license text was extracted from a raw ELF. Baseline ISA, Linux architecture,

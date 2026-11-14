@@ -1,9 +1,10 @@
 # Dependency updates
 
-`go.mod` owns the executable Go version. CI reads its `go` directive with
-`go-version-file`, and test fixtures derive the same installed toolchain rather
-than carrying their own patch versions. References to the Go release family in
-explanations or historical release evidence do not select a toolchain.
+The root `go.mod` selects the executable Go version. CI reads its `go` directive
+with `go-version-file`, and test fixtures derive their version from that
+toolchain. The Prometheus and OpenTelemetry runtimeinfo example modules carry
+matching directives because they replace the microfat module with the root
+checkout. Renovate updates all three directives in one patch PR.
 
 `.config/tool-versions.env` owns the developer, CI and release tool versions.
 The local CI composite reads that file and exports action inputs. Shell
@@ -14,23 +15,30 @@ with one tuple per supported platform.
 
 | Dependencies | Updater | Integrity data |
 | --- | --- | --- |
-| Go modules in `go.mod` | Dependabot `gomod` | `go.sum`, including transitive modules |
+| Direct and indirect Go module requirements | Dependabot `gomod` | `go.sum`, including transitive modules |
 | Workflow and composite action `uses:` references | Dependabot `github-actions` | Full upstream commit SHA and version comment |
 | Fixture Docker base images | Dependabot `docker` | Image tag and manifest digest |
-| Go patch in the root `go.mod` | Renovate custom manager | One shared Go directive, restricted to Go 1.27 |
+| Go patch in the root and both runtimeinfo example `go.mod` files | Renovate custom manager | Three synchronized Go directives, restricted to Go 1.27 |
 | Task, GoReleaser, golangci-lint, govulncheck, actionlint, gotestsum and Codecov CLI | Renovate custom manager | Exact release or module version in the shared environment file |
-| ShellCheck, cdxgen and Cosign downloads | Renovate release attachments | Exact release version and SHA-256 of each platform's asset |
+| ShellCheck, Gitleaks, cdxgen and Cosign downloads | Renovate release attachments | Exact release version and SHA-256 of each platform's asset |
 | Homebrew qualification source | Renovate GitHub tags | Release tag and exact source commit in the shared environment file |
 | Fortio benchmark tool | Renovate Go datasource | Module version, source commit and source URL in `benchmarks/tools.lock.json` |
 
-Dependabot is scheduled daily at 04:00 UTC and groups module, action and fixture
-image updates. Go security updates have their own group. Renovate can open update
-PRs daily between midnight and 06:00 Europe/Vienna. Automatic merging is disabled.
+Dependabot schedules Go, action and fixture image version checks at 04:00 UTC
+seven days a week, including Saturdays and Sundays. Go version checks include
+indirect requirements, and Go security updates have their own group. Renovate can
+open update PRs daily between midnight and 06:00 Europe/Vienna. Automatic merging
+is disabled.
 Renovate uses custom managers for dependencies outside Dependabot's module, action
 and image coverage.
 
 The hosted bots need repository access. Dependabot reads its configuration from
-the default branch. The repository owner must enable the
+the default branch. After a schedule change lands, review each ecosystem's
+weekend update-job log in the repository's Dependabot page. Check that the Go
+job includes indirect requirements and confirm the repository's Dependabot
+alerts and security-update settings independently of the schedule.
+
+The repository owner must enable the
 [Renovate GitHub App](https://docs.renovatebot.com/getting-started/installing-onboarding/)
 for this repository if it is not already selected. A configuration file or a
 successful local dry run does not establish that the App is installed. The
@@ -61,6 +69,12 @@ identifies the existing asset from its checksum, finds the corresponding asset
 in the next release and computes its replacement digest. Each architecture is
 matched separately; copies of the same package are updated in one PR. A
 version-only edit with the previous release's hash is incomplete.
+
+Renovate owns the Gitleaks engine and its Linux amd64 archive digest together.
+The secret detection job verifies that digest before unpacking and runs the
+installed engine directly. Review upstream rule changes when updating the pin.
+The job scans commits in the PR or push and uploads a redacted SARIF report.
+Manual CI runs scan the checked-out repository history.
 
 Homebrew uses the same tuple form with a 40-character commit instead of an
 asset SHA-256 and a `github-tags` annotation. `HOMEBREW_SOURCE` is its canonical
