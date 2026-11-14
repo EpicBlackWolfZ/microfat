@@ -23,11 +23,11 @@ with one tuple per supported platform.
 | Homebrew qualification source | Renovate GitHub tags | Release tag and exact source commit in the shared environment file |
 | Fortio benchmark tool | Renovate Go datasource | Module version, source commit and source URL in `benchmarks/tools.lock.json` |
 
-Dependabot runs weekly and groups module, action and fixture image updates.
-Go security updates have their own group. Renovate checks weekly and opens
-reviewable PRs; automatic merging is disabled. Its enabled managers are limited
-to custom managers so it does not duplicate Dependabot's module, action or image
-PRs.
+Dependabot is scheduled daily at 04:00 UTC and groups module, action and fixture
+image updates. Go security updates have their own group. Renovate can open update
+PRs daily between midnight and 06:00 Europe/Vienna. Automatic merging is disabled.
+Renovate uses custom managers for dependencies outside Dependabot's module, action
+and image coverage.
 
 The hosted bots need repository access. Dependabot reads its configuration from
 the default branch. The repository owner must enable the
