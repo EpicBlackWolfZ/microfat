@@ -4,7 +4,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 )
+
+// NoneCopyBufferSize bounds the scratch buffer used by non-WriterTo readers.
+// Extraction admission must include this allocation before decompression begins.
+const NoneCopyBufferSize = 128 * 1024
+
+var noneCopyBufferPool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, NoneCopyBufferSize)
+		return &buf
+	},
+}
 
 // NoneCodec implements the Codec interface for uncompressed passthrough payloads.
 type NoneCodec struct{}
@@ -37,7 +49,14 @@ func (c *NoneCodec) Decompress(w io.Writer, r io.Reader, uncompressedSize int64)
 	}
 
 	bw := newBoundedWriter(w, uncompressedSize)
-	_, copyErr := io.Copy(bw, r)
+	var copyErr error
+	if wt, ok := r.(io.WriterTo); ok {
+		_, copyErr = wt.WriteTo(bw)
+	} else {
+		bufPtr := noneCopyBufferPool.Get().(*[]byte)
+		_, copyErr = io.CopyBuffer(bw, r, *bufPtr)
+		noneCopyBufferPool.Put(bufPtr)
+	}
 	if copyErr != nil {
 		if errors.Is(copyErr, ErrSizeMismatch) {
 			return copyErr

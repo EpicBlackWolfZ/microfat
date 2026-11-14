@@ -50,15 +50,23 @@ func buildArtifacts(ctx context.Context, cfg ExperimentConfig, opts RunOptions, 
 	if err != nil || !strings.HasPrefix(strings.TrimSpace(string(version)), "go version go"+microfat.GoVersion()+" ") {
 		return nil, errors.New("benchmark builds require Go " + microfat.GoVersion())
 	}
-	sha, _, err := process.Run(ctx, process.Spec{Path: "git", Args: []string{"rev-parse", "HEAD"}, Dir: opts.Repository})
+	source, dirty, err := repositorySource(ctx, opts.Repository)
 	if err != nil {
 		return nil, err
 	}
-	dirty, _, err := process.Run(ctx, process.Spec{Path: "git", Args: []string{"status", "--porcelain"}, Dir: opts.Repository})
-	if err != nil {
-		return nil, err
+	built := &builtArtifacts{SourceSHA: source, Dirty: dirty}
+	headOpts := opts
+	if opts.HeadRepository != "" {
+		headOpts.Repository = opts.HeadRepository
 	}
-	built := &builtArtifacts{SourceSHA: strings.TrimSpace(string(sha)), Dirty: len(dirty) > 0}
+	headSource := source
+	if headOpts.Repository != opts.Repository {
+		headSource, dirty, err = repositorySource(ctx, headOpts.Repository)
+		if err != nil {
+			return nil, err
+		}
+		built.Dirty = built.Dirty || dirty
+	}
 	generic := "v1"
 	if runtime.GOARCH == "arm64" {
 		generic = "v8.0"
@@ -77,11 +85,11 @@ func buildArtifacts(ctx context.Context, cfg ExperimentConfig, opts RunOptions, 
 			continue
 		}
 		file := filepath.Join(root, "native-"+level)
-		if err := compile(ctx, opts, file, targetPackage, level, ""); err != nil {
+		if err := compile(ctx, headOpts, file, targetPackage, level, ""); err != nil {
 			return nil, err
 		}
 		paths[level] = file
-		artifact, err := identify(file, "native-"+level, built.SourceSHA)
+		artifact, err := identify(file, "native-"+level, headSource)
 		if err != nil {
 			return nil, err
 		}
@@ -92,16 +100,16 @@ func buildArtifacts(ctx context.Context, cfg ExperimentConfig, opts RunOptions, 
 	if cfg.Profile == minimalProfile {
 		tags = minimalProfile
 	}
-	if err := compile(ctx, opts, stub, "./cmd/microfat-stub", generic, tags); err != nil {
+	if err := compile(ctx, headOpts, stub, "./cmd/microfat-stub", generic, tags); err != nil {
 		return nil, err
 	}
-	stubArtifact, err := identify(stub, "stub", built.SourceSHA)
+	stubArtifact, err := identify(stub, "stub", headSource)
 	if err != nil {
 		return nil, err
 	}
 	built.Artifacts = append(built.Artifacts, stubArtifact)
 	fat := filepath.Join(root, "fat-server")
-	packerArtifact, err := buildPacker(ctx, opts, root, generic, built.SourceSHA)
+	packerArtifact, err := buildPacker(ctx, headOpts, root, generic, headSource)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +119,7 @@ func buildArtifacts(ctx context.Context, cfg ExperimentConfig, opts RunOptions, 
 		return nil, err
 	}
 
-	artifact, err := identify(fat, "fat", built.SourceSHA)
+	artifact, err := identify(fat, "fat", headSource)
 	if err != nil {
 		return nil, err
 	}
@@ -156,11 +164,11 @@ func addRevisionArtifacts(ctx context.Context, cfg ExperimentConfig, opts RunOpt
 	paths map[string]string, built *builtArtifacts) error {
 	baseOpts := opts
 	baseOpts.Repository = opts.BaseRepository
-	sha, _, err := process.Run(ctx, process.Spec{Path: "git", Args: []string{"rev-parse", "HEAD"}, Dir: baseOpts.Repository})
+	baseSHA, dirty, err := repositorySource(ctx, baseOpts.Repository)
 	if err != nil {
 		return err
 	}
-	baseSHA := strings.TrimSpace(string(sha))
+	built.Dirty = built.Dirty || dirty
 	stub, packer, fat := filepath.Join(root, "base-stub"), filepath.Join(root, "base-packer"), filepath.Join(root, "base-fat")
 	tags := ""
 	if cfg.Profile == minimalProfile {
@@ -195,6 +203,18 @@ func addRevisionArtifacts(ctx context.Context, cfg ExperimentConfig, opts RunOpt
 		built.Configurations = append(built.Configurations, base, head)
 	}
 	return nil
+}
+
+func repositorySource(ctx context.Context, repository string) (string, bool, error) {
+	sha, _, err := process.Run(ctx, process.Spec{Path: "git", Args: []string{"rev-parse", "HEAD"}, Dir: repository})
+	if err != nil {
+		return "", false, err
+	}
+	dirty, _, err := process.Run(ctx, process.Spec{Path: "git", Args: []string{"status", "--porcelain"}, Dir: repository})
+	if err != nil {
+		return "", false, err
+	}
+	return strings.TrimSpace(string(sha)), len(dirty) > 0, nil
 }
 
 func compile(ctx context.Context, opts RunOptions, output, pkg, level, tags string) error {

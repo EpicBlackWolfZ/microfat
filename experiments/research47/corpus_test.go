@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ func fixtureCorpus(t *testing.T) (corpusManifest, string, string) {
 	t.Helper()
 	root := t.TempDir()
 	inputs, levels := fixtureInputs()
-	m := corpusManifest{SchemaVersion: 2, SourceRevision: fixtureRevision, GoVersion: goVersion, Architecture: "amd64",
+	m := corpusManifest{SchemaVersion: 2, SourceRevision: fixtureRevision, GoVersion: runtime.Version(), Architecture: "amd64",
 		Build: corpusBuild{CGOEnabled: "0", GOOS: "linux", Trimpath: true}}
 	for _, family := range []string{"alpha", "beta", "gamma", "delta"} {
 		m.Sources = append(m.Sources, corpusSource{Family: family, Module: "example.org/" + family, Version: "v1.0.0",
@@ -29,6 +30,21 @@ func fixtureCorpus(t *testing.T) (corpusManifest, string, string) {
 				require.NoError(t, os.WriteFile(path, inputs[i], privateFileMode))
 				m.Variants = append(m.Variants, corpusVariant{family, profile, level, path, digest(inputs[i]), int64(len(inputs[i]))})
 			}
+		}
+	}
+	const boundaryBytes = 512 * kib
+	boundaries := map[string]int64{"below": boundaryBytes - 1, "at": boundaryBytes, "above": boundaryBytes + 1}
+	m.Synthetic = []syntheticSource{{
+		Family: "boundary", Kind: "synthetic-static-linux-elf", BoundaryBytes: boundaryBytes, Profiles: boundaries,
+		ReadinessArgs: []string{},
+	}}
+	for profile, size := range boundaries {
+		path := filepath.Join(root, "boundary-"+profile)
+		data := make([]byte, size)
+		copy(data, inputs[0])
+		require.NoError(t, os.WriteFile(path, data, privateFileMode))
+		for _, level := range levels {
+			m.Variants = append(m.Variants, corpusVariant{"boundary", profile, level, path, digest(data), size})
 		}
 	}
 	manifest := filepath.Join(root, "manifest.json")
@@ -60,7 +76,7 @@ func TestCorpusManifestValidation(t *testing.T) {
 	got, groups, checksum, err := loadManifest(path)
 	require.NoError(t, err)
 	require.Equal(t, m, got)
-	require.Len(t, groups, maxFamilies*maxProfiles)
+	require.Len(t, groups, maxFamilies*maxProfiles+len(m.Synthetic[0].Profiles))
 	require.Len(t, checksum, 2*sha256Bytes)
 	inputs, levels, err := readGroup(groups[0], m.Architecture)
 	require.NoError(t, err)
@@ -80,6 +96,9 @@ func TestCorpusManifestValidation(t *testing.T) {
 		{"source-duplicate", func(m *corpusManifest) { m.Sources[1] = m.Sources[0] }},
 		{"source-name", func(m *corpusManifest) { m.Sources[0].Family = "../escape" }},
 		{"source-pin", func(m *corpusManifest) { m.Sources[0].ModuleSum = "" }},
+		{"boundary-source", func(m *corpusManifest) { m.Synthetic = nil }},
+		{"boundary-profile", func(m *corpusManifest) { m.Synthetic[0].Profiles["above"]++ }},
+		{"boundary-bytes", func(m *corpusManifest) { m.Variants[len(m.Variants)-1].Bytes++ }},
 		{"family", func(m *corpusManifest) { m.Variants[0].Family = "absent" }},
 		{"profile", func(m *corpusManifest) { m.Variants[0].Profile = "other" }},
 		{"path", func(m *corpusManifest) { m.Variants[0].Path = "relative" }},

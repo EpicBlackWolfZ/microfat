@@ -33,7 +33,7 @@ func TestManifestInlineCompressionLevelPrecedence(t *testing.T) {
 			codec.AlgorithmZstd, inlineCompressionFastest},
 		{"variant transition beats CLI", "zstd:best", "", "lz4:fastest", "", codec.AlgorithmLZ4, inlineCompressionFastest},
 	}
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, tc := range cases {
 			t.Run(fmt.Sprintf("format%d/%s", version, tc.name), func(t *testing.T) {
 				t.Parallel()

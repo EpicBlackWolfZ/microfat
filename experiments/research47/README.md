@@ -1,25 +1,30 @@
-# Exact-sharing opportunity screen (#47)
+# Exact-sharing size screen (#410)
 
-This is an offline, bounded size diagnostic. It does not change the production
-format, packer, launcher or defaults. It reconstructs exact ELF bytes without
-executing them. It is the entry gate for #379, not a graph architecture or a
-production delta decoder.
+This offline screen reconstructs exact ELF bytes and compares complete container
+sizes. It exercises the #410 size gate ahead of runtime qualification. The
+[original #47 results](RESULTS.md) retain their Zstd/default protocol and output;
+they used the earlier controls.
 
-## Frozen protocol, before held-out results
+## Matched comparison protocol
 
-Use the shared checksum-pinned corpus recipe in `experiments/heldoutcorpus`:
-Fortio, Task, actionlint and govulncheck, each stripped and unstripped, each at
-three native ISA tiers. These four program families were absent from the earlier
-demo/microfat sampling and pooling screens. Stripping profiles and tiers are
-paired observations, not additional independent families. All groups remain in
-the results, including unsupported inputs, failed candidates and size losses.
+Use the checksum-pinned [shared corpus](../codecpolicy/README.md) with Fortio,
+Task, actionlint and govulncheck, each stripped and unstripped at three native ISA
+tiers. The three synthetic boundary ELFs are exactness controls. Their byte
+counts and verification outcomes are retained separately from the four-family
+gate.
 
-Each family/profile gets actual complete Format v2 artifacts from unchanged
-`pack.Pack`, with Zstd/default and either no dictionary or the current 112 KiB
-requested dictionary. The smaller complete artifact is the size control. Its
-real stub, dictionary, frames, metadata and 56-byte trailer all count. Artifact
-verification must match the pinned original payload sizes and SHA-256 hashes.
-No sampler from #161 is retuned. There is no fitted heuristic across families.
+Each group gets three actual Format v2 artifacts from the current production
+packer, using the same full launcher and an epoch of zero. The matched control
+for `better` is the production `balanced` profile. The matched control for
+`best` is the smaller of the production `size` profile with its automatic
+dictionary and the explicit `zstd:best` artifact without a dictionary. These
+controls reproduce the settings from the
+[#42 study](../../docs/codec-policy-results.md#complete-artifact-bytes).
+#42's published byte totals use its own pinned build and source revision.
+The report identifies the current corpus and stub and keeps every generated
+control, including its compressed frame and complete artifact hashes. Candidate
+pool, literal residual, and compressed path use the corresponding `better` or
+`best` level. The two levels are evaluated independently.
 
 The prespecified partitions are whole ELF sections plus every gap/header byte,
 fixed 512-byte blocks, fixed 4096-byte blocks and bounded Gear content-defined
@@ -55,14 +60,14 @@ with 0 and 256 KiB sensitivity columns, not a measured decoder build. A zero-cos
 decoder is an optimistic scenario, not a proven global lower bound on all
 possible sharing algorithms.
 
-The opportunity gate is at least **5% net complete-size savings in at least three
-of the four held-out families, in both stripping profiles**. A family only passes
-when one range representation clears the size threshold and the following
-selected-target estimates for every tier. No family may be discarded after
-results. If even the zero-incremental-decoder scenario misses this size gate,
-stop #379 graph implementation on this candidate space. If the 64 KiB costed
-gate clears, compare the simpler one-base frontier before allocating a decoder
-prototype. Neither outcome completes #47/#379 generally or changes defaults.
+The size gate is at least **5% complete-size savings** for one fixed
+representation and base choice in at least **three of the four** held-out
+families, in both stripping profiles. Meet this gate at the matched `best`
+level before proposing any runtime prototype for #410. Report both levels and
+every group, including lost-size cases and failures. The reports also retain the
+zero- and 256 KiB incremental decoder scenarios. The 64 KiB primary reserve
+remains an estimate inherited from the original screen. A release decision
+requires measured or defensibly upper-bounded growth in each launcher profile.
 
 The selected-target buffer estimate is decoded shared pool + target residual +
 original output + raw path + **32 MiB codec reserve**, capped at **256 MiB**. This
@@ -91,19 +96,22 @@ range, expansion, checksum and output limits reject malformed representations.
 
 ## Reproduce
 
-Use Go 1.27.3 and pinned Task. Corpus creation is outside timing:
+Use the Go patch pinned in `go.mod` and pinned Task. Build the corpus in a
+clean committed checkout and place output outside tracked paths.
 
 ```bash
-task research-heldout-corpus CORPUS_OUTPUT=/new/absolute/corpus CORPUS_ARCH=amd64
+task research-47-corpus CODEC_CORPUS=/new/absolute/corpus CODEC_ARCH=amd64
 task research-47-build
-task research-47 MANIFEST=/absolute/corpus/manifest.json \
-  STUB=/absolute/corpus/stub-full OUTPUT=/new/absolute/report-directory
+task research-47 MANIFEST=/new/absolute/corpus/manifest.json \
+  STUB=/new/absolute/corpus/stub-full OUTPUT=/new/absolute/report-directory
 ```
 
-The output contains one report, actual baseline fat artifacts and actual custom
-research containers. The report pins the producer revision, manifest/source/module
-identities, Go/dependency version, stub and corpus hashes, all attempts and the
-fixed cost assumptions. No performance timer is part of this first size screen.
-Native execution, startup quantiles, packaging RSS, ARM64 and real decoder size
-remain separate evidence. Unit tests use synthetic inputs; a successful unit
-matrix is not a held-out measurement.
+The report records the producer and corpus revisions, Go and codec versions,
+full stub and variant hashes, fixed cost assumptions and each attempt. A
+repeat on native arm64 uses `CODEC_ARCH=arm64`. Keep each report, actual baseline
+fat binaries and research containers in their own output tree.
+
+Runtime qualification requires a separate frozen protocol and a measured
+launcher baseline. The size screen does not collect Pack wall/CPU or cgroup
+peak, build a runnable launcher, or time cold memfd, cold cache and warm cache
+paths. Retain independent variant frames pending the #410 complete-cost review.

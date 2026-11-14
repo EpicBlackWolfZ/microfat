@@ -58,6 +58,16 @@ vars:
   QEMU_BACKEND: '{{.QEMU_BACKEND | default "userns"}}'
   QEMU_OUTPUT: '{{.QEMU_OUTPUT | default ".work/qemu-qualification"}}'
   QEMU_AARCH64: '{{.QEMU_AARCH64 | default ""}}'
+  HANDOFF_BASE: '{{.HANDOFF_BASE | default ".work/fd-handoff-base"}}'
+  HANDOFF_OUTPUT: '{{.HANDOFF_OUTPUT | default ".work/fd-handoff-confirmation"}}'
+  TELEMETRY_BASE: '{{.TELEMETRY_BASE | default ".work/telemetry-base"}}'
+  TELEMETRY_CANDIDATE: '{{.TELEMETRY_CANDIDATE | default ".work/telemetry-candidate"}}'
+  TELEMETRY_OUTPUT: '{{.TELEMETRY_OUTPUT | default ".work/telemetry-confirmation"}}'
+  TELEMETRY_STUDY: '{{.TELEMETRY_STUDY | default "original"}}'
+  CODEC_CORPUS: '{{.CODEC_CORPUS | default ".work/codec-policy-corpus"}}'
+  CODEC_OUTPUT: '{{.CODEC_OUTPUT | default ".work/codec-policy-cohort"}}'
+  CODEC_STUDY: '{{.CODEC_STUDY | default "original"}}'
+  CODEC_ARCH: '{{.CODEC_ARCH | default .HOST_ARCH}}'
   BENCHMARK_BINARY: '{{.BENCHMARK_BINARY | default (printf "%s/microfat" .BIN_DIR)}}'
   TASK_ENV: |
     export GO={{.GO | shellQuote}}
@@ -87,6 +97,45 @@ vars:
     export BENCHMARK_BINARY={{.BENCHMARK_BINARY | shellQuote}}
 
 tasks:
+  codec-policy-corpus:
+    desc: Build the pinned native codec evaluation corpus outside measurement windows (output must be new)
+    cmds:
+    - |
+      {{.TASK_ENV}}
+      bash scripts/codec-policy-corpus.sh {{.CODEC_CORPUS | shellQuote}} {{.CODEC_ARCH | shellQuote}}
+
+  test-codec-policy-harness:
+    desc: Check the codec evaluation schedule, measurements and boundary fixture without collecting a cohort
+    cmds:
+    - |
+      {{.TASK_ENV}}
+      {{.GO | shellQuote}} test -race ./tests/e2e/testdata/codecpolicy ./tests/e2e/testdata/codecboundary
+
+  qualify-codec-policy:
+    desc: Collect the frozen codec study (CODEC_STUDY=original|isolated, prepared native corpus, new output)
+    cmds:
+    - |
+      bash scripts/codec-policy-collect.sh {{.GO | shellQuote}} {{.CODEC_CORPUS | shellQuote}} {{.CODEC_OUTPUT | shellQuote}} {{.CODEC_STUDY | shellQuote}}
+
+  qualify-telemetry:
+    desc: Run a frozen telemetry study (TELEMETRY_STUDY=original|snapshot, base/candidate checkouts required, output must be new)
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      export PATH={{printf "%s/bin" .GO_ROOT | shellQuote}}:"$PATH"
+      {{.GO | shellQuote}} run ./tests/e2e/testdata/telemetry \
+        -study {{.TELEMETRY_STUDY | shellQuote}} \
+        -base {{.TELEMETRY_BASE | shellQuote}} -candidate {{.TELEMETRY_CANDIDATE | shellQuote}} \
+        -output {{.TELEMETRY_OUTPUT | shellQuote}}
+  qualify-cache-handoff:
+    desc: Run the frozen native verified-descriptor experiment (HANDOFF_BASE checkout required, HANDOFF_OUTPUT must be new)
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      export PATH={{printf "%s/bin" .GO_ROOT | shellQuote}}:"$PATH"
+      {{.GO | shellQuote}} run ./tests/e2e/testdata/fd_handoff \
+        -base {{.HANDOFF_BASE | shellQuote}} -candidate "$PWD" -output {{.HANDOFF_OUTPUT | shellQuote}}
+
   research-47-build:
     desc: Build the committed bounded exact-sharing diagnostic
     cmds:
@@ -94,20 +143,25 @@ tasks:
       git diff --quiet HEAD -- experiments/research47 internal/codec internal/format internal/pack go.mod go.sum
       mkdir -p .work/research47
       research_revision="$(git rev-parse HEAD)"
-      {{.GO | shellQuote}} build -trimpath -ldflags="-X main.producerRevision=${research_revision}" \
+      go_version="$(awk '$1 == "go" { print $2; exit }' go.mod)"
+      [ "$(GOTOOLCHAIN=local {{.GO | shellQuote}} env GOVERSION)" = "go${go_version}" ]
+      GOTOOLCHAIN=local {{.GO | shellQuote}} build -trimpath -ldflags="-X main.producerRevision=${research_revision}" \
         -o .work/research47/research47 ./experiments/research47
   research-47:
-    desc: Screen actual shared-range size costs (MANIFEST, STUB, OUTPUT=new directory)
+    desc: Compare matched better/best sharing sizes (MANIFEST, STUB, OUTPUT=new directory)
     cmds:
     - |
-      .work/research47/research47 --manifest {{.MANIFEST | default "" | shellQuote}} \
+      GOMAXPROCS=4 GOMEMLIMIT=2GiB .work/research47/research47 --manifest {{.MANIFEST | default "" | shellQuote}} \
         --stub {{.STUB | default "" | shellQuote}} --output {{.OUTPUT | default "" | shellQuote}}
-  research-heldout-corpus:
-    desc: Build checksum-pinned independent research corpus (CORPUS_OUTPUT=new directory, CORPUS_ARCH=amd64|arm64)
+
+  research-47-corpus:
+    desc: Build the shared native corpus for the current Go pin outside measurement windows
     cmds:
     - |
-      export GO={{.GO | shellQuote}}
-      bash scripts/research-heldout-corpus.sh {{.CORPUS_OUTPUT | default "" | shellQuote}} {{.CORPUS_ARCH | default "amd64" | shellQuote}}
+      {{.TASK_ENV}}
+      go_version="$(awk '$1 == "go" { print $2; exit }' go.mod)"
+      bash scripts/codec-policy-corpus.sh {{.CODEC_CORPUS | shellQuote}} {{.CODEC_ARCH | shellQuote}} "go${go_version}"
+
   test-runtime-fixtures:
     desc: Require native fat CLI inspection, timeout and detached-child cleanup regressions
     cmds:
@@ -172,6 +226,8 @@ tasks:
     - task: lint
     - task: vuln
     - task: test
+    - task: test-codec-policy-harness
+    - task: test-runtimeinfo-examples
     - task: coverage
     - task: build
   fmt:
@@ -330,7 +386,20 @@ tasks:
     cmds:
     - |-
       {{.TASK_ENV}}
-      golangci-lint run ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter
+      golangci-lint run ./... ./tests/e2e/testdata/mount_runner ./tests/e2e/testdata/mount_reporter ./tests/e2e/testdata/mountfixture ./tests/e2e/testdata/descriptor_probe ./tests/e2e/testdata/userns_runner ./tests/e2e/testdata/cpu_quota_reporter ./tests/e2e/testdata/fd_handoff ./tests/e2e/testdata/telemetry ./tests/e2e/testdata/codecpolicy ./tests/e2e/testdata/codecboundary ./runtimeinfo/testdata/reporter
+      for module in examples/runtimeinfo/prometheus examples/runtimeinfo/opentelemetry; do
+        (cd "$module" && golangci-lint run --config ../../../.golangci.yml ./...)
+      done
+  test-runtimeinfo-examples:
+    desc: Check isolated Prometheus/OpenTelemetry modules and run one collection each
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      for module in examples/runtimeinfo/prometheus examples/runtimeinfo/opentelemetry; do
+        (cd "$module" && "$GO" mod tidy -diff && "$GO" mod verify && "$GO" test -race ./...)
+      done
+      (cd examples/runtimeinfo/prometheus && "$GO" run . -once >/dev/null)
+      (cd examples/runtimeinfo/opentelemetry && "$GO" run . >/dev/null)
   lint-shell:
     desc: Run pinned ShellCheck on all tracked shell scripts
     preconditions:
@@ -350,6 +419,9 @@ tasks:
     - |-
       {{.TASK_ENV}}
       govulncheck ./...
+      for module in examples/runtimeinfo/prometheus examples/runtimeinfo/opentelemetry; do
+        (cd "$module" && govulncheck ./...)
+      done
   tidy:
     desc: Update module metadata and verify dependencies
     cmds:

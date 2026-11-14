@@ -33,11 +33,17 @@ import (
 )
 
 const (
-	percentMultiplier      = 100.0
-	keyValueParts          = 2
-	defaultDirMode         = 0o750
-	pprofHeaderTimeoutSec  = 3
-	pprofReadHeaderTimeout = pprofHeaderTimeoutSec * time.Second
+	percentMultiplier       = 100.0
+	keyValueParts           = 2
+	defaultDirMode          = 0o750
+	pprofHeaderTimeoutSec   = 3
+	pprofReadHeaderTimeout  = pprofHeaderTimeoutSec * time.Second
+	sourceDateEpochEnv      = "SOURCE_DATE_EPOCH"
+	creationDateUnavailable = "unavailable"
+	flagNameFormatVersion   = "format-version"
+	// UTC RFC3339 dates have four-digit years, from 0000 through 9999.
+	minCreationDateUnix int64 = -62167219200
+	maxCreationDateUnix int64 = 253402300799
 )
 
 var exitFunc = os.Exit
@@ -225,15 +231,6 @@ func newInspectCmd() *cobra.Command {
 				return fmt.Errorf("reading binary manifest: %w", err)
 			}
 
-			if idx.Version == format.FormatVersion1 {
-				_, _ = fmt.Fprintf(
-					cmd.ErrOrStderr(),
-					"[microfat:warn] binary %q uses legacy Format v1 JSON manifest; "+
-						"Format v1 is deprecated and scheduled for removal in v0.4.0 (use Format v2 for production)\n",
-					path,
-				)
-			}
-
 			if jsonOutput {
 				if err := json.MarshalWrite(cmd.OutOrStdout(), idx, jsontext.WithIndent("  ")); err != nil {
 					return fmt.Errorf("encoding json: %w", err)
@@ -252,7 +249,8 @@ func newInspectCmd() *cobra.Command {
 				_, _ = fmt.Fprintf(out, "Shared Dictionary: %d bytes (offset %d, sha256: %.12s...)\n",
 					idx.DictionarySize, idx.DictionaryOffset, idx.DictionarySHA256)
 			}
-			_, _ = fmt.Fprintf(out, "Created At:        %s\n\n", time.Unix(idx.CreatedUnix, 0).Format(time.RFC3339))
+			_, _ = fmt.Fprintf(out, "Created At:        %s\n", creationDate(idx.CreatedUnix))
+			_, _ = fmt.Fprintf(out, "Created Unix:      %d\n\n", idx.CreatedUnix)
 
 			_, _ = fmt.Fprintf(out, "Embedded Variants (%d total):\n", len(idx.Variants))
 			for _, v := range idx.Variants {
@@ -525,28 +523,65 @@ func cmdWarnFunc(cmd *cobra.Command) func(string, ...any) {
 	}
 }
 
+// sourceDateEpoch resolves the packaging epoch without modifying the environment
+// inherited by compiler and other build children.
+func sourceDateEpoch() (*int64, error) {
+	raw, present := os.LookupEnv(sourceDateEpochEnv)
+	if !present {
+		return nil, nil
+	}
+	epoch, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s %q: expected signed ASCII base-10 integer Unix seconds in the int64 range; "+
+			"unset the variable to use the current time: %w", sourceDateEpochEnv, raw, err)
+	}
+	return &epoch, nil
+}
+
+func creationDate(epoch int64) string {
+	// Bound the numeric input before constructing a time.Time: some int64 Unix
+	// seconds overflow Go's internal time representation and produce bogus dates.
+	if epoch < minCreationDateUnix || epoch > maxCreationDateUnix {
+		return creationDateUnavailable
+	}
+	return time.Unix(epoch, 0).UTC().Format(time.RFC3339)
+}
+
 func newPackCmd() *cobra.Command {
 	var flags builder.BuildOptions
 	var (
 		appName, targetOS, targetArch string
-		rawVariants                   []string
+		rawVariants, rawCompression   []string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "pack [--manifest <file> | [--stub <stub>] -v <level>=<path> ... -o <output>]",
 		Short: "Package multiple Go microarchitecture binaries into a single fat binary",
+		Long: `Package multiple Go microarchitecture binaries into a single fat binary.
+Set SOURCE_DATE_EPOCH to signed integer Unix seconds to supply reproducible creation metadata.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			epoch, err := sourceDateEpoch()
+			if err != nil {
+				return err
+			}
+			flags.CreatedUnix = epoch
 			if err := validateEmptyStubFlags(cmd, flags); err != nil {
 				return err
+			}
+			if err := validateFormatVersionFlag(cmd, flags.FormatVersion); err != nil {
+				return err
+			}
+			if flags.EnableDict && flags.DictProfitable {
+				return pack.ErrConflictingDictOptions
 			}
 			if flags.SkipELFValidation {
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(),
 					"[microfat] Warning: ELF platform, architecture and declared ABI validation explicitly skipped via --skip-elf-validation")
 			}
 			if flags.ManifestPath != "" {
-				return runManifestPack(cmd, flags)
+				return runManifestPack(cmd, flags, rawCompression)
 			}
-			return runDirectPack(cmd, flags, appName, targetOS, targetArch, rawVariants)
+			return runDirectPack(cmd, flags, appName, targetOS, targetArch, rawVariants, rawCompression)
 		},
 	}
 
@@ -560,7 +595,7 @@ func newPackCmd() *cobra.Command {
 		"Variant mapping in <level>=<path> format (e.g. -v v1=bin/v1 -v v3=bin/v3 for amd64, or -v v8.0=bin/v80 -v v8.2=bin/v82 for arm64)")
 	cmd.Flags().IntVarP(&flags.Concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (when using --manifest)")
 
-	bindManifestBuildFlags(cmd, &flags)
+	bindManifestBuildFlags(cmd, &flags, &rawCompression)
 	return cmd
 }
 
@@ -573,8 +608,25 @@ func explicitDictionarySize(cmd *cobra.Command, size int) int {
 	return 0
 }
 
-func runManifestPack(cmd *cobra.Command, flags builder.BuildOptions) error {
+func validateFormatVersionFlag(cmd *cobra.Command, version int) error {
+	if !cmd.Flags().Changed(flagNameFormatVersion) {
+		return nil
+	}
+	if version == format.FormatVersion1 {
+		return fmt.Errorf("%w: Format v1 was removed in v0.4.0; use Format v2", format.ErrUnsupportedVersion)
+	}
+	if version != format.FormatVersion2 {
+		return fmt.Errorf("%w: got version %d, expected %d", format.ErrUnsupportedVersion, version, format.FormatVersion2)
+	}
+	return nil
+}
+
+func runManifestPack(cmd *cobra.Command, flags builder.BuildOptions, rawCompression []string) error {
 	m, err := builder.LoadManifest(flags.ManifestPath)
+	if err != nil {
+		return err
+	}
+	flags.VariantCompression, err = manifestVariantCompression(m, rawCompression)
 	if err != nil {
 		return err
 	}
@@ -598,7 +650,7 @@ func runDirectPack(
 	cmd *cobra.Command,
 	flags builder.BuildOptions,
 	appName, targetOS, targetArch string,
-	rawVariants []string,
+	rawVariants, rawCompression []string,
 ) error {
 	targetOS, err := pack.NormalizeTargetOS(targetOS)
 	if err != nil {
@@ -608,6 +660,18 @@ func runDirectPack(
 		targetArch = microarch.ArchAMD64
 	}
 	targetArch, err = pack.NormalizeTargetArch(targetArch)
+	if err != nil {
+		return err
+	}
+	variants, err := parseRawVariants(rawVariants)
+	if err != nil {
+		return err
+	}
+	levels := make([]string, 0, len(variants))
+	for level := range variants {
+		levels = append(levels, level)
+	}
+	flags.VariantCompression, err = parseVariantCompression(rawCompression, targetArch, levels)
 	if err != nil {
 		return err
 	}
@@ -631,11 +695,6 @@ func runDirectPack(
 		return errors.New("required flag(s) \"variant\" not set (or specify --manifest)")
 	}
 
-	variants, err := parseRawVariants(rawVariants)
-	if err != nil {
-		return err
-	}
-
 	opts := pack.DefaultOptions()
 	opts.StubPath = actualStubPath
 	opts.OutputPath = flags.OutputPath
@@ -647,6 +706,8 @@ func runDirectPack(
 		opts.TargetArch = targetArch
 	}
 	opts.Variants = variants
+	opts.VariantCompression = flags.VariantCompression
+	opts.CreatedUnix = flags.CreatedUnix
 	opts.SkipELFValidation = flags.SkipELFValidation
 	opts.AllowMixedABI = flags.AllowMixedABI
 	var artifactABIReport *pack.ArtifactABIReport
@@ -658,12 +719,18 @@ func runDirectPack(
 	}
 	if flags.Compression != "" {
 		opts.Compression = flags.Compression
+		if _, inlineLevel := codec.ParseCompressionSpec(flags.Compression); inlineLevel != "" {
+			opts.CompressionLevel = inlineLevel
+		}
 	}
 	if flags.CompressionLevel != "" {
 		opts.CompressionLevel = flags.CompressionLevel
 	}
 	if flags.EnableDict {
 		opts.EnableDict = flags.EnableDict
+	}
+	if flags.DictProfitable {
+		opts.DictProfitable = flags.DictProfitable
 	}
 	if flags.DictSize > 0 {
 		opts.DictSize = flags.DictSize
@@ -709,18 +776,22 @@ func manifestBuildOptions(cmd *cobra.Command, flags builder.BuildOptions) builde
 	return flags
 }
 
-func bindManifestBuildFlags(cmd *cobra.Command, flags *builder.BuildOptions) {
+func bindManifestBuildFlags(cmd *cobra.Command, flags *builder.BuildOptions, rawCompression *[]string) {
 	cmd.Flags().StringVar(&flags.StubProfile, "stub-profile", "", "Launcher stub profile: full (default) or minimal")
 	cmd.Flags().StringVar(&flags.Profile, "profile", "", "Compression profile preset: latency, balanced, size")
 	cmd.Flags().StringVar(&flags.Compression, "compression", "", "Compression algorithm: lz4, zstd, none (e.g. lz4 or zstd:11)")
 	cmd.Flags().StringVar(&flags.CompressionLevel, "compression-level", "",
 		"Compression level override: fastest, default, better, best, or number")
+	cmd.Flags().StringArrayVar(rawCompression, "variant-compression", nil,
+		"Per-variant override in level=codec[:level] format (repeat for each variant; e.g. v1=none or v3=zstd:best)")
 	cmd.Flags().BoolVar(&flags.EnableDict, "dict", false, "Enable shared Zstandard dictionary compression across variants")
 	cmd.Flags().BoolVar(&flags.EnableDict, "zstd-dict", false, "Alias for --dict")
+	cmd.Flags().BoolVar(&flags.DictProfitable, "dict-profitable", false,
+		"Embed a shared Zstandard dictionary only when it strictly reduces complete artifact bytes")
 	cmd.Flags().IntVar(&flags.DictSize, "dict-size", codec.DefaultDictSize,
 		"Target shared Zstandard dictionary size in bytes (default: 112 KB)")
-	cmd.Flags().IntVar(&flags.FormatVersion, "format-version", format.FormatVersionCurrent,
-		"Binary format specification version (1 for JSON, 2 for binary table)")
+	cmd.Flags().IntVar(&flags.FormatVersion, flagNameFormatVersion, format.FormatVersionCurrent,
+		"Binary format specification version (only 2 is supported; Format v1 was removed in v0.4.0)")
 	cmd.Flags().BoolVar(&flags.SkipELFValidation, "skip-elf-validation", false,
 		"Skip ELF platform, architecture and executable structure validation")
 	cmd.Flags().BoolVar(&flags.AllowMixedABI, "allow-mixed-abi", false,
@@ -731,16 +802,29 @@ func bindManifestBuildFlags(cmd *cobra.Command, flags *builder.BuildOptions) {
 
 func newPgoPackCmd() *cobra.Command {
 	var flags builder.BuildOptions
+	var rawCompression []string
 
 	cmd := &cobra.Command{
 		Use:   "pgo-pack --manifest <manifest-file> [-o <output>]",
 		Short: "Compile and package microarchitecture variants with Profile-Guided Optimization (PGO)",
 		Long: `pgo-pack automates concurrent Go compilation across multiple microarchitecture levels
 (e.g., v1, v3, v4 on AMD64 or v8.0, v8.2 on ARM64) with Profile-Guided Optimization (-pgo) profiles,
-then packages them into a self-dispatching microfat binary.`,
+then packages them into a self-dispatching microfat binary.
+Set SOURCE_DATE_EPOCH to signed integer Unix seconds to supply reproducible creation metadata.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			epoch, err := sourceDateEpoch()
+			if err != nil {
+				return err
+			}
+			flags.CreatedUnix = epoch
 			if err := validateEmptyStubFlags(cmd, flags); err != nil {
 				return err
+			}
+			if err := validateFormatVersionFlag(cmd, flags.FormatVersion); err != nil {
+				return err
+			}
+			if flags.EnableDict && flags.DictProfitable {
+				return pack.ErrConflictingDictOptions
 			}
 			if flags.SkipELFValidation {
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(),
@@ -754,6 +838,10 @@ then packages them into a self-dispatching microfat binary.`,
 			}
 
 			m, err := builder.LoadManifest(flags.ManifestPath)
+			if err != nil {
+				return err
+			}
+			flags.VariantCompression, err = manifestVariantCompression(m, rawCompression)
 			if err != nil {
 				return err
 			}
@@ -784,7 +872,7 @@ then packages them into a self-dispatching microfat binary.`,
 	cmd.Flags().StringVar(&flags.StubPath, "stub", "", "Path to microfat launcher stub binary (overrides manifest)")
 	cmd.Flags().IntVarP(&flags.Concurrency, "concurrency", "j", 0, "Number of concurrent compiler workers (defaults to NumCPU)")
 
-	bindManifestBuildFlags(cmd, &flags)
+	bindManifestBuildFlags(cmd, &flags, &rawCompression)
 	return cmd
 }
 
@@ -793,169 +881,8 @@ func printABIReport(out io.Writer, report *pack.ArtifactABIReport) error {
 }
 
 func formatVersionName(version int) string {
-	switch version {
-	case format.FormatVersion1:
-		return "legacy JSON manifest"
-	case format.FormatVersion2:
+	if version == format.FormatVersion2 {
 		return "compact binary table"
-	default:
-		return "unknown"
 	}
-}
-
-func resolvePrewarmCacheDir(dir string, verifyOnly bool) (string, error) {
-	if verifyOnly {
-		return format.ResolveExistingCacheDir(dir)
-	}
-	return format.ResolveCacheDir(dir)
-}
-
-func printPrewarmJSON(idx *format.Index, results []format.PrewarmResult, cacheDir string) error {
-	telem := format.PrewarmTelemetry{
-		Event:             format.EventPrewarm,
-		TimestampUnixNano: time.Now().UnixNano(),
-		AppName:           idx.AppName,
-		CacheDir:          cacheDir,
-		Results:           results,
-	}
-	if err := json.MarshalWrite(os.Stdout, telem, jsontext.WithIndent("  ")); err != nil {
-		return fmt.Errorf("encoding json: %w", err)
-	}
-	fmt.Println()
-	return nil
-}
-
-func newPrewarmCmd() *cobra.Command {
-	var (
-		targetLevel string
-		allVariants bool
-		cacheDir    string
-		jsonOutput  bool
-		verifyOnly  bool
-	)
-
-	cmd := &cobra.Command{
-		Use:   "prewarm <binary>",
-		Short: "Pre-extract optimal or all variant payloads into the microfat cache, or verify cache integrity",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			path := filepath.Clean(args[0])
-			// #nosec G304 -- user-supplied binary path to prewarm
-			f, err := inputfile.Open(path)
-			if err != nil {
-				return fmt.Errorf("opening %s: %w", path, err)
-			}
-			defer func() { _ = f.Close() }()
-
-			stat, err := f.Stat()
-			if err != nil {
-				return fmt.Errorf("stat %s: %w", path, err)
-			}
-
-			if !format.IsFatBinary(f, stat.Size()) {
-				return fmt.Errorf("'%s' is not a valid microfat fat binary (missing magic trailer)", path)
-			}
-
-			idx, err := format.ReadTrailerAndIndex(f, stat.Size())
-			if err != nil {
-				return fmt.Errorf("reading binary manifest: %w", err)
-			}
-
-			resolvedDir, err := resolvePrewarmCacheDir(cacheDir, verifyOnly)
-			if err != nil {
-				return fmt.Errorf("resolving cache directory: %w", err)
-			}
-
-			var targetLevels []string
-			switch {
-			case allVariants:
-				targetLevels = idx.VariantLevels()
-			case targetLevel != "":
-				if _, found := idx.FindVariant(targetLevel); !found {
-					return fmt.Errorf("variant level %q not found in binary manifest", targetLevel)
-				}
-				targetLevels = []string{targetLevel}
-			default:
-				hostInfo := microarch.Detect()
-				policy := microarch.ReadPolicyFromEnv()
-				policyRes, selErr := microarch.SelectVariantForHost(idx.TargetArch, hostInfo, idx.VariantLevels(), policy)
-				if selErr != nil {
-					return fmt.Errorf("selecting optimal variant: %w", selErr)
-				}
-				targetLevels = []string{policyRes.SelectedVariant}
-			}
-
-			if verifyOnly {
-				idx, results, err := pack.VerifyCacheBinary(f, stat.Size(), targetLevels, resolvedDir)
-				if err != nil {
-					return fmt.Errorf("verifying cache: %w", err)
-				}
-
-				allValid := true
-				for _, r := range results {
-					if !r.Valid {
-						allValid = false
-						break
-					}
-				}
-
-				if jsonOutput {
-					if err := printPrewarmJSON(idx, results, resolvedDir); err != nil {
-						return err
-					}
-					if !allValid {
-						return errors.New("cache verification failed for one or more variants")
-					}
-					return nil
-				}
-
-				fmt.Printf("Verifying cache for '%s' (%s - %s/%s)...\n", path, idx.AppName, idx.TargetOS, idx.TargetArch)
-				fmt.Printf("Cache Directory: %s\n\n", resolvedDir)
-				for _, r := range results {
-					if r.Valid {
-						fmt.Printf("  [PASS] %-6s (sha256: %.12s..., size: %d B) -> %s\n",
-							r.Level, r.SHA256, r.UncompressedSize, r.CachedPath)
-					} else {
-						fmt.Printf("  [FAIL] %-6s (sha256: %.12s..., size: %d B) -> status: %s (%s)\n",
-							r.Level, r.SHA256, r.UncompressedSize, r.Status, r.Error)
-					}
-				}
-				if !allValid {
-					return errors.New("cache verification failed for one or more variants")
-				}
-				fmt.Println("\nResult: All specified cache entries are valid and verified.")
-				return nil
-			}
-
-			idx, results, err := pack.PrewarmBinary(f, stat.Size(), targetLevels, resolvedDir)
-			if err != nil {
-				return fmt.Errorf("prewarming binary: %w", err)
-			}
-
-			if jsonOutput {
-				return printPrewarmJSON(idx, results, resolvedDir)
-			}
-
-			fmt.Printf("Prewarming cache for '%s' (%s - %s/%s)...\n", path, idx.AppName, idx.TargetOS, idx.TargetArch)
-			fmt.Printf("Cache Directory: %s\n\n", resolvedDir)
-			for _, r := range results {
-				status := "extracted"
-				if r.AlreadyCached {
-					status = "already cached"
-				}
-				fmt.Printf("  • %-6s (sha256: %.12s..., size: %d B) -> %s (%s, %d µs)\n",
-					r.Level, r.SHA256, r.UncompressedSize, r.CachedPath, status, r.DecompressionUs)
-			}
-			fmt.Println("\nResult: Cache prewarming complete.")
-			return nil
-		},
-	}
-
-	cmd.Flags().StringVarP(&targetLevel, "level", "l", "", "Specific variant level to prewarm (defaults to host-optimal variant)")
-	cmd.Flags().BoolVar(&allVariants, "all", false, "Prewarm all embedded variants into the cache")
-	cmd.Flags().StringVar(&cacheDir, "cache-dir", "", "Custom destination cache directory")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results in JSON format")
-	cmd.Flags().BoolVar(&verifyOnly, "verify", false, "Verify cache health and checksums for target variants without extracting")
-
-	return cmd
+	return "unknown"
 }

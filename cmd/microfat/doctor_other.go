@@ -3,6 +3,7 @@
 package main
 
 import (
+	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/lifecycle"
 )
 
@@ -17,9 +18,6 @@ func probeMemfd() MemfdReport {
 	}
 }
 
-func probeCgroup() *CgroupReport {
-	return &CgroupReport{
-		Detected: false,
-		Version:  0,
-	}
+func readDoctorCgroupLimits() (cgroup.Limits, error) {
+	return cgroup.Limits{}, nil
 }

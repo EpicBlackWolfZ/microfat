@@ -34,11 +34,12 @@ var (
 
 // CompressionConfig defines declarative compression parameters.
 type CompressionConfig struct {
-	Profile    string `json:"profile,omitempty" yaml:"profile,omitempty"`
-	Algorithm  string `json:"algorithm,omitempty" yaml:"algorithm,omitempty"`
-	Level      string `json:"level,omitempty" yaml:"level,omitempty"`
-	EnableDict bool   `json:"dict,omitempty" yaml:"dict,omitempty"`
-	DictSize   int    `json:"dict_size,omitempty" yaml:"dict_size,omitempty"`
+	Profile        string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Algorithm      string `json:"algorithm,omitempty" yaml:"algorithm,omitempty"`
+	Level          string `json:"level,omitempty" yaml:"level,omitempty"`
+	EnableDict     bool   `json:"dict,omitempty" yaml:"dict,omitempty"`
+	DictProfitable bool   `json:"dict_profitable,omitempty" yaml:"dict_profitable,omitempty"`
+	DictSize       int    `json:"dict_size,omitempty" yaml:"dict_size,omitempty"`
 }
 
 // Manifest defines the declarative configuration for compiling and packaging
@@ -192,6 +193,9 @@ func ValidateManifest(m *Manifest) error {
 func validateCompressionConfig(c *CompressionConfig, contextStr string) error {
 	if c == nil {
 		return nil
+	}
+	if c.EnableDict && c.DictProfitable {
+		return fmt.Errorf("%w: %w in %s", ErrInvalidManifest, pack.ErrConflictingDictOptions, contextStr)
 	}
 	if c.Profile != "" {
 		p := strings.ToLower(strings.TrimSpace(c.Profile))

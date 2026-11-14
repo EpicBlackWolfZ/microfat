@@ -176,11 +176,11 @@ func TestSourceControllerAndAllFixtures(t *testing.T) {
 		t.Run(arch, func(t *testing.T) {
 			c, f := fakeController(t, arch)
 			// Exercise every scenario and both phases, with one instance of the matrix;
-			// packing below still covers all 16 configurations.
+			// packing below still covers all 8 configurations.
 			c.summary.Expected = Cases()[:70]
 			require.NoError(t, c.qualify(io.Discard))
 			require.Equal(t, Pass, c.summary.Status)
-			require.Len(t, c.bundles, 16)
+			require.Len(t, c.bundles, 8)
 			require.Len(t, c.summary.Results, len(c.summary.Expected))
 			for _, e := range c.summary.Results {
 				require.Equal(t, Pass, e.Status, e.Reason)

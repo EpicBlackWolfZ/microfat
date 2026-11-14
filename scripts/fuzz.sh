@@ -8,8 +8,6 @@ while IFS=' ' read -r package target; do
     "${GO}" test "-fuzz=^${target}$" "-fuzztime=${FUZZTIME}" "./internal/${package}"
 done <<'TARGETS'
 format FuzzUnmarshalBinaryIndex
-format FuzzUnmarshalJSONIndex
-format FuzzLegacyJSONSyntax
 format FuzzReadTrailerAndIndex
 codec FuzzDecompressZstd
 codec FuzzDecompressLZ4

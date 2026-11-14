@@ -4,7 +4,6 @@ package main
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -30,6 +29,7 @@ const (
 	privateExecMode     = 0o700
 	extraEnvCapacity    = 16
 	maxTempFileAttempts = 1000
+	sha256HexDigestLen  = 64
 	// memfdTargetSeals defines the mandatory Linux kernel memory file descriptor seals applied to
 	// anonymous RAM payloads prior to execution via /proc/self/fd/<fd>.
 	// - F_SEAL_WRITE: prevents any modification of the decompressed binary code in memory.
@@ -40,9 +40,10 @@ const (
 )
 
 var (
-	execveFunc      = syscall.Exec
-	memfdCreateFunc = unix.MemfdCreate
-	memfdSealFunc   = func(fd int, seals int) error {
+	execveFunc           = syscall.Exec
+	memfdCreateFunc      = unix.MemfdCreate
+	memfdPreallocateFunc = unix.Ftruncate
+	memfdSealFunc        = func(fd int, seals int) error {
 		_, err := unix.FcntlInt(uintptr(fd), unix.F_ADD_SEALS, seals)
 		return err
 	}
@@ -59,56 +60,6 @@ var (
 	}
 	filepathAbsFunc = filepath.Abs
 )
-
-// extractVariantToWriter seeks to the variant offset and streams decompressed bytes to w,
-// verifying the payload SHA-256 digest concurrently during decompression.
-func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, idx *format.Index, w io.Writer) error {
-	var dictBytes []byte
-	if idx != nil && idx.DictionarySize > 0 {
-		if idx.DictionarySize > format.MaxDictionarySize || idx.DictionaryOffset < 0 {
-			return fmt.Errorf("%w: dictionary size %d or offset %d out of bounds",
-				format.ErrInvalidDictionary, idx.DictionarySize, idx.DictionaryOffset)
-		}
-		if idx.DictionarySHA256 == "" || !format.ValidateChecksum(idx.DictionarySHA256) {
-			return fmt.Errorf("%w: dictionary missing or invalid sha256 checksum", format.ErrInvalidChecksum)
-		}
-		dictBytes = make([]byte, idx.DictionarySize)
-		if _, err := selfFile.ReadAt(dictBytes, idx.DictionaryOffset); err != nil {
-			return fmt.Errorf("reading shared dictionary: %w", err)
-		}
-		h := sha256.Sum256(dictBytes)
-		actualHex := hex.EncodeToString(h[:])
-		if actualHex != idx.DictionarySHA256 {
-			return fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, actualHex)
-		}
-	}
-
-	if entry.UncompressedSize <= 0 || entry.UncompressedSize > format.MaxPayloadSize {
-		return fmt.Errorf("%w: variant %s uncompressed size %d invalid", format.ErrPayloadTooLarge, entry.Level, entry.UncompressedSize)
-	}
-	if entry.SHA256 == "" || !format.ValidateChecksum(entry.SHA256) {
-		return fmt.Errorf("%w: variant %s missing or invalid sha256 checksum", format.ErrInvalidChecksum, entry.Level)
-	}
-
-	c, err := codec.Get(entry.Compression)
-	if err != nil {
-		return fmt.Errorf("lookup codec %q for variant %s: %w", entry.Compression, entry.Level, err)
-	}
-
-	secReader := io.NewSectionReader(selfFile, entry.Offset, entry.CompressedSize)
-	hasher := sha256.New()
-	mw := io.MultiWriter(w, hasher)
-	if err := codec.DecompressWithOptionalDict(c, mw, secReader, entry.UncompressedSize, dictBytes); err != nil {
-		return fmt.Errorf("decompressing variant payload: %w", err)
-	}
-
-	actualHex := hex.EncodeToString(hasher.Sum(nil))
-	if actualHex != entry.SHA256 {
-		return fmt.Errorf("%w: expected %s, got %s", format.ErrPayloadCorrupted, entry.SHA256, actualHex)
-	}
-
-	return nil
-}
 
 func isPayloadCorruptionOrDecompressionError(err error) bool {
 	if err == nil {
@@ -662,6 +613,10 @@ func executeViaMemfd(
 	memFile := os.NewFile(uintptr(fd), "microfat_payload")
 	defer func() { _ = memFile.Close() }()
 
+	// Best-effort pre-sizing avoids incremental shmem inode extension on multi-MiB writes;
+	// extractVariantToWriter still strictly verifies exact uncompressed byte count and SHA-256 before sealing.
+	_ = memfdPreallocateFunc(fd, entry.UncompressedSize)
+
 	decompStart := time.Now()
 	if err := extractVariantToWriter(selfFile, entry, idx, memFile); err != nil {
 		logErrorDiagnostics(format.StageMemfdExtract, err, hostInfo, entry, policyRes, "decompressing payload failed")
@@ -781,13 +736,14 @@ func executeViaCache(
 			return fmt.Errorf("%w: %w", format.ErrCacheExtract, err)
 		}
 		decompStart := time.Now()
-		cachedBinary, matErr := cache.MaterializeVariantAtFD(dirFD, cacheDir, entry, func(w io.Writer) error {
-			return extractVariantToWriter(selfFile, entry, idx, w)
-		})
+		_, materializedFD, matErr := cache.MaterializeAndOpenVariantAtFDWithOpener(dirFD, cacheDir, entry, func(w io.Writer) error {
+			return decompressVariantToWriter(selfFile, entry, idx, w)
+		}, openCachedBinaryAtFunc)
 		if matErr != nil {
 			stage := format.StageCacheCreateTemp
 			sentinel := format.ErrCacheWrite
-			if errors.Is(matErr, format.ErrCacheExtract) || isPayloadCorruptionOrDecompressionError(matErr) {
+			if !errors.Is(matErr, format.ErrCacheWrite) &&
+				(errors.Is(matErr, format.ErrCacheExtract) || isPayloadCorruptionOrDecompressionError(matErr)) {
 				stage = format.StageCacheExtract
 				sentinel = format.ErrCacheExtract
 			}
@@ -797,17 +753,8 @@ func executeViaCache(
 			)
 		}
 		decompDuration = time.Since(decompStart)
-
-		// Re-open with canonical descriptor-bound primitive and validate before execve
-		fd, openErr = openAndValidateCacheAtFD(dirFD, cachedName, entry)
-		if openErr != nil {
-			_ = unix.Unlinkat(dirFD, cachedName, 0)
-			rawErr := fmt.Errorf("opening verified cache file %s: %w", cachedBinary, openErr)
-			return handleCacheError(
-				format.ErrCacheWrite, format.StageCacheCreateTemp, rawErr,
-				primaryErr, requestedMode, hostInfo, entry, policyRes, "opening verified cache file failed",
-			)
-		}
+		// Execute the same descriptor validated after publication; do not reopen or rehash its pathname.
+		fd = materializedFD
 	}
 
 	defer func() { _ = unix.Close(fd) }()

@@ -66,7 +66,7 @@ func RunExperiment(ctx context.Context, cfg ExperimentConfig, opts RunOptions) (
 	if err != nil {
 		return nil, err
 	}
-	schedule, err := compare.Schedule(built.Configurations, cfg.Blocks, cfg.Seed)
+	schedule, err := compare.Schedule(built.Configurations, cfg.Blocks, cfg.scheduleSeed())
 	if err != nil {
 		return nil, err
 	}

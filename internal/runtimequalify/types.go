@@ -78,7 +78,7 @@ func (c Configuration) Name() string {
 }
 func Configurations() []Configuration {
 	var result []Configuration
-	for _, format := range []int{1, 2} {
+	for _, format := range []int{2} {
 		for _, profile := range []string{Full, Minimal} {
 			for _, codec := range []string{"none", "lz4", Zstd} {
 				c := Configuration{Format: format, Profile: profile, Codec: codec}

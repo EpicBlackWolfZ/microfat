@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"debug/buildinfo"
 	"debug/elf"
+	"encoding/binary"
 	"encoding/hex"
 	"os"
 	"os/exec"
@@ -684,27 +685,21 @@ func TestValidateArchive_InspectFatBinary_Errors(t *testing.T) {
 		t.Parallel()
 		stubBytes := []byte("\x7fELF\x02\x01\x01\x00" + strings.Repeat("\x00", 64))
 		variantPayload := []byte("\x7fELF\x02\x01\x01\x00" + strings.Repeat("\x00", 64))
-		variants := []format.VariantEntry{
-			{
-				Level:            "v1",
-				Offset:           int64(len(stubBytes)),
-				CompressedSize:   int64(len(variantPayload)),
-				UncompressedSize: int64(len(variantPayload)),
-				SHA256:           "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-				Compression:      "none",
-			},
-		}
-		idx := &format.Index{
-			Version:    format.FormatVersion1,
-			TargetOS:   testLinuxOS,
-			TargetArch: releasecheck.ArchAMD64,
-			Variants:   variants,
-		}
+		rawJSON := []byte(`{"version":1,"os":"linux","arch":"amd64","variants":[{"level":"v1","offset":72,` +
+			`"compressed_size":72,"uncompressed_size":72,"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",` +
+			`"compression":"none"}]}`)
 		var fatBuf bytes.Buffer
 		fatBuf.Write(stubBytes)
 		fatBuf.Write(variantPayload)
-		_, err := format.WriteIndexAndTrailerWithVersion(&fatBuf, idx, int64(fatBuf.Len()), format.FormatVersion1)
-		require.NoError(t, err)
+		indexOffset := uint64(fatBuf.Len())
+		fatBuf.Write(rawJSON)
+		sum := sha256.Sum256(rawJSON)
+		var trailer [format.TrailerSize]byte
+		binary.LittleEndian.PutUint64(trailer[0:format.OffsetLen], indexOffset)
+		binary.LittleEndian.PutUint64(trailer[format.OffsetLen:format.OffsetLen*2], uint64(len(rawJSON)))
+		copy(trailer[format.OffsetLen*2:format.OffsetLen*2+format.HashLen], sum[:])
+		copy(trailer[format.OffsetLen*2+format.HashLen:], []byte(format.MagicString))
+		fatBuf.Write(trailer[:])
 
 		entries := []tarEntry{
 			{Name: releasecheck.ReleaseProjectName, Data: fatBuf.Bytes(), Mode: 0o755},
@@ -714,9 +709,8 @@ func TestValidateArchive_InspectFatBinary_Errors(t *testing.T) {
 		archivePath := filepath.Join(t.TempDir(), "badver.tar.gz")
 		createOrderedTarGz(t, archivePath, entries)
 
-		_, err = releasecheck.ValidateArchive(archivePath, releasecheck.ArchAMD64, contract)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "expected format v2 index")
+		_, err := releasecheck.ValidateArchive(archivePath, releasecheck.ArchAMD64, contract)
+		require.ErrorIs(t, err, format.ErrUnsupportedVersion)
 	})
 
 	t.Run("UnexpectedVariantLevel", func(t *testing.T) {

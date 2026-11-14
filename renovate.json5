@@ -5,7 +5,7 @@
   enabledManagers: ['custom.regex'],
   dependencyDashboard: true,
   timezone: 'Europe/Vienna',
-  schedule: ['before 6am on monday'],
+  schedule: ['* 0-5 * * *'],
   labels: ['dependencies'],
   semanticCommits: 'enabled',
   semanticCommitType: 'chore',

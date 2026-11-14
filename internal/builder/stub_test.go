@@ -1111,26 +1111,19 @@ func testDispatchedIndexMismatchErrors(t *testing.T, tmpDir string) {
 func testDispatchedVersionNotV2(t *testing.T, tmpDir string) {
 	t.Helper()
 	v1FatFile := filepath.Join(tmpDir, "v1_format.fat")
-	idxV1 := &format.Index{
-		Version:    format.FormatVersion1,
-		TargetArch: runtime.GOARCH,
-		Variants: []format.VariantEntry{
-			{
-				Level:            "v1",
-				Offset:           10,
-				CompressedSize:   10,
-				UncompressedSize: 10,
-				SHA256:           strings.Repeat("a", 64),
-				Compression:      "none",
-			},
-		},
-	}
+	rawJSON := []byte(`{"version":1,"os":"linux","arch":"` + runtime.GOARCH + `","variants":[{"level":"v1",` +
+		`"offset":10,"compressed_size":10,"uncompressed_size":10,"sha256":"` + strings.Repeat("a", 64) + `"}]}`)
 	var buf bytes.Buffer
 	buf.Write(make([]byte, 20))
-	_, err := format.WriteIndexAndTrailerWithVersion(&buf, idxV1, 20, format.FormatVersion1)
-	if err != nil {
-		t.Fatalf("writing v1 index: %v", err)
-	}
+	indexOffset := uint64(buf.Len())
+	buf.Write(rawJSON)
+	sum := sha256.Sum256(rawJSON)
+	var trailer [format.TrailerSize]byte
+	binary.LittleEndian.PutUint64(trailer[0:format.OffsetLen], indexOffset)
+	binary.LittleEndian.PutUint64(trailer[format.OffsetLen:format.OffsetLen*2], uint64(len(rawJSON)))
+	copy(trailer[format.OffsetLen*2:format.OffsetLen*2+format.HashLen], sum[:])
+	copy(trailer[format.OffsetLen*2+format.HashLen:], []byte(format.MagicString))
+	buf.Write(trailer[:])
 	if err := os.WriteFile(v1FatFile, buf.Bytes(), 0o755); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
@@ -1155,9 +1148,9 @@ func testDispatchedVersionNotV2(t *testing.T, tmpDir string) {
 		_ = os.Unsetenv(format.EnvOriginalExe)
 	}()
 
-	_, err = ResolveInstallationDirectory()
-	if err == nil || !strings.Contains(err.Error(), "is not v2") {
-		t.Fatalf("expected version not v2 error, got: %v", err)
+	_, err := ResolveInstallationDirectory()
+	if !errors.Is(err, format.ErrUnsupportedVersion) {
+		t.Fatalf("expected ErrUnsupportedVersion for legacy Format v1 binary, got: %v", err)
 	}
 }
 

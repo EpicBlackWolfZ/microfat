@@ -130,53 +130,6 @@ func FuzzUnmarshalBinaryIndex(f *testing.F) {
 	})
 }
 
-func FuzzUnmarshalJSONIndex(f *testing.F) {
-	// Seed 1: Standard valid format v1 JSON
-	seedJSON1 := `{"version":1,"app_name":"demo","os":"linux","arch":"amd64","created_unix":1724540000,` +
-		`"variants":[{"level":"v1","offset":100,"compressed_size":200,"uncompressed_size":500,` +
-		`"sha256":"` + testSHA256Sample + `","compression":"zstd"}]}`
-	f.Add([]byte(seedJSON1))
-
-	// Seed 2: JSON with dictionary
-	seedJSON2 := `{"version":1,"app_name":"demo-dict","os":"linux","arch":"amd64","created_unix":1724540000,` +
-		`"dictionary_offset":64,"dictionary_size":256,"dictionary_sha256":"` + testSHA256Sample + `","dictionary_id":42,` +
-		`"variants":[{"level":"v2","offset":320,"compressed_size":150,"uncompressed_size":400,` +
-		`"sha256":"` + testSHA256Sample2 + `","compression":"lz4"}]}`
-	f.Add([]byte(seedJSON2))
-
-	// Seed 3: Whitespace and empty fields
-	f.Add([]byte(`  {  "version" : 1 , "variants" : [ ] }  `))
-
-	// Seed 4: Escaped strings and unknown extra fields
-	f.Add([]byte(`{"version":1,"app_name":"escaped\"name\\test\n","extra_field":{"nested":true},"variants":[]}`))
-
-	// Seed 5: Malformed JSON syntax and overflow boundaries
-	f.Add([]byte(`{"version": 1, "app_name": `))
-	f.Add([]byte(`{"version": "not-an-int"}`))
-	f.Add([]byte(`[1, 2, 3]`))
-	f.Add([]byte(`{"variants": [{"offset": -1}]}`))
-	f.Add([]byte(`{"version": 99999999999999999999, "variants": []}`))
-	f.Add([]byte(`{"version": 1, "created_unix": -99999999999999999999, "variants": []}`))
-	f.Add([]byte(`{"version": 1, "variants": [{"level": "v1", "offset": 9223372036854775808}]}`))
-	f.Add([]byte(`{"version": 1, "variants": [{"level": "v1", "offset": -9223372036854775809}]}`))
-
-	f.Fuzz(func(t *testing.T, data []byte) {
-		idx, err := unmarshalJSONIndex(data)
-		if err != nil {
-			if idx != nil {
-				t.Fatalf("expected nil index when unmarshalJSONIndex failed, got %+v", idx)
-			}
-			return
-		}
-		if idx == nil {
-			t.Fatal("expected non-nil index on success")
-		}
-
-		_ = idx.ValidateBounds(1 << 40)
-		_ = idx.VariantLevels()
-	})
-}
-
 func FuzzReadTrailer(f *testing.F) {
 	// Build valid seed trailer
 	validTrailer := make([]byte, TrailerSize)
@@ -233,11 +186,18 @@ func FuzzReadTrailerAndIndex(f *testing.F) {
 		f.Add(buf.Bytes())
 	}
 
-	bufV1 := bytes.NewBuffer(make([]byte, 16+32))
-	_, err = WriteIndexAndTrailerWithVersion(bufV1, idx, int64(bufV1.Len()), FormatVersion1)
-	if err == nil {
-		f.Add(bufV1.Bytes())
-	}
+	legacyJSON := []byte(`{"version":1,"app_name":"legacy","os":"linux","arch":"amd64","created_unix":1,"variants":[]}`)
+	legacyBuf := bytes.NewBuffer(make([]byte, 16+32))
+	legacyOffset := uint64(legacyBuf.Len())
+	legacyBuf.Write(legacyJSON)
+	legacyHash := sha256.Sum256(legacyJSON)
+	var legacyTrailer [TrailerSize]byte
+	binary.LittleEndian.PutUint64(legacyTrailer[0:OffsetLen], legacyOffset)
+	binary.LittleEndian.PutUint64(legacyTrailer[OffsetLen:OffsetLen*2], uint64(len(legacyJSON)))
+	copy(legacyTrailer[OffsetLen*2:OffsetLen*2+HashLen], legacyHash[:])
+	copy(legacyTrailer[OffsetLen*2+HashLen:], []byte(MagicString))
+	legacyBuf.Write(legacyTrailer[:])
+	f.Add(legacyBuf.Bytes())
 
 	f.Add([]byte("small"))
 	f.Add(make([]byte, TrailerSize+10))

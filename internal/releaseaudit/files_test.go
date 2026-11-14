@@ -32,7 +32,7 @@ func TestMatrixFilesystemFailures(t *testing.T) {
 			case "payload":
 				require.NoError(t, os.Mkdir(filepath.Join(options.Output, "payload.go"), directoryMode))
 			case "case directory":
-				require.NoError(t, os.Mkdir(filepath.Join(options.Output, "v1-full-none-dict0"), directoryMode))
+				require.NoError(t, os.Mkdir(filepath.Join(options.Output, "v2-full-none-dict0"), directoryMode))
 			case "results":
 				require.NoError(t, os.Mkdir(filepath.Join(options.Output, "results.json"), directoryMode))
 			case "progress":

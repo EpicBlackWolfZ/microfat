@@ -66,7 +66,7 @@ func TestPackCompressionOverrideAliases(t *testing.T) {
 		{"profile", codec.AlgorithmZstd, compressionBest, VariantCompressionOptions{Profile: codec.ProfileSize}},
 		{"level", codec.AlgorithmZstd, testCompressionFastest, VariantCompressionOptions{Level: testCompressionFastest}},
 	}
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, alias := range aliases {
 			for _, override := range overrides {
 				t.Run(fmt.Sprintf("format%d/%s/%s/%s", version, alias.variant, alias.override, override.name), func(t *testing.T) {
@@ -131,7 +131,7 @@ func TestPackCompressionLevelPrecedence(t *testing.T) {
 		{"none transition", codec.AlgorithmZstd, compressionBest, codec.AlgorithmNone, compressionBest,
 			VariantCompressionOptions{Compression: codec.AlgorithmNone}},
 	}
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, tc := range cases {
 			t.Run(fmt.Sprintf("format%d/%s", version, tc.name), func(t *testing.T) {
 				t.Parallel()

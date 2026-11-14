@@ -21,6 +21,7 @@ const (
 	privateDirMode  = 0o700
 	privateFileMode = 0o600
 	exitUsage       = 2
+	reportSchema    = 2
 )
 
 // Supplied by the research build target. Test binaries leave this empty.
@@ -68,39 +69,55 @@ type gateResult struct {
 
 func summarizeGate(groups []groupResult) gateResult {
 	type profileGate struct{ costed, zero, modeled bool }
-	families := make(map[string]map[string]profileGate)
+	type representation struct{ method, base string }
+	type familyCount struct{ costed, zero, modeled int }
+	families := make(map[string]map[string]map[representation]profileGate)
 	for _, g := range groups {
+		if g.Family == "boundary" {
+			continue
+		}
 		profiles := families[g.Family]
 		if profiles == nil {
-			profiles = make(map[string]profileGate)
+			profiles = make(map[string]map[representation]profileGate)
 			families[g.Family] = profiles
 		}
-		p := profileGate{}
+		p := make(map[representation]profileGate)
 		if g.Error == "" {
 			for _, c := range g.Candidates {
-				if c.Error == "" && c.Method != methodBase {
-					p.costed = p.costed || c.SizePass
-					p.zero = p.zero || c.OptimisticSizePass
-					p.modeled = p.modeled || c.ScreeningPass
+				if c.Error == "" {
+					p[representation{c.Method, c.Base}] = profileGate{c.SizePass, c.OptimisticSizePass, c.ScreeningPass}
 				}
 			}
 		}
 		profiles[g.Profile] = p
 	}
 	r := gateResult{}
+	byEncoding := make(map[representation]familyCount)
 	for family, profiles := range families {
-		a, b := profiles[stripped], profiles[unstripped]
-		f := familyGate{family, a.costed && b.costed, a.zero && b.zero, a.modeled && b.modeled}
+		f := familyGate{Family: family}
+		for encoding, a := range profiles[stripped] {
+			b := profiles[unstripped][encoding]
+			count := byEncoding[encoding]
+			if a.costed && b.costed {
+				f.CostedSize = true
+				count.costed++
+			}
+			if a.zero && b.zero {
+				f.ZeroDecoder = true
+				count.zero++
+			}
+			if a.modeled && b.modeled {
+				f.ModeledBudgets = true
+				count.modeled++
+			}
+			byEncoding[encoding] = count
+		}
 		r.Families = append(r.Families, f)
-		if f.CostedSize {
-			r.CostedSizePass++
-		}
-		if f.ZeroDecoder {
-			r.ZeroDecoderPass++
-		}
-		if f.ModeledBudgets {
-			r.ModeledBudgetsPass++
-		}
+	}
+	for _, count := range byEncoding {
+		r.CostedSizePass = max(r.CostedSizePass, count.costed)
+		r.ZeroDecoderPass = max(r.ZeroDecoderPass, count.zero)
+		r.ModeledBudgetsPass = max(r.ModeledBudgetsPass, count.modeled)
 	}
 	sort.Slice(r.Families, func(i, j int) bool { return r.Families[i].Family < r.Families[j].Family })
 	complete := len(families) == maxFamilies
@@ -110,7 +127,7 @@ func summarizeGate(groups []groupResult) gateResult {
 	case !complete:
 		r.Decision = "incomplete corpus; no portfolio gate decision"
 	case r.ZeroDecoderPass < requiredFamilies:
-		r.Decision = "stop #379 on this candidate space: even zero-decoder size scenario misses gate"
+		r.Decision = "stop on this candidate space: even zero-decoder size scenario misses gate"
 	case !r.CostedOpportunityPass:
 		r.Decision = "stop before decoder: estimated decoder cost erases useful size opportunity"
 	case !r.ModeledScreenPass:
@@ -133,8 +150,13 @@ type screenReport struct {
 	StubBytes      int64          `json:"stub_bytes"`
 	StubSHA256     string         `json:"stub_sha256"`
 	Protocol       protocol       `json:"protocol"`
-	Groups         []groupResult  `json:"groups"`
-	Gate           gateResult     `json:"gate"`
+	Levels         []levelResult  `json:"levels"`
+}
+
+type levelResult struct {
+	Level  string        `json:"level"`
+	Groups []groupResult `json:"groups"`
+	Gate   gateResult    `json:"gate"`
 }
 
 func codecModuleVersion() string {
@@ -152,8 +174,8 @@ func codecModuleVersion() string {
 func runScreen(o screenOptions) (screenReport, error) {
 	const revisionBytes = 20
 	if !validHex(o.Source, revisionBytes) || (producerRevision != "" && producerRevision != o.Source) ||
-		o.Manifest == "" || o.Stub == "" || o.Output == "" || runtime.Version() != goVersion {
-		return screenReport{}, errors.New("explicit paths, exact producer revision and Go 1.27.3 required")
+		o.Manifest == "" || o.Stub == "" || o.Output == "" {
+		return screenReport{}, errors.New("explicit paths and exact producer revision required")
 	}
 	m, groups, manifestSHA, err := loadManifest(o.Manifest)
 	if err != nil {
@@ -173,17 +195,21 @@ func runScreen(o screenOptions) (screenReport, error) {
 	if err = os.Mkdir(output, privateDirMode); err != nil {
 		return screenReport{}, err
 	}
-	r := screenReport{SchemaVersion: 1, Producer: o.Source, GoVersion: runtime.Version(), CodecVersion: codecModuleVersion(),
+	r := screenReport{SchemaVersion: reportSchema, Producer: o.Source, GoVersion: runtime.Version(), CodecVersion: codecModuleVersion(),
 		GOMAXPROCS: runtime.GOMAXPROCS(0), ManifestSHA256: manifestSHA, Corpus: m, Stub: o.Stub, StubBytes: int64(len(stub)),
 		StubSHA256: digest(stub), Protocol: frozenProtocol()}
-	for _, g := range groups {
-		dir := filepath.Join(output, g.family+"-"+g.profile)
-		if err = os.Mkdir(dir, privateDirMode); err != nil {
-			return r, err
+	for _, level := range []string{levelBetter, levelBest} {
+		c := levelResult{Level: level}
+		for _, g := range groups {
+			dir := filepath.Join(output, level, g.family+"-"+g.profile)
+			if err = os.MkdirAll(dir, privateDirMode); err != nil {
+				return r, err
+			}
+			c.Groups = append(c.Groups, screenGroup(g, m.Architecture, o.Stub, dir, stub, level))
 		}
-		r.Groups = append(r.Groups, screenGroup(g, m.Architecture, o.Stub, dir, stub))
+		c.Gate = summarizeGate(c.Groups)
+		r.Levels = append(r.Levels, c)
 	}
-	r.Gate = summarizeGate(r.Groups)
 	data, err := json.Marshal(r, jsontext.WithIndent("  "))
 	if err == nil {
 		err = writeNew(filepath.Join(output, "report.json"), data)
@@ -210,7 +236,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	r, err := runScreen(o)
 	if err == nil {
-		data, encodeErr := json.Marshal(r.Gate)
+		decisions := make(map[string]gateResult)
+		for _, level := range r.Levels {
+			decisions[level.Level] = level.Gate
+		}
+		data, encodeErr := json.Marshal(decisions)
 		if encodeErr == nil {
 			_, encodeErr = fmt.Fprintln(stdout, string(data))
 		}

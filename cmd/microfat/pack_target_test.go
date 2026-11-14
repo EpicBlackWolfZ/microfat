@@ -35,7 +35,7 @@ func TestCLIPackTargetArchitecture(t *testing.T) {
 		{name: "arm64 alias", arch: "AARCH64", canonical: testArchARM64, level: arm64LevelV80},
 		{name: "unsupported baseline", arch: "banana", level: "v1"},
 	}
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, tc := range cases {
 			t.Run(fmt.Sprintf("format%d/%s", version, tc.name), func(t *testing.T) {
 				t.Parallel()
@@ -95,7 +95,7 @@ func TestCLIPackTargetOperatingSystem(t *testing.T) {
 		{name: "unknown", targetOS: "banana"},
 		{name: "whitespace", targetOS: " linux "},
 	}
-	for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+	for _, version := range []int{format.FormatVersion2} {
 		for _, tc := range cases {
 			t.Run(fmt.Sprintf("format%d/%s", version, tc.name), func(t *testing.T) {
 				t.Parallel()
@@ -144,7 +144,7 @@ func TestCLIManifestUnsupportedOperatingSystem(t *testing.T) {
 
 	for _, command := range []string{"pack", "pgo-pack"} {
 		for _, targetOS := range []string{"freebsd", "windows", "banana", " linux "} {
-			for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+			for _, version := range []int{format.FormatVersion2} {
 				t.Run(fmt.Sprintf("%s/%s/format%d", command, targetOS, version), func(t *testing.T) {
 					t.Parallel()
 

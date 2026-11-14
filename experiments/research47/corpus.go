@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -23,7 +24,6 @@ const (
 	maxFamilies = 4
 	maxProfiles = 2
 	maxCorpus   = 1024 * mib
-	goVersion   = "go1.27.3"
 	stripped    = "stripped"
 	unstripped  = "unstripped"
 )
@@ -44,6 +44,15 @@ type corpusBuild struct {
 	GOOS       string `json:"goos"`
 	Trimpath   bool   `json:"trimpath"`
 	BuildVCS   bool   `json:"buildvcs"`
+	GOENV      string `json:"goenv"`
+	GOWORK     string `json:"gowork"`
+	Toolchain  string `json:"gotoolchain"`
+	GOMAXPROCS int    `json:"gomaxprocs"`
+	Mod        string `json:"mod"`
+	Stripped   string `json:"stripped_ldflags"`
+	Unstripped string `json:"unstripped_ldflags"`
+	Timeout    int    `json:"command_timeout_seconds"`
+	Grace      int    `json:"termination_grace_seconds"`
 }
 
 type corpusVariant struct {
@@ -56,13 +65,36 @@ type corpusVariant struct {
 }
 
 type corpusManifest struct {
-	SchemaVersion  int             `json:"schema_version"`
-	SourceRevision string          `json:"source_revision"`
-	GoVersion      string          `json:"go_version"`
-	Architecture   string          `json:"architecture"`
-	Sources        []corpusSource  `json:"sources"`
-	Build          corpusBuild     `json:"build"`
-	Variants       []corpusVariant `json:"variants"`
+	SchemaVersion  int               `json:"schema_version"`
+	SourceRevision string            `json:"source_revision"`
+	GoVersion      string            `json:"go_version"`
+	Architecture   string            `json:"architecture"`
+	Sources        []corpusSource    `json:"sources"`
+	Build          corpusBuild       `json:"build"`
+	Variants       []corpusVariant   `json:"variants"`
+	Synthetic      []syntheticSource `json:"synthetic_sources"`
+	Host           struct {
+		OS      string `json:"os"`
+		Kernel  string `json:"kernel"`
+		Machine string `json:"machine"`
+	} `json:"host"`
+	Toolchain struct {
+		Path        string `json:"path"`
+		SHA256      string `json:"sha256"`
+		Environment string `json:"environment"`
+	} `json:"toolchain"`
+}
+
+type syntheticSource struct {
+	Family          string           `json:"family"`
+	Kind            string           `json:"kind"`
+	Generator       string           `json:"generator"`
+	GeneratorSHA256 string           `json:"generator_sha256"`
+	ReadinessArgs   []string         `json:"readiness_args"`
+	Marker          string           `json:"marker"`
+	GoRuntime       bool             `json:"go_runtime"`
+	BoundaryBytes   int              `json:"boundary_bytes"`
+	Profiles        map[string]int64 `json:"profiles"`
 }
 
 type group struct {
@@ -116,10 +148,32 @@ func loadManifest(path string) (corpusManifest, []group, string, error) {
 
 func validManifestHeader(m corpusManifest) bool {
 	const revisionBytes = 20
-	return m.SchemaVersion == 2 && m.GoVersion == goVersion && validHex(m.SourceRevision, revisionBytes) &&
+	return m.SchemaVersion == 2 && m.GoVersion == runtime.Version() && validHex(m.SourceRevision, revisionBytes) &&
 		(m.Architecture == "amd64" || m.Architecture == "arm64") && m.Build.CGOEnabled == "0" &&
-		m.Build.GOOS == "linux" && m.Build.Trimpath && !m.Build.BuildVCS && len(m.Sources) == maxFamilies &&
-		len(m.Variants) == maxFamilies*maxProfiles*maxVariants
+		m.Build.GOOS == "linux" && m.Build.Trimpath && !m.Build.BuildVCS && len(m.Sources) == maxFamilies
+}
+
+func sourceProfiles(m corpusManifest) (map[string]map[string]int64, error) {
+	const boundaryBytes = 512 * kib
+	profiles := make(map[string]map[string]int64)
+	families, err := validateSources(m.Sources)
+	if err != nil {
+		return nil, err
+	}
+	for name := range families {
+		profiles[name] = map[string]int64{stripped: 0, unstripped: 0}
+	}
+	if len(m.Synthetic) != 1 {
+		return nil, errors.New("expected one synthetic boundary source")
+	}
+	s := m.Synthetic[0]
+	if s.Family != "boundary" || families[s.Family] || s.Kind != "synthetic-static-linux-elf" ||
+		s.GoRuntime || s.BoundaryBytes != boundaryBytes || len(s.Profiles) != 3 ||
+		s.Profiles["below"] != boundaryBytes-1 || s.Profiles["at"] != boundaryBytes || s.Profiles["above"] != boundaryBytes+1 {
+		return nil, errors.New("invalid synthetic boundary source")
+	}
+	profiles[s.Family] = s.Profiles
+	return profiles, nil
 }
 
 func validateSources(sources []corpusSource) (map[string]bool, error) {
@@ -140,7 +194,7 @@ func validateManifest(m corpusManifest) ([]group, error) {
 	if !validManifestHeader(m) {
 		return nil, errors.New("manifest protocol/toolchain/build/family count mismatch")
 	}
-	families, err := validateSources(m.Sources)
+	profiles, err := sourceProfiles(m)
 	if err != nil {
 		return nil, err
 	}
@@ -151,8 +205,9 @@ func validateManifest(m corpusManifest) ([]group, error) {
 	}
 	totalBytes := int64(0)
 	for _, variant := range m.Variants {
-		if !families[variant.Family] || (variant.Profile != stripped && variant.Profile != unstripped) ||
-			!filepath.IsAbs(variant.Path) || !validHex(variant.SHA256, sha256Bytes) || variant.Bytes <= 0 || variant.Bytes > maxInput {
+		exactBytes, present := profiles[variant.Family][variant.Profile]
+		if !present || !filepath.IsAbs(variant.Path) || !validHex(variant.SHA256, sha256Bytes) ||
+			variant.Bytes <= 0 || variant.Bytes > maxInput || (exactBytes > 0 && variant.Bytes != exactBytes) {
 			return nil, errors.New("invalid corpus variant")
 		}
 		totalBytes += variant.Bytes
@@ -167,7 +222,7 @@ func validateManifest(m corpusManifest) ([]group, error) {
 	if totalBytes > maxCorpus {
 		return nil, errors.New("corpus exceeds aggregate bound")
 	}
-	if len(byGroup) != maxFamilies*maxProfiles {
+	if len(byGroup) != maxFamilies*maxProfiles+len(m.Synthetic[0].Profiles) {
 		return nil, errors.New("incomplete family/profile groups")
 	}
 	var groups []group

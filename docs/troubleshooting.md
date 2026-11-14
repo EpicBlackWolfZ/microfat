@@ -21,7 +21,56 @@ microfat doctor --strict
 
 # 3. Machine-readable JSON report for automated monitoring
 microfat doctor --json
+
+# 4. Preview adaptive tuning with an operator-supplied live-heap estimate
+microfat doctor --gc-profile adaptive --live-heap-estimate 150MiB --json
 ```
+
+Doctor checks prerequisites without executing the application. Its tuning preview is always a
+dry run (`tuning_preview.applied: false` in JSON) and does not change runtime settings or
+permissions. The existing memfd and temporary cache-file prerequisite probes still run.
+
+### Reading the Runtime Tuning Preview
+
+Use `tuning_preview.tuning` to inspect the candidate calculation for the requested profile.
+Use `tuning_preview.effective_environment` to see what the launcher would pass after inherited
+Go environment settings and tuning controls take precedence. Each `GOMEMLIMIT`, `GOMAXPROCS`,
+and `GOGC` entry reports whether it is present, its value, and a source of `inherited`,
+`autotune`, or `unset`.
+
+For example, these previews answer different deployment questions:
+
+```bash
+# Candidate memory-constrained profile, while preserving an operator's explicit GOGC
+GOGC=80 microfat doctor --gc-profile memory_constrained --json
+
+# Preserve the payload's Go CPU policy while previewing memory and GC tuning
+MICROFAT_CPU_POLICY=native microfat doctor --gc-profile adaptive --live-heap-estimate 150MiB
+
+# Show that disabled autotuning would not inject candidate settings
+MICROFAT_AUTOTUNE=0 microfat doctor --gc-profile batch_etl --json
+```
+
+An explicit Go environment variable wins even when its value is empty. A candidate may therefore
+appear under `tuning` while the effective entry is inherited or unset. The preview also honors
+`MICROFAT_DRY_RUN`; examine its reasons before copying calculated values into a deployment.
+`batch_etl` retains periodic GC unless a finite effective memory limit supports turning it off.
+An explicit inherited `GOGC` remains the operator's choice.
+
+`--gc-profile` and `--live-heap-estimate` override `MICROFAT_GC_PROFILE` and
+`MICROFAT_LIVE_HEAP_ESTIMATE`, respectively. The profile otherwise defaults to `default`; the
+estimate otherwise stays missing. Supported profiles are `default`, `latency_critical`,
+`memory_constrained`, `batch_etl`, and `adaptive`. Invalid profiles and negative, malformed,
+or overflowing estimates fail before prerequisite probes. Check the preview's `inputs` for
+the raw values, input sources, parse status, and parsed values.
+
+Treat the live-heap estimate as supplied workload knowledge, not a measured heap sample.
+The separate `cgroup` fields retain observed limits and legacy default recommendations; they
+are not the effective profile-specific environment. Without finite evidence, a memory or CPU
+limit is unknown (unlimited or unavailable). Doctor has no selected payload, so its preview
+does not subtract retained executable storage. A real launch can have a smaller memory budget.
+`GOMEMLIMIT` is a soft Go runtime budget and cannot establish a safe RSS or container memory cap.
+See the [calculation and payload storage caveats](runtime-tuning.md#3-calculation-formulas).
 
 ### Interpreting Doctor Report Status Glyphs
 
@@ -222,8 +271,12 @@ microfat trim app.fat --max-level v3 --policy safe_avx512 -o app_safe.fat
 
 ### Symptom: High p99 Latency Spikes / High GC CPU Utilization (> 25%)
 
-#### Root Cause (The GC Thrashing Cliff):
-If steady-state live heap memory exceeds $\frac{\text{GOMEMLIMIT}}{1 + \text{GOGC}/100}$, Go enters continuous GC cycles, saturating the 50% GC CPU limiter.
+#### Possible Cause: Memory Pressure and GC Pacing
+When live heap exceeds $\frac{\text{GOMEMLIMIT}}{1 + \text{GOGC}/100}$, its proportional growth
+target exceeds the soft memory limit. Go can collect earlier, but the formula alone does not
+prove continuous GC or CPU-limiter saturation. Check allocation rates, live-heap measurements,
+and GC CPU consumption under a representative workload. Preview a profile with the measured
+workload estimate before changing deployment settings.
 
 #### Diagnostic Log Inspection:
 Set `GODEBUG=gctrace=1` to observe runtime memory pacing:
@@ -232,16 +285,16 @@ Set `GODEBUG=gctrace=1` to observe runtime memory pacing:
 gc 14 @1.245s 3%: 0.12+1.4+0.04 ms clock, 0.48+2.8/1.2/0+0.16 ms cpu, 450->452->220 MB, 870 MB goal, 0 MB stacks, 0 MB globals, 4 procs (forced)
 ```
 
-| Field | Analysis | Health Status |
+| Field | Analysis | Interpretation |
 | :--- | :--- | :--- |
-| `3%` | Process CPU time spent in GC | Healthy ($\le 10\%$). If $> 25\%$, application is nearing GC thrashing. |
-| `450->452->220 MB` | Live heap set ($220\text{ MB}$) vs peak ($452\text{ MB}$) | Healthy. Live set should be $\le 50\%$ of target goal. |
-| `870 MB goal` | Target heap ceiling configured by `GOMEMLIMIT` | Matches Microfat's calculated limit. |
+| `3%` | Percentage of time spent in GC since program startup | Compare trends with allocation throughput and latency; a percentage alone does not establish thrashing. |
+| `450->452->220 MB` | Heap at GC start, at GC end, and live heap after collection | Use representative post-collection live heap when supplying an estimate; account for workload peaks. |
+| `870 MB goal` | Heap goal for this GC cycle | This is not the total Go runtime memory limit or an RSS cap. |
 
 #### Workload Profile Tuning Recipes:
 
 ```bash
-# For Latency-Critical API Services (eliminates p99 latency cliffs):
+# For Latency-Critical API Services (measure the latency and CPU tradeoff):
 export MICROFAT_GC_PROFILE=latency_critical   # Sets GOGC=75
 
 # For Micro-Containers (< 512MB RAM):

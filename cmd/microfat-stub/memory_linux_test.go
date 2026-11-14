@@ -49,3 +49,38 @@ func TestExtractionBudgetPolicies(t *testing.T) {
 	readCgroupLimitsFunc = func() (cgroup.Limits, error) { return cgroup.Limits{}, errors.New("unavailable") }
 	require.NoError(t, checkExtractionBudget(entry, nil))
 }
+
+func TestNoneExtractionBudgetIncludesCopyBuffer(t *testing.T) {
+	old := readCgroupLimitsFunc
+	t.Cleanup(func() { readCgroupLimitsFunc = old })
+
+	const payloadSize = int64(1024 * 1024)
+	const scratchSize = int64(128 * 1024)
+	const required = payloadSize + scratchSize + cgroup.DefaultMinHeadroomBytes
+	entry := &format.VariantEntry{UncompressedSize: payloadSize, Compression: codec.AlgorithmNone}
+	for _, tc := range []struct {
+		name    string
+		limit   int64
+		wantErr bool
+	}{
+		{"below_copy_buffer_requirement", required - 1, true},
+		{"exact_copy_buffer_requirement", required, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			readCgroupLimitsFunc = func() (cgroup.Limits, error) {
+				return cgroup.Limits{
+					CgroupVersion:             cgroup.VersionV2,
+					MemoryLimitBytes:          tc.limit,
+					EffectiveMemoryLimitBytes: tc.limit,
+					MemoryLimitFinite:         true,
+				}, nil
+			}
+			err := checkExtractionBudget(entry, nil)
+			if tc.wantErr {
+				require.ErrorIs(t, err, cgroup.ErrMemoryBudget)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}

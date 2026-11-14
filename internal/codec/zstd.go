@@ -93,11 +93,28 @@ func (c *ZstdCodec) CompressWithDict(w io.Writer, src []byte, level string, dict
 		return err
 	}
 
+	hasDict := len(dict) > 0
+	plan := resolveZstdEncodePlan(len(src), encLevel, hasDict)
+
 	opts := []zstd.EOption{
 		zstd.WithEncoderLevel(encLevel),
+		zstd.WithEncoderConcurrency(plan.concurrency),
 	}
-	if len(dict) > 0 {
+	if hasDict {
 		opts = append(opts, zstd.WithEncoderDict(dict))
+	}
+
+	if plan.singleShot {
+		encoder, initErr := zstd.NewWriter(nil, opts...)
+		if initErr != nil {
+			return fmt.Errorf("initializing zstd encoder: %w", initErr)
+		}
+		initialCap := len(src)/singleShotCapDivisor + singleShotOverheadBytes
+		encoded := encoder.EncodeAll(src, make([]byte, 0, initialCap))
+		if _, writeErr := w.Write(encoded); writeErr != nil {
+			return fmt.Errorf("compressing zstd payload: %w", writeErr)
+		}
+		return nil
 	}
 
 	writer, err := zstd.NewWriter(w, opts...)

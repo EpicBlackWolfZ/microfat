@@ -224,7 +224,7 @@ func buildStartupScenarios(srcDir, benchDir, microfatStub, microfatCli string) [
 		if _, err := os.Stat(profile.path); err != nil {
 			panic(fmt.Errorf("startup matrix requires %s stub: %w", profile.name, err))
 		}
-		for _, version := range []string{"2", "1"} {
+		for _, version := range []string{"2"} {
 			for _, codec := range []string{"zstd", "lz4", "none", "zstd-dict"} {
 				name := "Format v" + version + " " + profile.name + " " + codec
 				path := filepath.Join(benchDir, "fat_v"+version+"_"+profile.name+"_"+codec)

@@ -189,13 +189,24 @@ shared release gates below apply to the final candidate; green intermediate CI i
 
 ## v0.4.0: measured improvements and observability
 
+Start with reproducible new-Pack creation epochs [#391](https://github.com/EpicBlackWolfZ/microfat/issues/391)
+and per-variant CLI compression #43. The live
+[delivery index #378](https://github.com/EpicBlackWolfZ/microfat/issues/378) records the complete
+ten-issue commitment and ordering, including verified-descriptor handoff #392, prewarm planning
+and payload-byte admission #390, and the original matched service-p99 investigation #230.
+Issue-local acceptance remains authoritative; these are pending release commitments.
+
 | Scope | Issues |
 | --- | --- |
+| Explicit new-Pack epoch and CLI `SOURCE_DATE_EPOCH` | [#391](https://github.com/EpicBlackWolfZ/microfat/issues/391) |
 | Runtime metadata accessor/recipes and non-mutating doctor tuning preview | [#15](https://github.com/EpicBlackWolfZ/microfat/issues/15), [#156](https://github.com/EpicBlackWolfZ/microfat/issues/156) |
 | Attribute and reduce disabled-telemetry overhead | [#41](https://github.com/EpicBlackWolfZ/microfat/issues/41) |
-| Derive automatic codec policy from representative measurements | [#42](https://github.com/EpicBlackWolfZ/microfat/issues/42) |
+| Evaluate complete codec costs; retain defaults unless a replacement qualifies | [#42](https://github.com/EpicBlackWolfZ/microfat/issues/42), [evaluation](codec-policy-results.md) |
+| Known-size Zstd frame/window evaluation and opt-in complete-byte dictionary profitability | [#409](https://github.com/EpicBlackWolfZ/microfat/issues/409), [evaluation](zstd-frame-and-dict-profitability.md) |
 | Per-variant CLI compression with existing manifest support and explicit precedence | [#43](https://github.com/EpicBlackWolfZ/microfat/issues/43) |
-| Exact compatible-level bitsets with independent requirements-based equivalence tests | [#153](https://github.com/EpicBlackWolfZ/microfat/issues/153) |
+| Requirements-exact selection qualification; masks only when measured work justifies them | [#153](https://github.com/EpicBlackWolfZ/microfat/issues/153), [evaluation](requirements-exact-selection-results.md) |
+| Controlled historical service-p99 investigation and explicit inconclusive disposition | [#230](https://github.com/EpicBlackWolfZ/microfat/issues/230), [results](hosted-p99-investigation-results.md) |
+| Permanent removal of deprecated legacy Format v1 JSON manifest support | [#427](https://github.com/EpicBlackWolfZ/microfat/issues/427), [migration](release-artifacts.md#4-legacy-format-v1-removal-notice) |
 
 Exit: metadata fields/profiles and unknowns are accurate, previews preserve safe GC prerequisites,
 and optimizations demonstrate useful benefit without weakening correctness. Include AMD64 missing-feature

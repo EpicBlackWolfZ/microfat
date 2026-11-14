@@ -96,11 +96,8 @@ func (f *productFake) cli(spec process.Spec, result *Result) {
 		require.Equal(f.t, f.options.Arch, argument(spec, "--arch"))
 		write(f.t, packed, "xxpayload")
 	case inspectCommand:
-		version := 1
-		if strings.HasPrefix(filepath.Base(filepath.Dir(spec.Args[1])), "v2-") {
-			version = 2
-		}
-		result.Stdout = fmt.Sprintf(`{"version":%d,"arch":%q,"variants":[{"offset":2},{"offset":3}]}`, version, f.options.Arch)
+		require.True(f.t, strings.HasPrefix(filepath.Base(filepath.Dir(spec.Args[1])), "v2-"))
+		result.Stdout = fmt.Sprintf(`{"version":2,"arch":%q,"variants":[{"offset":2},{"offset":3}]}`, f.options.Arch)
 	case "verify":
 		result.Stdout = `{"valid":true}`
 		if filepath.Base(spec.Args[1]) == "corrupt" {
@@ -163,8 +160,8 @@ func TestCompleteNativeMatrix(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join(options.Output, "results.json"))
 			require.NoError(t, err)
 			require.NoError(t, json.Unmarshal(data, &results))
-			require.Len(t, results, 16)
-			require.Equal(t, 16, strings.Count(progress.String(), "passed"))
+			require.Len(t, results, 8)
+			require.Equal(t, 8, strings.Count(progress.String(), "passed"))
 			names := map[string]bool{}
 			for _, result := range results {
 				require.False(t, names[result.Case])
@@ -172,8 +169,8 @@ func TestCompleteNativeMatrix(t *testing.T) {
 				require.Equal(t, "pass", result.Status)
 				require.Len(t, result.Digest, 64)
 			}
-			require.Greater(t, fake.calls, 200)
-			corrupt, err := os.ReadFile(filepath.Join(options.Output, "v1-full-none-dict0", "corrupt"))
+			require.Greater(t, fake.calls, 100)
+			corrupt, err := os.ReadFile(filepath.Join(options.Output, "v2-full-none-dict0", "corrupt"))
 			require.NoError(t, err)
 			require.Equal(t, byte('p')^0xff, corrupt[2])
 			require.Equal(t, byte('a')^0xff, corrupt[3])
@@ -202,11 +199,11 @@ func TestMatrixRejectsWrongObservations(t *testing.T) {
 		{"wrong version", "--version", "0.2.40"}, {"empty detect", detectCommand, `{}`},
 		{"wrong arch", detectCommand, `{"arch":"arm64","level":"v8.0"}`},
 		{"unknown level", detectCommand, `{"arch":"amd64","level":"../../escape"}`},
-		{"invalid json", detectCommand, "not json"}, {"wrong format", inspectCommand, `{"version":2,"arch":"amd64"}`},
-		{"wrong inspected arch", inspectCommand, `{"version":1,"arch":"arm64"}`},
-		{"missing variants", inspectCommand, `{"version":1,"arch":"amd64"}`},
-		{"negative offset", inspectCommand, `{"version":1,"arch":"amd64","variants":[{"offset":-1}]}`},
-		{"large offset", inspectCommand, `{"version":1,"arch":"amd64","variants":[{"offset":200}]}`},
+		{"invalid json", detectCommand, "not json"}, {"wrong format", inspectCommand, `{"version":1,"arch":"amd64"}`},
+		{"wrong inspected arch", inspectCommand, `{"version":2,"arch":"arm64"}`},
+		{"missing variants", inspectCommand, `{"version":2,"arch":"amd64"}`},
+		{"negative offset", inspectCommand, `{"version":2,"arch":"amd64","variants":[{"offset":-1}]}`},
+		{"large offset", inspectCommand, `{"version":2,"arch":"amd64","variants":[{"offset":200}]}`},
 		{"wrong variant", "argument with spaces", `{"arch":"amd64","variant":"v1"}`},
 		{"wrong args", "argument with spaces", `{"arch":"amd64","variant":"v3","args":[]}`},
 		{"wrong origin", "argument with spaces", `{"arch":"amd64","variant":"v3","args":["argument with spaces","*literal*"]}`},

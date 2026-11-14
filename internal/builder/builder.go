@@ -28,25 +28,28 @@ const (
 
 // BuildOptions contains configuration parameters for building and packaging PGO variants.
 type BuildOptions struct {
-	ManifestPath      string
-	OutputPath        string
-	StubPath          string
-	StubProfile       string
-	Concurrency       int
-	KeepIntermediates bool
-	GoBinary          string
-	SkipELFValidation bool
-	AllowMixedABI     bool
-	ABIReportCallback func(report *pack.ArtifactABIReport)
-	Profile           string
-	Compression       string
-	CompressionLevel  string
-	EnableDict        bool
-	DictSize          int
-	FormatVersion     int
-	Stdout            io.Writer
-	Stderr            io.Writer
-	WarnFunc          pack.WarnFunc
+	ManifestPath       string
+	OutputPath         string
+	StubPath           string
+	StubProfile        string
+	Concurrency        int
+	KeepIntermediates  bool
+	GoBinary           string
+	SkipELFValidation  bool
+	AllowMixedABI      bool
+	ABIReportCallback  func(report *pack.ArtifactABIReport)
+	Profile            string
+	Compression        string
+	CompressionLevel   string
+	VariantCompression map[string]pack.VariantCompressionOptions
+	EnableDict         bool
+	DictProfitable     bool
+	DictSize           int
+	FormatVersion      int
+	CreatedUnix        *int64 // Optional creation metadata for Pack; nil retains wall-clock time.
+	Stdout             io.Writer
+	Stderr             io.Writer
+	WarnFunc           pack.WarnFunc
 }
 
 // BuildResult contains metadata about the compiled and packaged fat binary.
@@ -59,11 +62,28 @@ type BuildResult struct {
 	VariantPGOApplied map[string]string // level -> pgo flag applied
 }
 
+func validateBuildOptions(m *Manifest, opts BuildOptions) error {
+	if m == nil {
+		return ErrInvalidManifest
+	}
+	if opts.EnableDict && opts.DictProfitable {
+		return pack.ErrConflictingDictOptions
+	}
+	if opts.FormatVersion == format.FormatVersion1 {
+		return fmt.Errorf("%w: Format v1 was removed in v0.4.0; use Format v2", format.ErrUnsupportedVersion)
+	}
+	if opts.FormatVersion != 0 && opts.FormatVersion != format.FormatVersion2 {
+		return fmt.Errorf("%w: got version %d, expected %d",
+			format.ErrUnsupportedVersion, opts.FormatVersion, format.FormatVersion2)
+	}
+	return nil
+}
+
 // BuildAndPack orchestrates concurrent Go compilation of all manifest variants with Profile-Guided
 // Optimization flags, then packages the resulting ELF binaries into a self-dispatching fat executable.
 func BuildAndPack(ctx context.Context, m *Manifest, opts BuildOptions) (*BuildResult, error) {
-	if m == nil {
-		return nil, ErrInvalidManifest
+	if err := validateBuildOptions(m, opts); err != nil {
+		return nil, err
 	}
 
 	mOwned := cloneManifest(m)
@@ -433,6 +453,7 @@ func assemblePackOptions(
 	packOpts.StubPath = stubPath
 	packOpts.OutputPath = finalOutput
 	packOpts.AppName = appName
+	packOpts.CreatedUnix = opts.CreatedUnix
 	if m.TargetOS != "" {
 		packOpts.TargetOS = m.TargetOS
 	}
@@ -460,6 +481,9 @@ func assemblePackOptions(
 		if m.Compression.EnableDict {
 			packOpts.EnableDict = true
 		}
+		if m.Compression.DictProfitable {
+			packOpts.DictProfitable = true
+		}
 		if m.Compression.DictSize > 0 {
 			packOpts.DictSize = m.Compression.DictSize
 		}
@@ -479,26 +503,17 @@ func assemblePackOptions(
 	}
 	if opts.EnableDict {
 		packOpts.EnableDict = true
+		packOpts.DictProfitable = false
+	}
+	if opts.DictProfitable {
+		packOpts.DictProfitable = true
+		packOpts.EnableDict = false
 	}
 	if opts.DictSize > 0 {
 		packOpts.DictSize = opts.DictSize
 	}
 
-	if len(m.Variants) > 0 {
-		varCompMap := make(map[string]pack.VariantCompressionOptions, len(m.Variants))
-		for _, v := range m.Variants {
-			if v.Compression != nil {
-				varCompMap[v.Level] = pack.VariantCompressionOptions{
-					Profile:     v.Compression.Profile,
-					Compression: v.Compression.Algorithm,
-					Level:       v.Compression.Level,
-				}
-			}
-		}
-		if len(varCompMap) > 0 {
-			packOpts.VariantCompression = varCompMap
-		}
-	}
+	packOpts.VariantCompression = assembleVariantCompression(m.Variants, opts.VariantCompression)
 
 	if opts.WarnFunc != nil {
 		packOpts.WarnFunc = opts.WarnFunc
@@ -527,4 +542,41 @@ func assemblePackOptions(
 	}
 
 	return packOpts
+}
+
+func assembleVariantCompression(
+	variants []VariantConfig,
+	overrides map[string]pack.VariantCompressionOptions,
+) map[string]pack.VariantCompressionOptions {
+	merged := make(map[string]pack.VariantCompressionOptions, len(variants)+len(overrides))
+	for _, variant := range variants {
+		if variant.Compression != nil {
+			merged[format.NormalizeVariant(variant.Level)] = pack.VariantCompressionOptions{
+				Profile:     variant.Compression.Profile,
+				Compression: variant.Compression.Algorithm,
+				Level:       variant.Compression.Level,
+			}
+		}
+	}
+	for level, override := range overrides {
+		level = format.NormalizeVariant(level)
+		compression := merged[level]
+		if override.Profile != "" {
+			compression.Profile = override.Profile
+		}
+		if override.Compression != "" {
+			compression.Compression = override.Compression
+			if _, inlineLevel := codec.ParseCompressionSpec(override.Compression); inlineLevel != "" {
+				compression.Level = inlineLevel
+			}
+		}
+		if override.Level != "" {
+			compression.Level = override.Level
+		}
+		merged[level] = compression
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
 }

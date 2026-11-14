@@ -38,7 +38,7 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 | [**v0.3.0 Release Notes**](docs/releases/v0.3.0.md) | Verified installation, updates, Linux Homebrew and release acceptance evidence. |
 | [**v0.3.1 Release Notes**](docs/releases/v0.3.1.md) | Installer and dictionary fixes, dependency updates, and release acceptance evidence. |
 | [**v0.2.5 Release Notes**](docs/releases/v0.2.5.md) | Go/Task tooling, modern SBOMs, staged CI and benchmark correctness. |
-| [**Release Artifacts Guide**](docs/release-artifacts.md) | Universal fat archives, bundled launcher stubs, and Format v1 deprecation. |
+| [**Release Artifacts Guide**](docs/release-artifacts.md) | Universal fat archives, bundled launcher stubs, and Format v2 binary index migration. |
 | [**Native Runtime Qualification**](docs/runtime-qualification.md) | Concurrent cache and kernel-policy testing, replay, and signed-candidate release gates. |
 | [**Production Roadmap**](docs/roadmap.md) | Release priorities, safety gates and experimental scope. |
 | 📊 [**Demo & Benchmark Suite**](examples/demo/README.md) | Multi-workload benchmark application testing SIMD vector math, JSON/Zstd processing, and concurrent workers. |
@@ -46,6 +46,8 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 | 📖 [**Architecture & Binary Format**](docs/architecture.md) | Technical specification of the 56-byte trailer, Format v2 binary table layout, shared dictionaries, and `memfd_create` lifecycle. |
 | 💻 [**CLI & Launcher Stub Reference**](docs/cli-reference.md) | Complete reference for `microfat` CLI commands, flags, launcher stub meta-commands, exit codes, and environment variables. |
 | ⚙️ [**Container Resource Auto-Tuning**](docs/runtime-tuning.md) | Linux cgroup v1/v2 auto-tuning (`GOMEMLIMIT` / `GOMAXPROCS`), GC mechanics, and workload `GOGC` tuning recipes. |
+| [**Application Runtime Metadata**](docs/runtimeinfo.md) | Supported read-only accessor, source/unknown semantics, and runnable Prometheus/OpenTelemetry recipes. |
+| [**Launcher Diagnostics Cost**](docs/disabled-telemetry-snapshot-results.md) | Both clock-removal evaluations, retained implementation, and reproducible process/allocation evidence. |
 | 🔄 [**Binary Lifecycle Modes**](docs/lifecycle-modes.md) | Comprehensive comparison and workflows for Universal Fat, Trimmed Fat, Raw Native ELF, and node cache prewarming. |
 | 🚀 [**Advanced Optimizations & Compression Matrix**](docs/advanced-optimizations.md) | AVX-512 downclocking mitigation, Compression Decision Matrix, declarative PGO matrices, and high-performance C allocators. |
 | 🩺 [**Troubleshooting & Runbook**](docs/troubleshooting.md) | Diagnostic workflows with `microfat doctor`, seccomp `memfd_create` remediation, read-only rootfs fallback, and FAQ. |
@@ -312,6 +314,14 @@ configPath := filepath.Join(filepath.Dir(exePath), "config.yaml")
 
 ---
 
+## Application Runtime Metadata (`runtimeinfo`)
+
+Read launcher hints, current environment configuration and observed Go runtime
+settings through the standard-library-only `runtimeinfo.Read()` accessor. Missing
+metadata stays explicit; cgroup recommendations do not imply applied tuning.
+See the [field and source contract](docs/runtimeinfo.md) and the separate
+[Prometheus/OpenTelemetry recipes](examples/runtimeinfo/README.md).
+
 ## Runtime Meta-Commands
 
 Fat executables using the full launcher support reserved meta-commands for diagnostics and disk specialization:
@@ -392,6 +402,11 @@ across both formats, stub profiles and all codecs with identical tuning.
 | `size` | `zstd:best` (+`--dict`) | Favor storage/transfer reduction; measure extraction cost |
 
 Startup latency and compression ratios depend on the payload, host and execution mode.
+The [complete-cost evaluation](docs/codec-policy-results.md) retains these defaults
+after comparing fixed explicit settings, complete bytes, packing wall/CPU time
+and full process completion. It preserves the failed telemetry-enabled cohort
+and discloses unresolved codec memory attribution in the wait4 observations.
+Warm verified-cache launches still hash payloads; they do not decompress them.
 
 For full benchmarks and sizing recipes, see the [Advanced Optimizations Guide](docs/advanced-optimizations.md#4-compression-profiles--decision-matrix).
 

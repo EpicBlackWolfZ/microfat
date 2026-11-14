@@ -5,6 +5,7 @@ import (
 	"debug/elf"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"runtime/debug"
 )
 
@@ -25,6 +26,7 @@ const (
 	goBuildInfoLargePtr    = 8
 	goBuildInfoStringWord  = 2
 	goBuildInfoModuleTabs  = 2
+	goBuildInfoScanWindow  = 64 * 1024
 )
 
 type goBuildInfoAccounting struct {
@@ -36,21 +38,33 @@ type goBuildInfoAccounting struct {
 // bounds have been validated. SysV ELF is common for Linux binaries and does
 // not identify an operating system; explicit foreign OSABI values do.
 func validateELFPlatform(data []byte, f *elf.File, targetOS string) error {
+	return validateELFPlatformReaderAt(bytes.NewReader(data), uint64(len(data)), f, targetOS)
+}
+
+func validateELFPlatformReaderAt(r io.ReaderAt, fileSize uint64, f *elf.File, targetOS string) error {
 	if f.OSABI != elf.ELFOSABI_NONE && f.OSABI != elf.ELFOSABI_LINUX {
 		return fmt.Errorf("ELF OSABI %s conflicts with target operating system %s", f.OSABI, targetOS)
 	}
 	loads := make([]loadSegment, 0, len(f.Progs))
+	var maxWritable uint64
 	for _, p := range f.Progs {
 		if p.Type == elf.PT_LOAD {
 			loads = append(loads, loadSegment{off: p.Off, vaddr: p.Vaddr, filesz: p.Filesz, memsz: p.Memsz})
+			if p.Flags&elf.PF_W != 0 && p.Filesz >= goBuildInfoHeaderSize && p.Filesz > maxWritable {
+				maxWritable = p.Filesz
+			}
 		}
 	}
+	if maxWritable == 0 {
+		return nil
+	}
+	scanBuf := make([]byte, min(maxWritable, uint64(goBuildInfoScanWindow)))
 	accounting := &goBuildInfoAccounting{}
 	for _, p := range f.Progs {
 		if p.Type != elf.PT_LOAD || p.Flags&elf.PF_W == 0 || p.Filesz < goBuildInfoHeaderSize {
 			continue
 		}
-		found, err := checkGoBuildInfoSegment(data, loads, p, targetOS, accounting)
+		found, err := checkGoBuildInfoSegmentReaderAt(r, fileSize, loads, p, targetOS, accounting, scanBuf)
 		if err != nil || found {
 			return err
 		}
@@ -58,56 +72,96 @@ func validateELFPlatform(data []byte, f *elf.File, targetOS string) error {
 	return nil
 }
 
-// Search file-backed writable segments without consulting section names. This
-// also works when section headers have been stripped and avoids debug/elf's
-// eager expansion and copying of auxiliary section-name tables.
-func checkGoBuildInfoSegment(
-	data []byte, loads []loadSegment, p *elf.Prog, targetOS string, accounting *goBuildInfoAccounting,
+// Search file-backed writable segments in bounded 64 KiB windows without consulting section names.
+// This works when section headers have been stripped and avoids reading multi-megabyte .text/.rodata
+// or eagerly allocating entire writable segments into heap buffers.
+func checkGoBuildInfoSegmentReaderAt(
+	r io.ReaderAt,
+	fileSize uint64,
+	loads []loadSegment,
+	p *elf.Prog,
+	targetOS string,
+	accounting *goBuildInfoAccounting,
+	scanBuf []byte,
 ) (bool, error) {
-	segment := data[p.Off : p.Off+p.Filesz]
-	start := (goBuildInfoAlignment - p.Vaddr%goBuildInfoAlignment) % goBuildInfoAlignment
-	for start < uint64(len(segment)) {
-		index := bytes.Index(segment[start:], []byte(goBuildInfoMagic))
-		if index < 0 {
+	segEnd := p.Off + p.Filesz
+	var windowStart uint64
+	for windowStart < p.Filesz {
+		rem := p.Filesz - windowStart
+		if rem < goBuildInfoHeaderSize {
 			break
 		}
-		offset := start + uint64(index)
-		start = offset + uint64(len(goBuildInfoMagic))
-		if (p.Vaddr+offset)%goBuildInfoAlignment != 0 || uint64(len(segment))-offset < goBuildInfoHeaderSize {
-			continue
-		}
-		module, err := readGoBuildInfoModule(data, loads, segment[offset:])
-		if err != nil {
+		windowLen := min(uint64(len(scanBuf)), rem)
+		window := scanBuf[:windowLen]
+		if err := readIntoAt(r, window, p.Off+windowStart); err != nil {
 			return false, err
 		}
-		found, err := checkGoBuildInfoTarget(module, targetOS, accounting)
-		if err != nil || found {
-			return found, err
+
+		maxRelStart := windowLen - goBuildInfoHeaderSize
+		rel := (goBuildInfoAlignment - (p.Vaddr+windowStart)%goBuildInfoAlignment) % goBuildInfoAlignment
+		for rel <= maxRelStart {
+			idx := bytes.Index(window[rel:], []byte(goBuildInfoMagic))
+			if idx < 0 {
+				break
+			}
+			candRel := rel + uint64(idx)
+			rel = candRel + uint64(len(goBuildInfoMagic))
+			if candRel > maxRelStart {
+				break
+			}
+			offset := windowStart + candRel
+			if (p.Vaddr+offset)%goBuildInfoAlignment != 0 {
+				continue
+			}
+			header := window[candRel : candRel+goBuildInfoHeaderSize]
+			module, err := readGoBuildInfoModuleReaderAt(r, fileSize, loads, header, p.Off+offset+goBuildInfoHeaderSize, segEnd)
+			if err != nil {
+				return false, err
+			}
+			found, err := checkGoBuildInfoTarget(module, targetOS, accounting)
+			if err != nil || found {
+				return found, err
+			}
 		}
+
+		if windowStart+windowLen >= p.Filesz {
+			break
+		}
+		windowStart += windowLen - (goBuildInfoHeaderSize - 1)
 	}
 	return false, nil
 }
 
-func readGoBuildInfoModule(data []byte, loads []loadSegment, blob []byte) ([]byte, error) {
+func readGoBuildInfoModuleReaderAt(
+	r io.ReaderAt,
+	fileSize uint64,
+	loads []loadSegment,
+	header []byte,
+	inlinePos uint64,
+	segEnd uint64,
+) ([]byte, error) {
 	var version, module []byte
 	var err error
-	if blob[goBuildInfoFlagsOffset]&goBuildInfoInlineFlag != 0 {
-		version, blob, err = readGoBuildInfoInlineString(blob[goBuildInfoHeaderSize:])
+	if header[goBuildInfoFlagsOffset]&goBuildInfoInlineFlag != 0 {
+		var nextPos uint64
+		version, nextPos, err = readGoBuildInfoInlineStringReaderAt(r, inlinePos, segEnd)
 		if err == nil && len(version) != 0 {
-			module, _, err = readGoBuildInfoInlineString(blob)
+			module, _, err = readGoBuildInfoInlineStringReaderAt(r, nextPos, segEnd)
 		}
 	} else {
-		pointerSize := blob[goBuildInfoPointerSize]
+		pointerSize := header[goBuildInfoPointerSize]
 		if pointerSize != goBuildInfoSmallPtr && pointerSize != goBuildInfoLargePtr {
 			return nil, nil
 		}
 		order := binary.ByteOrder(binary.LittleEndian)
-		if blob[goBuildInfoFlagsOffset]&goBuildInfoEndianFlag != 0 {
+		if header[goBuildInfoFlagsOffset]&goBuildInfoEndianFlag != 0 {
 			order = binary.BigEndian
 		}
-		version, err = readGoBuildInfoPointerString(data, loads, blob[goBuildInfoPointerOff:], pointerSize, order)
+		version, err = readGoBuildInfoPointerStringReaderAt(r, fileSize, loads, header[goBuildInfoPointerOff:], pointerSize, order)
 		if err == nil && len(version) != 0 {
-			module, err = readGoBuildInfoPointerString(data, loads, blob[goBuildInfoPointerOff+pointerSize:], pointerSize, order)
+			module, err = readGoBuildInfoPointerStringReaderAt(
+				r, fileSize, loads, header[goBuildInfoPointerOff+pointerSize:], pointerSize, order,
+			)
 		}
 	}
 	if err != nil {
@@ -122,35 +176,50 @@ func readGoBuildInfoModule(data []byte, loads []loadSegment, blob []byte) ([]byt
 	return module, nil
 }
 
-func readGoBuildInfoInlineString(blob []byte) ([]byte, []byte, error) {
-	length, prefix := binary.Uvarint(blob)
-	if prefix <= 0 {
-		return nil, nil, nil
+func readGoBuildInfoInlineStringReaderAt(r io.ReaderAt, pos, segEnd uint64) ([]byte, uint64, error) {
+	if pos >= segEnd {
+		return nil, 0, nil
 	}
-	if length > uint64(len(blob))-uint64(prefix) {
-		return nil, nil, nil
+	var varintBuf [binary.MaxVarintLen64]byte
+	avail := min(uint64(len(varintBuf)), segEnd-pos)
+	if err := readIntoAt(r, varintBuf[:avail], pos); err != nil {
+		return nil, 0, err
+	}
+	length, prefix := binary.Uvarint(varintBuf[:avail])
+	if prefix <= 0 {
+		return nil, 0, nil
+	}
+	remAfterPrefix := (segEnd - pos) - uint64(prefix)
+	if length > remAfterPrefix {
+		return nil, 0, nil
 	}
 	if length > MaxABIStringBytesPerInput {
-		return nil, nil, fmt.Errorf("%w: Go buildinfo string size %d exceeds budget limit %d",
+		return nil, 0, fmt.Errorf("%w: Go buildinfo string size %d exceeds budget limit %d",
 			ErrABIResourceLimit, length, MaxABIStringBytesPerInput)
 	}
-	end := uint64(prefix) + length
-	return blob[uint64(prefix):end], blob[end:], nil
+	strOff := pos + uint64(prefix)
+	strBytes, err := readExactAt(r, strOff, length)
+	if err != nil {
+		return nil, 0, err
+	}
+	return strBytes, strOff + length, nil
 }
 
-func readGoBuildInfoPointerString(
-	data []byte, loads []loadSegment, rawPointer []byte, pointerSize uint8, order binary.ByteOrder,
+func readGoBuildInfoPointerStringReaderAt(
+	r io.ReaderAt, fileSize uint64, loads []loadSegment, rawPointer []byte, pointerSize uint8, order binary.ByteOrder,
 ) ([]byte, error) {
 	headerAddr := readGoBuildInfoPointer(rawPointer, pointerSize, order)
-	fileSize := uint64(len(data))
 	headerSize := uint64(pointerSize) * goBuildInfoStringWord
 	headerOff, err := translateVaddr(loads, fileSize, headerAddr, headerSize)
 	if err != nil {
 		return nil, nil
 	}
-	header := data[headerOff : headerOff+headerSize]
-	address := readGoBuildInfoPointer(header, pointerSize, order)
-	length := readGoBuildInfoPointer(header[pointerSize:], pointerSize, order)
+	var header [goBuildInfoLargePtr * goBuildInfoStringWord]byte
+	if err := readIntoAt(r, header[:headerSize], headerOff); err != nil {
+		return nil, err
+	}
+	address := readGoBuildInfoPointer(header[:headerSize], pointerSize, order)
+	length := readGoBuildInfoPointer(header[pointerSize:headerSize], pointerSize, order)
 	if length > MaxABIStringBytesPerInput {
 		return nil, fmt.Errorf("%w: Go buildinfo string size %d exceeds budget limit %d",
 			ErrABIResourceLimit, length, MaxABIStringBytesPerInput)
@@ -162,7 +231,7 @@ func readGoBuildInfoPointerString(
 	if err != nil {
 		return nil, nil
 	}
-	return data[offset : offset+length], nil
+	return readExactAt(r, offset, length)
 }
 
 func readGoBuildInfoPointer(data []byte, pointerSize uint8, order binary.ByteOrder) uint64 {

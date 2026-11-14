@@ -105,7 +105,7 @@ var mountScenarios = []string{
 
 func mountConfigurations() []mountConfiguration {
 	var configurations []mountConfiguration
-	for _, version := range []int{1, 2} {
+	for _, version := range []int{2} {
 		for _, profile := range []string{launcherFullProfile, launcherMinimalProfile} {
 			for _, codec := range []string{"none", "lz4", mountCodecZstd} {
 				c := mountConfiguration{Version: version, Profile: profile, Codec: codec}

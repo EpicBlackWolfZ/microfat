@@ -3168,14 +3168,27 @@ func TestPrewarm_RequiresValidDictionaryChecksum(t *testing.T) {
 
 	buildPoisonedFatFile := func(t *testing.T, poisonedSHA string) (*os.File, int64) {
 		t.Helper()
-		tamperedIdx := *origIdx
-		tamperedIdx.DictionarySHA256 = poisonedSHA
+		goodIndexBytes, mErr := format.MarshalBinaryIndex(origIdx)
+		require.NoError(t, mErr)
+		const dictSHALenOffset = 34
+		origDictSHALen := int(goodIndexBytes[dictSHALenOffset])
+		craftedIndex := make([]byte, 0, len(goodIndexBytes)-origDictSHALen+len(poisonedSHA))
+		craftedIndex = append(craftedIndex, goodIndexBytes[:dictSHALenOffset]...)
+		craftedIndex = append(craftedIndex, byte(len(poisonedSHA)))
+		craftedIndex = append(craftedIndex, []byte(poisonedSHA)...)
+		craftedIndex = append(craftedIndex, goodIndexBytes[dictSHALenOffset+1+origDictSHALen:]...)
 
 		var buf bytes.Buffer
 		buf.Write(fatBytes[:indexOffset])
-		if _, err := format.WriteIndexAndTrailerWithVersion(&buf, &tamperedIdx, indexOffset, format.FormatVersion1); err != nil {
-			t.Fatalf("failed to rewrite index and trailer: %v", err)
-		}
+		buf.Write(craftedIndex)
+
+		var trailer [format.TrailerSize]byte
+		binary.LittleEndian.PutUint64(trailer[0:format.OffsetLen], uint64(indexOffset))
+		binary.LittleEndian.PutUint64(trailer[format.OffsetLen:format.OffsetLen*2], uint64(len(craftedIndex)))
+		sum := sha256.Sum256(craftedIndex)
+		copy(trailer[format.OffsetLen*2:format.OffsetLen*2+format.HashLen], sum[:])
+		copy(trailer[format.OffsetLen*2+format.HashLen:], []byte(format.MagicString))
+		buf.Write(trailer[:])
 
 		f, err := os.CreateTemp(t.TempDir(), "poisoned_dict_*.fat")
 		require.NoError(t, err, "failed to create temp file")

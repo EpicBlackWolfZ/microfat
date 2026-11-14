@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"sort"
 	"strconv"
@@ -533,7 +534,76 @@ func sanitizeStringSlice(ss []string) []string {
 	return res
 }
 
-const stringScanChunkSize = 64
+const (
+	stringScanChunkSize   = 64
+	sectionZeroShnumOff   = 32
+	sectionZeroShnumBytes = 8
+	phOffsetFieldOff      = 8
+	phVaddrFieldOff       = 16
+	phFileszFieldOff      = 32
+	phMemszFieldOff       = 40
+	phTypeFieldEnd        = 4
+	dynTagBytes           = 8
+	vernauxFlagsOff       = 4
+	vernauxFlagsEnd       = 6
+	vernauxNameOff        = 8
+	vernauxNameEnd        = 12
+	vernauxNextOff        = 12
+	verneedCntOff         = 2
+	verneedCntEnd         = 4
+	verneedFileOff        = 4
+	verneedFileEnd        = 8
+	verneedAuxOff         = 8
+	verneedAuxEnd         = 12
+	verneedNextOff        = 12
+	elfEhdrTypeOff        = 16
+	elfEhdrTypeEnd        = 18
+	elfEhdrMachineOff     = 18
+	elfEhdrMachineEnd     = 20
+	elfEhdrPhoffOff       = 32
+	elfEhdrPhoffEnd       = 40
+	elfEhdrShoffOff       = 40
+	elfEhdrShoffEnd       = 48
+	elfEhdrEhsizeOff      = 52
+	elfEhdrEhsizeEnd      = 54
+	elfEhdrPhentsizeOff   = 54
+	elfEhdrPhentsizeEnd   = 56
+	elfEhdrPhnumOff       = 56
+	elfEhdrPhnumEnd       = 58
+	elfEhdrShentsizeOff   = 58
+	elfEhdrShentsizeEnd   = 60
+	elfEhdrShnumOff       = 60
+	elfEhdrShnumEnd       = 62
+)
+
+func readIntoAt(r io.ReaderAt, buf []byte, off uint64) error {
+	size := uint64(len(buf))
+	if size == 0 {
+		return nil
+	}
+	if off > math.MaxInt64 || size > math.MaxInt64 || off > uint64(math.MaxInt64)-size {
+		return fmt.Errorf("%w: offset %d or size %d overflows int64", ErrABIMetadata, off, size)
+	}
+	n, err := r.ReadAt(buf, int64(off))
+	if err != nil && (!errors.Is(err, io.EOF) || n < len(buf)) {
+		return fmt.Errorf("%w: reading %d bytes at offset %d: %w", ErrABIMetadata, size, off, err)
+	}
+	return nil
+}
+
+func readExactAt(r io.ReaderAt, off, size uint64) ([]byte, error) {
+	if size == 0 {
+		return []byte{}, nil
+	}
+	if off > math.MaxInt64 || size > math.MaxInt64 || off > uint64(math.MaxInt64)-size {
+		return nil, fmt.Errorf("%w: offset %d or size %d overflows int64", ErrABIMetadata, off, size)
+	}
+	buf := make([]byte, size)
+	if err := readIntoAt(r, buf, off); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
 
 func scanBoundedCString(
 	strtab []byte,
@@ -658,6 +728,16 @@ func validateSectionHeaderTable(
 	fileSize, eShoff uint64,
 	eShentsize, eShnum uint16,
 ) error {
+	return validateSectionHeaderTableReaderAt(acc, bytes.NewReader(data), order, fileSize, eShoff, eShentsize, eShnum)
+}
+
+func validateSectionHeaderTableReaderAt(
+	acc *inputAccounting,
+	r io.ReaderAt,
+	order binary.ByteOrder,
+	fileSize, eShoff uint64,
+	eShentsize, eShnum uint16,
+) error {
 	if eShoff == 0 {
 		return nil
 	}
@@ -668,10 +748,14 @@ func validateSectionHeaderTable(
 		return fmt.Errorf("%w: section header table offset %d extends beyond file size %d", ErrABIMetadata, eShoff, fileSize)
 	}
 	if eShnum == 0 {
-		if eShoff+uint64(eShentsize) > fileSize {
+		if uint64(eShentsize) > fileSize-eShoff {
 			return fmt.Errorf("%w: section header 0 extends beyond file size %d", ErrABIMetadata, fileSize)
 		}
-		realShnum := order.Uint64(data[eShoff+32 : eShoff+40])
+		var shSizeBuf [sectionZeroShnumBytes]byte
+		if err := readIntoAt(r, shSizeBuf[:], eShoff+sectionZeroShnumOff); err != nil {
+			return err
+		}
+		realShnum := order.Uint64(shSizeBuf[:])
 		if realShnum > MaxSectionHeaders {
 			return fmt.Errorf("%w: extended section header count %d exceeds budget %d",
 				ErrABIResourceLimit, realShnum, MaxSectionHeaders)
@@ -704,40 +788,57 @@ func validateSectionHeaderTable(
 
 // PreflightELFHeaders validates ELF header tables and arithmetic bounds before general ELF parsing.
 func PreflightELFHeaders(data []byte) error {
+	return PreflightELFHeadersReaderAt(bytes.NewReader(data), uint64(len(data)))
+}
+
+// PreflightELFHeadersReaderAt validates ELF header tables and arithmetic bounds using bounded random-access reads.
+func PreflightELFHeadersReaderAt(r io.ReaderAt, fileSize uint64) error {
 	acc := &inputAccounting{}
-	return preflightELFHeadersWithAccounting(acc, data)
+	_, err := preflightELFHeadersReaderAtWithAccounting(acc, r, fileSize)
+	return err
 }
 
 func preflightELFHeadersWithAccounting(acc *inputAccounting, data []byte) error {
-	if len(data) < minELFHeaderSize {
-		return fmt.Errorf("%w: file size %d bytes is smaller than 64-byte ELF header", ErrABIMetadata, len(data))
+	_, err := preflightELFHeadersReaderAtWithAccounting(acc, bytes.NewReader(data), uint64(len(data)))
+	return err
+}
+
+func preflightELFHeadersReaderAtWithAccounting(acc *inputAccounting, r io.ReaderAt, fileSize uint64) ([]byte, error) {
+	if fileSize < minELFHeaderSize {
+		return nil, fmt.Errorf("%w: file size %d bytes is smaller than 64-byte ELF header", ErrABIMetadata, fileSize)
 	}
 	if acc != nil {
 		if err := acc.chargeMetadata(minELFHeaderSize); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	order, err := validateELFHeaderMagicAndEncoding(data)
+	var headerBuf [minELFHeaderSize]byte
+	if err := readIntoAt(r, headerBuf[:], 0); err != nil {
+		return nil, err
+	}
+	order, err := validateELFHeaderMagicAndEncoding(headerBuf[:])
 	if err != nil {
-		return err
+		return nil, err
 	}
-	fileSize := uint64(len(data))
-	eEhsize := order.Uint16(data[52:54])
-	if eEhsize < minELFHeaderSize || int(eEhsize) > len(data) {
-		return fmt.Errorf("%w: invalid ELF header size %d", ErrABIMetadata, eEhsize)
+	eEhsize := order.Uint16(headerBuf[elfEhdrEhsizeOff:elfEhdrEhsizeEnd])
+	if eEhsize < minELFHeaderSize || uint64(eEhsize) > fileSize {
+		return nil, fmt.Errorf("%w: invalid ELF header size %d", ErrABIMetadata, eEhsize)
 	}
 
-	ePhoff := order.Uint64(data[32:40])
-	ePhentsize := order.Uint16(data[54:56])
-	ePhnum := order.Uint16(data[56:58])
+	ePhoff := order.Uint64(headerBuf[elfEhdrPhoffOff:elfEhdrPhoffEnd])
+	ePhentsize := order.Uint16(headerBuf[elfEhdrPhentsizeOff:elfEhdrPhentsizeEnd])
+	ePhnum := order.Uint16(headerBuf[elfEhdrPhnumOff:elfEhdrPhnumEnd])
 	if err := validateProgramHeaderTable(acc, fileSize, ePhoff, ePhentsize, ePhnum); err != nil {
-		return err
+		return nil, err
 	}
 
-	eShoff := order.Uint64(data[40:48])
-	eShentsize := order.Uint16(data[58:60])
-	eShnum := order.Uint16(data[60:62])
-	return validateSectionHeaderTable(acc, data, order, fileSize, eShoff, eShentsize, eShnum)
+	eShoff := order.Uint64(headerBuf[elfEhdrShoffOff:elfEhdrShoffEnd])
+	eShentsize := order.Uint16(headerBuf[elfEhdrShentsizeOff:elfEhdrShentsizeEnd])
+	eShnum := order.Uint16(headerBuf[elfEhdrShnumOff:elfEhdrShnumEnd])
+	if err := validateSectionHeaderTableReaderAt(acc, r, order, fileSize, eShoff, eShentsize, eShnum); err != nil {
+		return nil, err
+	}
+	return headerBuf[:], nil
 }
 
 type loadSegment struct {
@@ -787,29 +888,55 @@ func InspectELFABI(data []byte) (*VariantABIReport, error) {
 	return InspectELFABIWithAccounting(data, nil)
 }
 
+// InspectELFABIReaderAt parses declared ABI metadata via bounded random-access reads without slurping the full ELF.
+func InspectELFABIReaderAt(r io.ReaderAt, fileSize uint64) (*VariantABIReport, error) {
+	return InspectELFABIReaderAtWithAccounting(r, fileSize, nil)
+}
+
 // InspectELFABIWithAccounting parses declared ABI metadata from raw ELF binary bytes, charging against a shared artifact account.
 func InspectELFABIWithAccounting(data []byte, shared *ArtifactMetadataAccounting) (*VariantABIReport, error) {
+	return InspectELFABIReaderAtWithAccounting(bytes.NewReader(data), uint64(len(data)), shared)
+}
+
+// InspectELFABIReaderAtWithAccounting parses declared ABI metadata via bounded random-access reads,
+// charging only inspected metadata tables/segments against per-input and shared artifact budgets.
+func InspectELFABIReaderAtWithAccounting(
+	r io.ReaderAt, fileSize uint64, shared *ArtifactMetadataAccounting,
+) (*VariantABIReport, error) {
 	acc := &inputAccounting{shared: shared}
-	if err := preflightELFHeadersWithAccounting(acc, data); err != nil {
+	header, err := preflightELFHeadersReaderAtWithAccounting(acc, r, fileSize)
+	if err != nil {
 		return nil, err
 	}
-	return inspectELFABIWithAccounting(acc, data)
+	return inspectELFABIReaderAtWithAccounting(acc, r, fileSize, header)
 }
 
 func inspectELFABIWithAccounting(acc *inputAccounting, data []byte) (*VariantABIReport, error) {
+	return inspectELFABIReaderAtWithAccounting(acc, bytes.NewReader(data), uint64(len(data)), nil)
+}
+
+func inspectELFABIReaderAtWithAccounting(
+	acc *inputAccounting, r io.ReaderAt, fileSize uint64, header []byte,
+) (*VariantABIReport, error) {
+	if len(header) < minELFHeaderSize {
+		var hdrBuf [minELFHeaderSize]byte
+		if err := readIntoAt(r, hdrBuf[:], 0); err != nil {
+			return nil, err
+		}
+		header = hdrBuf[:]
+	}
 	var order binary.ByteOrder
-	if data[5] == byte(elf.ELFDATA2LSB) {
+	if header[elf.EI_DATA] == byte(elf.ELFDATA2LSB) {
 		order = binary.LittleEndian
 	} else {
 		order = binary.BigEndian
 	}
 
-	fileSize := uint64(len(data))
-	eType := elf.Type(order.Uint16(data[16:18]))
-	eMachine := elf.Machine(order.Uint16(data[18:20]))
-	ePhoff := order.Uint64(data[32:40])
-	ePhentsize := uint64(order.Uint16(data[54:56]))
-	ePhnum := uint64(order.Uint16(data[56:58]))
+	eType := elf.Type(order.Uint16(header[elfEhdrTypeOff:elfEhdrTypeEnd]))
+	eMachine := elf.Machine(order.Uint16(header[elfEhdrMachineOff:elfEhdrMachineEnd]))
+	ePhoff := order.Uint64(header[elfEhdrPhoffOff:elfEhdrPhoffEnd])
+	ePhentsize := uint64(order.Uint16(header[elfEhdrPhentsizeOff:elfEhdrPhentsizeEnd]))
+	ePhnum := uint64(order.Uint16(header[elfEhdrPhnumOff:elfEhdrPhnumEnd]))
 
 	report := &VariantABIReport{
 		Class:            "ELFCLASS64",
@@ -819,57 +946,28 @@ func inspectELFABIWithAccounting(acc *inputAccounting, data []byte) (*VariantABI
 		Completeness:     MetadataAbsent,
 	}
 
-	var loads []loadSegment
-	var interpProg *loadSegment
-	var dynamicProg *loadSegment
-	interpCount := 0
-
-	for i := range ePhnum {
-		phOff := ePhoff + i*ePhentsize
-		pType := order.Uint32(data[phOff : phOff+4])
-		pOffset := order.Uint64(data[phOff+8 : phOff+16])
-		pVaddr := order.Uint64(data[phOff+16 : phOff+24])
-		pFilesz := order.Uint64(data[phOff+32 : phOff+40])
-		pMemsz := order.Uint64(data[phOff+40 : phOff+48])
-
-		switch elf.ProgType(pType) {
-		case elf.PT_LOAD:
-			if pFilesz > pMemsz || pOffset > fileSize || pFilesz > fileSize-pOffset || pMemsz > math.MaxUint64-pVaddr {
-				return nil, fmt.Errorf("%w: invalid PT_LOAD segment bounds (offset %d, filesz %d, memsz %d, vaddr 0x%x)",
-					ErrABIMetadata, pOffset, pFilesz, pMemsz, pVaddr)
-			}
-			loads = append(loads, loadSegment{off: pOffset, vaddr: pVaddr, filesz: pFilesz, memsz: pMemsz})
-
-		case elf.PT_INTERP:
-			interpCount++
-			if interpCount > 1 {
-				return nil, fmt.Errorf("%w: multiple PT_INTERP segments in ELF program headers", ErrABIMetadata)
-			}
-			if pFilesz > MaxInterpreterSize {
-				return nil, fmt.Errorf("%w: PT_INTERP size %d exceeds budget limit %d",
-					ErrABIResourceLimit, pFilesz, MaxInterpreterSize)
-			}
-			if pFilesz == 0 {
-				return nil, fmt.Errorf("%w: empty PT_INTERP segment", ErrABIMetadata)
-			}
-			if pOffset > fileSize || pFilesz > fileSize-pOffset {
-				return nil, fmt.Errorf("%w: PT_INTERP segment extends beyond file", ErrABIMetadata)
-			}
-			interpProg = &loadSegment{off: pOffset, vaddr: pVaddr, filesz: pFilesz, memsz: pMemsz}
-
-		case elf.PT_DYNAMIC:
-			if pOffset > fileSize || pFilesz > fileSize-pOffset {
-				return nil, fmt.Errorf("%w: PT_DYNAMIC segment extends beyond file", ErrABIMetadata)
-			}
-			dynamicProg = &loadSegment{off: pOffset, vaddr: pVaddr, filesz: pFilesz, memsz: pMemsz}
+	var phTable []byte
+	if ePhnum > 0 {
+		var err error
+		phTable, err = readExactAt(r, ePhoff, ePhnum*ePhentsize)
+		if err != nil {
+			return nil, err
 		}
+	}
+
+	loads, interpProg, dynamicProg, err := parseABIProgramHeaders(phTable, ePhnum, ePhentsize, fileSize, order)
+	if err != nil {
+		return nil, err
 	}
 
 	if interpProg != nil {
 		if err := acc.chargeMetadata(interpProg.filesz); err != nil {
 			return nil, err
 		}
-		rawInterp := data[interpProg.off : interpProg.off+interpProg.filesz]
+		rawInterp, err := readExactAt(r, interpProg.off, interpProg.filesz)
+		if err != nil {
+			return nil, err
+		}
 		nulIdx := bytes.IndexByte(rawInterp, 0)
 		if nulIdx < 0 {
 			return nil, fmt.Errorf("%w: PT_INTERP string is not NUL-terminated", ErrABIMetadata)
@@ -886,7 +984,7 @@ func inspectELFABIWithAccounting(acc *inputAccounting, data []byte) (*VariantABI
 
 	if dynamicProg != nil {
 		report.InspectionSource = "program_headers/dynamic_metadata"
-		if err := parseDynamicMetadata(data, dynamicProg, loads, fileSize, order, acc, report); err != nil {
+		if err := parseDynamicMetadataReaderAt(r, dynamicProg, loads, fileSize, order, acc, report); err != nil {
 			return nil, err
 		}
 	}
@@ -895,6 +993,55 @@ func inspectELFABIWithAccounting(acc *inputAccounting, data []byte) (*VariantABI
 	report.VersionRequirements = normalizeVersionRequirements(report.VersionRequirements)
 
 	return report, nil
+}
+
+func parseABIProgramHeaders(
+	phTable []byte,
+	ePhnum, ePhentsize, fileSize uint64,
+	order binary.ByteOrder,
+) (loads []loadSegment, interpProg *loadSegment, dynamicProg *loadSegment, err error) {
+	interpCount := 0
+	for i := range ePhnum {
+		ph := phTable[i*ePhentsize:]
+		pType := order.Uint32(ph[:phTypeFieldEnd])
+		pOffset := order.Uint64(ph[phOffsetFieldOff:phVaddrFieldOff])
+		pVaddr := order.Uint64(ph[phVaddrFieldOff : phVaddrFieldOff+8])
+		pFilesz := order.Uint64(ph[phFileszFieldOff:phMemszFieldOff])
+		pMemsz := order.Uint64(ph[phMemszFieldOff : phMemszFieldOff+8])
+
+		switch elf.ProgType(pType) {
+		case elf.PT_LOAD:
+			if pFilesz > pMemsz || pOffset > fileSize || pFilesz > fileSize-pOffset || pMemsz > math.MaxUint64-pVaddr {
+				return nil, nil, nil, fmt.Errorf("%w: invalid PT_LOAD segment bounds (offset %d, filesz %d, memsz %d, vaddr 0x%x)",
+					ErrABIMetadata, pOffset, pFilesz, pMemsz, pVaddr)
+			}
+			loads = append(loads, loadSegment{off: pOffset, vaddr: pVaddr, filesz: pFilesz, memsz: pMemsz})
+
+		case elf.PT_INTERP:
+			interpCount++
+			if interpCount > 1 {
+				return nil, nil, nil, fmt.Errorf("%w: multiple PT_INTERP segments in ELF program headers", ErrABIMetadata)
+			}
+			if pFilesz > MaxInterpreterSize {
+				return nil, nil, nil, fmt.Errorf("%w: PT_INTERP size %d exceeds budget limit %d",
+					ErrABIResourceLimit, pFilesz, MaxInterpreterSize)
+			}
+			if pFilesz == 0 {
+				return nil, nil, nil, fmt.Errorf("%w: empty PT_INTERP segment", ErrABIMetadata)
+			}
+			if pOffset > fileSize || pFilesz > fileSize-pOffset {
+				return nil, nil, nil, fmt.Errorf("%w: PT_INTERP segment extends beyond file", ErrABIMetadata)
+			}
+			interpProg = &loadSegment{off: pOffset, vaddr: pVaddr, filesz: pFilesz, memsz: pMemsz}
+
+		case elf.PT_DYNAMIC:
+			if pOffset > fileSize || pFilesz > fileSize-pOffset {
+				return nil, nil, nil, fmt.Errorf("%w: PT_DYNAMIC segment extends beyond file", ErrABIMetadata)
+			}
+			dynamicProg = &loadSegment{off: pOffset, vaddr: pVaddr, filesz: pFilesz, memsz: pMemsz}
+		}
+	}
+	return loads, interpProg, dynamicProg, nil
 }
 
 type dynamicTags struct {
@@ -909,14 +1056,14 @@ type dynamicTags struct {
 	hasVerneedNum bool
 }
 
-func scanDynamicEntries(data []byte, dynamicProg *loadSegment, numDyn uint64, order binary.ByteOrder) (*dynamicTags, error) {
+func scanDynamicEntriesBuf(dynBytes []byte, numDyn uint64, order binary.ByteOrder) (*dynamicTags, error) {
 	tags := &dynamicTags{}
 	hasNullTerminator := false
 
 	for i := range numDyn {
-		entryOff := dynamicProg.off + i*dynamicEntrySize
-		dTag := order.Uint64(data[entryOff : entryOff+8])
-		dVal := order.Uint64(data[entryOff+8 : entryOff+16])
+		entryOff := i * dynamicEntrySize
+		dTag := order.Uint64(dynBytes[entryOff : entryOff+dynTagBytes])
+		dVal := order.Uint64(dynBytes[entryOff+dynTagBytes : entryOff+dynamicEntrySize])
 
 		switch dTag {
 		case uint64(elf.DT_NULL):
@@ -1003,6 +1150,16 @@ func resolveDynamicStrtab(
 	tags *dynamicTags,
 	acc *inputAccounting,
 ) ([]byte, error) {
+	return resolveDynamicStrtabReaderAt(bytes.NewReader(data), loads, fileSize, tags, acc)
+}
+
+func resolveDynamicStrtabReaderAt(
+	r io.ReaderAt,
+	loads []loadSegment,
+	fileSize uint64,
+	tags *dynamicTags,
+	acc *inputAccounting,
+) ([]byte, error) {
 	needsStrtab := len(tags.neededOffsets) > 0 || (tags.hasVerneed && tags.verneedNum > 0)
 	if !needsStrtab {
 		return nil, nil
@@ -1021,11 +1178,23 @@ func resolveDynamicStrtab(
 	if tErr != nil {
 		return nil, fmt.Errorf("%w: translating DT_STRTAB address: %w", ErrABIMetadata, tErr)
 	}
-	return data[strtabOff : strtabOff+tags.strtabSize], nil
+	return readExactAt(r, strtabOff, tags.strtabSize)
 }
 
 func parseDynamicMetadata(
 	data []byte,
+	dynamicProg *loadSegment,
+	loads []loadSegment,
+	fileSize uint64,
+	order binary.ByteOrder,
+	acc *inputAccounting,
+	report *VariantABIReport,
+) error {
+	return parseDynamicMetadataReaderAt(bytes.NewReader(data), dynamicProg, loads, fileSize, order, acc, report)
+}
+
+func parseDynamicMetadataReaderAt(
+	r io.ReaderAt,
 	dynamicProg *loadSegment,
 	loads []loadSegment,
 	fileSize uint64,
@@ -1044,8 +1213,12 @@ func parseDynamicMetadata(
 	if err := acc.chargeMetadata(dynamicProg.filesz); err != nil {
 		return err
 	}
+	dynBytes, err := readExactAt(r, dynamicProg.off, dynamicProg.filesz)
+	if err != nil {
+		return err
+	}
 
-	tags, err := scanDynamicEntries(data, dynamicProg, numDyn, order)
+	tags, err := scanDynamicEntriesBuf(dynBytes, numDyn, order)
 	if err != nil {
 		return err
 	}
@@ -1054,7 +1227,7 @@ func parseDynamicMetadata(
 		return err
 	}
 
-	strtab, err := resolveDynamicStrtab(data, loads, fileSize, tags, acc)
+	strtab, err := resolveDynamicStrtabReaderAt(r, loads, fileSize, tags, acc)
 	if err != nil {
 		return err
 	}
@@ -1073,7 +1246,7 @@ func parseDynamicMetadata(
 		if !tags.hasStrtab || !tags.hasStrsz {
 			return fmt.Errorf("%w: dynamic version requirements declared without DT_STRTAB or DT_STRSZ", ErrABIMetadata)
 		}
-		return parseVerneed(data, loads, fileSize, order, tags.verneedVaddr, tags.verneedNum, strtab, acc, report)
+		return parseVerneedReaderAt(r, loads, fileSize, order, tags.verneedVaddr, tags.verneedNum, strtab, acc, report)
 	}
 	return nil
 }
@@ -1111,6 +1284,24 @@ func parseVernauxChain(
 	acc *inputAccounting,
 	report *VariantABIReport,
 ) error {
+	return parseVernauxChainReaderAt(
+		bytes.NewReader(data), order, verneedOff, availableBytes, currVernauxOff,
+		vnCnt, parentVerneedOff, libName, strtab, strtabSize, acc, report,
+	)
+}
+
+func parseVernauxChainReaderAt(
+	r io.ReaderAt,
+	order binary.ByteOrder,
+	verneedOff, availableBytes, currVernauxOff uint64,
+	vnCnt uint16,
+	parentVerneedOff uint64,
+	libName string,
+	strtab []byte,
+	strtabSize uint64,
+	acc *inputAccounting,
+	report *VariantABIReport,
+) error {
 	if uint64(len(strtab)) > strtabSize {
 		strtab = strtab[:strtabSize]
 	}
@@ -1135,9 +1326,13 @@ func parseVernauxChain(
 		}
 		visitedVernaux[currVernauxOff] = true
 
-		vnaFlags := order.Uint16(data[currVernauxOff+4 : currVernauxOff+6])
-		vnaName := order.Uint32(data[currVernauxOff+8 : currVernauxOff+12])
-		vnaNext := order.Uint32(data[currVernauxOff+12 : currVernauxOff+16])
+		var auxBuf [vernauxEntrySize]byte
+		if err := readIntoAt(r, auxBuf[:], currVernauxOff); err != nil {
+			return err
+		}
+		vnaFlags := order.Uint16(auxBuf[vernauxFlagsOff:vernauxFlagsEnd])
+		vnaName := order.Uint32(auxBuf[vernauxNameOff:vernauxNameEnd])
+		vnaNext := order.Uint32(auxBuf[vernauxNextOff:vernauxEntrySize])
 
 		verName, err := scanBoundedCString(strtab, uint64(vnaName), acc, "vna_name", true)
 		if err != nil {
@@ -1222,6 +1417,20 @@ func parseVerneed(
 	acc *inputAccounting,
 	report *VariantABIReport,
 ) error {
+	return parseVerneedReaderAt(bytes.NewReader(data), loads, fileSize, order, verneedVaddr, verneedNum, strtab, acc, report)
+}
+
+func parseVerneedReaderAt(
+	r io.ReaderAt,
+	loads []loadSegment,
+	fileSize uint64,
+	order binary.ByteOrder,
+	verneedVaddr uint64,
+	verneedNum uint64,
+	strtab []byte,
+	acc *inputAccounting,
+	report *VariantABIReport,
+) error {
 	if verneedNum > MaxVersionRecordsPerInput {
 		return fmt.Errorf("%w: DT_VERNEEDNUM %d exceeds budget limit %d",
 			ErrABIResourceLimit, verneedNum, MaxVersionRecordsPerInput)
@@ -1263,7 +1472,11 @@ func parseVerneed(
 		}
 		visitedVerneed[currVerneedOff] = true
 
-		vnVersion := order.Uint16(data[currVerneedOff : currVerneedOff+2])
+		var vnBuf [verneedEntrySize]byte
+		if err := readIntoAt(r, vnBuf[:], currVerneedOff); err != nil {
+			return err
+		}
+		vnVersion := order.Uint16(vnBuf[:verneedCntOff])
 		if vnVersion != 1 {
 			report.Completeness = MetadataUnsupported
 			vnWarn := fmt.Sprintf("unsupported Elf64_Verneed version %d", vnVersion)
@@ -1273,10 +1486,10 @@ func parseVerneed(
 			report.Warnings = append(report.Warnings, vnWarn)
 			break
 		}
-		vnCnt := order.Uint16(data[currVerneedOff+2 : currVerneedOff+4])
-		vnFile := order.Uint32(data[currVerneedOff+4 : currVerneedOff+8])
-		vnAux := order.Uint32(data[currVerneedOff+8 : currVerneedOff+12])
-		vnNext := order.Uint32(data[currVerneedOff+12 : currVerneedOff+16])
+		vnCnt := order.Uint16(vnBuf[verneedCntOff:verneedCntEnd])
+		vnFile := order.Uint32(vnBuf[verneedFileOff:verneedFileEnd])
+		vnAux := order.Uint32(vnBuf[verneedAuxOff:verneedAuxEnd])
+		vnNext := order.Uint32(vnBuf[verneedNextOff:verneedEntrySize])
 
 		// Validate auxiliary offset structurally before decoding names when vnCnt > 0
 		if err := validateVerneedAuxOffset(vnCnt, vnAux, recordIdx, currVerneedOff, verneedOff, availableBytes); err != nil {
@@ -1290,8 +1503,8 @@ func parseVerneed(
 
 		if vnCnt > 0 {
 			currVernauxOff := currVerneedOff + uint64(vnAux)
-			if err := parseVernauxChain(
-				data, order, verneedOff, availableBytes, currVernauxOff,
+			if err := parseVernauxChainReaderAt(
+				r, order, verneedOff, availableBytes, currVernauxOff,
 				vnCnt, currVerneedOff, libName, strtab, uint64(len(strtab)), acc, report,
 			); err != nil {
 				return err

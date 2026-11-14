@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func fixtureBaseline(t *testing.T, dictionary bool) (baseline, group, [][]byte, []byte, []byte) {
+func fixtureBaseline(t *testing.T, control string) (baseline, group, [][]byte, []byte, []byte) {
 	t.Helper()
 	m, _, stubPath := fixtureCorpus(t)
 	groups, err := validateManifest(m)
@@ -21,7 +21,7 @@ func fixtureBaseline(t *testing.T, dictionary bool) (baseline, group, [][]byte, 
 	require.NoError(t, err)
 	stub, err := os.ReadFile(stubPath)
 	require.NoError(t, err)
-	b := packBaseline(g, m.Architecture, stubPath, filepath.Join(t.TempDir(), "baseline.fat"), dictionary, inputs, stub)
+	b := packBaseline(g, m.Architecture, stubPath, filepath.Join(t.TempDir(), "baseline.fat"), control, inputs, stub)
 	require.Empty(t, b.Error)
 	data, err := os.ReadFile(b.Path)
 	require.NoError(t, err)
@@ -30,8 +30,8 @@ func fixtureBaseline(t *testing.T, dictionary bool) (baseline, group, [][]byte, 
 
 func TestCompleteBaselineAndRepresentationAccounting(t *testing.T) {
 	t.Parallel()
-	for _, dictionary := range []bool{false, true} {
-		b, g, inputs, stub, data := fixtureBaseline(t, dictionary)
+	for _, control := range []string{controlBalanced, controlBestNoDict, controlSize} {
+		b, g, inputs, stub, data := fixtureBaseline(t, control)
 		require.Equal(t, maxVariants, b.Exact)
 		require.EqualValues(t, len(data), b.Bytes)
 		require.Greater(t, b.MetadataBytes, int64(format.TrailerSize))
@@ -44,7 +44,7 @@ func TestCompleteBaselineAndRepresentationAccounting(t *testing.T) {
 		inv, err := buildInventory(inputs, methodSmall)
 		require.NoError(t, err)
 		m := sharingModel(inv, levels, inputs, methodSmall)
-		c := evaluateModel(m, inv, int64(len(stub)), b, filepath.Join(t.TempDir(), "candidate"))
+		c := evaluateModel(m, inv, int64(len(stub)), b, filepath.Join(t.TempDir(), "candidate"), levelBetter)
 		require.Empty(t, c.Error)
 		require.Equal(t, maxVariants, c.Exact)
 		require.Equal(t, c.OptimisticEstimate+decoderReserve, c.CompleteEstimate)
@@ -80,21 +80,21 @@ func TestCompleteBaselineAndRepresentationAccounting(t *testing.T) {
 
 func TestCandidateFailuresRetainNegativeResults(t *testing.T) {
 	t.Parallel()
-	b, _, _, stub, _ := fixtureBaseline(t, false)
+	b, _, _, stub, _ := fixtureBaseline(t, controlBalanced)
 	m := fixtureModel(t)
 	path := filepath.Join(t.TempDir(), "exists")
 	require.NoError(t, os.WriteFile(path, []byte("retained"), privateFileMode))
-	c := evaluateModel(m, inventory{}, int64(len(stub)), b, path)
+	c := evaluateModel(m, inventory{}, int64(len(stub)), b, path, levelBetter)
 	require.NotEmpty(t, c.Error)
 	retained, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, "retained", string(retained))
 	m.method = string([]byte{0xff})
-	c = evaluateModel(m, inventory{}, int64(len(stub)), b, filepath.Join(t.TempDir(), "bad"))
+	c = evaluateModel(m, inventory{}, int64(len(stub)), b, filepath.Join(t.TempDir(), "bad"), levelBetter)
 	require.NotEmpty(t, c.Error)
 	m = fixtureModel(t)
 	m.targets[0].path = []span{{shared: true, offset: len(m.pool), size: 1}}
-	c = evaluateModel(m, inventory{}, int64(len(stub)), b, filepath.Join(t.TempDir(), "bad"))
+	c = evaluateModel(m, inventory{}, int64(len(stub)), b, filepath.Join(t.TempDir(), "bad"), levelBetter)
 	require.NotEmpty(t, c.Error)
 }
 
@@ -106,7 +106,7 @@ func TestScreenGroupKeepsReadBaselineAndSectionFailures(t *testing.T) {
 	stub, err := os.ReadFile(stubPath)
 	require.NoError(t, err)
 	g := groups[0]
-	result := screenGroup(g, m.Architecture, stubPath, t.TempDir(), stub)
+	result := screenGroup(g, m.Architecture, stubPath, t.TempDir(), stub, levelBest)
 	require.Empty(t, result.Error)
 	require.Len(t, result.Baselines, 2)
 	require.Len(t, result.Candidates, 4+maxVariants)
@@ -117,14 +117,9 @@ func TestScreenGroupKeepsReadBaselineAndSectionFailures(t *testing.T) {
 	bad := g
 	bad.variants = append([]corpusVariant(nil), g.variants...)
 	bad.variants[0].Path = filepath.Join(t.TempDir(), "missing")
-	require.NotEmpty(t, screenGroup(bad, m.Architecture, stubPath, t.TempDir(), stub).Error)
-	require.Contains(t, screenGroup(g, m.Architecture, "missing", t.TempDir(), stub).Error, "control failed")
-	// One-tier diagnostics retain dictionary failure rather than silently omitting it.
-	one := g
-	one.variants = g.variants[:1]
-	oneResult := screenGroup(one, m.Architecture, stubPath, t.TempDir(), stub)
-	require.Empty(t, oneResult.Error)
-	require.NotEmpty(t, oneResult.Baselines[1].Error)
+	require.NotEmpty(t, screenGroup(bad, m.Architecture, stubPath, t.TempDir(), stub, levelBest).Error)
+	require.Contains(t, screenGroup(g, m.Architecture, "missing", t.TempDir(), stub, levelBest).Error, "control failed")
+
 }
 
 func gateGroups() []groupResult {
@@ -165,6 +160,14 @@ func TestGateRequiresBothProfilesAndThreeIndependentFamilies(t *testing.T) {
 	groups = gateGroups()
 	for i := range groups {
 		groups[i].Candidates[0].Method = methodBase
+	}
+	require.Equal(t, maxFamilies, summarizeGate(groups).CostedSizePass)
+	for i := range groups {
+		groups[i].Candidates[0].Base = groups[i].Family
+	}
+	require.Equal(t, 1, summarizeGate(groups).CostedSizePass)
+	for i := range groups {
+		groups[i].Candidates[0].Base = groups[i].Profile
 	}
 	require.Zero(t, summarizeGate(groups).CostedSizePass)
 	groups = gateGroups()

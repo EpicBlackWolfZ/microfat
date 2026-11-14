@@ -28,16 +28,18 @@ const (
 
 // Common error definitions.
 var (
-	ErrNoVariantsSpecified = format.ErrNoVariantsSpecified
-	ErrDuplicateVariant    = format.ErrDuplicateVariant
-	ErrInvalidVariant      = format.ErrInvalidVariant
-	ErrStubMissing         = errors.New("stub binary path is required and must exist")
-	ErrVariantNotFound     = errors.New("variant binary file not found")
-	ErrChecksumMismatch    = errors.New("variant payload checksum mismatch")
-	ErrSizeMismatch        = codec.ErrSizeMismatch
-	ErrInvalidELF          = errors.New("invalid ELF binary")
-	ErrUnsupportedArch     = errors.New("unsupported target architecture")
-	ErrUnsupportedOS       = errors.New("unsupported target operating system")
+	ErrNoVariantsSpecified    = format.ErrNoVariantsSpecified
+	ErrDuplicateVariant       = format.ErrDuplicateVariant
+	ErrInvalidVariant         = format.ErrInvalidVariant
+	ErrStubMissing            = errors.New("stub binary path is required and must exist")
+	ErrVariantNotFound        = errors.New("variant binary file not found")
+	ErrChecksumMismatch       = errors.New("variant payload checksum mismatch")
+	ErrSizeMismatch           = codec.ErrSizeMismatch
+	ErrInvalidELF             = errors.New("invalid ELF binary")
+	ErrUnsupportedArch        = errors.New("unsupported target architecture")
+	ErrUnsupportedOS          = errors.New("unsupported target operating system")
+	ErrConflictingDictOptions = errors.New("cannot combine forced dictionary with dictionary profitability gating")
+	ErrSpoolBudgetExceeded    = errors.New("dictionary profitability staging spool budget exceeded")
 )
 
 // VariantCompressionOptions configures compression parameters for a specific variant level.
@@ -62,10 +64,13 @@ type Options struct {
 	Compression        string            // "zstd", "lz4", "none" (or "zstd:best")
 	CompressionLevel   string            // level string or numeric
 	EnableDict         bool              // Train and embed a shared Zstandard dictionary across variants
+	DictProfitable     bool              // Train a candidate dictionary and embed it only when strictly smaller than no-dictionary
 	DictSize           int               // Target dictionary size in bytes (default: 112 KB)
+	MaxSpoolBytes      int64             // Optional staging spool limit in bytes for DictProfitable (0 uses MaxDictProfitabilitySpoolBytes)
 	VariantCompression map[string]VariantCompressionOptions
 	Permissions        os.FileMode
-	FormatVersion      int                                       // FormatVersion1 (JSON) or FormatVersion2 (Binary, default)
+	FormatVersion      int                                       // FormatVersion2 (compact binary table, default)
+	CreatedUnix        *int64                                    // Optional creation epoch in Unix seconds; nil uses the wall clock
 	SkipELFValidation  bool                                      // Optional flag to bypass ELF header validation (primarily for testing)
 	AllowMixedABI      bool                                      // Allow packaging variants with differing declared ABI requirements
 	ABIReportCallback  func(report *ArtifactABIReport)           // Optional callback receiving the aggregate ABI report
@@ -165,7 +170,8 @@ func sampleInput(path string, budget int) ([][]byte, error) {
 
 func prepareSharedDictionary(opts *Options, levels []string) ([]byte, string, error) {
 	enableDict := opts.EnableDict
-	if !enableDict && strings.EqualFold(strings.TrimSpace(opts.Profile), codec.ProfileSize) && len(levels) >= minVariantsForDict {
+	autoCandidate := opts.DictProfitable || strings.EqualFold(strings.TrimSpace(opts.Profile), codec.ProfileSize)
+	if !enableDict && autoCandidate && len(levels) >= minVariantsForDict {
 		var err error
 		enableDict, err = hasDictionaryCapableVariant(opts, levels)
 		if err != nil {
@@ -243,6 +249,13 @@ func hasDictionaryCapableVariant(opts *Options, levels []string) (bool, error) {
 
 // Pack stitches the stub and compressed variant binaries into a complete microfat fat executable.
 func Pack(opts Options) (*format.Index, error) {
+	var createdUnix int64
+	if opts.CreatedUnix == nil {
+		createdUnix = time.Now().Unix()
+	} else {
+		createdUnix = *opts.CreatedUnix
+	}
+
 	// Validate configuration first; validate ELF bytes only after pinning the inputs.
 	validateELF := !opts.SkipELFValidation
 	opts.SkipELFValidation = true
@@ -255,11 +268,6 @@ func Pack(opts Options) (*format.Index, error) {
 		return nil, err
 	}
 	defer cleanup()
-
-	stubBytes, err := readBoundedInput(opts.StubPath, format.MaxPayloadSize)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrStubMissing, err)
-	}
 
 	levels := sortVariantLevels(opts.Variants, opts.TargetArch)
 
@@ -284,19 +292,24 @@ func Pack(opts Options) (*format.Index, error) {
 		_ = os.Remove(tmpPath)
 	}()
 
-	// 1. Write Stub Binary
-	if _, err := tmpFile.Write(stubBytes); err != nil {
-		return nil, fmt.Errorf("writing stub binary: %w", err)
+	// 1. Stream Stub Binary into tmpFile without retaining a heap copy across variant compression
+	currentOffset, err := writeStubBinaryFromPath(tmpFile, opts.StubPath)
+	if err != nil {
+		return nil, err
 	}
-
-	currentOffset := int64(len(stubBytes))
 	idx := &format.Index{
 		Version:     opts.FormatVersion,
 		AppName:     opts.AppName,
 		TargetOS:    opts.TargetOS,
 		TargetArch:  opts.TargetArch,
-		CreatedUnix: time.Now().Unix(),
+		CreatedUnix: createdUnix,
 		Variants:    make([]format.VariantEntry, 0, len(levels)),
+	}
+
+	if opts.DictProfitable && len(dictBytes) > 0 {
+		return assembleAndFinalizeProfitableArtifact(
+			tmpFile, tmpPath, outDir, levels, &opts, currentOffset, idx, dictBytes, dictSHAHex,
+		)
 	}
 
 	// 2. Write Shared Dictionary (if trained)
@@ -313,15 +326,13 @@ func Pack(opts Options) (*format.Index, error) {
 		idx.DictionaryID = codec.DefaultDictionaryID
 	}
 
-	// 3. Compress and write each variant payload
-	for _, lvl := range levels {
-		entry, newOffset, err := writeVariantPayload(tmpFile, lvl, opts.Variants[lvl], &opts, currentOffset, dictBytes)
-		if err != nil {
-			return nil, err
-		}
-		currentOffset = newOffset
-		idx.Variants = append(idx.Variants, entry)
+	// 3. Compress and write each variant payload (parallelized under bounded CPU/memory admission)
+	variantEntries, newOffset, err := writeAllVariantPayloads(tmpFile, outDir, levels, &opts, currentOffset, dictBytes)
+	if err != nil {
+		return nil, err
 	}
+	currentOffset = newOffset
+	idx.Variants = append(idx.Variants, variantEntries...)
 
 	// 4. Write Index and Trailer
 	if _, err := format.WriteIndexAndTrailerWithVersion(tmpFile, idx, currentOffset, opts.FormatVersion); err != nil {
@@ -365,12 +376,8 @@ func validateOptions(opts *Options) error {
 	if opts.Permissions == 0 {
 		opts.Permissions = defaultFileMode
 	}
-	if opts.FormatVersion != 0 && opts.FormatVersion != format.FormatVersion1 && opts.FormatVersion != format.FormatVersion2 {
-		return fmt.Errorf("%w: got version %d, expected %d or %d",
-			format.ErrUnsupportedVersion, opts.FormatVersion, format.FormatVersion1, format.FormatVersion2)
-	}
-	if opts.FormatVersion == 0 {
-		opts.FormatVersion = format.FormatVersionCurrent
+	if err := validateDictionaryAndFormatOptions(opts); err != nil {
+		return err
 	}
 
 	seenLevels := make(map[string]string, len(opts.Variants))
@@ -420,6 +427,26 @@ func validateOptions(opts *Options) error {
 		if err := ValidateELFBinary(opts.StubPath, opts.TargetOS, opts.TargetArch); err != nil {
 			return fmt.Errorf("validating stub: %w", err)
 		}
+	}
+	return nil
+}
+
+func validateDictionaryAndFormatOptions(opts *Options) error {
+	if opts.EnableDict && opts.DictProfitable {
+		return ErrConflictingDictOptions
+	}
+	if opts.MaxSpoolBytes < 0 {
+		return fmt.Errorf("%w: negative max spool bytes %d", ErrSpoolBudgetExceeded, opts.MaxSpoolBytes)
+	}
+	if opts.FormatVersion == format.FormatVersion1 {
+		return fmt.Errorf("%w: Format v1 was removed in v0.4.0; use Format v2", format.ErrUnsupportedVersion)
+	}
+	if opts.FormatVersion != 0 && opts.FormatVersion != format.FormatVersion2 {
+		return fmt.Errorf("%w: got version %d, expected %d",
+			format.ErrUnsupportedVersion, opts.FormatVersion, format.FormatVersion2)
+	}
+	if opts.FormatVersion == 0 {
+		opts.FormatVersion = format.FormatVersionCurrent
 	}
 	return nil
 }
@@ -480,20 +507,8 @@ func writeVariantPayload(
 		return format.VariantEntry{}, 0, err
 	}
 
-	if len(dict) > 0 {
-		if dc, ok := c.(codec.DictCodec); ok {
-			if err := dc.CompressWithDict(tmpFile, variantBytes, resolvedLevel, dict); err != nil {
-				return format.VariantEntry{}, 0, fmt.Errorf("compressing variant %s with dict: %w", lvl, err)
-			}
-		} else {
-			if err := c.Compress(tmpFile, variantBytes, resolvedLevel); err != nil {
-				return format.VariantEntry{}, 0, fmt.Errorf("compressing variant %s with codec %s: %w", lvl, c.Name(), err)
-			}
-		}
-	} else {
-		if err := c.Compress(tmpFile, variantBytes, resolvedLevel); err != nil {
-			return format.VariantEntry{}, 0, fmt.Errorf("compressing variant %s with codec %s: %w", lvl, c.Name(), err)
-		}
+	if err := compressVariantIntoWriter(tmpFile, lvl, c, resolvedLevel, variantBytes, dict); err != nil {
+		return format.VariantEntry{}, 0, err
 	}
 
 	newOffset, err := tmpFile.Seek(0, io.SeekCurrent)
@@ -766,14 +781,9 @@ func validatePayloadABIs(opts *Options, levels []string) error {
 	variantReports := make([]*VariantABIReport, 0, len(levels))
 	sharedAcc := NewArtifactMetadataAccounting(MaxArtifactMetadataBytes)
 	for _, lvl := range levels {
-		varData, err := readBoundedInput(opts.Variants[lvl], format.MaxPayloadSize)
+		rep, err := inspectVariantABIFile(lvl, opts.Variants[lvl], sharedAcc)
 		if err != nil {
-			return fmt.Errorf("reading snapshotted variant %s: %w", lvl, err)
-		}
-
-		rep, err := InspectELFABIWithAccounting(varData, sharedAcc)
-		if err != nil {
-			return fmt.Errorf("inspecting declared ABI for variant %s: %w", lvl, err)
+			return err
 		}
 		rep.Level = lvl
 		rep.Path = opts.Variants[lvl]
@@ -796,6 +806,37 @@ func validatePayloadABIs(opts *Options, levels []string) error {
 	return nil
 }
 
+func writeStubBinaryFromPath(tmpFile *os.File, stubPath string) (int64, error) {
+	f, size, err := openBoundedReaderAt(stubPath, format.MaxPayloadSize)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %w", ErrStubMissing, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if err := copyBoundedInput(tmpFile, f, format.MaxPayloadSize, size); err != nil {
+		return 0, fmt.Errorf("writing stub binary: %w", err)
+	}
+	return size, nil
+}
+
+func inspectVariantABIFile(lvl, path string, shared *ArtifactMetadataAccounting) (*VariantABIReport, error) {
+	f, size, err := openBoundedReaderAt(path, format.MaxPayloadSize)
+	if err != nil {
+		return nil, fmt.Errorf("reading snapshotted variant %s: %w", lvl, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	unsignedSize := uint64(size) // #nosec G115 -- openBoundedReaderAt guarantees 0 < size <= MaxPayloadSize.
+	rep, err := InspectELFABIReaderAtWithAccounting(f, unsignedSize, shared)
+	if err != nil {
+		return nil, fmt.Errorf("inspecting declared ABI for variant %s: %w", lvl, err)
+	}
+	if err := verifyBoundedReaderAtUnchanged(f, size, format.MaxPayloadSize); err != nil {
+		return nil, fmt.Errorf("reading snapshotted variant %s: %w", lvl, err)
+	}
+	return rep, nil
+}
+
 // ValidateELFBinary checks if the file at path is a valid 64-bit ELF binary matching targetOS and targetArch.
 func ValidateELFBinary(path string, targetOS, targetArch string) error {
 	osName, err := NormalizeTargetOS(targetOS)
@@ -806,39 +847,41 @@ func ValidateELFBinary(path string, targetOS, targetArch string) error {
 	if err != nil {
 		return err
 	}
-	data, err := readBoundedInput(path, format.MaxPayloadSize)
+	f, size, err := openBoundedReaderAt(path, format.MaxPayloadSize)
 	if err != nil {
 		return err
 	}
-	f, err := readExecutableELF(data)
+	defer func() { _ = f.Close() }()
+
+	unsignedSize := uint64(size) // #nosec G115 -- openBoundedReaderAt guarantees 0 < size <= MaxPayloadSize.
+	elfFile, err := readExecutableELFReaderAt(f, unsignedSize)
 	if err != nil {
 		return fmt.Errorf("%w (%s): %w", ErrInvalidELF, path, err)
 	}
 
-	if f.Class != elf.ELFCLASS64 {
-		return fmt.Errorf("%w (%s): expected 64-bit ELF, got class %v", ErrInvalidELF, path, f.Class)
+	if elfFile.Class != elf.ELFCLASS64 {
+		return fmt.Errorf("%w (%s): expected 64-bit ELF, got class %v", ErrInvalidELF, path, elfFile.Class)
 	}
 
 	switch arch {
 	case microarch.ArchAMD64:
-		if f.Machine != elf.EM_X86_64 {
+		if elfFile.Machine != elf.EM_X86_64 {
 			return fmt.Errorf("%w (%s): machine type %v does not match target architecture %s (expected EM_X86_64)",
-				ErrInvalidELF, path, f.Machine, targetArch)
+				ErrInvalidELF, path, elfFile.Machine, targetArch)
 		}
 	case microarch.ArchARM64:
-		if f.Machine != elf.EM_AARCH64 {
+		if elfFile.Machine != elf.EM_AARCH64 {
 			return fmt.Errorf("%w (%s): machine type %v does not match target architecture %s (expected EM_AARCH64)",
-				ErrInvalidELF, path, f.Machine, targetArch)
+				ErrInvalidELF, path, elfFile.Machine, targetArch)
 		}
 	}
-	if err := validateExecutableELF(f, uint64(len(data))); err != nil {
+	if err := validateExecutableELF(elfFile, unsignedSize); err != nil {
 		return fmt.Errorf("%w (%s): %w", ErrInvalidELF, path, err)
 	}
-	if err := validateELFPlatform(data, f, osName); err != nil {
+	if err := validateELFPlatformReaderAt(f, unsignedSize, elfFile, osName); err != nil {
 		return fmt.Errorf("%w (%s): %w", ErrInvalidELF, path, err)
 	}
-
-	return nil
+	return verifyBoundedReaderAtUnchanged(f, size, format.MaxPayloadSize)
 }
 
 // PrewarmVariant extracts and validates an embedded variant into the specified cache directory.
@@ -934,9 +977,34 @@ func PrewarmBinary(
 	targetLevels []string,
 	cacheDir string,
 ) (*format.Index, []format.PrewarmResult, error) {
+	idx, results, err := PrewarmBinaryWithOptions(r, totalSize, targetLevels, cacheDir, PrewarmOptions{})
+	if err != nil {
+		return nil, nil, err
+	}
+	return idx, results, nil
+}
+
+// PrewarmBinaryWithOptions checks admission before cache discovery or writes, then materializes selected entries.
+// On an operational failure it returns the successful earlier results; admission is not a multi-entry transaction.
+// Cache observations from prior planning are never trusted: every reused entry is validated again on its open descriptor.
+func PrewarmBinaryWithOptions(
+	r io.ReaderAt,
+	totalSize int64,
+	targetLevels []string,
+	cacheDir string,
+	opts PrewarmOptions,
+) (*format.Index, []format.PrewarmResult, error) {
 	idx, err := format.ReadTrailerAndIndex(r, totalSize)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading index: %w", err)
+	}
+	selected, _, err := selectPrewarmVariants(idx, targetLevels, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	dictBytes, err := readPrewarmDictionary(r, idx)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	if cacheDir == "" {
@@ -947,72 +1015,22 @@ func PrewarmBinary(
 		cacheDir = resolved
 	}
 
-	var dictBytes []byte
-	if idx.DictionarySize > 0 {
-		if idx.DictionarySize > format.MaxDictionarySize || idx.DictionaryOffset < 0 {
-			return nil, nil, fmt.Errorf("%w: dictionary size %d or offset %d out of bounds",
-				format.ErrInvalidDictionary, idx.DictionarySize, idx.DictionaryOffset)
-		}
-		if idx.DictionarySHA256 == "" || !format.ValidateChecksum(idx.DictionarySHA256) {
-			return nil, nil, fmt.Errorf("%w: dictionary missing or invalid sha256 checksum", format.ErrInvalidChecksum)
-		}
-		dictBytes = make([]byte, idx.DictionarySize)
-		if _, err := r.ReadAt(dictBytes, idx.DictionaryOffset); err != nil {
-			return nil, nil, fmt.Errorf("reading shared dictionary: %w", err)
-		}
-		h := sha256.Sum256(dictBytes)
-		actualHex := hex.EncodeToString(h[:])
-		if actualHex != idx.DictionarySHA256 {
-			return nil, nil, fmt.Errorf("%w: expected %s, got %s", format.ErrDictionaryCorrupted, idx.DictionarySHA256, actualHex)
-		}
-	}
-
-	targetCap := len(idx.Variants)
-	var targetSet map[string]struct{}
-	if len(targetLevels) > 0 {
-		targetSet = make(map[string]struct{}, len(targetLevels))
-		for _, lvl := range targetLevels {
-			entry, found := idx.FindVariant(lvl)
-			if !found {
-				return nil, nil, fmt.Errorf("variant level %q not found in binary manifest", lvl)
-			}
-			targetSet[entry.Level] = struct{}{}
-		}
-		if len(targetSet) < targetCap {
-			targetCap = len(targetSet)
-		}
-	}
-
-	results := make([]format.PrewarmResult, 0, targetCap)
-	for _, v := range idx.Variants {
-		if targetSet != nil {
-			if _, ok := targetSet[v.Level]; !ok {
-				continue
-			}
-		}
-
-		path, alreadyCached, duration, err := PrewarmVariantWithDict(r, &v, cacheDir, dictBytes)
+	results := make([]format.PrewarmResult, 0, len(selected))
+	for _, entry := range selected {
+		path, alreadyCached, duration, err := PrewarmVariantWithDict(r, &entry, cacheDir, dictBytes)
 		if err != nil {
-			return nil, nil, fmt.Errorf("prewarming variant %s: %w", v.Level, err)
+			return idx, results, fmt.Errorf("prewarming variant %s: %w", entry.Level, err)
 		}
-
 		status := format.PrewarmStatusExtracted
 		if alreadyCached {
 			status = format.PrewarmStatusAlreadyCached
 		}
-
 		results = append(results, format.PrewarmResult{
-			Level:            v.Level,
-			SHA256:           v.SHA256,
-			UncompressedSize: v.UncompressedSize,
-			CachedPath:       path,
-			AlreadyCached:    alreadyCached,
-			DecompressionUs:  duration.Microseconds(),
-			Valid:            true,
-			Status:           status,
+			Level: entry.Level, SHA256: entry.SHA256, UncompressedSize: entry.UncompressedSize,
+			CachedPath: path, AlreadyCached: alreadyCached, DecompressionUs: duration.Microseconds(),
+			Valid: true, Status: status,
 		})
 	}
-
 	return idx, results, nil
 }
 

@@ -101,7 +101,9 @@ microfat detect --json
 
 ### `microfat doctor`
 
-Verify the local host runtime environment readiness for high-performance Microfat dispatch, checking CPU capabilities, in-memory execution (`memfd_create`), disk cache execution permissions, and Linux container cgroup limits.
+Inspect local CPU capabilities, `memfd_create` and disk cache prerequisites, Linux container
+cgroup limits, and a dry-run runtime tuning plan. Doctor does not execute a payload; passing
+prerequisite checks does not prove that the application will execute successfully.
 
 ```bash
 # Standard environment inspection
@@ -110,11 +112,17 @@ microfat doctor
 # Machine-readable JSON output (recommended for CI/CD gates)
 microfat doctor --json
 
-# Strict mode (fails if memfd_create is unavailable)
+# Strict mode (requires both memfd and disk cache prerequisites)
 microfat doctor --strict
 
 # Custom cache directory audit
 microfat doctor --cache-dir /var/cache/microfat
+
+# Preview adaptive GC tuning using a supplied peak live-heap estimate
+microfat doctor --gc-profile adaptive --live-heap-estimate 150MiB
+
+# Inspect candidate tuning and the effective environment separately
+microfat doctor --json --gc-profile memory_constrained
 ```
 
 #### Flags
@@ -122,9 +130,52 @@ microfat doctor --cache-dir /var/cache/microfat
 | :--- | :--- | :--- | :--- | :--- |
 | `--json` | *(none)* | `bool` | `false` | Output complete diagnostic report in JSON. |
 | `--cache-dir` | *(none)* | `string` | *(unset)* | Custom disk cache directory path to probe and verify. |
-| `--strict` | *(none)* | `bool` | `false` | Require both `memfd_create` and disk cache to be functional; fail if either is blocked. |
+| `--strict` | *(none)* | `bool` | `false` | Require both `memfd_create` and disk cache prerequisites to pass. |
+| `--gc-profile` | *(none)* | `string` | `MICROFAT_GC_PROFILE`, then `default` | Preview `default`, `latency_critical`, `memory_constrained`, `batch_etl`, or `adaptive` GC tuning. |
+| `--live-heap-estimate` | *(none)* | `string` | `MICROFAT_LIVE_HEAP_ESTIMATE`, then unset | Supplied peak live-heap estimate, such as `150MiB`, for adaptive tuning. |
 
-#### Human-Readable Output:
+#### Tuning Preview and Input Precedence
+
+Each preview flag overrides its corresponding environment variable. An absent profile uses
+`default`; an absent live-heap estimate remains unavailable. Invalid profiles and negative,
+malformed, or overflowing estimates fail before doctor runs environment probes.
+
+Both text and JSON reports include the preview. JSON always includes a top-level
+`tuning_preview` with `applied: false`. Its `inputs` records raw values, their sources, parse
+status, and parsed values, so automation can distinguish a supplied estimate from a missing
+one. The estimate is operator input, not a measurement of this process or the application.
+
+The preview separates two views:
+
+- `tuning` is the calculated candidate plan, including the selected GC profile and any reason
+  for skipping a batch GC adjustment.
+- `effective_environment` contains `GOMEMLIMIT`, `GOMAXPROCS`, and `GOGC`. Each entry records
+  `present`, `value`, and `source` (`inherited`, `autotune`, or `unset`). An explicitly empty Go
+  environment variable remains present and inherited. Reasons explain settings that would
+  remain inherited, unset, or suppressed.
+
+Candidate values do not imply application. The effective view honors explicit Go environment
+settings, `MICROFAT_CPU_POLICY`, `MICROFAT_AUTOTUNE`, and `MICROFAT_DRY_RUN`. Native CPU policy
+does not inject `GOMAXPROCS`; disabled tuning and dry-run controls do not inject candidate
+values. The `batch_etl` profile only proposes `GOGC=off` when a finite effective memory limit
+supports it; an inherited `GOGC` still takes precedence.
+
+The existing `cgroup` report remains the observed limits and legacy default recommendations;
+its `gomemlimit_*` and `gomaxprocs` fields are not the profile-specific effective preview.
+An observation without a finite limit means unlimited or unavailable, not confirmed unlimited.
+Doctor does not select a payload, so this preview excludes retained executable storage that
+can reduce a launcher's memory budget. `GOMEMLIMIT` is a soft Go runtime budget, not a cap on
+RSS or container memory. See [runtime tuning](runtime-tuning.md) for these constraints.
+
+The preview changes no runtime settings or permissions. Doctor's existing prerequisite probes
+may still create and remove temporary files or memfd descriptors; previewing tuning does not
+turn those probes into a side-effect-free host audit.
+
+#### Human-Readable Prerequisite Output (Excerpt)
+
+Resource values and available CPU features vary by host. The full report also includes the
+tuning preview described above.
+
 ```text
 === Microfat Host Environment Doctor ===
 
@@ -134,13 +185,15 @@ microfat doctor --cache-dir /var/cache/microfat
     • Key Features:   cx16, popcnt, sse3, ssse3, sse4.1, sse4.2, avx, avx2, bmi1, bmi2, fma, osxsave
     • AVX-512 Status: not present (no downclock risk)
 
-[✔] In-Memory Execution (memfd_create)
+[✔] In-Memory Execution (memfd_create) Prerequisites
     • Kernel Support: Available (Linux 6.8.0-generic)
-    • Seccomp Filter: Permitted
+    • Seccomp Filter: Unknown (not independently tested)
+    • Execution Test: not_tested
 
-[✔] Disk Cache Execution Fallback
+[✔] Disk Cache Execution Fallback Prerequisites
     • Resolved Path:  /home/deployer/.cache/microfat
     • Permissions:    0700 (read/write OK)
+    • Execution Test: unknown (prerequisite check only; payload execution was not tested)
 
 [✔] Container Resource Limits (cgroup v2)
     • Memory Limit:   2147483648 B (2.00 GiB)
@@ -153,7 +206,7 @@ microfat doctor --cache-dir /var/cache/microfat
     • Commit:         7cba82c
     • Build Date:     2026-09-02T20:00:00Z
 
-Summary: Environment is fully ready for high-performance Microfat dispatch!
+...
 ```
 
 ---
@@ -173,8 +226,8 @@ microfat info bin/myapp
 microfat inspect bin/myapp --json
 ```
 
-> [!WARNING]
-> **Format v1 Deprecation**: Inspecting binaries packed with the legacy Format v1 JSON manifest displays a deprecation warning on stderr. Format v1 will be removed in a future release. Please repack using Format v2 (the default).
+> [!NOTE]
+> **Format v1 Removed**: Legacy Format v1 JSON manifests were permanently removed in `v0.4.0`. Inspecting, verifying, or launching a Format v1 binary fails closed with an unsupported-version error; re-package using `microfat pack` (Format v2).
 
 #### Flags
 | Flag | Shorthand | Type | Default | Description |
@@ -190,12 +243,18 @@ Target Platform:   linux/amd64
 Total Size:        12582912 bytes
 Shared Dictionary: 114688 bytes (offset 3254120, sha256: 8f3c4e1b...)
 Created At:        2026-08-28T02:30:00Z
+Created Unix:      1787884200
 
 Embedded Variants (3 total):
   • v1     [zstd] offset:    3368808 | comp:    2945120 B | raw:    7397639 B (39.8%) | sha256: f4e7f675b059...
   • v3     [zstd] offset:    6313928 | comp:    2891240 B | raw:    7389447 B (39.1%) | sha256: fda5c10d86f6...
   • v4     [zstd] offset:    9205168 | comp:    2892110 B | raw:    7389447 B (39.1%) | sha256: 56b5656ccdd1...
 ```
+
+`Created Unix` and JSON `created_unix` preserve the exact signed integer epoch. `Created At`
+shows its UTC RFC3339 calendar representation for years 0000 through 9999, or `unavailable`
+outside that range. The creation epoch is caller-supplied metadata, not proof of producer
+identity or a measurement of when the build actually ran.
 
 ---
 
@@ -294,42 +353,141 @@ microfat pack --manifest pgo.yaml -o bin/myapp
 | `--profile` | *(none)* | `string` | `""` | Compression profile preset: `latency`, `balanced`, `size`. |
 | `--compression` | *(none)* | `string` | `""` | Compression algorithm: `zstd`, `lz4`, `none` (e.g. `zstd:11`). |
 | `--compression-level` | *(none)* | `string` | `""` | Compression level override: `fastest`, `default`, `better`, `best`, or number. |
+| `--variant-compression` | *(none)* | `stringArray` | `[]` | Override one supplied variant with `<level>=<codec>[:<compression-level>]`; repeat for multiple variants. Available for direct `pack`, `pack --manifest`, and `pgo-pack`. |
 | `--dict`, `--zstd-dict` | *(none)* | `bool` | `false` | Enable shared Zstandard inter-variant dictionary compression. |
+| `--dict-profitable` | *(none)* | `bool` | `false` | Embed a shared Zstandard dictionary only when it strictly reduces complete artifact bytes. |
 | `--dict-size` | *(none)* | `int` | `114688` | Target shared dictionary size in bytes (default: 112 KB). |
-| `--format-version` | *(none)* | `int` | `2` | Binary format version: `2` (compact binary table, default) or `1` (legacy JSON, deprecated). |
+| `--format-version` | *(none)* | `int` | `2` | Binary format version (`2` compact binary table; Format `1` was removed in `v0.4.0`). |
 | `--skip-elf-validation` | *(none)* | `bool` | `false` | Skip ELF architecture, executable type, load segment and entry-point checks. |
 | `--manifest` | `-m` | `string` | `""` | Path to YAML or JSON declarative build manifest. |
 | `--concurrency` | `-j` | `int` | `NumCPU` | Concurrent compiler workers when building via manifest. |
 | `--keep-intermediates` | *(none)* | `bool` | `false` | Retain intermediate compiled variant binaries when building via manifest. |
 | `--go-binary` | *(none)* | `string` | `""` | Path to custom Go toolchain binary (defaults to `$GO` or `go`). |
 
+#### Reproducible Creation Epoch
+
+Direct `pack`, `pack --manifest`, and `pgo-pack` read
+[`SOURCE_DATE_EPOCH`](https://reproducible-builds.org/specs/source-date-epoch/) once before
+building or snapshotting packaging inputs. When absent, new packages retain wall-clock Unix
+seconds. When present, the value must be an ASCII decimal integer with an optional `+` or `-`
+sign that fits `int64` (`-9223372036854775808` through `9223372036854775807`). Zero and
+pre-1970 epochs are accepted. Empty values, whitespace, fractions, non-ASCII digits and overflow
+fail with an error before packaging changes output files. An already exported value is
+preserved for compiler/build children, taking precedence over manifest `env` entries for this
+variable. When the ambient variable is absent, a manifest `env` entry remains a build-child
+setting and does not select the package creation epoch.
+
+```bash
+# Reuse one epoch for every packaging operation in this build.
+export SOURCE_DATE_EPOCH=1787884200
+microfat pack --stub bin/microfat-stub -v v1=dist/app_v1 -o bin/myapp
+microfat pack --manifest pgo.yaml -o bin/myapp-manifest
+microfat pgo-pack --manifest pgo.yaml -o bin/myapp-pgo
+```
+
+With identical stub/payload bytes, effective compression settings, dictionary inputs, epoch,
+other metadata/options, and pinned toolchain/codec, repeated packaging produces identical
+complete bytes and SHA-256.
+The epoch is preserved in Format v2. This controls new package metadata; it does
+not normalize ELF build IDs, source paths, compiler provenance or signatures, and does not
+guarantee identical arbitrary source builds or output across different toolchains/codecs.
+Trim/optimize transformations retain their existing timestamp and filesystem metadata policies.
+
+Internal Go callers can set `pack.Options.CreatedUnix` to an `*int64`; nil selects wall-clock
+seconds and a pointer to zero selects epoch zero. Core `Pack` resolves this option once and
+does not read `SOURCE_DATE_EPOCH` itself.
+
 #### Compression Precedence and Profile Resolution Contract
 
-When packaging multiple microarchitecture variants into a fat binary (via `microfat pack`, `pack --manifest`, or `pgo-pack`),
-compression codecs and levels are resolved according to strict hierarchical precedence:
+Use repeated `--variant-compression <level>=<codec>[:<compression-level>]` flags to mix
+`none`, `lz4`, and `zstd` in one executable:
 
-1. **Explicit Variant Algorithm Override**: A per-variant `compression.algorithm` specification in the manifest
-   (e.g. `compression: {algorithm: lz4}` or `compression: {algorithm: zstd, level: best}`) takes highest precedence for that variant.
-2. **Explicit CLI Algorithm Override**: The `--compression` command-line flag (e.g. `--compression=zstd` or `--compression=lz4`)
-   overrides root manifest algorithm settings and profile defaults across all packaged variants.
-3. **Explicit Root Manifest Algorithm**: A root manifest `compression.algorithm` entry in a declarative manifest applies to all variants
-   unless specifically overridden by a per-variant `compression.algorithm` field.
-4. **Compression Profile Resolution**: If the compression algorithm is omitted (empty `""`), the compression profile (`--profile` on CLI
-   or `compression.profile` in manifest) resolves the target codec:
-   - `latency`: When the compression algorithm is omitted, the latency profile selects `none` for positive uncompressed payload sizes
-     smaller than 512 KiB (524,288 bytes), and `lz4` for payloads at or above 512 KiB.
-   - `size`: Sets `zstd:best` (maximum compression ratio).
-   - `balanced` (default when profile and algorithm are omitted): Sets `zstd:better`.
-5. **Launcher Stub Support**: The resulting binary can be executed with either the standard (full) launcher stub or the lightweight
-   minimal launcher stub (built with `-tags minimal`).
+```bash
+microfat pack --stub bin/microfat-stub \
+  -v v1=dist/app_v1 -v v2=dist/app_v2 -v v3=dist/app_v3 \
+  --variant-compression v1=none \
+  --variant-compression v2=lz4:fastest \
+  --variant-compression amd64_v3=zstd:best -o bin/myapp
 
-An inline CLI level overrides an inherited root manifest level.
-An inline per-variant level such as `algorithm: zstd:fastest` overrides inherited root or CLI levels.
-If the same variant also supplies `compression.level`, that separate level takes precedence over its inline level.
-An algorithm override without an inline or separate level retains an inherited separate level, when present.
-Accepted numeric Zstandard levels use the same setting regardless of leading zeros, a plus sign, or surrounding whitespace:
-values up to 1 select `fastest`, 2 selects `default`, 3 through 9 select `better`, and 10 or higher select `best`.
-These numbers select microfat's encoder presets.
+# The same overrides apply when the manifest builds the variants.
+microfat pgo-pack --manifest pgo.yaml --variant-compression v3=zstd:best -o bin/myapp-pgo
+```
+
+Variant keys accept the same normalized aliases as `--variant`, including `V3`,
+`amd64_v3`, and `arm64-v8.2`. Each key must belong to the selected architecture and
+refer to a supplied direct or manifest variant. Repeated keys, including different
+aliases for the same variant, are rejected. Missing keys/codecs, extra separators,
+unknown codecs, unsupported inline levels and a trailing empty `:` are rejected before
+compilation or packaging. `none` accepts no inline compression level.
+
+Codec names and named compression levels are case-insensitive. The level mappings
+match the existing codec encoders:
+
+| Codec | Accepted compression levels |
+| :--- | :--- |
+| `zstd` | `fastest`/`fast`/`speed`; `default`/`standard`; `better`; `best`/`max`. Integers up to 1 select `fastest`, 2 selects `default`, 3–9 select `better`, and 10 or above select `best`. |
+| `lz4` | `fastest`/`fast`/`default` select fast mode; `better` selects level 5; `best`/`max` select level 9. Integers up to 0 select fast mode, 1–8 select that level, and 9 or above select level 9. |
+| `none` | No level; payload bytes are stored uncompressed. |
+
+Numeric levels accept leading zeros, a plus or minus sign, and surrounding
+whitespace. Zstandard numbers select microfat encoder presets.
+
+Algorithm, compression level and profile are resolved separately for each variant:
+
+1. The algorithm comes from `--variant-compression`, then the manifest variant's
+   `compression.algorithm`, then global `--compression`, then root manifest
+   `compression.algorithm`. The first supplied algorithm wins.
+2. A variant CLI inline level overrides that variant's manifest level. A
+   **codec-only** variant CLI override preserves its manifest's separate
+   `compression.level` and `compression.profile` fields. It replaces the entire
+   `compression.algorithm` field, including any inline level in that field.
+3. Without a variant CLI inline level, the variant's separate `compression.level`
+   outranks an inline level in its effective variant algorithm. Either outranks
+   the global level. A codec-only variant algorithm inherits the global level
+   when the variant has no separate level.
+4. The inherited global level comes from `--compression-level`, then an inline
+   level in CLI `--compression`, then root manifest `compression.level`. An inline
+   level in root manifest `compression.algorithm` remains part of that field:
+   replacing its algorithm with a global or variant override replaces that inline
+   level too. Codec-only overrides retain a separate root level.
+5. The profile comes from the manifest variant's `compression.profile`, then
+   global `--profile`, then root manifest `compression.profile`, then `balanced`.
+   When the algorithm is absent, `latency` selects `none` for positive payload
+   sizes below 512 KiB (524,288 bytes), otherwise `lz4`; `size` and `balanced`
+   select `zstd`. An omitted Zstandard level defaults to `best` with `size` or
+   `better` with `balanced`; `latency` uses the codec default.
+
+For example, a manifest variant with `compression: {algorithm: zstd, level: best}`
+and `--variant-compression v3=lz4` uses LZ4 level 9. Adding `:fastest` to that CLI
+override selects LZ4 fast mode. A global `--compression=lz4` does not replace a
+manifest variant's explicit algorithm.
+
+Format v2 and both the full and minimal launcher stubs support mixed codecs
+in `memfd` and `cache` execution modes. `--dict` (or manifest `compression.dict`)
+forces shared Zstandard dictionary training across the supplied payloads and
+requires at least two variants; only Zstandard frames consume the dictionary.
+`--dict-profitable` (or root manifest `compression.dict_profitable`) gates shared
+Zstandard dictionary embedding on complete artifact bytes (launcher stub, optional
+dictionary payload, compressed frames, metadata index, and 56-byte trailer): when
+at least two variants are supplied and at least one resolves to Zstandard, `Pack`
+trains a candidate dictionary, stages one no-dictionary and one with-dictionary
+frame per Zstandard variant within a bounded 2 GiB temporary spool while encoding
+non-dictionary (`none`, `lz4`) variants once, and embeds the dictionary only when
+the complete with-dictionary artifact is strictly smaller than the complete
+no-dictionary artifact (exact byte ties omit the dictionary). Winning staged
+frames are copied directly without re-encoding. Combining `--dict` and
+`--dict-profitable` in one CLI invocation or setting both `dict` and
+`dict_profitable` in the same manifest scope is rejected before compilation or
+packaging; across scopes, an explicit CLI `--dict` overrides manifest
+`compression.dict_profitable`, and an explicit CLI `--dict-profitable` overrides
+manifest `compression.dict`.
+The root `size` profile attempts automatic dictionary training when at least two
+variants are supplied and at least one resolves to Zstandard. If every variant
+resolves to `none` or `lz4`, no dictionary is trained automatically. Automatic
+and profitability-gated training failures on degenerate samples emit a warning and
+fall back to independent frames; explicit `--dict` requests fail on training errors.
+Codec overrides leave dictionary settings in place, and explicit `--dict` requests
+retain dictionary metadata even when all variants use `none` or `lz4`.
 
 The following manifest fragment illustrates omitting algorithms while selecting profiles at root and variant scopes:
 
@@ -410,7 +568,12 @@ variants:
 ```
 
 #### Flags
-Accepts all manifest and compiler flags matching `microfat pack` (`--manifest`, `-o`, `--stub`, `--stub-profile`, `--concurrency`, `--profile`, `--compression`, `--dict`, `--keep-intermediates`, `--go-binary`, `--skip-elf-validation`).
+Accepts the manifest and compiler flags matching `microfat pack`: `--manifest`,
+`-o`, `--stub`, `--stub-profile`, `--concurrency`, `--profile`, `--compression`,
+`--compression-level`, repeated `--variant-compression`, `--dict`/`--zstd-dict`,
+`--dict-profitable`, `--dict-size`, `--format-version`, `--keep-intermediates`,
+`--go-binary`, and `--skip-elf-validation`. Per-variant CLI compression overrides
+follow the same precedence contract above for `pgo-pack` and `pack --manifest`.
 
 > [!NOTE]
 > **Authoritative Target Policy**: `GOOS`, `GOARCH`, `GOAMD64`, and `GOARM64` are reserved target variables. Ambient values for these variables are sanitized during compilation. Contradictory values declared in manifest `env` (at root or variant level) are rejected before compilation begins. In addition, every compiled Go artifact is validated via `debug/buildinfo` prior to packaging to ensure binary settings match declared variant levels.
@@ -464,6 +627,15 @@ microfat prewarm bin/myapp --cache-dir /var/cache/microfat
 # Verify cache health without re-extracting
 microfat prewarm bin/myapp --verify
 
+# Inspect selected work without changing the cache
+microfat prewarm bin/myapp --all --plan --cache-dir /var/cache/microfat
+
+# Plan and then apply a 32 MiB logical selected-payload budget
+microfat prewarm bin/myapp --all --plan --json --max-payload-bytes=33554432 \
+  --cache-dir /var/cache/microfat
+microfat prewarm bin/myapp --all --max-payload-bytes=33554432 \
+  --cache-dir /var/cache/microfat
+
 # Structured JSON output for initContainers
 microfat prewarm bin/myapp --json
 ```
@@ -475,7 +647,86 @@ microfat prewarm bin/myapp --json
 | `--all` | *(none)* | `bool` | `false` | Prewarm all embedded variants into the cache directory. |
 | `--cache-dir` | *(none)* | `string` | `""` | Custom cache directory path. |
 | `--verify` | *(none)* | `bool` | `false` | Verify existing cache entries without creating directories, repairing permissions, extracting, or removing entries. |
+| `--plan` | *(none)* | `bool` | `false` | Report selected declarations, read-only cache checks and materialization prerequisites without extracting or executing payloads. |
+| `--max-payload-bytes` | *(none)* | `decimal bytes` | unlimited | Admit at most this many unique selected raw payload bytes, independently of cache state. |
 | `--json` | *(none)* | `bool` | `false` | Output results in JSON telemetry format. |
+
+`--all` and `--level` are mutually exclusive. Omit both to select the host-compatible variant.
+Explicit `--level` and `--all` can stage supported foreign-architecture payloads without executing
+them. Unsupported target architectures fail. `--plan` and `--verify` are mutually exclusive;
+`--max-payload-bytes` works with planning, verification and extraction. These two new flags apply
+to the CLI only; the embedded launcher interface is unchanged.
+
+The byte limit accepts one or more ASCII decimal digits in the range `0` through
+`18446744073709551615`; signs, whitespace, units, fractions, hexadecimal and empty values fail.
+The exact limit is admitted. Explicit zero rejects every nonempty selection. Omission preserves
+unlimited admission. SHA-256 identities shared by several selected levels count once; conflicting
+declared sizes and arithmetic overflow fail. The limit is checked before cache discovery,
+directory creation, permission repair, temporary files or extraction. An oversized request fails
+without partial materialization, even if every selected payload is already cached.
+
+This is a logical selected-payload cap, not a filesystem quota, free-space check or reservation.
+It excludes filesystem metadata, temporary and replacement overlap, other processes, sparse or
+compressed filesystem allocation, and RSS. A later operational failure can leave earlier entries
+successfully materialized; this is not a multi-entry transaction. On such a failure, prewarm emits
+completed results and a failing exit status. JSON `results` contains only completed entries.
+
+Planning never creates, repairs, chmods, removes or replaces cache entries or directories. It
+validates the source index and shared dictionary, and checks existing entries by opening and
+hashing their descriptors with the normal size, ownership, mode and SHA-256 requirements. This
+performs reads and hashing. Reported payload hashes and raw sizes are validated index declarations,
+not verification of embedded payload contents. Authenticate or verify the whole artifact separately.
+Every observation can become stale immediately; a later prewarm invocation revalidates its own
+opened descriptors and retains normal atomic publication and error handling.
+
+An explicit missing cache directory is reported as planned work without creating it. Automatic
+discovery uses existing secure directories; when none can be securely identified, the plan reports
+`unavailable` and an empty `cache_path`, rather than guessing a future extraction destination.
+Read-only automatic discovery can observe an existing fallback directory while a later mutating
+resolution creates or repairs a primary directory and uses a different path with different cache
+totals. Supply the same explicit `--cache-dir` to review and apply the same destination; its state
+can still change between invocations.
+Cache state and decoder availability are independent: a descriptor-verified cache hit can be reused
+even if its embedded codec is unavailable.
+
+#### Plan JSON vocabulary
+
+`--plan --json` emits `event: "prewarm_plan"`, `app_name`, `target_os`, `target_arch`, the following
+totals, and an `entries` array. All sizes are integer bytes. Each total deduplicates selected SHA-256
+identities; `entries` still lists every selected level. Existing extraction and `--verify` JSON keep
+their `event: "prewarm"` shape when `--plan` is absent, including when a cap is supplied.
+
+| Field | Meaning |
+| :--- | :--- |
+| `unique_payload_count` | Number of distinct selected SHA-256 identities. |
+| `unique_payload_bytes` | Sum of their index-declared raw sizes; the admission limit uses this total. |
+| `verified_cache_bytes` | Logical bytes whose existing descriptors passed mandatory validation. |
+| `needs_materialization_bytes` | Declared logical bytes with cache status `missing` or `corrupt_safe`, including when their decoder is unavailable. |
+| `blocked_payload_bytes` | Declared logical bytes with cache status `unsafe` or `unavailable`. |
+
+| Entry field | Meaning |
+| :--- | :--- |
+| `level`, `sha256`, `uncompressed_size` | Selected level and validated index-declared identity and raw bytes. |
+| `cache_path` | Observed or explicit destination pathname; empty when discovery could not identify one. |
+| `cache_status` | `valid`, `missing`, `corrupt_safe`, `unsafe` or `unavailable`, as described below. |
+| `cache_error` | Explanation of a failed cache observation; omitted when empty. |
+| `decoder_available`, `decoder_error` | Whether the CLI has the declared codec, and an optional explanation when it does not. |
+| `materialization_possible` | Whether known decoder and cache safety prerequisites permit extraction if needed; no capacity or success guarantee. |
+| `can_prewarm` | Whether a verified hit, known extraction prerequisites or earlier same-identity staging can satisfy this entry. |
+| `reuse_after_level` | Optional earlier selected level whose successful staging would let this entry reuse the same payload. |
+
+`valid` requires a descriptor-verified executable entry. `missing` means an explicit directory or
+entry is absent. `corrupt_safe` means a safe regular entry failed executable-mode, size or content
+validation and can be replaced by explicit extraction. `unsafe` means directory or entry metadata
+violates cache safety requirements, including symlinks and nonregular entries. `unavailable` means
+the directory or entry could not be inspected or securely discovered; it does not claim absence.
+
+The plan is printed before a failing exit status when any selected entry cannot prewarm, including
+unsafe or unavailable cache observations and an unavailable decoder without a reusable hit or
+earlier supported duplicate. A later duplicate can depend on earlier successful materialization;
+`reuse_after_level` is a conditional dependency, not a reservation. A missing entry with a known
+decoder normally produces a successful plan. None of these outcomes authorizes skipping validation
+when applying the work.
 
 ---
 

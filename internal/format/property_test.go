@@ -50,7 +50,7 @@ func TestFormat_PropertyInvariants(t *testing.T) {
 			currentOffset += cSize + propOffsetSpacing
 		}
 
-		for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+		for _, version := range []int{format.FormatVersion2} {
 			idx := &format.Index{
 				Version:     version,
 				AppName:     "prop_app",

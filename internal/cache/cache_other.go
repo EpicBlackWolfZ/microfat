@@ -120,6 +120,9 @@ func VerifyBinary(path string, expectedSize int64, expectedSHA256 string) bool {
 	defer func() { _ = f.Close() }()
 
 	hasher := sha256.New()
+	if VerifyHashStartedFunc != nil {
+		VerifyHashStartedFunc()
+	}
 	if _, err := io.Copy(hasher, f); err != nil {
 		return false
 	}
@@ -193,6 +196,9 @@ func VerifyVariant(entry *format.VariantEntry, cacheDir string) format.PrewarmRe
 	defer func() { _ = f.Close() }()
 
 	hasher := sha256.New()
+	if VerifyHashStartedFunc != nil {
+		VerifyHashStartedFunc()
+	}
 	if _, err := io.Copy(hasher, f); err != nil {
 		res.Status = format.PrewarmStatusCorrupted
 		res.Error = fmt.Sprintf("hashing cached binary: %v", err)
@@ -209,6 +215,28 @@ func VerifyVariant(entry *format.VariantEntry, cacheDir string) format.PrewarmRe
 	res.Valid = true
 	res.Status = format.PrewarmStatusValid
 	return res
+}
+
+// MaterializeAndOpenVariantAtFD returns ErrUnsupportedPlatform because a verified
+// Unix descriptor cannot be transferred on this platform.
+func MaterializeAndOpenVariantAtFD(
+	dirFD int,
+	dirPath string,
+	entry *format.VariantEntry,
+	writePayload func(w io.Writer) error,
+) (string, int, error) {
+	return "", -1, fmt.Errorf("%w: descriptor-bound materialization is Unix-specific", ErrUnsupportedPlatform)
+}
+
+// MaterializeAndOpenVariantAtFDWithOpener returns ErrUnsupportedPlatform on non-Unix platforms.
+func MaterializeAndOpenVariantAtFDWithOpener(
+	dirFD int,
+	dirPath string,
+	entry *format.VariantEntry,
+	writePayload func(w io.Writer) error,
+	opener func(int, string) (int, error),
+) (string, int, error) {
+	return MaterializeAndOpenVariantAtFD(dirFD, dirPath, entry, writePayload)
 }
 
 // MaterializeVariantAtFD provides a portable implementation of variant cache materialization for non-Unix platforms.
@@ -253,6 +281,9 @@ func MaterializeVariantAtFD(
 	}()
 
 	hasher := sha256.New()
+	if StreamHashStartedFunc != nil {
+		StreamHashStartedFunc()
+	}
 	mw := io.MultiWriter(tmpFile, hasher)
 	if err := writePayload(mw); err != nil {
 		return "", fmt.Errorf("%w: writing variant payload: %w", format.ErrCacheExtract, err)

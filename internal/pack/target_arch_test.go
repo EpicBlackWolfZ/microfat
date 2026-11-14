@@ -94,7 +94,7 @@ func TestPack_CanonicalTargetArchitecture(t *testing.T) {
 		machine:   elf.EM_X86_64,
 	})
 	for _, tc := range cases {
-		for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+		for _, version := range []int{format.FormatVersion2} {
 			t.Run(fmt.Sprintf("%s/format v%d", tc.name, version), func(t *testing.T) {
 				t.Parallel()
 				dir := t.TempDir()
@@ -134,7 +134,7 @@ func TestPack_CanonicalTargetArchitecture(t *testing.T) {
 func TestPack_TargetArchitectureMismatchPreservesOutput(t *testing.T) {
 	t.Parallel()
 	for _, tc := range targetArchTestCases() {
-		for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+		for _, version := range []int{format.FormatVersion2} {
 			for _, role := range []string{"launcher", "payload"} {
 				t.Run(fmt.Sprintf("%s/format v%d/wrong %s", tc.name, version, role), func(t *testing.T) {
 					t.Parallel()
@@ -170,7 +170,7 @@ func TestPack_TargetArchitectureMismatchPreservesOutput(t *testing.T) {
 func TestPack_UnsupportedTargetArchitectureBeforeInputs(t *testing.T) {
 	t.Parallel()
 	for _, target := range []string{"mips64", "386", "arm", "unsupported"} {
-		for _, version := range []int{format.FormatVersion1, format.FormatVersion2} {
+		for _, version := range []int{format.FormatVersion2} {
 			for _, skipValidation := range []bool{false, true} {
 				name := fmt.Sprintf("%s/format v%d/skip ELF validation %t", target, version, skipValidation)
 				t.Run(name, func(t *testing.T) {

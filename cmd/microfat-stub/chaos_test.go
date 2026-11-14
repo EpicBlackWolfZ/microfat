@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -822,7 +823,7 @@ func TestMemfdSealingGracefulFallback(t *testing.T) {
 	}
 }
 
-func TestRedTeam_FormatV1_EmptySHA256_Rejected(t *testing.T) {
+func TestRedTeam_EmptySHA256_And_LegacyFormatV1_Rejected(t *testing.T) {
 	origExecve := execveFunc
 	defer func() { execveFunc = origExecve }()
 
@@ -836,9 +837,9 @@ func TestRedTeam_FormatV1_EmptySHA256_Rejected(t *testing.T) {
 	fatFile, entry, idx := createSyntheticFatFile(t, payload)
 	defer func() { _ = fatFile.Close() }()
 
-	// Poison the entry: Format v1 with empty SHA-256
+	// Poison the entry: empty SHA-256
 	entry.SHA256 = ""
-	idx.Version = format.FormatVersion1
+	idx.Version = format.FormatVersion2
 
 	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
 	policyRes := microarch.PolicyResult{SelectedVariant: entry.Level}
@@ -860,6 +861,24 @@ func TestRedTeam_FormatV1_EmptySHA256_Rejected(t *testing.T) {
 	}
 	if execveCalled {
 		t.Fatal("execve must NOT be called for variant with empty SHA-256")
+	}
+
+	// Verify legacy Format v1 JSON index is rejected before dispatch
+	rawJSON := []byte(`{"version":1,"os":"linux","arch":"amd64","variants":[]}`)
+	var legacyBuf bytes.Buffer
+	legacyBuf.WriteString("stub")
+	legacyOffset := uint64(legacyBuf.Len())
+	legacyBuf.Write(rawJSON)
+	sum := sha256.Sum256(rawJSON)
+	var trailer [format.TrailerSize]byte
+	binary.LittleEndian.PutUint64(trailer[0:format.OffsetLen], legacyOffset)
+	binary.LittleEndian.PutUint64(trailer[format.OffsetLen:format.OffsetLen*2], uint64(len(rawJSON)))
+	copy(trailer[format.OffsetLen*2:format.OffsetLen*2+format.HashLen], sum[:])
+	copy(trailer[format.OffsetLen*2+format.HashLen:], []byte(format.MagicString))
+	legacyBuf.Write(trailer[:])
+	_, legacyErr := format.ReadTrailerAndIndex(bytes.NewReader(legacyBuf.Bytes()), int64(legacyBuf.Len()))
+	if !errors.Is(legacyErr, format.ErrUnsupportedVersion) {
+		t.Fatalf("expected ErrUnsupportedVersion for legacy Format v1 JSON, got: %v", legacyErr)
 	}
 }
 

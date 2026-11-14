@@ -83,12 +83,11 @@ func runImage(selfPath, imagePath string) error {
 		return fmt.Errorf("stat executable: %w", err)
 	}
 
-	if !format.IsFatBinary(selfFile, stat.Size()) {
-		return fmt.Errorf("file %s is not a valid microfat fat binary (missing magic trailer); %s", selfPath, incompleteArtifactHint)
-	}
-
 	idx, err := format.ReadTrailerAndIndex(selfFile, stat.Size())
 	if err != nil {
+		if format.IsMissingTrailerError(err) {
+			return fmt.Errorf("file %s is not a valid microfat fat binary (missing magic trailer); %s", selfPath, incompleteArtifactHint)
+		}
 		return fmt.Errorf("reading binary manifest: %w; %s", err, incompleteArtifactHint)
 	}
 

@@ -67,9 +67,10 @@ func (c *LZ4Codec) Compress(w io.Writer, src []byte, level string) error {
 		return err
 	}
 
+	concurrency := resolveLZ4Concurrency(len(src))
 	writer := lz4.NewWriter(w)
-	if err := writer.Apply(lz4.CompressionLevelOption(encLevel)); err != nil {
-		return fmt.Errorf("applying lz4 compression level: %w", err)
+	if err := writer.Apply(lz4.CompressionLevelOption(encLevel), lz4.ConcurrencyOption(concurrency)); err != nil {
+		return fmt.Errorf("applying lz4 compression options: %w", err)
 	}
 
 	if _, err := writer.Write(src); err != nil {

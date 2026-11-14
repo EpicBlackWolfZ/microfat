@@ -20,7 +20,6 @@ func TestVerifyBinaryChecksumCasing(t *testing.T) {
 		name    string
 		version int
 	}{
-		{name: "json_v1", version: format.FormatVersion1},
 		{name: "binary_v2", version: format.FormatVersion2},
 	}
 	cases := []struct {

@@ -12,7 +12,11 @@ import (
 )
 
 const (
-	defaultLevel       = "default"
+	levelBetter        = "better"
+	levelBest          = "best"
+	controlBalanced    = "balanced"
+	controlBestNoDict  = "best-no-dict"
+	controlSize        = "size"
 	decoderReserve     = 64 * kib
 	largeReserve       = 256 * kib
 	codecReserve       = 32 * mib
@@ -39,23 +43,25 @@ type baseline struct {
 	Error         string            `json:"error,omitempty"`
 }
 
-func baselineOptions(g group, arch, stub, output string, dictionary bool) pack.Options {
+func baselineOptions(g group, arch, stub, output, control string) pack.Options {
 	opts := pack.DefaultOptions()
 	opts.AppName, opts.TargetArch, opts.StubPath, opts.OutputPath = g.family, arch, stub, output
-	opts.Compression, opts.CompressionLevel, opts.EnableDict = codec.AlgorithmZstd, defaultLevel, dictionary
+	opts.CreatedUnix = new(int64)
+	switch control {
+	case controlBestNoDict:
+		opts.Compression = "zstd:best"
+	case controlSize:
+		opts.Profile = codec.ProfileSize
+	}
 	for _, v := range g.variants {
 		opts.Variants[v.Level] = v.Path
 	}
 	return opts
 }
 
-func packBaseline(g group, arch, stub, output string, dictionary bool, inputs [][]byte, stubData []byte) baseline {
-	name := "no-dictionary"
-	if dictionary {
-		name = "current-dictionary"
-	}
-	b := baseline{Name: name, Path: output}
-	_, err := pack.Pack(baselineOptions(g, arch, stub, output, dictionary))
+func packBaseline(g group, arch, stub, output, control string, inputs [][]byte, stubData []byte) baseline {
+	b := baseline{Name: control, Path: output}
+	_, err := pack.Pack(baselineOptions(g, arch, stub, output, control))
 	if err != nil {
 		b.Error = err.Error()
 		return b
@@ -189,7 +195,7 @@ func selectedCosts(h wireHeader, containerSize int, control baseline) []targetCo
 	return result
 }
 
-func evaluateModel(m model, inv inventory, stubBytes int64, control baseline, output string) candidate {
+func evaluateModel(m model, inv inventory, stubBytes int64, control baseline, output, level string) candidate {
 	c := candidate{Method: m.method, Base: m.base, Path: output, InventoryApplicable: m.method != methodBase, DistinctChunkBytes: inv.unique,
 		SharedCoverage: inv.shared, CoreCoverage: inv.core, SubsetCoverage: inv.shared - inv.core, DistinctChunks: len(inv.records)}
 	for _, path := range inv.paths {
@@ -198,7 +204,7 @@ func evaluateModel(m model, inv inventory, stubBytes int64, control baseline, ou
 	for _, t := range m.targets {
 		c.InputBytes += int64(len(t.original))
 	}
-	data, h, err := encodeModel(m, defaultLevel)
+	data, h, err := encodeModel(m, level)
 	if err == nil {
 		err = roundtripModel(data, m)
 	}
@@ -248,27 +254,29 @@ type groupResult struct {
 	Error      string          `json:"error,omitempty"`
 }
 
-func screenGroup(g group, arch, stub, output string, stubData []byte) groupResult {
+func screenGroup(g group, arch, stub, output string, stubData []byte, level string) groupResult {
 	r := groupResult{Family: g.family, Profile: g.profile, Variants: g.variants}
 	inputs, levels, err := readGroup(g, arch)
 	if err != nil {
 		r.Error = err.Error()
 		return r
 	}
-	for _, useDict := range []bool{false, true} {
-		name := "no-dictionary.fat"
-		if useDict {
-			name = "current-dictionary.fat"
-		}
-		r.Baselines = append(r.Baselines, packBaseline(g, arch, stub, filepath.Join(output, name), useDict, inputs, stubData))
+	controls := []string{controlBalanced}
+	if level == levelBest {
+		controls = []string{controlBestNoDict, controlSize}
+	}
+	for _, name := range controls {
+		r.Baselines = append(r.Baselines, packBaseline(g, arch, stub, filepath.Join(output, name+".fat"), name, inputs, stubData))
 	}
 	control := r.Baselines[0]
-	if control.Error != "" {
-		r.Error = fmt.Sprintf("mandatory no-dictionary control failed: %s", control.Error)
-		return r
-	}
-	if other := r.Baselines[1]; other.Error == "" && other.Bytes < control.Bytes {
-		control = other
+	for _, other := range r.Baselines {
+		if other.Error != "" {
+			r.Error = fmt.Sprintf("mandatory %s control failed: %s", other.Name, other.Error)
+			return r
+		}
+		if other.Bytes < control.Bytes {
+			control = other
+		}
 	}
 	r.Control = control.Name
 	for _, method := range []string{methodSections, methodSmall, methodLarge, methodCDC} {
@@ -278,12 +286,13 @@ func screenGroup(g group, arch, stub, output string, stubData []byte) groupResul
 			continue
 		}
 		m := sharingModel(inv, levels, inputs, method)
-		r.Candidates = append(r.Candidates, evaluateModel(m, inv, int64(len(stubData)), control, filepath.Join(output, method+".mf47")))
+		r.Candidates = append(r.Candidates, evaluateModel(m, inv, int64(len(stubData)), control,
+			filepath.Join(output, method+".mf47"), level))
 	}
 	for base := range inputs {
 		m := baseModel(inputs, levels, base)
 		r.Candidates = append(r.Candidates, evaluateModel(m, inventory{}, int64(len(stubData)), control,
-			filepath.Join(output, methodBase+"-"+levels[base]+".mf47")))
+			filepath.Join(output, methodBase+"-"+levels[base]+".mf47"), level))
 	}
 	return r
 }

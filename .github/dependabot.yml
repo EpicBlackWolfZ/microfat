@@ -2,10 +2,11 @@ version: 2
 updates:
   # Native Go module updates include transitive dependencies and go.sum integrity.
   - package-ecosystem: "gomod"
-    directory: "/"
+    directories:
+      - "/"
+      - "/examples/runtimeinfo/*"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "04:00"
       timezone: "UTC"
     commit-message:
@@ -29,8 +30,7 @@ updates:
       - "/"
       - "/.github/actions/*"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "04:00"
       timezone: "UTC"
     commit-message:
@@ -47,8 +47,7 @@ updates:
   - package-ecosystem: "docker"
     directory: "/scripts/fixtures"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "04:00"
       timezone: "UTC"
     commit-message:

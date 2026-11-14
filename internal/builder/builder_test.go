@@ -1320,3 +1320,24 @@ variants:
 		require.ErrorIs(t, err, builder.ErrInvalidManifest)
 	})
 }
+
+func TestBuildAndPack_RejectsUnsupportedFormatVersion(t *testing.T) {
+	t.Parallel()
+	m := &builder.Manifest{
+		AppName:    "ver-app",
+		TargetOS:   testOSLinux,
+		TargetArch: testArchAMD64,
+		Variants:   []builder.VariantConfig{{Level: "v1"}},
+	}
+
+	_, err := builder.BuildAndPack(t.Context(), m, builder.BuildOptions{
+		FormatVersion: format.FormatVersion1,
+	})
+	require.ErrorIs(t, err, format.ErrUnsupportedVersion)
+	require.ErrorContains(t, err, "Format v1 was removed in v0.4.0; use Format v2")
+
+	_, err = builder.BuildAndPack(t.Context(), m, builder.BuildOptions{
+		FormatVersion: 99,
+	})
+	require.ErrorIs(t, err, format.ErrUnsupportedVersion)
+}

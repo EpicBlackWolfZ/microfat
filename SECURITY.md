@@ -212,7 +212,6 @@ particular host. The linked constants and checks are authoritative when versions
 | Serialized metadata index | 1,048,576 bytes (1 MiB) | `MaxIndexSize` in [format.go](internal/format/format.go) |
 | One uncompressed variant | 1,073,741,824 bytes (1 GiB) | `MaxPayloadSize` in [format.go](internal/format/format.go); decoder output is also capped |
 | Shared dictionary | 1,048,576 bytes (1 MiB) | `MaxDictionarySize` in [format.go](internal/format/format.go) |
-| Legacy JSON nesting, including unknown fields | 128 levels | `MaxJSONDepth` in [format.go](internal/format/format.go) |
 | Build manifest | 1,048,576 bytes (1 MiB) | `maxManifestBytes` in [manifest.go](internal/builder/manifest.go) |
 | Secure-execution auxiliary vector read | 4,096 bytes | `maxAuxvBytes` in [privilege_linux.go](cmd/microfat-stub/privilege_linux.go) |
 

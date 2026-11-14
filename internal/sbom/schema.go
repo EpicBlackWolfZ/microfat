@@ -5,8 +5,8 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"regexp"
 	"sync"
-	"time"
 
 	"github.com/dlclark/regexp2"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -18,6 +18,9 @@ const (
 	CycloneDXSchema  = "https://cyclonedx.org/schema/bom-1.7.schema.json"
 	SPDXSchema       = "https://spdx.org/schema/3.0.1/spdx-json-schema.json"
 	SPDXContext      = "https://spdx.org/rdf/3.0.1/spdx-context.jsonld"
+
+	minPrintableASCII = 0x20
+	maxPrintableASCII = 0x7e
 )
 
 //go:embed schema/*.json
@@ -45,12 +48,94 @@ func (p ecmaPattern) MatchString(value string) bool {
 func (p ecmaPattern) String() string { return p.compiled.String() }
 
 func compilePattern(value string) (jsonschema.Regexp, error) {
+	// Only pinned embedded schemas are ever compiled (offlineLoader rejects external URIs)
+	// and documents are pre-bounded by MaxDocumentBytes. Do not set regexp2.MatchTimeout:
+	// regexp2's global fastclock goroutine returns false-negative timeouts when 100ms sleeps
+	// overshoot under heavy CPU load and lingers after validation returns.
 	compiled, err := regexp2.Compile(value, regexp2.ECMAScript)
 	if err != nil {
 		return nil, err
 	}
-	compiled.MatchTimeout = time.Second
+	if isASCIIRE2Equivalent(value) {
+		if re, reErr := regexp.Compile(value); reErr == nil {
+			return re, nil
+		}
+	}
 	return ecmaPattern{compiled}, nil
+}
+
+// isASCIIRE2Equivalent reports whether an ECMA-262 pattern uses only constructs whose
+// matching semantics are identical in Go's linear-time RE2 engine (no unescaped '.',
+// lookarounds, inline modifiers, empty/leading-']' classes, Unicode whitespace/word
+// classes, or nested POSIX bracket expressions).
+func isASCIIRE2Equivalent(pattern string) bool {
+	inClass := false
+	classLead := false
+	for i := 0; i < len(pattern); i++ {
+		c := pattern[i]
+		if c < minPrintableASCII || c > maxPrintableASCII {
+			return false
+		}
+		if c == '\\' {
+			i++
+			if i >= len(pattern) || !isSafeRE2Escape(pattern[i]) {
+				return false
+			}
+			classLead = false
+			continue
+		}
+		if inClass {
+			var ok bool
+			inClass, classLead, ok = stepCharClass(c, classLead)
+			if !ok {
+				return false
+			}
+			continue
+		}
+		if !stepOutsideClass(pattern, i, c) {
+			return false
+		}
+		if c == '[' {
+			inClass = true
+			classLead = true
+		}
+	}
+	return !inClass
+}
+
+func stepCharClass(c byte, classLead bool) (inClass, nextLead, ok bool) {
+	if c == '[' {
+		return true, false, false
+	}
+	if classLead && c == '^' {
+		return true, true, true
+	}
+	if c == ']' {
+		if classLead {
+			return true, false, false
+		}
+		return false, false, true
+	}
+	return true, false, true
+}
+
+func stepOutsideClass(pattern string, idx int, c byte) bool {
+	if c == '.' {
+		return false
+	}
+	if c == '(' && idx+1 < len(pattern) && pattern[idx+1] == '?' {
+		return idx+2 < len(pattern) && pattern[idx+2] == ':'
+	}
+	return true
+}
+
+func isSafeRE2Escape(c byte) bool {
+	switch c {
+	case 'd', '.', '/', '-', '+', '*', '?', '(', ')', '[', ']', '{', '}', '^', '$', '|', '\\':
+		return true
+	default:
+		return false
+	}
 }
 
 func compileSchemas() (schemaSet, error) {

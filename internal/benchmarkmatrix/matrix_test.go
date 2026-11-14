@@ -19,13 +19,13 @@ func TestCases(t *testing.T) {
 	t.Parallel()
 	cases, err := Cases(Options{Tier: Compatibility, Workload: MixedWorkload})
 	require.NoError(t, err)
-	require.Len(t, cases, 16)
+	require.Len(t, cases, 8)
 	names := map[string]bool{}
 	for _, scenario := range cases {
 		name := scenario["name"].(string)
 		require.False(t, names[name])
 		names[name] = true
-		require.Contains(t, []int{1, 2}, scenario["format"])
+		require.Equal(t, 2, scenario["format"])
 		if scenario["dictionary"].(bool) {
 			require.Equal(t, "zstd", scenario["codec"])
 		}

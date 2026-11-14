@@ -1,0 +1,99 @@
+# C2 packing observations
+
+All 88 cells from the retained C2 Pack rows, including the three synthetic boundary groups.
+Each setting has three successful rounds. Wall and CPU are median milliseconds;
+RSS is maximum wait4 KiB, including pre-exec parent/shared-mm accounting.
+It does not isolate codec memory. Complete bytes include the full stub, stored
+dictionary, frames, index and trailer. No C1 timings are included.
+See [disposition](../../codec-policy-results.md).
+
+| Family | Build / fixture | Setting | Complete bytes | Wall ms | CPU ms | Observed wait4 RSS KiB |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| actionlint | stripped | balanced | 11284651 | 228.784 | 268.683 | 82868 |
+| actionlint | stripped | balanced-dict | 11283306 | 285.866 | 324.294 | 72308 |
+| actionlint | stripped | explicit-lz4 | 14262386 | 132.741 | 138.398 | 57288 |
+| actionlint | stripped | explicit-none | 23544712 | 69.405 | 75.375 | 57288 |
+| actionlint | stripped | explicit-zstd-best | 10907142 | 1211.152 | 1254.734 | 124392 |
+| actionlint | stripped | explicit-zstd-fastest | 11826339 | 116.182 | 160.940 | 57288 |
+| actionlint | stripped | latency | 14262386 | 131.690 | 139.128 | 57288 |
+| actionlint | stripped | size | 10913129 | 1209.892 | 1252.531 | 235000 |
+| actionlint | unstripped | balanced | 18174110 | 282.804 | 331.694 | 83216 |
+| actionlint | unstripped | balanced-dict | 18174658 | 284.184 | 337.139 | 79540 |
+| actionlint | unstripped | explicit-lz4 | 21463915 | 152.594 | 159.993 | 57288 |
+| actionlint | unstripped | explicit-none | 31637032 | 84.129 | 94.699 | 57288 |
+| actionlint | unstripped | explicit-zstd-best | 17759518 | 1279.289 | 1333.883 | 160668 |
+| actionlint | unstripped | explicit-zstd-fastest | 18759085 | 140.292 | 192.058 | 57288 |
+| actionlint | unstripped | latency | 21463915 | 152.197 | 161.245 | 57288 |
+| actionlint | unstripped | size | 17770424 | 1336.507 | 1363.522 | 245892 |
+| boundary | above | balanced | 5567072 | 24.722 | 22.275 | 57288 |
+| boundary | above | balanced-dict | 5371141 | 41.821 | 39.059 | 57288 |
+| boundary | above | explicit-lz4 | 5567051 | 20.680 | 16.194 | 57288 |
+| boundary | above | explicit-none | 5566997 | 18.351 | 13.304 | 57288 |
+| boundary | above | explicit-zstd-best | 5567072 | 39.456 | 37.574 | 98012 |
+| boundary | above | explicit-zstd-fastest | 5567108 | 21.002 | 16.944 | 57288 |
+| boundary | above | latency | 5567051 | 21.228 | 17.204 | 57288 |
+| boundary | above | size | 5371147 | 85.989 | 84.211 | 204252 |
+| boundary | at | balanced | 5567069 | 24.905 | 22.133 | 57288 |
+| boundary | at | balanced-dict | 5371138 | 43.776 | 42.967 | 57288 |
+| boundary | at | explicit-lz4 | 5567048 | 20.570 | 17.016 | 57288 |
+| boundary | at | explicit-none | 5566994 | 19.077 | 14.247 | 57288 |
+| boundary | at | explicit-zstd-best | 5567069 | 38.741 | 36.589 | 99128 |
+| boundary | at | explicit-zstd-fastest | 5567105 | 22.058 | 18.264 | 57288 |
+| boundary | at | latency | 5567048 | 20.106 | 16.938 | 57288 |
+| boundary | at | size | 5371144 | 86.885 | 86.584 | 171912 |
+| boundary | below | balanced | 5567057 | 26.453 | 24.149 | 57288 |
+| boundary | below | balanced-dict | 5371198 | 41.636 | 38.480 | 57288 |
+| boundary | below | explicit-lz4 | 5567045 | 20.517 | 15.913 | 57288 |
+| boundary | below | explicit-none | 5566991 | 19.527 | 14.239 | 57288 |
+| boundary | below | explicit-zstd-best | 5567057 | 38.321 | 34.964 | 98064 |
+| boundary | below | explicit-zstd-fastest | 5567093 | 21.645 | 19.536 | 57288 |
+| boundary | below | latency | 5566991 | 18.462 | 13.308 | 57288 |
+| boundary | below | size | 5371207 | 86.231 | 85.064 | 188524 |
+| fortio | stripped | balanced | 26133547 | 683.109 | 805.837 | 114020 |
+| fortio | stripped | balanced-dict | 26182863 | 768.619 | 902.869 | 107216 |
+| fortio | stripped | explicit-lz4 | 35269028 | 357.067 | 377.148 | 103256 |
+| fortio | stripped | explicit-none | 63177604 | 169.904 | 188.635 | 74304 |
+| fortio | stripped | explicit-zstd-best | 24931916 | 3866.603 | 3996.422 | 139992 |
+| fortio | stripped | explicit-zstd-fastest | 28269381 | 305.383 | 435.492 | 77204 |
+| fortio | stripped | latency | 35269028 | 353.125 | 371.737 | 83480 |
+| fortio | stripped | size | 24972518 | 3885.934 | 4026.538 | 220804 |
+| fortio | unstripped | balanced | 47016805 | 1021.024 | 1191.757 | 102768 |
+| fortio | unstripped | balanced-dict | 47080063 | 836.692 | 1004.648 | 123380 |
+| fortio | unstripped | explicit-lz4 | 56923069 | 425.411 | 458.228 | 101628 |
+| fortio | unstripped | explicit-none | 88753205 | 211.271 | 244.029 | 119376 |
+| fortio | unstripped | explicit-zstd-best | 45747870 | 4300.117 | 4479.428 | 156492 |
+| fortio | unstripped | explicit-zstd-fastest | 49087715 | 388.769 | 554.594 | 103400 |
+| fortio | unstripped | latency | 56923069 | 421.835 | 456.001 | 123468 |
+| fortio | unstripped | size | 45807384 | 4400.004 | 4568.150 | 144244 |
+| govulncheck | stripped | balanced | 17532112 | 387.368 | 461.514 | 86268 |
+| govulncheck | stripped | balanced-dict | 17512413 | 430.011 | 496.673 | 78704 |
+| govulncheck | stripped | explicit-lz4 | 22499507 | 210.237 | 219.506 | 57288 |
+| govulncheck | stripped | explicit-none | 36504457 | 98.050 | 105.243 | 57288 |
+| govulncheck | stripped | explicit-zstd-best | 16802260 | 2344.327 | 2414.055 | 141376 |
+| govulncheck | stripped | explicit-zstd-fastest | 18656044 | 184.988 | 262.128 | 57288 |
+| govulncheck | stripped | latency | 22499507 | 206.389 | 215.973 | 57288 |
+| govulncheck | stripped | size | 16779119 | 2272.081 | 2330.841 | 249784 |
+| govulncheck | unstripped | balanced | 30628645 | 435.875 | 519.049 | 66220 |
+| govulncheck | unstripped | balanced-dict | 30654411 | 480.479 | 560.396 | 97692 |
+| govulncheck | unstripped | explicit-lz4 | 36296161 | 260.682 | 262.418 | 81240 |
+| govulncheck | unstripped | explicit-none | 51618869 | 136.764 | 139.813 | 57288 |
+| govulncheck | unstripped | explicit-zstd-best | 29852164 | 2470.291 | 2565.533 | 132152 |
+| govulncheck | unstripped | explicit-zstd-fastest | 31718999 | 237.786 | 320.816 | 81060 |
+| govulncheck | unstripped | latency | 36296161 | 251.856 | 258.917 | 75928 |
+| govulncheck | unstripped | size | 29877749 | 2417.474 | 2514.144 | 259120 |
+| task | stripped | balanced | 49798459 | 1943.735 | 2229.259 | 218500 |
+| task | stripped | balanced-dict | 49851922 | 1924.070 | 2206.847 | 182024 |
+| task | stripped | explicit-lz4 | 71975832 | 824.483 | 867.078 | 172476 |
+| task | stripped | explicit-none | 161219458 | 402.599 | 431.612 | 150204 |
+| task | stripped | explicit-zstd-best | 46982460 | 8206.328 | 8506.446 | 193192 |
+| task | stripped | explicit-zstd-fastest | 54794804 | 729.442 | 1041.224 | 172412 |
+| task | stripped | latency | 71975832 | 828.841 | 869.271 | 171920 |
+| task | stripped | size | 47062109 | 8424.608 | 8730.957 | 218984 |
+| task | unstripped | balanced | 95628756 | 2000.274 | 2356.112 | 266388 |
+| task | unstripped | balanced-dict | 95666788 | 2134.801 | 2474.309 | 259976 |
+| task | unstripped | explicit-lz4 | 120206291 | 1002.269 | 1069.466 | 258260 |
+| task | unstripped | explicit-none | 225928568 | 566.483 | 616.928 | 269368 |
+| task | unstripped | explicit-zstd-best | 92652961 | 9360.700 | 9724.233 | 267244 |
+| task | unstripped | explicit-zstd-fastest | 100601460 | 945.305 | 1326.927 | 352988 |
+| task | unstripped | latency | 120206291 | 1035.834 | 1113.283 | 266048 |
+| task | unstripped | size | 92735955 | 9629.846 | 9966.725 | 344640 |

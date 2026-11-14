@@ -208,22 +208,18 @@ Do not distribute separate `v1` and `v3` container images or RPM/DEB packages. P
 
 ---
 
-## 4. Format v1 Manifest Deprecation Notice
+## 4. Legacy Format v1 Removal Notice
 
-`microfat` Format v2 compact binary tables with mandatory frame digests are the production standard in `v0.2.2` and later.
+`microfat` Format v2 compact binary tables with mandatory frame digests have been the default production standard since `v0.2.2`, and are the sole supported format in `v0.4.0` and later.
 
-### Deprecation Schedule
+### Lifecycle Timeline
 
-- **`v0.2.2`**: Format v2 became the default for all `microfat pack` and `build` commands. Format v1 reading remains supported for backwards compatibility.
-- **`v0.2.3`**: `microfat inspect` and `microfat info` emit deprecation warnings to `stderr` when reading legacy Format v1 JSON manifests:
-  ```text
-  [microfat:warn] binary "app.fat" uses legacy Format v1 JSON manifest; Format v1 is deprecated and scheduled for removal in v0.4.0 (use Format v2 for production)
-  ```
-  Pure JSON output on `stdout` via `--json` remains parseable and uncontaminated.
-- **`v0.4.0`**: Legacy Format v1 reading support will be permanently removed.
+- **`v0.2.2`**: Format v2 became the default for all `microfat pack` and `build` commands, while Format v1 reading remained supported for backwards compatibility.
+- **`v0.2.3`**: `microfat inspect` and `microfat info` emitted deprecation warnings to `stderr` when reading legacy Format v1 JSON manifests, announcing scheduled removal in `v0.4.0`.
+- **`v0.4.0`**: Legacy Format v1 packaging and reading support were permanently removed. Any `--format-version 1` request or legacy Format v1 JSON manifest fails closed with `ErrUnsupportedVersion`.
 
 ### Migrating to Format v2
-Re-package existing binaries using `microfat pack` (which uses Format v2 by default):
+Re-package existing variant ELF binaries using `microfat pack` (Format v2):
 ```bash
 microfat pack -v v1=bin/v1 -v v3=bin/v3 -o dist/app
 ```

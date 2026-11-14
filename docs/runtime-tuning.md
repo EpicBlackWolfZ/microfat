@@ -130,6 +130,13 @@ default change requires representative workload measurements.
 
 ## 4. Environment Precedence & Opt-Out Controls
 
+Preview these controls with `microfat doctor --gc-profile adaptive --live-heap-estimate 150MiB`.
+The report separates its calculated `tuning` from `effective_environment`, which preserves
+explicit `GOMEMLIMIT`, `GOMAXPROCS`, and `GOGC` values, including empty values. It always reports
+`applied: false` and changes no runtime settings. The supplied heap estimate is not measured,
+and doctor has no selected payload from which to deduct retained executable storage. See the
+[doctor reference](cli-reference.md#microfat-doctor) for flag precedence and report fields.
+
 Microfat strictly adheres to the following precedence order:
 
 1. **Explicit User / Kubernetes Environment Variables (Highest Priority)**:

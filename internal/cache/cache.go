@@ -29,5 +29,6 @@ var (
 )
 
 const (
-	verifyBufferSize = 32768
+	verifyBufferSize   = 64 * 1024
+	verifyHexDigestLen = 64
 )

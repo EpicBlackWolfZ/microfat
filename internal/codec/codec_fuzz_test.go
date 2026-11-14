@@ -124,3 +124,50 @@ func FuzzDecompressNone(f *testing.F) {
 		}
 	})
 }
+
+func FuzzRoundTripZstd(f *testing.F) {
+	f.Add([]byte{}, "fastest")
+	f.Add([]byte("single-block zstd payload"), "better")
+	f.Add(bytes.Repeat([]byte("boundary-64k-pattern-"), 3200), "fastest")
+
+	zCodec := NewZstdCodec()
+	f.Fuzz(func(t *testing.T, payload []byte, level string) {
+		if len(payload) > 2*1024*1024 {
+			return
+		}
+		var compressed bytes.Buffer
+		if err := zCodec.Compress(&compressed, payload, level); err != nil {
+			return
+		}
+		var decoded bytes.Buffer
+		if err := zCodec.Decompress(&decoded, bytes.NewReader(compressed.Bytes()), int64(len(payload))); err != nil {
+			t.Fatalf("round-trip decompress failed for len=%d level=%q: %v", len(payload), level, err)
+		}
+		if !bytes.Equal(decoded.Bytes(), payload) {
+			t.Fatalf("round-trip payload mismatch for len=%d level=%q", len(payload), level)
+		}
+	})
+}
+
+func FuzzRoundTripLZ4(f *testing.F) {
+	f.Add([]byte{}, "fast")
+	f.Add([]byte("single-block lz4 payload"), "better")
+
+	lzCodec := NewLZ4Codec()
+	f.Fuzz(func(t *testing.T, payload []byte, level string) {
+		if len(payload) > 2*1024*1024 {
+			return
+		}
+		var compressed bytes.Buffer
+		if err := lzCodec.Compress(&compressed, payload, level); err != nil {
+			return
+		}
+		var decoded bytes.Buffer
+		if err := lzCodec.Decompress(&decoded, bytes.NewReader(compressed.Bytes()), int64(len(payload))); err != nil {
+			t.Fatalf("round-trip decompress failed for len=%d level=%q: %v", len(payload), level, err)
+		}
+		if !bytes.Equal(decoded.Bytes(), payload) {
+			t.Fatalf("round-trip payload mismatch for len=%d level=%q", len(payload), level)
+		}
+	})
+}

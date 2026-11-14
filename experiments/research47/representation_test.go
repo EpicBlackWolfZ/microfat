@@ -45,17 +45,17 @@ func TestRepresentationsRoundtripExactly(t *testing.T) {
 			inv, err := buildInventory(inputs, method)
 			require.NoError(t, err)
 			m := sharingModel(inv, levels, inputs, method)
-			data, _, err := encodeModel(m, defaultLevel)
+			data, _, err := encodeModel(m, levelBetter)
 			require.NoError(t, err)
 			require.NoError(t, roundtripModel(data, m))
-			again, _, err := encodeModel(m, defaultLevel)
+			again, _, err := encodeModel(m, levelBetter)
 			require.NoError(t, err)
 			require.Equal(t, data, again)
 		})
 	}
 	for base := range inputs {
 		m := baseModel(inputs, levels, base)
-		data, _, err := encodeModel(m, defaultLevel)
+		data, _, err := encodeModel(m, levelBetter)
 		require.NoError(t, err)
 		require.NoError(t, roundtripModel(data, m))
 	}
@@ -65,14 +65,14 @@ func TestRepresentationsRoundtripExactly(t *testing.T) {
 	require.NoError(t, err)
 	m := sharingModel(inv, levels[:2], unique, methodSmall)
 	require.Empty(t, m.pool)
-	data, _, err := encodeModel(m, defaultLevel)
+	data, _, err := encodeModel(m, levelBetter)
 	require.NoError(t, err)
 	require.NoError(t, roundtripModel(data, m))
 }
 
 func TestContainerRejectsInvalidFramingAndMetadata(t *testing.T) {
 	t.Parallel()
-	data, _, err := encodeModel(fixtureModel(t), defaultLevel)
+	data, _, err := encodeModel(fixtureModel(t), levelBetter)
 	require.NoError(t, err)
 	for _, raw := range [][]byte{nil, []byte("bad"), bytes.Repeat([]byte{0}, framePrefix+sha256.Size)} {
 		_, _, err = parseContainer(raw)
@@ -126,7 +126,7 @@ func TestContainerRejectsInvalidFramingAndMetadata(t *testing.T) {
 func TestDecodeRejectsCorruptionAndBadPaths(t *testing.T) {
 	t.Parallel()
 	m := fixtureModel(t)
-	data, h, err := encodeModel(m, defaultLevel)
+	data, h, err := encodeModel(m, levelBetter)
 	require.NoError(t, err)
 	_, err = decodeTarget(data, "missing")
 	require.Error(t, err)
@@ -163,7 +163,7 @@ func TestDecodeRejectsCorruptionAndBadPaths(t *testing.T) {
 	badModel := m
 	badModel.targets = append([]target(nil), m.targets...)
 	badModel.targets[0].path = []span{{shared: true, offset: len(m.pool), size: 1}}
-	bad, _, err := encodeModel(badModel, defaultLevel)
+	bad, _, err := encodeModel(badModel, levelBetter)
 	require.NoError(t, err)
 	_, err = decodeTarget(bad, "v1")
 	require.Error(t, err)
@@ -183,7 +183,7 @@ func TestEncoderErrorsAndEmptyFrames(t *testing.T) {
 	require.Error(t, err)
 	_, _, err = encodeModel(model{targets: []target{{path: []span{{size: 1}}}}}, "invalid")
 	require.Error(t, err)
-	_, _, err = encodeModel(model{method: string([]byte{0xff})}, defaultLevel)
+	_, _, err = encodeModel(model{method: string([]byte{0xff})}, levelBetter)
 	require.Error(t, err)
 	result, err := compressed(nil, "invalid")
 	require.NoError(t, err)

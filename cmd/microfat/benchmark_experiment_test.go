@@ -81,15 +81,21 @@ func TestExperimentRunCommand(t *testing.T) {
 	executeExperiment = func(_ context.Context, cfg runner.ExperimentConfig, opts runner.RunOptions) (*runner.ExperimentResult, error) {
 		assert.Equal(t, "test", cfg.Name)
 		assert.Equal(t, "fake-tool", opts.Fortio)
+		assert.Equal(t, "current-harness", opts.Repository)
+		assert.Equal(t, "historical-head", opts.HeadRepository)
+		assert.Equal(t, "historical-base", opts.BaseRepository)
+		require.NotNil(t, cfg.ScheduleSeed)
+		assert.Zero(t, *cfg.ScheduleSeed)
 		return &runner.ExperimentResult{Bundle: "/fixture/evidence"}, nil
 	}
 	config := filepath.Join(t.TempDir(), "suite.json")
-	require.NoError(t, os.WriteFile(config, []byte(`{"name":"test"}`), 0o600))
+	require.NoError(t, os.WriteFile(config, []byte(`{"name":"test","schedule_seed":0}`), 0o600))
 	cmd := newRootCmd()
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{cmdBenchmark, "run", "--config", config, "--fortio", "fake-tool"})
+	cmd.SetArgs([]string{cmdBenchmark, "run", "--config", config, "--fortio", "fake-tool",
+		"--repository", "current-harness", "--head-repository", "historical-head", "--base-repository", "historical-base"})
 	require.NoError(t, cmd.Execute())
 	assert.Equal(t, "/fixture/evidence\n", stdout.String())
 	executeExperiment = func(context.Context, runner.ExperimentConfig, runner.RunOptions) (*runner.ExperimentResult, error) {

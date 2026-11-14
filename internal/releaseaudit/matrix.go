@@ -15,7 +15,7 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
 )
 
-const matrixSize = 16
+const matrixSize = 8
 const executableMode = 0o700
 const payloadSource = `package main
 import ("encoding/json"; "os"; "runtime")
@@ -52,7 +52,7 @@ type packedIndex struct {
 
 func matrixCases() []matrixCase {
 	var result []matrixCase
-	for _, version := range []int{1, 2} {
+	for _, version := range []int{2} {
 		for _, profile := range []string{"full", "minimal"} {
 			for _, codec := range []string{"none", "lz4", "zstd"} {
 				item := matrixCase{Version: version, Profile: profile, Codec: codec}
