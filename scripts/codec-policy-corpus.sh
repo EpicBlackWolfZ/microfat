@@ -4,6 +4,7 @@ IFS=$'\n\t'
 
 # Build inputs outside all measurement windows. Never execute downloaded tools here.
 corpus_root="${1:?usage: codec-policy-corpus.sh NEW_OUTPUT [amd64|arm64] [GO_VERSION]}"
+corpus_expected_go="${3:-go1.27.3}"
 corpus_repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 corpus_lock="${corpus_repo}/experiments/codecpolicy/sources.lock.json"
 corpus_generator="tests/e2e/testdata/codecboundary/main.go"
@@ -24,7 +25,6 @@ done <<< "${corpus_inherited_names}"
 export GOENV=off GOWORK=off GOTOOLCHAIN=local GOMAXPROCS=4
 export CGO_ENABLED=0 GOOS=linux LC_ALL=C TZ=UTC
 
-corpus_expected_go="${3:-go1.27.3}"
 corpus_go_version="$("${corpus_go}" env GOVERSION)"
 if [[ "${corpus_go_version}" != "${corpus_expected_go}" ]]; then
   printf 'Go %s is required; do not change the project toolchain.\n' "${corpus_expected_go#go}" >&2
