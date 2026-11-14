@@ -101,3 +101,24 @@ historical downloads. The signed-draft gate executes the updater from authentica
 performs explicit downgrades to v0.2.5 and the immediately prior v0.3.0 release, and restores the
 candidate through the authenticated helper after each downgrade. Historical v0.2.x CLIs have no
 updater command. This evidence is separate from publishing the candidate.
+
+## Scheduled Go advisory scans
+
+The [Advisory Scan workflow](../.github/workflows/advisory-scan.yml) runs daily at 06:23 UTC and
+supports manual dispatch. It uses the pinned Go toolchain and `govulncheck` to scan the root module
+and both runtimeinfo example modules. It resolves the latest stable release once, authenticates its
+signed checksums through the published release audit, and scans the Linux amd64 and arm64 CLIs,
+embedded CLI tier payloads, full and minimal launchers, and installer helpers without executing them.
+
+All scans use the same fresh Go vulnerability database snapshot. The job summary records its
+timestamp and digest, the source commit, release tag and source SHA, compiler versions, advisory
+IDs, reported fixes and verification errors. Source-mode logs include call traces. Binary mode
+reports symbol observations, or may use module-level precision when symbol information is unavailable.
+It cannot establish application reachability. Full logs and trust records are retained for 14 days.
+
+The repository maintainer reviews failed scans. Check the result level and reported fix for advisory
+findings, and check the acquisition or verification log for errors before retrying. To verify the
+hosted reporting path, dispatch **Advisory Scan** from **Actions** with the defaults, then dispatch
+it again with **Exercise binary scan error reporting with a non-Go fixture** enabled. The second run
+should include a failed `failure-probe` result and a job error annotation. Published binary findings
+can also make either run fail independently of the probe.

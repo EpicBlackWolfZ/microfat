@@ -28,7 +28,8 @@ func TestCommandModes(t *testing.T) {
 	for _, args := range [][]string{nil, {"unknown"}, {"validate-tag"}, {"validate-tag", "bad"}, {"metadata"},
 		{"metadata", "bad", "missing", "missing"},
 		{runCommand, "--unknown"}, {runCommand}, {runCommand, "--dist", "dist", "--output", "out", "extra"},
-		{runCommand, "--dist", "dist", "--output", "out", "--version", "bad"}} {
+		{runCommand, "--dist", "dist", "--output", "out", "--version", "bad"},
+		{"prepare-advisory"}, {"prepare-advisory", "--arch", "amd64"}} {
 		require.Error(t, run(ctx, args, io.Discard, nil))
 	}
 	require.NoError(t, run(ctx, []string{"validate-tag", "v0.2.5"}, io.Discard, nil))
@@ -55,6 +56,26 @@ func TestCommandModes(t *testing.T) {
 	}), "authentication rejected")
 	require.True(t, called)
 }
+
+func TestPrepareAdvisoryRejectsUnauthenticatedRelease(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	output := filepath.Join(directory, "prepared")
+	args := []string{"prepare-advisory", "--dist", directory, "--output", output, "--version", "0.3.1",
+		"--source", strings.Repeat("a", 40)}
+	calls := 0
+	execute := func(_ context.Context, spec process.Spec) (releaseaudit.Result, error) {
+		calls++
+		require.Equal(t, "cosign", spec.Path)
+		return releaseaudit.Result{ExitCode: 1, Stderr: "invalid signature"}, nil
+	}
+	require.ErrorContains(t, run(context.Background(), args, io.Discard, execute), "authenticating published assets")
+	require.Equal(t, 1, calls)
+	require.FileExists(t, filepath.Join(output, "commands.jsonl"))
+	require.NoDirExists(t, filepath.Join(output, "amd64"))
+	require.NoDirExists(t, filepath.Join(output, "arm64"))
+}
+
 func TestMain(t *testing.T) {
 	if os.Getenv("MICROFAT_AUDIT_HELPER") == "1" {
 		os.Args = []string{"release-audit"}
