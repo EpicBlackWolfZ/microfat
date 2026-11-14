@@ -1,10 +1,11 @@
 # Runtime metadata observability recipes
 
 These applications use the supported `github.com/EpicBlackWolfZ/microfat/runtimeinfo`
-accessor. Each is a separate Go 1.27.3 module, with a local `replace` pointing
-three directories up to this checkout. Their pinned observability SDKs do not
-become dependencies of the core accessor or launcher. Run commands from the
-recipe directory; no workspace file or published microfat version is needed.
+accessor. Each is a separate module that uses the root module's Go version,
+with a local `replace` pointing three directories up to this checkout.
+Their pinned observability SDKs do not become dependencies of the core accessor
+or launcher. Run commands from the recipe directory; no workspace file or
+published microfat version is needed.
 
 ## Prometheus
 

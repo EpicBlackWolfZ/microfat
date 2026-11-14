@@ -50,7 +50,7 @@ func TestEnvironmentIgnoresInheritedGoSettings(t *testing.T) {
 
 func TestToolchainRejectsAlternateCompilerAndMachine(t *testing.T) {
 	t.Parallel()
-	version := "go version " + goVersion + " linux/" + runtime.GOARCH
+	version := "go version " + runtime.Version() + " linux/" + runtime.GOARCH
 	machine := "x86_64"
 	if runtime.GOARCH == "arm64" {
 		machine = "aarch64"
@@ -68,7 +68,7 @@ func TestToolchainRejectsAlternateCompilerAndMachine(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			settings := map[string]string{
-				"GOVERSION": goVersion, "GOOS": "linux", "GOARCH": runtime.GOARCH, "GOENV": "", "GOTOOLCHAIN": "local",
+				"GOVERSION": runtime.Version(), "GOOS": "linux", "GOARCH": runtime.GOARCH, "GOENV": "", "GOTOOLCHAIN": "local",
 			}
 			if tc.key != "" {
 				settings[tc.key] = tc.value
@@ -90,7 +90,7 @@ func TestToolchainPreflightWithPinnedCompiler(t *testing.T) {
 	require.NoError(t, verifyToolchain(output))
 	data, err := os.ReadFile(filepath.Join(output, "toolchain.json"))
 	require.NoError(t, err)
-	assert.Contains(t, string(data), goVersion)
+	assert.Contains(t, string(data), runtime.Version())
 }
 
 func TestScheduleIsCompleteAndBalanced(t *testing.T) {

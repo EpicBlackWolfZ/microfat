@@ -2,8 +2,9 @@
 
 ## Comparability
 
-Build every target ISA from identical source, Go 1.27.3, modules, tags, and optimization settings. Reuse the exact
-native payload bytes inside each fat artifact. Capture hashes, full source revisions, dirty-tree state, build info,
+Build every target ISA from identical source, modules, tags, and optimization settings with the Go
+version pinned in the root `go.mod`. Reuse the exact native payload bytes inside each fat artifact.
+Capture hashes, full source revisions, dirty-tree state, build info,
 the load tool identity, suite configuration, and environment. Verify the running target's ISA, execution mode,
 selected payload digest, and effective runtime settings before sustained measurement.
 

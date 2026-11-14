@@ -145,10 +145,11 @@ func verifyToolchain(output string) (retErr error) {
 		wantMachine = "aarch64"
 	}
 	_, hasGOENV := settings["GOENV"]
-	if strings.TrimSpace(string(version)) != "go version "+goVersion+" linux/"+runtime.GOARCH ||
-		settings["GOVERSION"] != goVersion || settings["GOOS"] != "linux" || settings["GOARCH"] != runtime.GOARCH ||
+	wantGoVersion := runtime.Version()
+	if strings.TrimSpace(string(version)) != "go version "+wantGoVersion+" linux/"+runtime.GOARCH ||
+		settings["GOVERSION"] != wantGoVersion || settings["GOOS"] != "linux" || settings["GOARCH"] != runtime.GOARCH ||
 		!hasGOENV || settings["GOENV"] != "" || settings["GOTOOLCHAIN"] != "local" || strings.TrimSpace(string(machine)) != wantMachine {
-		return errors.New("external toolchain/machine differs from native Go 1.27.3 requirement")
+		return fmt.Errorf("external toolchain or machine differs from native %s harness", wantGoVersion)
 	}
 	pathGo, err := exec.LookPath("go")
 	if err != nil {
