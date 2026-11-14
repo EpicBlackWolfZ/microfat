@@ -86,11 +86,19 @@ identity. Benchmark result files retain their historical tool identities.
 ## Qualification fixtures and operating-system tools
 
 `benchmarks/kernel.lock.json` deliberately selects a Linux 5.15 cgroup v1
-qualification guest. It is a test compatibility boundary, so it does not track
-the latest general-purpose kernel. Refresh its image and modules package names,
-versions, URLs and SHA-256 values together from signed Ubuntu repository
-metadata, then rerun the guest qualification. A Debian version-only updater
-cannot regenerate this complete fixture safely.
+qualification guest. The **Guest Kernel Updates** workflow checks the signed
+Ubuntu Jammy security index for matching amd64 generic image and modules builds
+every day at 04:37 UTC and on manual dispatch. It fails when a newer matched
+build needs review and attaches the proposed lock and signed repository metadata.
+
+Repository maintainers review failed runs. On an Ubuntu host with `gpgv` and
+`ubuntu-keyring`, reproduce the check with
+`go run ./internal/cmd/benchmark-kernel-lock --check "$(mktemp -d)"`. Review the
+upstream security notice and copy the proposed lock over
+`benchmarks/kernel.lock.json` in a PR. This moves image and modules package
+names, versions, URLs and SHA-256 values together. Verify that the hosted
+**Benchmark Kernel Controls** workflow passes its `v1-tcg` job on that PR, and
+link the run and its guest evidence in the PR.
 
 QEMU, BusyBox, cpio and other runner packages are acquired through the runner's
 authenticated APT repositories. They have no repository source-commit pin for
