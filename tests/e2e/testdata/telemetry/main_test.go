@@ -311,13 +311,15 @@ func TestResourceAndSequenceFailuresCannotBeAccepted(t *testing.T) {
 	assert.False(t, correct)
 	assert.False(t, resource)
 	assert.False(t, equivalent)
-	assert.Error(t, run("", "", ""))
+	assert.Error(t, runStudy("", "", "", studyConfig{}, runtime.Version()))
 }
 
 func TestGlobalPreparationFailureRetainsScheduleAndError(t *testing.T) {
 	t.Parallel()
+	study, err := selectStudy(originalStudy)
+	require.NoError(t, err)
 	output := filepath.Join(t.TempDir(), "evidence")
-	assert.Error(t, run(filepath.Join(t.TempDir(), "missing-baseline"), ".", output))
+	assert.Error(t, runStudy(filepath.Join(t.TempDir(), "missing-baseline"), ".", output, study, runtime.Version()))
 	data, err := os.ReadFile(filepath.Join(output, "schedule.json"))
 	require.NoError(t, err)
 	var retained []scheduled
@@ -326,7 +328,7 @@ func TestGlobalPreparationFailureRetainsScheduleAndError(t *testing.T) {
 	_, err = os.Stat(filepath.Join(output, "failure.txt"))
 	require.NoError(t, err)
 	// The first failed cohort remains intact and cannot be overwritten by another run.
-	assert.Error(t, run(".", ".", output))
+	assert.Error(t, runStudy(".", ".", output, study, runtime.Version()))
 }
 
 func TestSourceRecheckRejectsDirtyAndChangedFrozenHeads(t *testing.T) {

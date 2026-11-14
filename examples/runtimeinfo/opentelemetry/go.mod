@@ -1,6 +1,6 @@
 module github.com/EpicBlackWolfZ/microfat/examples/runtimeinfo/opentelemetry
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/EpicBlackWolfZ/microfat v0.0.0

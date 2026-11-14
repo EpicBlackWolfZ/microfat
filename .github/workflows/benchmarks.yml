@@ -121,6 +121,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Use the frozen harness and toolchain recorded in docs/hosted-p99-investigation-results.md.
+          ref: cedeb50c18901b1c7fcdf8550cb04126c5821def
           fetch-depth: 0
           persist-credentials: false
       - name: Read shared tool versions

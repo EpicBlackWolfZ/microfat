@@ -246,12 +246,13 @@ func checkToolchain(version string, settings map[string]string, machine string) 
 	if runtime.GOARCH == archARM64 {
 		wantMachine = "aarch64"
 	}
-	wantVersion := "go version " + goVersion + " linux/" + runtime.GOARCH
-	if strings.TrimSpace(version) != wantVersion || settings["GOVERSION"] != goVersion || settings["GOOS"] != "linux" ||
+	wantGoVersion := runtime.Version()
+	wantVersion := "go version " + wantGoVersion + " linux/" + runtime.GOARCH
+	if strings.TrimSpace(version) != wantVersion || settings["GOVERSION"] != wantGoVersion || settings["GOOS"] != "linux" ||
 		settings["GOARCH"] != runtime.GOARCH || !envFileReported || envFile != "" || settings["GOTOOLCHAIN"] != "local" ||
 		machine != wantMachine {
-		return fmt.Errorf("external compiler or machine differs from frozen native Go 1.27.3 requirement: %s, %v, %s",
-			version, settings, machine)
+		return fmt.Errorf("external compiler or machine differs from native %s harness: %s, %v, %s",
+			wantGoVersion, version, settings, machine)
 	}
 	return nil
 }
