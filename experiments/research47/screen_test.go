@@ -156,7 +156,8 @@ func TestGateRequiresBothProfilesAndThreeIndependentFamilies(t *testing.T) {
 	groups = gateGroups()
 	groups[0].Error, groups[2].Error = "retained failure", "retained failure"
 	result = summarizeGate(groups)
-	require.Contains(t, result.Decision, "even zero-decoder")
+	require.Contains(t, result.Decision, "failed observation")
+	require.False(t, result.CostedOpportunityPass)
 	groups = gateGroups()
 	for i := range groups {
 		groups[i].Candidates[0].Method = methodBase
@@ -172,8 +173,18 @@ func TestGateRequiresBothProfilesAndThreeIndependentFamilies(t *testing.T) {
 	require.Zero(t, summarizeGate(groups).CostedSizePass)
 	groups = gateGroups()
 	groups[0].Candidates[0].Error, groups[2].Candidates[0].Error = "retained", "retained"
-	require.False(t, summarizeGate(groups).CostedOpportunityPass)
+	result = summarizeGate(groups)
+	require.False(t, result.CostedOpportunityPass)
+	require.Contains(t, result.Decision, "failed observation")
 	require.Contains(t, summarizeGate(groups[:2]).Decision, "incomplete")
+	require.Contains(t, summarizeGate(gateGroups()[1:]).Decision, "incomplete")
+	groups = gateGroups()
+	groups[0].Profile = unstripped
+	require.Contains(t, summarizeGate(groups).Decision, "incomplete")
+	groups[0].Profile = "unknown"
+	require.Contains(t, summarizeGate(groups).Decision, "incomplete")
+	groups = append(gateGroups(), groupResult{Family: "boundary", Error: "retained failure"})
+	require.Contains(t, summarizeGate(groups).Decision, "failed observation")
 }
 
 type failingWriter struct{}

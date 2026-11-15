@@ -67,6 +67,29 @@ type gateResult struct {
 	Decision              string       `json:"decision"`
 }
 
+func completeCohort(groups []groupResult) bool {
+	profiles := make(map[[2]string]bool)
+	for _, g := range groups {
+		if g.Error != "" || len(g.Candidates) == 0 {
+			return false
+		}
+		for _, c := range g.Candidates {
+			if c.Error != "" {
+				return false
+			}
+		}
+		if g.Family != "boundary" {
+			key := [2]string{g.Family, g.Profile}
+			if profiles[key] || (g.Profile != stripped && g.Profile != unstripped) {
+				return false
+			}
+			profiles[key] = true
+		}
+	}
+	const profilesPerFamily = 2
+	return len(profiles) == maxFamilies*profilesPerFamily
+}
+
 func summarizeGate(groups []groupResult) gateResult {
 	type profileGate struct{ costed, zero, modeled bool }
 	type representation struct{ method, base string }
@@ -120,12 +143,12 @@ func summarizeGate(groups []groupResult) gateResult {
 		r.ModeledBudgetsPass = max(r.ModeledBudgetsPass, count.modeled)
 	}
 	sort.Slice(r.Families, func(i, j int) bool { return r.Families[i].Family < r.Families[j].Family })
-	complete := len(families) == maxFamilies
+	complete := len(families) == maxFamilies && completeCohort(groups)
 	r.CostedOpportunityPass = complete && r.CostedSizePass >= requiredFamilies
 	r.ModeledScreenPass = complete && r.ModeledBudgetsPass >= requiredFamilies
 	switch {
 	case !complete:
-		r.Decision = "incomplete corpus; no portfolio gate decision"
+		r.Decision = "incomplete corpus or failed observation; no portfolio gate decision"
 	case r.ZeroDecoderPass < requiredFamilies:
 		r.Decision = "stop on this candidate space: even zero-decoder size scenario misses gate"
 	case !r.CostedOpportunityPass:

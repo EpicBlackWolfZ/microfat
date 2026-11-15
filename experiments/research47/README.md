@@ -115,3 +115,6 @@ Runtime qualification requires a separate frozen protocol and a measured
 launcher baseline. The size screen does not collect Pack wall/CPU or cgroup
 peak, build a runnable launcher, or time cold memfd, cold cache and warm cache
 paths. Retain independent variant frames pending the #410 complete-cost review.
+
+The [matched evaluation](MATCHED-RESULTS.md) records the v0.4.0 retention disposition, including the
+complete-artifact size results and the measured local materialization costs.
