@@ -162,6 +162,37 @@ func TestPackParallelByteForByteEquivalence(t *testing.T) {
 	}
 }
 
+func TestPackVariantWorkerLimit(t *testing.T) {
+	dir := t.TempDir()
+	stub := makeDistinctVariantFixture(t, dir, "stub", 64*1024)
+	variants := map[string]string{
+		"v1": makeDistinctVariantFixture(t, dir, "v1", testParallelVariantPayload),
+		"v2": makeDistinctVariantFixture(t, dir, "v2", testParallelVariantPayload+4096),
+	}
+	installPackResourceHooks(t, testParallelWorkersFour, cgroup.Limits{}, nil, math.MaxInt64, testParallelMem2GiB, true)
+	epoch := testParallelEpoch
+	opts := DefaultOptions()
+	opts.StubPath, opts.Variants, opts.Profile = stub, variants, codec.ProfileLatency
+	opts.CreatedUnix = &epoch
+	var workers int
+	opts.VariantWorkers = func(selected int) { workers = selected }
+	opts.OutputPath = filepath.Join(dir, "parallel.fat")
+	_, err := Pack(opts)
+	require.NoError(t, err)
+	require.Equal(t, len(variants), workers)
+	expected, err := os.ReadFile(opts.OutputPath)
+	require.NoError(t, err)
+
+	opts.OutputPath = filepath.Join(dir, "serial.fat")
+	opts.VariantWorkerLimit = 1
+	_, err = Pack(opts)
+	require.NoError(t, err)
+	require.Equal(t, 1, workers)
+	actual, err := os.ReadFile(opts.OutputPath)
+	require.NoError(t, err)
+	assert.Equal(t, expected, actual)
+}
+
 func TestResolvePackWorkerCountAdmissionPolicy(t *testing.T) {
 	makePlans := func(count int, size int64, algo, lvl string) []variantWorkPlan {
 		plans := make([]variantWorkPlan, count)
