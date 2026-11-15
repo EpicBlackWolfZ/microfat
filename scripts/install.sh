@@ -6,7 +6,7 @@ microfat_bootstrap() (
     set -euo pipefail
     IFS=$'\n\t'
 
-    readonly helper_version='0.3.1'
+    readonly helper_version='0.4.0'
     # renovate: datasource=github-release-attachments depName=sigstore/cosign
     readonly cosign_amd64='v3.1.4@424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa'
     # renovate: datasource=github-release-attachments depName=sigstore/cosign
