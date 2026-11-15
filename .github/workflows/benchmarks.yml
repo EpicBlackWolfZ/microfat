@@ -11,7 +11,7 @@ on:
       tier:
         description: Benchmark tier (branch dispatch never publishes)
         type: choice
-        options: [smoke, nightly, release, calibration, compatibility, historical-p99]
+        options: [smoke, nightly, release, calibration, compatibility, historical-p99, parallel-pack]
         default: smoke
 
 permissions:
@@ -103,6 +103,83 @@ jobs:
           path: .work/benchmark-matrix
           include-hidden-files: true
           retention-days: 14
+
+  parallel-pack:
+    name: Parallel Pack (${{ matrix.arch }}, ${{ matrix.family }}, VM ${{ matrix.replica }})
+    if: github.event_name == 'workflow_dispatch' && inputs.tier == 'parallel-pack'
+    runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        arch: [amd64, arm64]
+        family: [actionlint, fortio, govulncheck, task]
+        replica: [0, 1]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Check the frozen schedule and decisions
+        run: go test -race ./tests/e2e/testdata/packqualification
+      - name: Prepare native corpus and benchmark controller
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p .work/parallel-pack
+          {
+            git rev-parse HEAD
+            go version
+            uname -a
+            lscpu
+          } > .work/parallel-pack/host.txt
+          go_version=$(awk '$1 == "go" { print $2; exit }' go.mod)
+          bash scripts/codec-policy-corpus.sh .work/parallel-pack/corpus "$ARCH" "go$go_version" \
+            2>&1 | tee .work/parallel-pack/corpus-build.log
+          go build -trimpath -o .work/parallel-pack/collector ./tests/e2e/testdata/packqualification
+          sha256sum docs/benchmarks/parallel-pack.md .work/parallel-pack/collector \
+            > .work/parallel-pack/producer-SHA256SUMS
+      - name: Prepare hosted resource controls
+        run: bash scripts/benchmark-controls.sh .work/parallel-pack/controls.json
+      - name: Measure serial and default Pack in paired blocks
+        env:
+          ARCH: ${{ matrix.arch }}
+          FAMILY: ${{ matrix.family }}
+          REPLICA: ${{ matrix.replica }}
+        run: |
+          root="$GITHUB_WORKSPACE/.work/parallel-pack"
+          bash scripts/benchmark-enter.sh "$MICROFAT_BENCH_CGROUP_ROOT" "$root/collector" \
+            -corpus "$root/corpus" -output "$root/results" -cgroup-root "$MICROFAT_BENCH_CGROUP_ROOT" \
+            -arch "$ARCH" -revision "$GITHUB_SHA" -family "$FAMILY" -replica "$REPLICA"
+      - name: Drain owned delegation
+        if: always()
+        run: bash scripts/benchmark-cleanup.sh
+      - name: Preserve complete and partial observations
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: parallel-pack-${{ matrix.arch }}-${{ matrix.family }}-${{ matrix.replica }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .work/parallel-pack/*.json
+            .work/parallel-pack/*.txt
+            .work/parallel-pack/*.log
+            .work/parallel-pack/*SHA256SUMS
+            .work/parallel-pack/corpus/*.json
+            .work/parallel-pack/corpus/*.ndjson
+            .work/parallel-pack/corpus/*.txt
+            .work/parallel-pack/corpus/*.buildinfo
+            .work/parallel-pack/corpus/SHA256SUMS
+            .work/parallel-pack/results/**/*.json
+            .work/parallel-pack/results/**/*.log
+          include-hidden-files: true
+          retention-days: 30
 
   historical-p99:
     name: Historical service p99 (${{ matrix.scenario }}, cohort ${{ matrix.cohort }})

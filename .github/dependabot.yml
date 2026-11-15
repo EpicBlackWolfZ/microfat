@@ -1,14 +1,16 @@
 version: 2
 updates:
-  # Native Go module updates include transitive dependencies and go.sum integrity.
+  # Allow routine version updates for direct and indirect Go requirements.
   - package-ecosystem: "gomod"
     directories:
       - "/"
       - "/examples/runtimeinfo/*"
     schedule:
-      interval: "daily"
-      time: "04:00"
+      interval: "cron"
+      cronjob: "0 4 * * *"
       timezone: "UTC"
+    allow:
+      - dependency-type: all
     commit-message:
       prefix: "chore(deps)"
     labels:
@@ -30,8 +32,8 @@ updates:
       - "/"
       - "/.github/actions/*"
     schedule:
-      interval: "daily"
-      time: "04:00"
+      interval: "cron"
+      cronjob: "0 4 * * *"
       timezone: "UTC"
     commit-message:
       prefix: "chore(ci)"
@@ -47,8 +49,8 @@ updates:
   - package-ecosystem: "docker"
     directory: "/scripts/fixtures"
     schedule:
-      interval: "daily"
-      time: "04:00"
+      interval: "cron"
+      cronjob: "0 4 * * *"
       timezone: "UTC"
     commit-message:
       prefix: "chore(deps)"
