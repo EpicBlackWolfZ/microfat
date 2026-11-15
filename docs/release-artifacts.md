@@ -87,7 +87,14 @@ new releases and v0.2.5 snapshots reject the historical schemas.
 
 ---
 
-Maintainers can dispatch [Published Release Audit](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/release-audit.yml) with a published immutable tag. It verifies the checksum signature against the exact tag workflow and source commit before executing downloaded products on native amd64 and ARM64 runners. The audit covers both formats, full/minimal launchers, codecs/dictionaries, automatic/memfd/cache dispatch, metadata operations and corrupt-payload rejection. Its retained evidence identifies the downloaded bytes. Go, gofmt and Cosign are available in this archive audit; clean bootstrap acceptance and benchmark publication qualification remain separate gates.
+Maintainers can dispatch [Published Release Audit](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/release-audit.yml)
+with a published immutable tag. It verifies the checksum signature against the exact tag workflow
+and source commit before executing the downloaded products on native amd64 and arm64 runners.
+The v0.4.0 audit runs eight Format v2 cases per architecture. Each full or minimal launcher
+exercises `none`, `lz4`, and Zstandard with and without a dictionary. The matrix checks auto,
+memfd and cache dispatch, metadata operations and corrupt-payload rejection. Its retained
+evidence identifies the downloaded bytes. The archive audit uses Go, gofmt and Cosign.
+Clean bootstrap acceptance and benchmark publication qualification have their own gates.
 
 [Public installation acceptance](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/release-public-acceptance.yml)
 checks the documented installation paths on native amd64 and arm64. The installer runs in fresh,
