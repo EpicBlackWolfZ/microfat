@@ -12,8 +12,11 @@ import (
 func TestCommand(t *testing.T) {
 	t.Parallel()
 	require.ErrorContains(t, run(nil), "usage:")
+	require.ErrorContains(t, run([]string{"--check"}), "usage:")
 	require.Error(t, run([]string{t.TempDir()}), "lock is absent from the package test directory")
-	require.Error(t, verifySignature(filepath.Join(t.TempDir(), "missing")), "missing or unauthenticated metadata must fail")
+	require.Error(t, run([]string{"--check", t.TempDir()}), "lock is absent from the package test directory")
+	_, err := verifySignature(filepath.Join(t.TempDir(), "missing"))
+	require.Error(t, err, "missing or unauthenticated metadata must fail")
 }
 
 func TestMain(t *testing.T) {

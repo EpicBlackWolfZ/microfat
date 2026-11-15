@@ -1,4 +1,4 @@
-// Command release-audit authenticates and tests published artifacts on native Linux runners.
+// Command release-audit authenticates published artifacts for runtime testing or static inspection.
 package main
 
 import (
@@ -16,7 +16,7 @@ import (
 
 func run(ctx context.Context, args []string, out io.Writer, execute releaseaudit.Execute) error {
 	if len(args) == 0 {
-		return errors.New("usage: release-audit validate-tag|metadata|run [options]")
+		return errors.New("usage: release-audit validate-tag|metadata|run|prepare-advisory [options]")
 	}
 	switch args[0] {
 	case "validate-tag":
@@ -27,25 +27,39 @@ func run(ctx context.Context, args []string, out io.Writer, execute releaseaudit
 		return releaseaudit.ValidateTag(args[1])
 	case "metadata":
 		return metadata(args[1:], out)
-	case "run":
-		flags := flag.NewFlagSet("release-audit", flag.ContinueOnError)
-		flags.SetOutput(io.Discard)
-		var options releaseaudit.Options
-		flags.StringVar(&options.Dist, "dist", "", "downloaded release directory")
-		flags.StringVar(&options.Output, "output", "", "new evidence output directory")
-		flags.StringVar(&options.Version, "version", "", "release version without v prefix")
-		flags.StringVar(&options.Source, "source", "", "full release source SHA")
-		flags.StringVar(&options.Arch, "arch", "", "native Linux architecture")
-		if err := flags.Parse(args[1:]); err != nil {
+	case "run", "prepare-advisory":
+		advisory := args[0] == "prepare-advisory"
+		options, err := parseAuditOptions(args[1:], advisory)
+		if err != nil {
 			return err
 		}
-		if flags.NArg() != 0 || options.Dist == "" || options.Output == "" {
-			return errors.New("--dist and --output required; no positional arguments")
+		if advisory {
+			return releaseaudit.PrepareAdvisory(ctx, options, os.Environ(), execute)
 		}
 		return releaseaudit.Run(ctx, options, out, os.Environ(), execute)
 	default:
 		return errors.New("unknown release-audit command")
 	}
+}
+
+func parseAuditOptions(args []string, advisory bool) (releaseaudit.Options, error) {
+	flags := flag.NewFlagSet("release-audit", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	var options releaseaudit.Options
+	flags.StringVar(&options.Dist, "dist", "", "downloaded release directory")
+	flags.StringVar(&options.Output, "output", "", "new evidence output directory")
+	flags.StringVar(&options.Version, "version", "", "release version without v prefix")
+	flags.StringVar(&options.Source, "source", "", "full release source SHA")
+	if !advisory {
+		flags.StringVar(&options.Arch, "arch", "", "native Linux architecture")
+	}
+	if err := flags.Parse(args); err != nil {
+		return options, err
+	}
+	if flags.NArg() != 0 || options.Dist == "" || options.Output == "" {
+		return options, errors.New("--dist and --output required; no positional arguments")
+	}
+	return options, nil
 }
 
 func metadata(args []string, out io.Writer) error {

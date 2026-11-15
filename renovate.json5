@@ -46,8 +46,11 @@
     },
     {
       customType: 'regex',
-      description: 'The go.mod directive is the sole executable Go toolchain pin',
-      managerFilePatterns: ['/^go\\.mod$/'],
+      description: 'Keep the root and runtimeinfo Go toolchain directives in sync',
+      managerFilePatterns: [
+        '/^go\\.mod$/',
+        '/^examples\\/runtimeinfo\\/(prometheus|opentelemetry)\\/go\\.mod$/',
+      ],
       matchStrings: ['(?:^|\\n)go (?<currentValue>\\d+\\.\\d+\\.\\d+)(?:\\r?\\n|$)'],
       depNameTemplate: 'go',
       datasourceTemplate: 'golang-version',
@@ -83,6 +86,9 @@
       description: 'Stay on the supported Go 1.27 series; review language upgrades explicitly',
       matchDatasources: ['golang-version'],
       allowedVersions: '>=1.27.3 <1.28.0',
+      groupName: 'Go toolchain',
+      groupSlug: 'go-toolchain',
+      minimumGroupSize: 3,
     },
   ],
 }

@@ -1,0 +1,67 @@
+name: Advisory Scan
+
+on:
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+    inputs:
+      failure_probe:
+        description: Exercise binary scan error reporting with a non-Go fixture
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Go source and published binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOTOOLCHAIN: local
+      ADVISORY_REPORT: .work/advisory-scan
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read shared tool versions
+        id: toolchain
+        uses: ./.github/actions/toolchain-config
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install pinned govulncheck
+        env:
+          GOVULNCHECK_VERSION: ${{ steps.toolchain.outputs.govulncheck }}
+        run: go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+      - name: Fetch current Go advisory database
+        id: database
+        run: bash scripts/advisory-scan.sh database
+      - name: Scan source modules
+        run: bash scripts/advisory-scan.sh source
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        if: ${{ !cancelled() && steps.database.outcome == 'success' }}
+        with:
+          cosign-release: ${{ steps.toolchain.outputs.cosign }}
+      - name: Scan verified published binaries
+        if: ${{ !cancelled() && steps.database.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADVISORY_FAILURE_PROBE: ${{ inputs.failure_probe }}
+        run: bash scripts/advisory-scan.sh release
+      - name: Preserve advisory scan evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: advisory-scan-${{ github.run_id }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          retention-days: 14
+          path: |
+            .work/advisory-scan/*.log
+            .work/advisory-scan/release.json
+            .work/advisory-scan/source.txt
+            .work/advisory-scan/vulndb.sha256
+            .work/advisory-scan/vulndb/index/db.json
+            .work/advisory-scan/prepared/commands.jsonl
+            .work/advisory-scan/prepared/verification.json

@@ -81,6 +81,12 @@ func writeAllVariantPayloads(
 	}
 
 	workers := resolvePackWorkerCount(plans)
+	if opts.VariantWorkerLimit > 0 {
+		workers = min(workers, opts.VariantWorkerLimit)
+	}
+	if opts.VariantWorkers != nil {
+		opts.VariantWorkers(workers)
+	}
 	if workers < packMinParallelVariants {
 		entries := make([]format.VariantEntry, 0, len(plans))
 		offset := currentOffset

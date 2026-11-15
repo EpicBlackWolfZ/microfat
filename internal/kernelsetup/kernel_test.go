@@ -91,16 +91,18 @@ func (f *fixture) writeLock(t *testing.T) string {
 	return file
 }
 
+func (f *fixture) verify(string) ([]byte, error) { return f.responses[releaseURL], nil }
+
 func TestRunTrustOrder(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	output := filepath.Join(t.TempDir(), "artifacts")
-	require.NoError(t, Run(f.writeLock(t), output, f.client, func(file string) error {
+	require.NoError(t, Run(f.writeLock(t), output, f.client, func(file string) ([]byte, error) {
 		require.Equal(t, []string{releaseURL}, f.requests, "no index or package may be used before signature verification")
 		data, err := os.ReadFile(file)
 		require.NoError(t, err)
 		require.Equal(t, f.responses[releaseURL], data)
-		return nil
+		return f.verify(file)
 	}))
 	require.Equal(t, []string{releaseURL, f.indexURL, fixtureKernel, fixtureModules}, f.requests)
 	for name, location := range map[string]string{"InRelease": releaseURL, "Packages.gz": f.indexURL,
@@ -118,10 +120,10 @@ func TestRunRejectsBrokenTrustChain(t *testing.T) {
 		t.Run(stage, func(t *testing.T) {
 			t.Parallel()
 			f := newFixture(t)
-			verify := func(string) error { return nil }
+			verify := f.verify
 			switch stage {
 			case "signature":
-				verify = func(string) error { return errors.New("invalid signature") }
+				verify = func(string) ([]byte, error) { return nil, errors.New("invalid signature") }
 			case "signed index":
 				f.responses[releaseURL] = []byte("SHA256:\n")
 			case "index checksum":
@@ -159,20 +161,19 @@ func TestRunRejectsBrokenTrustChain(t *testing.T) {
 func TestRunIOFailures(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	verify := func(string) error { return nil }
 	root := t.TempDir()
-	require.Error(t, Run(filepath.Join(root, "missing"), root, f.client, verify))
+	require.Error(t, Run(filepath.Join(root, "missing"), root, f.client, f.verify))
 	badLock := filepath.Join(root, "bad")
 	require.NoError(t, os.WriteFile(badLock, []byte("{}"), fileMode))
-	require.Error(t, Run(badLock, root, f.client, verify))
-	require.Error(t, Run(f.writeLock(t), badLock, f.client, verify))
+	require.Error(t, Run(badLock, root, f.client, f.verify))
+	require.Error(t, Run(f.writeLock(t), badLock, f.client, f.verify))
 	for _, filename := range []string{"InRelease", "Packages.gz", "kernel.deb", "modules.deb"} {
 		t.Run(filename, func(t *testing.T) {
 			t.Parallel()
 			f := newFixture(t)
 			output := t.TempDir()
 			require.NoError(t, os.Mkdir(filepath.Join(output, filename), 0o755))
-			require.Error(t, Run(f.writeLock(t), output, f.client, verify))
+			require.Error(t, Run(f.writeLock(t), output, f.client, f.verify))
 		})
 	}
 }
