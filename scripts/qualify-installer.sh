@@ -36,8 +36,21 @@ actual=$(sha256sum < "${cosign}")
 chmod 700 "${cosign}"
 fixture_home="${private}/home space"
 mkdir "${fixture_home}"
+bin="${fixture_home}/.local/bin"
 common=(--cosign "${cosign}" --cosign-sha256 "${pin}" --staging-dir "${private}")
-versions=(0.2.3 0.2.4 0.2.5 0.3.0)
+
+record_installed_version() {
+    local expected=$1 mode=$2 evidence=$3 observed
+    PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" MICROFAT_EXEC_MODE="${mode}" \
+        "${bin}/microfat" --version > "${evidence}"
+    read -r observed < "${evidence}"
+    [[ ${observed} == "Version: ${expected} (Commit: "* ]] || {
+        printf 'Expected installed microfat %s, got %s.\n' "${expected}" "${observed}" >&2
+        return 1
+    }
+}
+
+versions=(0.2.3 0.2.4 0.2.5 0.3.0 0.3.1)
 if [[ -n ${candidate} ]]; then versions+=("${candidate}"); fi
 for version in "${versions[@]}"; do
     args=(--version "${version}")
@@ -48,8 +61,8 @@ for version in "${versions[@]}"; do
         "${helper}" "${common[@]}" "${args[@]}"
     PATH=/nonexistent HOME="${fixture_home}" XDG_DATA_HOME='' XDG_CACHE_HOME="${private}/cache" \
         "${helper}" "${common[@]}" "${args[@]}"
-    bin="${fixture_home}/.local/bin"
     for mode in memfd cache; do
+        record_installed_version "${version}" "${mode}" "${output}/${version}-${mode}-version.txt"
         PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" MICROFAT_EXEC_MODE="${mode}" \
             "${bin}/microfat" detect --json > "${output}/${version}-${mode}.json"
         for profile in full minimal; do
@@ -71,7 +84,7 @@ for version in "${versions[@]}"; do
         # Retain the older archive contract and the immediately prior release.
         # Restore the candidate with the trusted helper after each downgrade.
         for mode in memfd cache; do
-            for previous in 0.2.5 0.3.0; do
+            for previous in 0.2.5 0.3.1; do
                 PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" MICROFAT_EXEC_MODE="${mode}" \
                     "${bin}/microfat" update --check --version "${previous}" --json \
                     > "${output}/updater-${mode}-${previous}-check.json"
@@ -79,7 +92,9 @@ for version in "${versions[@]}"; do
                     "${bin}/microfat" update --version "${previous}" --allow-downgrade \
                     --cosign "${cosign}" --cosign-sha256 "${pin}" --staging-dir "${private}" --json \
                     > "${output}/updater-${mode}-${previous}-signed-downgrade.json"
+                record_installed_version "${previous}" "${mode}" "${output}/updater-${mode}-${previous}-installed.txt"
                 PATH=/nonexistent HOME="${fixture_home}" XDG_DATA_HOME='' "${helper}" "${common[@]}" "${args[@]}"
+                record_installed_version "${candidate}" "${mode}" "${output}/updater-${mode}-${previous}-restored.txt"
             done
         done
     fi
