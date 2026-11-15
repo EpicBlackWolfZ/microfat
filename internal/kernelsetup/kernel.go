@@ -218,48 +218,57 @@ func verifyPackageRecord(records []map[string]string, pin packagePin) error {
 	return nil
 }
 
-// Run downloads only locked packages after signature, index, and package verification.
-// verify must authenticate InRelease using the independently trusted Ubuntu keyring.
-func Run(lockPath, output string, client *http.Client, verify func(string) error) error {
+func loadLock(lockPath string) (kernelLock, error) {
 	data, err := os.ReadFile(lockPath) // #nosec G304 -- explicit operator-selected lock file.
 	if err != nil {
-		return err
+		return kernelLock{}, err
 	}
-	lock, err := decodeLock(data)
-	if err != nil {
-		return err
-	}
+	return decodeLock(data)
+}
+
+func signedRecords(lock kernelLock, output string, client *http.Client, verify func(string) ([]byte, error)) ([]map[string]string, error) {
 	if err := os.MkdirAll(output, directoryMode); err != nil {
-		return err
+		return nil, err
 	}
 	distribution := ubuntuBase + "dists/" + lock.Suite + "/"
 	release, err := download(client, distribution+"InRelease", maxReleaseBytes)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	releasePath := filepath.Join(output, "InRelease")
 	if err := os.WriteFile(releasePath, release, fileMode); err != nil {
-		return err
+		return nil, err
 	}
-	if err := verify(releasePath); err != nil {
-		return fmt.Errorf("Ubuntu signature verification: %w", err)
+	verified, err := verify(releasePath)
+	if err != nil {
+		return nil, fmt.Errorf("Ubuntu signature verification: %w", err)
 	}
 	relative := lock.Component + "/binary-" + lock.Architecture + "/Packages.gz"
-	digest, size, err := signedIndex(release, relative)
+	digest, size, err := signedIndex(verified, relative)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	index, err := download(client, distribution+path.Dir(relative)+"/by-hash/SHA256/"+digest, maxIndexBytes)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if int64(len(index)) != size || !digestMatches(index, digest) {
-		return errors.New("repository index checksum or size mismatch")
+		return nil, errors.New("repository index checksum or size mismatch")
 	}
 	if err := os.WriteFile(filepath.Join(output, "Packages.gz"), index, fileMode); err != nil {
+		return nil, err
+	}
+	return packageRecords(index)
+}
+
+// Run downloads only locked packages after signature, index, and package verification.
+// verify must return only the InRelease payload authenticated with the independently trusted Ubuntu keyring.
+func Run(lockPath, output string, client *http.Client, verify func(string) ([]byte, error)) error {
+	lock, err := loadLock(lockPath)
+	if err != nil {
 		return err
 	}
-	records, err := packageRecords(index)
+	records, err := signedRecords(lock, output, client, verify)
 	if err != nil {
 		return err
 	}

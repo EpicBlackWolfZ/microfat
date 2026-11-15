@@ -1,0 +1,53 @@
+name: Guest Kernel Updates
+
+on:
+  schedule:
+    - cron: '37 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check signed Jammy 5.15 packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Check for newer matched packages
+        shell: bash
+        run: |
+          mkdir -p .work/guest-kernel-updates
+          go run ./internal/cmd/benchmark-kernel-lock --check .work/guest-kernel-updates 2>&1 |
+            tee .work/guest-kernel-updates/check.log
+      - name: Summarize kernel check
+        if: always()
+        shell: bash
+        run: |
+          {
+            printf '### Ubuntu Jammy cgroup-v1 guest\n\n'
+            if [ -f .work/guest-kernel-updates/check.log ]; then
+              printf '```text\n'
+              cat .work/guest-kernel-updates/check.log
+              printf '```\n'
+            fi
+            printf '\nRepository maintainers review failed checks and any proposed lock in the run artifact.\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Retain signed metadata and proposed lock
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: guest-kernel-update
+          retention-days: 7
+          path: |
+            .work/guest-kernel-updates/check.log
+            .work/guest-kernel-updates/InRelease
+            .work/guest-kernel-updates/Packages.gz
+            .work/guest-kernel-updates/kernel.lock.candidate.json
