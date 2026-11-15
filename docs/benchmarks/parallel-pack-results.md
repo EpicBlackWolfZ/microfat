@@ -78,8 +78,8 @@ outer workers stayed within their caps. The default-only OOMs still violate
 the frozen acceptance rule. See
 [production admission](https://github.com/EpicBlackWolfZ/microfat/blob/831c22d865606b89a5a1b59c8d9e15d7a44e3583/internal/pack/parallel.go).
 
-The proposed v0.4.0 disposition retains production admission and documents
-the failures under the tested memory caps. Maintainer review remains pending
+The maintainer accepted the documented limits for v0.4.0. The release retains
+production admission with the failures under the tested memory caps recorded
 in [#423](https://github.com/EpicBlackWolfZ/microfat/issues/423).
 
 ## Results by VM
