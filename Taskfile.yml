@@ -142,6 +142,33 @@ tasks:
       export PATH={{printf "%s/bin" .GO_ROOT | shellQuote}}:"$PATH"
       {{.GO | shellQuote}} run ./tests/e2e/testdata/fd_handoff \
         -base {{.HANDOFF_BASE | shellQuote}} -candidate "$PWD" -output {{.HANDOFF_OUTPUT | shellQuote}}
+
+  research-47-build:
+    desc: Build the committed bounded exact-sharing diagnostic
+    cmds:
+    - |
+      git diff --quiet HEAD -- experiments/research47 internal/codec internal/format internal/pack go.mod go.sum
+      mkdir -p .work/research47
+      research_revision="$(git rev-parse HEAD)"
+      go_version="$(awk '$1 == "go" { print $2; exit }' go.mod)"
+      [ "$(GOTOOLCHAIN=local {{.GO | shellQuote}} env GOVERSION)" = "go${go_version}" ]
+      GOTOOLCHAIN=local {{.GO | shellQuote}} build -trimpath -ldflags="-X main.producerRevision=${research_revision}" \
+        -o .work/research47/research47 ./experiments/research47
+  research-47:
+    desc: Compare matched better/best sharing sizes (MANIFEST, STUB, OUTPUT=new directory)
+    cmds:
+    - |
+      GOMAXPROCS=4 GOMEMLIMIT=2GiB .work/research47/research47 --manifest {{.MANIFEST | default "" | shellQuote}} \
+        --stub {{.STUB | default "" | shellQuote}} --output {{.OUTPUT | default "" | shellQuote}}
+
+  research-47-corpus:
+    desc: Build the shared native corpus for the current Go pin outside measurement windows
+    cmds:
+    - |
+      {{.TASK_ENV}}
+      go_version="$(awk '$1 == "go" { print $2; exit }' go.mod)"
+      bash scripts/codec-policy-corpus.sh {{.CODEC_CORPUS | shellQuote}} {{.CODEC_ARCH | shellQuote}} "go${go_version}"
+
   test-runtime-fixtures:
     desc: Require native fat CLI inspection, timeout and detached-child cleanup regressions
     cmds:
