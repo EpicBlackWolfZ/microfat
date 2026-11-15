@@ -63,12 +63,12 @@ type manifest struct {
 	Arch     string `json:"architecture"`
 	Revision string `json:"source_revision"`
 	Variants []struct {
-		Family  string
-		Profile string
-		Level   string
-		Path    string
-		SHA256  string
-		Bytes   int64
+		Family  string `json:"family"`
+		Profile string `json:"profile"`
+		Level   string `json:"level"`
+		Path    string `json:"path"`
+		SHA256  string `json:"sha256"`
+		Bytes   int64  `json:"bytes"`
 	} `json:"variants"`
 }
 
