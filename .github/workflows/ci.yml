@@ -630,6 +630,7 @@ jobs:
           path: |
             .work/installer-qualification/*.json
             .work/installer-qualification/*.log
+            .work/installer-qualification/*.txt
           include-hidden-files: true
           retention-days: 7
 

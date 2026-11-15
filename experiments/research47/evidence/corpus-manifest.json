@@ -1,0 +1,256 @@
+{
+  "schema_version": 2,
+  "source_revision": "f87db35fdf9fc7f51d262bd15634a3dd19c01a5e",
+  "go_version": "go1.27.3",
+  "architecture": "amd64",
+  "sources": [
+    {
+      "family": "fortio",
+      "module": "fortio.org/fortio",
+      "version": "v1.76.0",
+      "package": ".",
+      "readiness_args": [
+        "version"
+      ],
+      "module_sum": "h1:CSeuqtbKDwX34cTsjcV0VDYjCCJeQ/sYTPDtIakFmrs=",
+      "go_mod_sum": "h1:y7Z/DzCk4cHbl2WHAU3RA45Eo1oLG5bpd5PZ1tLg0QU=",
+      "source_commit": "67ce9fa2a3a62fdb2f7a0d2b50acda1f7002d32b"
+    },
+    {
+      "family": "task",
+      "module": "github.com/go-task/task/v3",
+      "version": "v3.54.0",
+      "package": "./cmd/task",
+      "readiness_args": [
+        "--version"
+      ],
+      "module_sum": "h1:xDgD9BNHIDnHhemB3gumYb+ozUoa6oCFMIz44GGosj8=",
+      "go_mod_sum": "h1:oOHzpL1r0bga9Xq1dC/8kucE1Y4fxSMTlKKFpNi6mFc=",
+      "source_commit": "b5aef1c287a9be8038347a17646bdf4bc7185bce"
+    },
+    {
+      "family": "actionlint",
+      "module": "github.com/rhysd/actionlint",
+      "version": "v1.7.12",
+      "package": "./cmd/actionlint",
+      "readiness_args": [
+        "-version"
+      ],
+      "module_sum": "h1:vQ4GeJN86C0QH+gTUQcs8McmK62OLT3kmakPMtEWYnY=",
+      "go_mod_sum": "h1:krOUhujIsJusovkaYzQ/VNH8PFexjNKqU0q5XI/4w+g=",
+      "source_commit": "914e7df21a07ef503a81201c76d2b11c789d3fca"
+    },
+    {
+      "family": "govulncheck",
+      "module": "golang.org/x/vuln",
+      "version": "v1.9.0",
+      "package": "./cmd/govulncheck",
+      "readiness_args": [
+        "-version"
+      ],
+      "module_sum": "h1:12VaqnI9kJfqwRoPptxoqsUhQtdfrSbdksT7X/KY/sc=",
+      "go_mod_sum": "h1:E/Frwm0xp49fTyBW+6CQHdkvobknbwUM49yEpMGUauw=",
+      "source_commit": "e672cbe8fbc8c76e28fcb6db0efd9ce354e0dac5"
+    }
+  ],
+  "build": {
+    "cgo_enabled": "0",
+    "goos": "linux",
+    "trimpath": true,
+    "buildvcs": false
+  },
+  "variants": [
+    {
+      "family": "fortio",
+      "profile": "stripped",
+      "level": "v1",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/fortio-stripped-v1",
+      "sha256": "41b745acd13d894f9c88e6b4dd58ee24912ed7f02486a10fd8de7b5a5a7bbc6a",
+      "bytes": 19734652
+    },
+    {
+      "family": "fortio",
+      "profile": "stripped",
+      "level": "v2",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/fortio-stripped-v2",
+      "sha256": "b25bdbc30044f047d3d1cc6284bd7c64c0b16a2a20712f7341ff058f69b2c60a",
+      "bytes": 19730556
+    },
+    {
+      "family": "fortio",
+      "profile": "stripped",
+      "level": "v3",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/fortio-stripped-v3",
+      "sha256": "69481306d1ad934253a1454cfe329da5e02defbf81861057eef9e21249e524f0",
+      "bytes": 19718268
+    },
+    {
+      "family": "fortio",
+      "profile": "unstripped",
+      "level": "v1",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/fortio-unstripped-v1",
+      "sha256": "4b718fb6f2874c0ef80457ab2b609d51b09228ff4c811810fdf2da4b79125276",
+      "bytes": 28266198
+    },
+    {
+      "family": "fortio",
+      "profile": "unstripped",
+      "level": "v2",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/fortio-unstripped-v2",
+      "sha256": "414af9f42a72e926776fe09f8f118dc4e2dbd7a339e9f387cbed241f127c1dc3",
+      "bytes": 28255134
+    },
+    {
+      "family": "fortio",
+      "profile": "unstripped",
+      "level": "v3",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/fortio-unstripped-v3",
+      "sha256": "0822c171beba140597c08b5985d5fa59974d32f08447ba368f0bdd1e10cac30a",
+      "bytes": 28237745
+    },
+    {
+      "family": "task",
+      "profile": "stripped",
+      "level": "v1",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/task-stripped-v1",
+      "sha256": "d5d3a7c1fe1436bdc47525beb4ce2efcc5fe2d81d7925664a11a224d08995f13",
+      "bytes": 52416636
+    },
+    {
+      "family": "task",
+      "profile": "stripped",
+      "level": "v2",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/task-stripped-v2",
+      "sha256": "1042b6d95dd3fe4404ea4fd35c39b6b4cd71d2aa3dea09698bfdc7b5a8e091f0",
+      "bytes": 52412540
+    },
+    {
+      "family": "task",
+      "profile": "stripped",
+      "level": "v3",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/task-stripped-v3",
+      "sha256": "580119d9433bf415c8cbbed2e8aecade88ce5b84b388c68b4f593a3684224dee",
+      "bytes": 52396156
+    },
+    {
+      "family": "task",
+      "profile": "unstripped",
+      "level": "v1",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/task-unstripped-v1",
+      "sha256": "65304420e8433fef1c0d2ffe0033da3293aeb24c959778fd1954e8ae30c30b73",
+      "bytes": 73996007
+    },
+    {
+      "family": "task",
+      "profile": "unstripped",
+      "level": "v2",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/task-unstripped-v2",
+      "sha256": "ac31dc866dd390e58f5fa59f83ad27976214cf320ff7ee81ccb751f78b75875c",
+      "bytes": 73982020
+    },
+    {
+      "family": "task",
+      "profile": "unstripped",
+      "level": "v3",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/task-unstripped-v3",
+      "sha256": "0df492a4ee17be7e445fc42092d663640ebae7a0dc8b032574d94d6da27fecd3",
+      "bytes": 73956415
+    },
+    {
+      "family": "actionlint",
+      "profile": "stripped",
+      "level": "v1",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/actionlint-stripped-v1",
+      "sha256": "0f80f1fabea0708ee535fd0a4b9137346e40b67408e4a74fd94c30bfff1a44a9",
+      "bytes": 6520956
+    },
+    {
+      "family": "actionlint",
+      "profile": "stripped",
+      "level": "v2",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/actionlint-stripped-v2",
+      "sha256": "0f15440ad1e2354a6b7ef0302705f1cdc3150aa4a398f2636accfa3f9b94edc2",
+      "bytes": 6516860
+    },
+    {
+      "family": "actionlint",
+      "profile": "stripped",
+      "level": "v3",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/actionlint-stripped-v3",
+      "sha256": "8cb9b4fd7dc32a64540ff627048bd9f263e901bbe53070556776494d2b9b2ac3",
+      "bytes": 6512764
+    },
+    {
+      "family": "actionlint",
+      "profile": "unstripped",
+      "level": "v1",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/actionlint-unstripped-v1",
+      "sha256": "8a411486faa2398d4e3d7d28f95f5024e5000cc3c53c3ad00967c8503c7e36ff",
+      "bytes": 9218369
+    },
+    {
+      "family": "actionlint",
+      "profile": "unstripped",
+      "level": "v2",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/actionlint-unstripped-v2",
+      "sha256": "e05e4facb150dc765b686f91413c0173d89aca92f42f9fd54101b3e0d67b0a22",
+      "bytes": 9215856
+    },
+    {
+      "family": "actionlint",
+      "profile": "unstripped",
+      "level": "v3",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/actionlint-unstripped-v3",
+      "sha256": "7bb0b2b8831ca82bcba90a1fa2970c2a3957d41b6569eea1149847b89e2ec4bb",
+      "bytes": 9208675
+    },
+    {
+      "family": "govulncheck",
+      "profile": "stripped",
+      "level": "v1",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/govulncheck-stripped-v1",
+      "sha256": "f0d7e0e8e8c6df5d4b20fa4ecc7b185147afba6769b7c6417ba7da9ab7ea683c",
+      "bytes": 10842236
+    },
+    {
+      "family": "govulncheck",
+      "profile": "stripped",
+      "level": "v2",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/govulncheck-stripped-v2",
+      "sha256": "eec3c6deae06aadd29689ab41ccf07aace80fa738955e474576b476c10b566f7",
+      "bytes": 10838140
+    },
+    {
+      "family": "govulncheck",
+      "profile": "stripped",
+      "level": "v3",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/govulncheck-stripped-v3",
+      "sha256": "cb6074be000028862d32264a74c0af9e2343f82745393f307e7e802431c031f7",
+      "bytes": 10829948
+    },
+    {
+      "family": "govulncheck",
+      "profile": "unstripped",
+      "level": "v1",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/govulncheck-unstripped-v1",
+      "sha256": "103e0c7e145316242c00cf7d2575141b49da126393ed6380da942f45668a09e0",
+      "bytes": 15882157
+    },
+    {
+      "family": "govulncheck",
+      "profile": "unstripped",
+      "level": "v2",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/govulncheck-unstripped-v2",
+      "sha256": "cdf99506003328b2126c4fe60ec46d998c1ef5f0566a32aa70815d73aa06cac6",
+      "bytes": 15878660
+    },
+    {
+      "family": "govulncheck",
+      "profile": "unstripped",
+      "level": "v3",
+      "path": "/tmp/microfat-research-confirm-20261023/corpus/amd64/govulncheck-unstripped-v3",
+      "sha256": "e2dc7ba109ad9b5790c18b746320e764eb8ff54f4ddfa93b7a4ce120ea4015f9",
+      "bytes": 15863919
+    }
+  ]
+}

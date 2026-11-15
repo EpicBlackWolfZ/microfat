@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "measurement_kind": "offline-size-only-no-timers",
+  "producer_revision": "e32e294ece6b7bc17eaa832ec4eac811fd4069d9",
+  "producer_path": "/home/nanoninja/.codex/worktrees/poc-161-dictionary/microfat/.work/research47/research47",
+  "producer_sha256": "f53b80ca1621fbc59d088adc65f2b917bc7e2fc4fbaadd96ec71b472e959d505",
+  "source_recipe_revision": "f87db35fdf9fc7f51d262bd15634a3dd19c01a5e",
+  "raw_report_sha256": "4cce55ce7062763eb46f80de1663cbe0f8b5df1a67dd0788ca79eec9b4f46539",
+  "manifest_sha256": "ee1a51e9720eab58d561839e2f8428f85c3c1fa49b02481f4fd872380b30b194",
+  "stub_sha256": "0e09e44d41f2e00ace1bcd275e9b77ee4ffe2caa802d5c5d301a7ee556e6e50f",
+  "stub_bytes": 3989628,
+  "go_version": "go1.27.3",
+  "codec_module_version": "v1.20.3",
+  "environment": {
+    "GOMAXPROCS": "4",
+    "GOMEMLIMIT": "2GiB",
+    "GOFLAGS": "-p=4"
+  },
+  "platform": {
+    "system": "Linux",
+    "node": "Gjallarhorn",
+    "release": "7.2.11-200.nobara.fc44.x86_64",
+    "version": "#1 SMP PREEMPT_DYNAMIC Fri Oct 16 13:07:09 UTC 2026",
+    "machine": "x86_64",
+    "processor": ""
+  },
+  "command": "task research-47 GO=/home/nanoninja/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/bin/go MANIFEST=/tmp/microfat-research-confirm-20261023/corpus/amd64/manifest.json STUB=/tmp/microfat-research-confirm-20261023/corpus/amd64/stub-full OUTPUT=.work/research47/heldout-amd64",
+  "source_files": {
+    "experiments/research47/chunks.go": "89b31bbe8bf443bce6f42a83400e2b5944943bbf15804f140830106a83db6494",
+    "experiments/research47/chunks_test.go": "361544e2d075466cc6a96863fb3312f82f44b554ac86be6d7d303b33210eb6a8",
+    "experiments/research47/corpus.go": "1eb821775a7f500883ca64fae5666ea22aae2163c6f0bde222ddd20e8f678a38",
+    "experiments/research47/corpus_test.go": "8bd0430a91a311504fde87f3a473bb31866ebbffaf4d6ca96855b4d080bea75d",
+    "experiments/research47/corpus_unix_test.go": "52c4c87696a5b1faa725348f09f446f3f0fc34d60ccbf22c48b171800155cae4",
+    "experiments/research47/main.go": "6186984a0334712014f2ec27780377a39614cfddbc480524f00159ce395406f3",
+    "experiments/research47/representation.go": "6e3b41619b4ae4a9cdd42551746cef7941901ed4c20e5b3ae4bb8f91e0942f77",
+    "experiments/research47/representation_test.go": "c0470b0c74ccc80f6ab26876368fe1864ed2e979b0fb84a111925ce4ba02f47c",
+    "experiments/research47/screen.go": "c30a89d5f30f9c0fb654b4bb5c111db2aaaab34c971cd6eb3953ed198bf54996",
+    "experiments/research47/screen_test.go": "7bf07d4e8a26b373d6ff8edcea9072f55310b96e26c712a6ab0a10dbbe895d70",
+    "experiments/research47/README.md": "5bd7e793e3457b0fb3dd10be3375f56103cd8f80a1c95cd4da0eafc95b50f4a5",
+    "Taskfile.yml": "314da017f468513ae1858c6de9d3beefd95971af13f907dedbc5c1b6b5238336",
+    "go.mod": "e879b84f7211c7716956dd644f2ae92ef90f4b056cf2a71237944fd24a10afc0",
+    "go.sum": "6f03850c41a80232a680fc224f4c42d2cf825fd391161b404cbed342afc5c53e",
+    "scripts/research-heldout-corpus.sh": "8936806a9f64c404983e728a309a18b91d3eb96f3edfaf005555387e8ba21b69",
+    "experiments/heldoutcorpus/sources.lock.json": "872a8fe7b2a481ff89edcf71f5945c8b98d79dc82d161066f986ab48511ffcfd"
+  },
+  "independent_audit": {
+    "method": "separate Python stdlib manual binary parser and system libzstd; no Go encoder/decoder calls",
+    "result": "PASS all24sources/72outputs/216exactpayloadbytecomparisons",
+    "evidence_sha256": "03a34fca61d0f5aa46adbb74cdf6441b869286089c65560cb740590fb0c0e8c0"
+  }
+}
