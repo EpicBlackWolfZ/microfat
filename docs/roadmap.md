@@ -1,19 +1,24 @@
 # Production roadmap
 
-Updated 2026-10-23: v0.3.1 passed source/candidate qualification and hosted evidence gates and
-was published immutable. Independently reviewed public archive and clean native bootstrap checks
-passed, the authenticated v0.3.1 Homebrew recipe is merged, and final combined public installer/tap
-acceptance passed on both native architectures.
+Updated 2026-11-16: v0.4.0 passed source/candidate qualification, hosted evidence and advisory
+scan gates and was published immutable. Independently reviewed public archive audits and clean native
+bootstrap checks passed, the authenticated v0.4.0 Homebrew recipe is merged, and final combined
+public installer/tap acceptance passed on both native architectures.
 GitHub issues define remaining scope,
 dependencies and acceptance criteria. Milestones group deliverable outcomes; they are not dates.
 
 ## Current baseline
 
-[v0.3.1](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.3.1) is the latest published
-release, published on 2026-10-23 at 05:04:02 UTC as immutable release `421362795` from source
-`94cb9f6ad26c14931ea28e53a8969f09790eff80`. Its
-[acceptance record](releases/v0.3.1.md#release-acceptance) separates source CI, signed-candidate
-qualification, hosted measurements, publication and public installer/tap results.
+[v0.4.0](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.4.0) is the latest published
+release, published on 2026-11-16 at 09:48:04 UTC as immutable release `446786773` from source
+`48032c2c6b9b66e0f2148ae023a74466ccd2c391`, built with Go 1.27.4 and clearing `GO-2026-6859`. Its
+[acceptance record](releases/v0.4.0.md#release-acceptance) separates source CI, signed-candidate
+qualification, hosted measurements, publication, advisory scan and public installer/tap results.
+
+[v0.3.1](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.3.1) was published on
+2026-10-23 at 05:04:02 UTC as immutable release `421362795` from source
+`94cb9f6ad26c14931ea28e53a8969f09790eff80`. See its
+[acceptance record](releases/v0.3.1.md#release-acceptance).
 
 [v0.3.0](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.3.0) was published on
 2026-10-13 at 05:25:54 UTC as immutable release `411193467`.
@@ -56,7 +61,8 @@ added ShellCheck. They are merged into `main`; they are not new work to implemen
 | [v0.2.5](https://github.com/EpicBlackWolfZ/microfat/milestone/13) | Consolidate tooling, release trust and CI without losing validation | Installer/updater/tap features or speculative attestations |
 | [v0.3.0](https://github.com/EpicBlackWolfZ/microfat/milestone/2) | Coherent installation and executable lifecycle contracts | Native macOS support and new compression formats |
 | [v0.3.1](releases/v0.3.1.md) | Installer/dictionary corrections and dependency/toolchain updates | New binary formats and dedicated-hardware certification |
-| [v0.4.0](https://github.com/EpicBlackWolfZ/microfat/milestone/3) | Observability and performance improvements supported by evidence | Arbitrary latency targets and dedicated-hardware availability |
+| [v0.4.0](releases/v0.4.0.md) | Observability, Format v2 migration and evidence-backed cold-cache improvements | Arbitrary latency targets and dedicated-hardware availability |
+| [v0.4.1](https://github.com/EpicBlackWolfZ/microfat/milestone/15) | Patch follow-ups, CI API rate-limit hardening and release workflow defaults | Speculative format changes |
 
 Urgent, independently validated corrections can ship earlier in the patch stream. A tooling
 migration must not hold a known runtime fix. Work can proceed independently where dependencies
@@ -194,7 +200,9 @@ and per-variant CLI compression #43. The live
 [delivery index #378](https://github.com/EpicBlackWolfZ/microfat/issues/378) records the complete
 ten-issue commitment and ordering, including verified-descriptor handoff #392, prewarm planning
 and payload-byte admission #390, and the original matched service-p99 investigation #230.
-Issue-local acceptance remains authoritative; these are pending release commitments.
+These shipped in v0.4.0 alongside [#423](https://github.com/EpicBlackWolfZ/microfat/issues/423)
+and [#441](https://github.com/EpicBlackWolfZ/microfat/issues/441); issue-local acceptance records
+the completed scope and documented limits.
 
 | Scope | Issues |
 | --- | --- |
