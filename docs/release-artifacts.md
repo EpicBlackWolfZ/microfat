@@ -31,8 +31,8 @@ Release-level evidence is attached separately: hosted benchmark evidence uses
 `benchmark-evidence-<source-sha>-<run>-<attempt>.tar.gz`, and native runtime evidence uses
 `runtime-evidence_<version>.tar.gz`, each with its own `.sha256` sidecar. These four supplemental
 files have separate digest and workflow-provenance checks; they are outside the signed product
-checksum inventory. The v0.3.1 release has eighteen uploaded assets: twelve signed payloads, the
-checksum file and signature, and these four evidence files.
+checksum inventory. Releases from v0.3.1 onward upload eighteen assets: twelve signed payloads,
+the checksum file and signature, and these four evidence files.
 
 ### SBOM inventory and verification
 
@@ -106,16 +106,12 @@ Those checks install from the official remote tap and retain product hashes, own
 results. Signed-draft helper qualification, published archive audits and these public-path checks
 retain separate evidence.
 
-The [v0.3.1 acceptance record](releases/v0.3.1.md#release-acceptance) identifies its immutable publication,
+The [v0.4.0 acceptance record](releases/v0.4.0.md#release-acceptance) identifies its immutable publication,
 signed-candidate and hosted qualification, and the independently reviewed public installer/tap results.
 
-The v0.3.0 then-private signed candidate passed native installer and runtime qualification on both architectures.
-Hosted evidence passed and v0.3.0 is published as an immutable release. Independently verified
-[public installation acceptance 38376089070, attempt 2](https://github.com/EpicBlackWolfZ/microfat/actions/runs/38376089070/attempts/2)
-passed all four native installer/Homebrew jobs from qualification source `5f09b0185b1c51daa54a641d7241ac111c340555`,
-authenticating immutable product source `d3883d59674eb32351717f6d28744862d1cc45c9`.
-The [release acceptance record](releases/v0.3.0.md#release-acceptance) identifies the final source and
-candidate/publication results and the separate public installer/tap evidence and its scope.
+The [v0.3.1 acceptance record](releases/v0.3.1.md#release-acceptance) and
+[v0.3.0 acceptance record](releases/v0.3.0.md#release-acceptance) retain historical publication and
+public acceptance records.
 
 ## 2. Archive Contents & Binary Roles
 
@@ -145,7 +141,7 @@ Extracting `microfat_<version>_linux_<arch>.tar.gz` provides:
 3. **`microfat-stub-minimal` (Minimal Launcher Stub)**:
    - A lightweight stub compiled with `-tags=minimal`.
    - Removes interactive meta-command handlers (`--microfat:*`) for a reduced ELF footprint while retaining container resource auto-tuning and environment controls, including `MICROFAT_FORCE_LEVEL`, `MICROFAT_EXEC_MODE`, and `MICROFAT_GC_PROFILE`.
-   - Size varies with architecture, toolchain, and build flags. The published v0.3.0 Linux amd64 minimal stub is 3,748,000 bytes; its full counterpart is 3,977,376 bytes.
+   - Size varies with architecture, toolchain, and build flags. The published v0.4.0 Linux amd64 minimal stub is 2,896,032 bytes; its full counterpart is 3,920,032 bytes.
    - Recommended for extreme cold-start sensitivity or deeply constrained serverless/embedded Linux containers.
 
 ---
@@ -155,14 +151,14 @@ Extracting `microfat_<version>_linux_<arch>.tar.gz` provides:
 ### Scenario A: Installing the `microfat` CLI
 
 The [official Homebrew tap](https://github.com/EpicBlackWolfZ/homebrew-tap) selects these same archives
-for Linux amd64 and arm64. The authenticated v0.3.1 recipe and official remote installation passed
+for Linux amd64 and arm64. The authenticated v0.4.0 recipe and official remote installation passed
 on both native architectures. See [Homebrew commands](installation.md#homebrew-linux-amd64-and-arm64)
-and the [release acceptance record](releases/v0.3.1.md#release-acceptance). The tap generator consumes
+and the [release acceptance record](releases/v0.4.0.md#release-acceptance). The tap generator consumes
 the authenticated release inventory directly, so GoReleaser's `meta: true` archive output does not
 need fabricated platform metadata or a second packaging pass.
 
 Use the [verified installer](installation.md) to authenticate the release and publish all three products
-as one owned generation. Signed v0.3.1 helper assets are published; their public bootstrap passed
+as one owned generation. Signed v0.4.0 helper assets are published; their public bootstrap passed
 in fresh nonroot native amd64/arm64 containers without Go or preinstalled Cosign, using default user
 roots. The retained evidence identifies the exact bootstrap digest and authenticated product hashes.
 The guide also covers a trusted source helper and independently provisioned verifier.
