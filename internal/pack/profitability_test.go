@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/klauspost/compress/zstd"
@@ -719,5 +721,87 @@ func TestProfitabilityInternalErrorAndEdgeCoverage(t *testing.T) {
 			validTmp, validTmp.Name(), t.TempDir(), levels, &renameFailOpts, stubOffsetVal, baseIdx, []byte("dict"), validDigest,
 		)
 		require.Error(t, err)
+	})
+}
+
+func TestProfitabilityVariantWorkerLimit(t *testing.T) {
+	installPackResourceHooks(
+		t, testParallelWorkersFour, cgroup.Limits{}, nil, math.MaxInt64, testParallelMem2GiB, true,
+	)
+	stub, variants := netPositiveVariantSet(t)
+	epoch := testParallelEpoch
+
+	cases := []struct {
+		name         string
+		limit        int
+		wantWorkers  int
+		expectedDict bool
+	}{
+		{name: "unbounded_uses_admitted_workers", limit: 0, wantWorkers: testParallelWorkersFour, expectedDict: true},
+		{name: "positive_limit_two_clamps_workers", limit: 2, wantWorkers: 2, expectedDict: true},
+		{name: "positive_limit_one_forces_serial", limit: 1, wantWorkers: 1, expectedDict: true},
+	}
+
+	var baseline []byte
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var reported []int
+			opts := DefaultOptions()
+			opts.StubPath = stub
+			opts.Variants = variants
+			opts.CreatedUnix = &epoch
+			opts.Profile = codec.ProfileSize
+			opts.DictSize = profitableDictTargetSize
+			opts.DictProfitable = true
+			opts.VariantWorkerLimit = tc.limit
+			opts.VariantWorkers = func(count int) { reported = append(reported, count) }
+			opts.OutputPath = filepath.Join(t.TempDir(), tc.name+".fat")
+
+			idx, err := Pack(opts)
+			require.NoError(t, err)
+			assert.Equal(t, []int{tc.wantWorkers}, reported)
+			if tc.expectedDict {
+				assert.Positive(t, idx.DictionarySize)
+			}
+
+			artifact, err := os.ReadFile(opts.OutputPath)
+			require.NoError(t, err)
+			if baseline == nil {
+				baseline = artifact
+			} else {
+				assert.Equal(t, baseline, artifact, "clamped profitability Pack must remain byte-for-byte identical")
+			}
+
+			_, results, verifyErr := VerifyBinary(bytes.NewReader(artifact), int64(len(artifact)))
+			require.NoError(t, verifyErr)
+			require.Len(t, results, len(variants))
+			for _, res := range results {
+				assert.True(t, res.Valid)
+			}
+		})
+	}
+
+	t.Run("unprofitable_serial_limit_enforces_single_worker", func(t *testing.T) {
+		incompStub, v1, v3 := incompressibleVariantPair(t)
+		var callbackCounts []int
+		opts := DefaultOptions()
+		opts.StubPath = incompStub
+		opts.Variants = map[string]string{"v1": v1, "v3": v3}
+		opts.CreatedUnix = &epoch
+		opts.Profile = codec.ProfileSize
+		opts.DictProfitable = true
+		opts.VariantWorkerLimit = 1
+		opts.VariantWorkers = func(count int) { callbackCounts = append(callbackCounts, count) }
+		opts.OutputPath = filepath.Join(t.TempDir(), "unprofitable-serial.fat")
+
+		idx, err := Pack(opts)
+		require.NoError(t, err)
+		assert.Zero(t, idx.DictionarySize)
+		assert.Equal(t, []int{1}, callbackCounts)
+	})
+
+	t.Run("nil_options_guard", func(t *testing.T) {
+		plans := []variantWorkPlan{{level: "v1"}, {level: "v2"}}
+		assert.Equal(t, 2, resolvePackWorkersForOptions(plans, nil))
 	})
 }
