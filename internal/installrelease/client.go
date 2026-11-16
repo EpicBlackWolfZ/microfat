@@ -22,17 +22,22 @@ import (
 )
 
 const (
-	Repository             = "EpicBlackWolfZ/microfat"
-	Issuer                 = "https://token.actions.githubusercontent.com"
-	apiURL                 = "https://api.github.com/repos/" + Repository + "/releases/latest"
-	downloadURL            = "https://github.com/" + Repository + "/releases/download/v"
-	maxDownloadBytes int64 = 256 * 1024 * 1024
-	maxMetadataBytes int64 = 1024 * 1024
-	requestTimeout         = 2 * time.Minute
-	maxRedirects           = 5
-	maxVersionLength       = 64
-	privateMode            = 0o700
-	fileMode               = 0o600
+	Repository                = "EpicBlackWolfZ/microfat"
+	Issuer                    = "https://token.actions.githubusercontent.com"
+	apiHost                   = "api.github.com"
+	githubHost                = "github.com"
+	apiURL                    = "https://" + apiHost + "/repos/" + Repository + "/releases/latest"
+	apiTagURL                 = "https://" + apiHost + "/repos/" + Repository + "/releases/tags/v"
+	latestReleaseURL          = "https://" + githubHost + "/" + Repository + "/releases/latest"
+	latestTagPathPrefix       = "/" + Repository + "/releases/tag/v"
+	downloadURL               = "https://" + githubHost + "/" + Repository + "/releases/download/v"
+	maxDownloadBytes    int64 = 256 * 1024 * 1024
+	maxMetadataBytes    int64 = 1024 * 1024
+	requestTimeout            = 2 * time.Minute
+	maxRedirects              = 5
+	maxVersionLength          = 64
+	privateMode               = 0o700
+	fileMode                  = 0o600
 )
 
 var versionSyntax = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
@@ -89,7 +94,7 @@ func NewLocalClient(directory string) (*Client, error) {
 
 func allowedURL(location *url.URL) bool {
 	return location.Scheme == "https" && location.User == nil && location.Port() == "" &&
-		slices.Contains([]string{"api.github.com", "github.com", "release-assets.githubusercontent.com",
+		slices.Contains([]string{apiHost, githubHost, "release-assets.githubusercontent.com",
 			"objects.githubusercontent.com"}, location.Host)
 }
 
@@ -97,18 +102,68 @@ func checkRedirect(request *http.Request, previous []*http.Request) error {
 	if len(previous) >= maxRedirects || !allowedURL(request.URL) {
 		return errors.New("refusing release download redirect")
 	}
+	if request.URL.Host != apiHost {
+		request.Header.Del("Authorization")
+	}
 	return nil
 }
 
+type httpStatusError struct {
+	statusCode int
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("release download returned HTTP %d", e.statusCode)
+}
+
+func isRateLimitError(err error) bool {
+	var statusErr *httpStatusError
+	return errors.As(err, &statusErr) &&
+		(statusErr.statusCode == http.StatusForbidden || statusErr.statusCode == http.StatusTooManyRequests)
+}
+
+func isRedirectStatus(statusCode int) bool {
+	return slices.Contains([]int{
+		http.StatusMovedPermanently,
+		http.StatusFound,
+		http.StatusSeeOther,
+		http.StatusTemporaryRedirect,
+		http.StatusPermanentRedirect,
+	}, statusCode)
+}
+
+func gitHubToken() string {
+	for _, key := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		if token := os.Getenv(key); token != "" && !strings.ContainsAny(token, "\r\n") {
+			return token
+		}
+	}
+	return ""
+}
+
+func newAllowedRequest(ctx context.Context, method, address string) (*http.Request, error) {
+	request, err := http.NewRequestWithContext(ctx, method, address, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !allowedURL(request.URL) {
+		return nil, errors.New("refusing non-official or non-HTTPS release URL")
+	}
+	request.Header.Set("User-Agent", "microfat-installer")
+	if request.URL.Host == apiHost {
+		request.Header.Set("Accept", "application/vnd.github+json")
+		if token := gitHubToken(); token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
+	return request, nil
+}
+
 func (c *Client) get(ctx context.Context, address string, limit int64, output io.Writer) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
+	request, err := newAllowedRequest(ctx, http.MethodGet, address)
 	if err != nil {
 		return err
 	}
-	if !allowedURL(request.URL) {
-		return errors.New("refusing non-official or non-HTTPS release URL")
-	}
-	request.Header.Set("User-Agent", "microfat-installer")
 	response, err := c.http.Do(request)
 	if err != nil {
 		return err
@@ -118,7 +173,7 @@ func (c *Client) get(ctx context.Context, address string, limit int64, output io
 
 func copyResponse(response *http.Response, limit int64, output io.Writer) error {
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("release download returned HTTP %d", response.StatusCode)
+		return &httpStatusError{statusCode: response.StatusCode}
 	}
 	if response.ContentLength > limit {
 		return errors.New("release download exceeds size limit")
@@ -133,6 +188,57 @@ func copyResponse(response *http.Response, limit int64, output io.Writer) error 
 	return nil
 }
 
+func (c *Client) resolveLatestWeb(ctx context.Context) (string, error) {
+	request, err := newAllowedRequest(ctx, http.MethodHead, latestReleaseURL)
+	if err != nil {
+		return "", err
+	}
+	noRedirectClient := *c.http
+	noRedirectClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	response, err := noRedirectClient.Do(request)
+	if err != nil {
+		return "", err
+	}
+	location := response.Header.Get("Location")
+	statusCode := response.StatusCode
+	if closeErr := response.Body.Close(); closeErr != nil {
+		return "", closeErr
+	}
+	if !isRedirectStatus(statusCode) || location == "" {
+		return "", fmt.Errorf("latest release lookup returned HTTP %d", statusCode)
+	}
+	target, err := request.URL.Parse(location)
+	if err != nil || !allowedURL(target) || target.Host != githubHost || target.RawQuery != "" || target.Fragment != "" {
+		return "", errors.New("refusing non-official latest release redirect")
+	}
+	rawVersion, ok := strings.CutPrefix(target.Path, latestTagPathPrefix)
+	if !ok || strings.HasPrefix(rawVersion, "v") {
+		return "", errors.New("latest release redirect does not target a published stable tag")
+	}
+	return ParseVersion(rawVersion)
+}
+
+func (c *Client) verifyAssetHead(ctx context.Context, version, name string) error {
+	request, err := newAllowedRequest(ctx, http.MethodHead, downloadURL+version+"/"+name)
+	if err != nil {
+		return err
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return err
+	}
+	statusCode := response.StatusCode
+	if closeErr := response.Body.Close(); closeErr != nil {
+		return closeErr
+	}
+	if statusCode != http.StatusOK {
+		return &httpStatusError{statusCode: statusCode}
+	}
+	return nil
+}
+
 func (c *Client) Resolve(ctx context.Context, version string) (string, error) {
 	if version != "" {
 		return ParseVersion(version)
@@ -142,6 +248,9 @@ func (c *Client) Resolve(ctx context.Context, version string) (string, error) {
 	}
 	var data strings.Builder
 	if err := c.get(ctx, apiURL, maxMetadataBytes, &data); err != nil {
+		if isRateLimitError(err) {
+			return c.resolveLatestWeb(ctx)
+		}
 		return "", err
 	}
 	var release struct {

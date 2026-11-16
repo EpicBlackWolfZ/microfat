@@ -22,10 +22,13 @@ func (c *Client) Published(ctx context.Context, requested, arch string) (string,
 			return "", err
 		}
 		requested = version
-		address = "https://api.github.com/repos/" + Repository + "/releases/tags/v" + version
+		address = apiTagURL + version
 	}
 	var data strings.Builder
 	if err := c.get(ctx, address, maxMetadataBytes, &data); err != nil {
+		if isRateLimitError(err) {
+			return c.publishedWebFallback(ctx, requested, arch)
+		}
 		return "", err
 	}
 	var release struct {
@@ -53,10 +56,34 @@ func (c *Client) Published(ctx context.Context, requested, arch string) (string,
 	for _, asset := range release.Assets {
 		counts[asset.Name]++
 	}
-	archive := "microfat_" + version + "_linux_" + arch + ".tar.gz"
-	for _, name := range []string{archive, "checksums.txt", "checksums.txt.sig"} {
+	for _, name := range releaseRequiredAssets(version, arch) {
 		if counts[name] != 1 {
 			return "", fmt.Errorf("release requires exactly one asset named %s", name)
+		}
+	}
+	return version, nil
+}
+
+func releaseRequiredAssets(version, arch string) []string {
+	return []string{
+		"microfat_" + version + "_linux_" + arch + ".tar.gz",
+		"checksums.txt",
+		"checksums.txt.sig",
+	}
+}
+
+func (c *Client) publishedWebFallback(ctx context.Context, requested, arch string) (string, error) {
+	version := requested
+	if version == "" {
+		resolved, err := c.resolveLatestWeb(ctx)
+		if err != nil {
+			return "", err
+		}
+		version = resolved
+	}
+	for _, name := range releaseRequiredAssets(version, arch) {
+		if err := c.verifyAssetHead(ctx, version, name); err != nil {
+			return "", err
 		}
 	}
 	return version, nil

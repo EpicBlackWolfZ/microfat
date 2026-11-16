@@ -248,3 +248,200 @@ func TestDownloadBoundaries(t *testing.T) {
 	_, _, err = client.Acquire(t.Context(), "0.3.0", "amd64", t.TempDir(), nil)
 	require.Error(t, err)
 }
+
+const redirectLocationHeader = "Location"
+
+func TestAPITokenAndRedirectAuthorizationStripping(t *testing.T) {
+	t.Run("prefers_GH_TOKEN_and_strips_on_redirect", func(t *testing.T) {
+		t.Setenv("GH_TOKEN", "ghp_primary")
+		t.Setenv("GITHUB_TOKEN", "ghp_secondary")
+		client := NewClient()
+		var apiAuth, apiAccept, assetAuth string
+		client.http.Transport = transportFunc(func(request *http.Request) (*http.Response, error) {
+			switch request.URL.String() {
+			case apiURL:
+				apiAuth = request.Header.Get("Authorization")
+				apiAccept = request.Header.Get("Accept")
+				return &http.Response{
+					StatusCode: http.StatusFound,
+					Header:     http.Header{redirectLocationHeader: []string{downloadURL + "0.4.0/checksums.txt"}},
+					Body:       http.NoBody,
+				}, nil
+			case downloadURL + "0.4.0/checksums.txt":
+				assetAuth = request.Header.Get("Authorization")
+				payload := `{"tag_name":"v0.4.0","draft":false,"prerelease":false}`
+				return &http.Response{
+					StatusCode:    http.StatusOK,
+					ContentLength: int64(len(payload)),
+					Body:          io.NopCloser(strings.NewReader(payload)),
+				}, nil
+			default:
+				return nil, fmt.Errorf("unexpected URL %s", request.URL.String())
+			}
+		})
+		version, err := client.Resolve(t.Context(), "")
+		require.NoError(t, err)
+		assert.Equal(t, "0.4.0", version)
+		assert.Equal(t, "Bearer ghp_primary", apiAuth)
+		assert.Equal(t, "application/vnd.github+json", apiAccept)
+		assert.Empty(t, assetAuth)
+	})
+
+	t.Run("uses_GITHUB_TOKEN_and_ignores_crlf_tokens", func(t *testing.T) {
+		t.Setenv("GH_TOKEN", "invalid\ntoken")
+		t.Setenv("GITHUB_TOKEN", "ghp_fallback")
+		client := NewClient()
+		var gotAuth string
+		client.http.Transport = transportFunc(func(request *http.Request) (*http.Response, error) {
+			gotAuth = request.Header.Get("Authorization")
+			payload := `{"tag_name":"v0.4.0","draft":false,"prerelease":false}`
+			return &http.Response{
+				StatusCode:    http.StatusOK,
+				ContentLength: int64(len(payload)),
+				Body:          io.NopCloser(strings.NewReader(payload)),
+			}, nil
+		})
+		version, err := client.Resolve(t.Context(), "")
+		require.NoError(t, err)
+		assert.Equal(t, "0.4.0", version)
+		assert.Equal(t, "Bearer ghp_fallback", gotAuth)
+
+		t.Setenv("GH_TOKEN", "")
+		t.Setenv("GITHUB_TOKEN", "bad\rtoken")
+		gotAuth = "sentinel"
+		_, err = client.Resolve(t.Context(), "")
+		require.NoError(t, err)
+		assert.Empty(t, gotAuth)
+	})
+
+	t.Run("checkRedirect_retains_api_auth_and_strips_non_api_auth", func(t *testing.T) {
+		apiReq, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/foo", nil)
+		require.NoError(t, err)
+		apiReq.Header.Set("Authorization", "Bearer keep")
+		require.NoError(t, checkRedirect(apiReq, nil))
+		assert.Equal(t, "Bearer keep", apiReq.Header.Get("Authorization"))
+
+		cdnReq, err := http.NewRequest(http.MethodGet, "https://release-assets.githubusercontent.com/blob", nil)
+		require.NoError(t, err)
+		cdnReq.Header.Set("Authorization", "Bearer drop")
+		require.NoError(t, checkRedirect(cdnReq, nil))
+		assert.Empty(t, cdnReq.Header.Get("Authorization"))
+	})
+}
+
+func TestResolveRateLimitWebFallback(t *testing.T) {
+	t.Parallel()
+	for _, status := range []int{http.StatusForbidden, http.StatusTooManyRequests} {
+		for _, location := range []string{
+			"https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.4.0",
+			"/EpicBlackWolfZ/microfat/releases/tag/v0.4.0",
+		} {
+			name := fmt.Sprintf("http_%d_%s", status, location)
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				client := NewClient()
+				client.http.Transport = transportFunc(func(request *http.Request) (*http.Response, error) {
+					switch {
+					case request.Method == http.MethodGet && request.URL.String() == apiURL:
+						return &http.Response{StatusCode: status, Body: http.NoBody}, nil
+					case request.Method == http.MethodHead && request.URL.String() == latestReleaseURL:
+						return &http.Response{
+							StatusCode: http.StatusFound,
+							Header:     http.Header{redirectLocationHeader: []string{location}},
+							Body:       http.NoBody,
+						}, nil
+					default:
+						return nil, fmt.Errorf("unexpected %s %s", request.Method, request.URL.String())
+					}
+				})
+				version, err := client.Resolve(t.Context(), "")
+				require.NoError(t, err)
+				assert.Equal(t, "0.4.0", version)
+			})
+		}
+	}
+
+	t.Run("non_rate_limit_http_error_does_not_fallback", func(t *testing.T) {
+		t.Parallel()
+		client := NewClient()
+		headCalled := false
+		client.http.Transport = transportFunc(func(request *http.Request) (*http.Response, error) {
+			if request.Method == http.MethodHead {
+				headCalled = true
+			}
+			return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody}, nil
+		})
+		_, err := client.Resolve(t.Context(), "")
+		require.ErrorContains(t, err, "release download returned HTTP 404")
+		assert.False(t, headCalled)
+	})
+
+	for _, tc := range []struct {
+		name     string
+		response *http.Response
+		err      error
+		wantErr  string
+	}{
+		{name: "transport_error", err: errors.New("network down"), wantErr: "network down"},
+		{name: "non_redirect_status", response: &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, wantErr: "HTTP 200"},
+		{name: "empty_location", response: &http.Response{StatusCode: http.StatusFound, Body: http.NoBody}, wantErr: "HTTP 302"},
+		{
+			name: "disallowed_host",
+			response: &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     http.Header{redirectLocationHeader: []string{"https://evil.example/EpicBlackWolfZ/microfat/releases/tag/v0.4.0"}},
+				Body:       http.NoBody,
+			},
+			wantErr: "non-official latest release redirect",
+		},
+		{
+			name: "query_in_redirect",
+			response: &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     http.Header{redirectLocationHeader: []string{"/EpicBlackWolfZ/microfat/releases/tag/v0.4.0?draft=1"}},
+				Body:       http.NoBody,
+			},
+			wantErr: "non-official latest release redirect",
+		},
+		{
+			name: "missing_tag_prefix",
+			response: &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     http.Header{redirectLocationHeader: []string{"/EpicBlackWolfZ/microfat/releases"}},
+				Body:       http.NoBody,
+			},
+			wantErr: "published stable tag",
+		},
+		{
+			name: "double_v_prefix",
+			response: &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     http.Header{redirectLocationHeader: []string{"/EpicBlackWolfZ/microfat/releases/tag/vv0.4.0"}},
+				Body:       http.NoBody,
+			},
+			wantErr: "published stable tag",
+		},
+		{
+			name: "pre_policy_version",
+			response: &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     http.Header{redirectLocationHeader: []string{"/EpicBlackWolfZ/microfat/releases/tag/v0.2.2"}},
+				Body:       http.NoBody,
+			},
+			wantErr: "v0.2.3 and later",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			client := NewClient()
+			client.http.Transport = transportFunc(func(request *http.Request) (*http.Response, error) {
+				if request.Method == http.MethodGet {
+					return &http.Response{StatusCode: http.StatusForbidden, Body: http.NoBody}, nil
+				}
+				return tc.response, tc.err
+			})
+			_, err := client.Resolve(t.Context(), "")
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
