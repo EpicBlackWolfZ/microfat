@@ -7,7 +7,7 @@ on:
         description: Exact published stable immutable release
         type: string
         required: true
-        default: v0.3.0
+        default: v0.4.0
       source:
         description: Independently reviewed full release source SHA
         type: string
