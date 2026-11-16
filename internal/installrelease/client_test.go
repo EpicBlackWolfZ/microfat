@@ -29,6 +29,11 @@ type transportFunc func(*http.Request) (*http.Response, error)
 
 func (f transportFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
+type errCloseBody struct{}
+
+func (errCloseBody) Read([]byte) (int, error) { return 0, io.EOF }
+func (errCloseBody) Close() error             { return errors.New("body close failed") }
+
 type verifierFunc func(context.Context, string, string, string) error
 
 func (f verifierFunc) Verify(ctx context.Context, version, checksums, bundle string) error {
@@ -430,6 +435,15 @@ func TestResolveRateLimitWebFallback(t *testing.T) {
 			},
 			wantErr: "v0.2.3 and later",
 		},
+		{
+			name: "body_close_error",
+			response: &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     http.Header{redirectLocationHeader: []string{"/EpicBlackWolfZ/microfat/releases/tag/v0.4.0"}},
+				Body:       errCloseBody{},
+			},
+			wantErr: "body close failed",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -444,4 +458,14 @@ func TestResolveRateLimitWebFallback(t *testing.T) {
 			require.ErrorContains(t, err, tc.wantErr)
 		})
 	}
+
+	t.Run("verify_asset_head_errors", func(t *testing.T) {
+		t.Parallel()
+		client := NewClient()
+		client.http.Transport = transportFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: errCloseBody{}}, nil
+		})
+		require.ErrorContains(t, client.verifyAssetHead(t.Context(), "0.4.0", "checksums.txt"), "body close failed")
+		require.Error(t, client.verifyAssetHead(t.Context(), "0.4.0\x7f", "checksums.txt"))
+	})
 }

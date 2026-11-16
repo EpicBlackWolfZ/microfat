@@ -188,28 +188,46 @@ func copyResponse(response *http.Response, limit int64, output io.Writer) error 
 	return nil
 }
 
-func (c *Client) resolveLatestWeb(ctx context.Context) (string, error) {
-	request, err := newAllowedRequest(ctx, http.MethodHead, latestReleaseURL)
+type headResult struct {
+	requestURL *url.URL
+	header     http.Header
+	statusCode int
+}
+
+func (c *Client) doHead(ctx context.Context, httpClient *http.Client, address string) (headResult, error) {
+	request, err := newAllowedRequest(ctx, http.MethodHead, address)
 	if err != nil {
-		return "", err
+		return headResult{}, err
 	}
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return headResult{}, err
+	}
+	result := headResult{
+		requestURL: request.URL,
+		header:     response.Header,
+		statusCode: response.StatusCode,
+	}
+	if closeErr := response.Body.Close(); closeErr != nil {
+		return headResult{}, closeErr
+	}
+	return result, nil
+}
+
+func (c *Client) resolveLatestWeb(ctx context.Context) (string, error) {
 	noRedirectClient := *c.http
 	noRedirectClient.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	response, err := noRedirectClient.Do(request)
+	head, err := c.doHead(ctx, &noRedirectClient, latestReleaseURL)
 	if err != nil {
 		return "", err
 	}
-	location := response.Header.Get("Location")
-	statusCode := response.StatusCode
-	if closeErr := response.Body.Close(); closeErr != nil {
-		return "", closeErr
+	location := head.header.Get("Location")
+	if !isRedirectStatus(head.statusCode) || location == "" {
+		return "", fmt.Errorf("latest release lookup returned HTTP %d", head.statusCode)
 	}
-	if !isRedirectStatus(statusCode) || location == "" {
-		return "", fmt.Errorf("latest release lookup returned HTTP %d", statusCode)
-	}
-	target, err := request.URL.Parse(location)
+	target, err := head.requestURL.Parse(location)
 	if err != nil || !allowedURL(target) || target.Host != githubHost || target.RawQuery != "" || target.Fragment != "" {
 		return "", errors.New("refusing non-official latest release redirect")
 	}
@@ -221,20 +239,12 @@ func (c *Client) resolveLatestWeb(ctx context.Context) (string, error) {
 }
 
 func (c *Client) verifyAssetHead(ctx context.Context, version, name string) error {
-	request, err := newAllowedRequest(ctx, http.MethodHead, downloadURL+version+"/"+name)
+	head, err := c.doHead(ctx, c.http, downloadURL+version+"/"+name)
 	if err != nil {
 		return err
 	}
-	response, err := c.http.Do(request)
-	if err != nil {
-		return err
-	}
-	statusCode := response.StatusCode
-	if closeErr := response.Body.Close(); closeErr != nil {
-		return closeErr
-	}
-	if statusCode != http.StatusOK {
-		return &httpStatusError{statusCode: statusCode}
+	if head.statusCode != http.StatusOK {
+		return &httpStatusError{statusCode: head.statusCode}
 	}
 	return nil
 }
