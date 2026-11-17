@@ -217,6 +217,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_ARCH: ${{ matrix.arch }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           version=${RELEASE_TAG#v}
           bash scripts/qualify-installer.sh "$PWD/.work/draft/microfat-install_${version}_linux_${RELEASE_ARCH}" \
