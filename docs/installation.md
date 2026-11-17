@@ -192,7 +192,9 @@ using the stderr diagnostic. Unknown versions are null. `running_version` can di
 caused a failure status. Do not assume a nonzero exit means the old release is still active.
 
 Updates select latest stable by default, or a pinned published stable version from v0.2.3 onward.
-Drafts and prereleases are rejected. A healthy identical version is a no-op. If your installation is
+Drafts and prereleases are rejected. If the GitHub API is rate-limited, the public fallback can
+verify the latest stable tag. To verify another exact version, retry with `GH_TOKEN` or `GITHUB_TOKEN`.
+A healthy identical version is a no-op. If your installation is
 newer than latest, the default command leaves it alone. An explicitly older version requires both
 `--version` and `--allow-downgrade`; checks may inspect an older version without that permission.
 Downgrading below v0.3.0 removes the new update command. Use the verified installer to upgrade again.
