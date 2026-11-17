@@ -251,6 +251,17 @@ actionable finding; review the candidate scan after tooling migrations.
 7. **Merge**:
    - Once required checks are satisfied and reviews are complete, the maintainer can merge the PR.
 
+### Opt-in compliance advisory
+
+Ask a maintainer to apply the `compliance-pilot` label when a pull request is part of the pilot.
+Add `## Acceptance criteria` with the expected behavior and `## Verification evidence` with
+the regression test, the exact commands run, and their results. Include the relevant `task all`
+or qualification result and identify any omitted checks.
+
+The next PR CI run shows the advisory in the Actions summary for **Validate Conventional PR Title**.
+Edit the PR description if you want to run it after applying the label. Missing headings produce
+suggestions. Review the actual evidence alongside the required CI. Remove the label to opt out.
+
 ## 8. Documentation-only pull requests
 
 The required CI workflow runs on every pull request to `main`. PR title validation, secret scanning

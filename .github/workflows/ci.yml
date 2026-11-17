@@ -53,6 +53,27 @@ jobs:
             revert
           requireScope: false
 
+      - name: Report pilot evidence headings
+        id: pilot-evidence
+        if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'compliance-pilot')
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          body=$(jq -er '.pull_request.body // ""' "$GITHUB_EVENT_PATH")
+          {
+            echo '## Pilot evidence advisory'
+            echo
+            for heading in 'Acceptance criteria' 'Verification evidence'; do
+              if grep -Eiq "^##[[:blank:]]+${heading}[[:space:]]*$" <<< "$body"; then
+                printf -- '- %s heading present. Review its contents.\n' "$heading"
+              else
+                printf -- '- Add the %s section before review.\n' "$heading"
+              fi
+            done
+            echo '- Record the test commands, results, and any omitted checks.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   lint:
     name: Lint (golangci-lint)
     runs-on: ubuntu-latest
