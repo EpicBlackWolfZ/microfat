@@ -27,7 +27,7 @@ func (c *Client) Published(ctx context.Context, requested, arch string) (string,
 	var data strings.Builder
 	if err := c.get(ctx, address, maxMetadataBytes, &data); err != nil {
 		if isRateLimitError(err) {
-			return c.publishedWebFallback(ctx, requested, arch)
+			return c.publishedWebFallback(ctx, requested, arch, err)
 		}
 		return "", err
 	}
@@ -72,14 +72,14 @@ func releaseRequiredAssets(version, arch string) []string {
 	}
 }
 
-func (c *Client) publishedWebFallback(ctx context.Context, requested, arch string) (string, error) {
-	version := requested
-	if version == "" {
-		resolved, err := c.resolveLatestWeb(ctx)
-		if err != nil {
-			return "", err
-		}
-		version = resolved
+func (c *Client) publishedWebFallback(ctx context.Context, requested, arch string, apiErr error) (string, error) {
+	version, err := c.resolveLatestWeb(ctx)
+	if err != nil {
+		return "", err
+	}
+	// Asset availability alone cannot establish the publication status of an exact tag.
+	if requested != "" && requested != version {
+		return "", fmt.Errorf("cannot verify %s as a published stable release (retry with GH_TOKEN): %w", requested, apiErr)
 	}
 	for _, name := range releaseRequiredAssets(version, arch) {
 		if err := c.verifyAssetHead(ctx, version, name); err != nil {

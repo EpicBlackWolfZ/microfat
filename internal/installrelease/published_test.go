@@ -223,7 +223,7 @@ func TestPublishedRateLimitWebFallback(t *testing.T) {
 		}, seenAssets)
 	})
 
-	t.Run("versioned_429_checks_assets_directly", func(t *testing.T) {
+	t.Run("versioned_429_requires_latest_stable_tag", func(t *testing.T) {
 		t.Parallel()
 		client := NewClient()
 		seenAssets := make(map[string]int)
@@ -231,6 +231,8 @@ func TestPublishedRateLimitWebFallback(t *testing.T) {
 			switch {
 			case request.Method == http.MethodGet && request.URL.String() == apiTagURL+"0.2.5":
 				return &http.Response{StatusCode: http.StatusTooManyRequests, Body: http.NoBody}, nil
+			case request.Method == http.MethodHead && request.URL.String() == latestReleaseURL:
+				return stableReleaseRedirect("0.2.5"), nil
 			case request.Method == http.MethodHead && strings.HasPrefix(request.URL.String(), downloadURL+"0.2.5/"):
 				name := strings.TrimPrefix(request.URL.String(), downloadURL+"0.2.5/")
 				seenAssets[name]++
@@ -272,6 +274,9 @@ func TestPublishedRateLimitWebFallback(t *testing.T) {
 					if request.Method == http.MethodGet {
 						return &http.Response{StatusCode: http.StatusForbidden, Body: http.NoBody}, nil
 					}
+					if request.URL.String() == latestReleaseURL {
+						return stableReleaseRedirect("0.2.5"), nil
+					}
 					if strings.HasSuffix(request.URL.Path, "checksums.txt.sig") {
 						return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody}, nil
 					}
@@ -284,6 +289,9 @@ func TestPublishedRateLimitWebFallback(t *testing.T) {
 				handler: func(request *http.Request) (*http.Response, error) {
 					if request.Method == http.MethodGet {
 						return &http.Response{StatusCode: http.StatusForbidden, Body: http.NoBody}, nil
+					}
+					if request.URL.String() == latestReleaseURL {
+						return stableReleaseRedirect("0.2.5"), nil
 					}
 					return nil, errors.New("head reset")
 				},
@@ -303,4 +311,40 @@ func TestPublishedRateLimitWebFallback(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestPublishedRateLimitDoesNotTrustExactAssetAvailability(t *testing.T) {
+	t.Parallel()
+
+	for _, status := range []int{http.StatusForbidden, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			t.Parallel()
+			const requested = "0.2.5"
+			var assetProbes int
+			client := NewClient()
+			client.http.Transport = transportFunc(func(request *http.Request) (*http.Response, error) {
+				switch request.URL.String() {
+				case apiTagURL + requested:
+					return &http.Response{StatusCode: status, Body: http.NoBody}, nil
+				case latestReleaseURL:
+					return stableReleaseRedirect("0.4.0"), nil
+				default:
+					assetProbes++
+					return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+				}
+			})
+			_, err := client.Published(t.Context(), requested, "amd64")
+			require.ErrorContains(t, err, "retry with GH_TOKEN")
+			assert.ErrorContains(t, err, fmt.Sprintf("HTTP %d", status))
+			assert.Zero(t, assetProbes)
+		})
+	}
+}
+
+func stableReleaseRedirect(version string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusFound,
+		Header:     http.Header{redirectLocationHeader: []string{latestTagPathPrefix + version}},
+		Body:       http.NoBody,
+	}
 }
