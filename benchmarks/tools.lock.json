@@ -1,9 +1,9 @@
 {
   "fortio": {
     "module": "fortio.org/fortio",
-    "version": "v1.76.0",
-    "source_commit": "67ce9fa2a3a62fdb2f7a0d2b50acda1f7002d32b",
-    "source": "https://github.com/fortio/fortio/tree/v1.76.0",
+    "version": "v1.76.1",
+    "source_commit": "32a39ecf9482289d571aefc6b4622a0a868d21d5",
+    "source": "https://github.com/fortio/fortio/tree/v1.76.1",
     "histogram": "Fortio variable-width histogram; uncorrected service-time observations"
   }
 }

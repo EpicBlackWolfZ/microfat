@@ -615,10 +615,13 @@ jobs:
       - name: Qualify native, full and minimal updater against signed historical releases
         env:
           MICROFAT_UPDATE_TESTS: required
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p .work/installer-qualification
           go test -race -v ./tests/e2e -run '^TestUpdate' -count=1 | tee .work/installer-qualification/updater.log
       - name: Authenticate historical releases in an isolated user installation
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bash scripts/qualify-installer.sh "$PWD/bin/microfat-install" "$PWD/.work/installer-qualification"
       - name: Require a real noexec bootstrap failure in a private mount namespace
         run: bash scripts/qualify-installer-noexec.sh

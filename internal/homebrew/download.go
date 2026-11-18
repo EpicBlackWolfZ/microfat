@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -39,6 +40,15 @@ func newClient() client {
 	}}}
 }
 
+func gitHubToken() string {
+	for _, key := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		if token := os.Getenv(key); token != "" && !strings.ContainsAny(token, "\r\n") {
+			return token
+		}
+	}
+	return ""
+}
+
 func (c client) fetch(ctx context.Context, address string, limit int64, out io.Writer) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
@@ -46,7 +56,7 @@ func (c client) fetch(ctx context.Context, address string, limit int64, out io.W
 	}
 	if req.URL.Host == "api.github.com" {
 		req.Header.Set("Accept", "application/vnd.github+json")
-		if token := os.Getenv("GH_TOKEN"); token != "" {
+		if token := gitHubToken(); token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
 	}

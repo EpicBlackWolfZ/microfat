@@ -217,3 +217,19 @@ func TestDownloadLimitsAndRedirects(t *testing.T) {
 		require.Error(t, c.http.CheckRedirect(req, make([]*http.Request, redirectLimit)))
 	}
 }
+
+func TestClientGitHubTokenSelection(t *testing.T) {
+	t.Setenv("GH_TOKEN", "bad\ntoken")
+	t.Setenv("GITHUB_TOKEN", "ghp_fallback")
+	var gotAuth string
+	c := client{http: &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
+		gotAuth = r.Header.Get("Authorization")
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})}}
+	require.NoError(t, c.json(t.Context(), apiBase, &struct{}{}))
+	assert.Equal(t, "Bearer ghp_fallback", gotAuth)
+
+	t.Setenv("GH_TOKEN", "ghp_primary")
+	require.NoError(t, c.json(t.Context(), apiBase, &struct{}{}))
+	assert.Equal(t, "Bearer ghp_primary", gotAuth)
+}
