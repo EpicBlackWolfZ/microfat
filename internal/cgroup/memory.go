@@ -10,8 +10,9 @@ var ErrMemoryBudget = errors.New("insufficient or invalid extraction memory budg
 // ExtractionMemory estimates peak launcher storage. Cache page pressure is included as
 // one output buffer; reclaimability makes this an estimate, not a total-memory bound.
 func ExtractionMemory(payload, dictionary, decoder, reserve int64) (int64, error) {
+	components := [...]int64{payload, dictionary, decoder, reserve}
 	total := int64(0)
-	for _, value := range []int64{payload, dictionary, decoder, reserve} {
+	for _, value := range components {
 		if value < 0 || value > math.MaxInt64-total {
 			return 0, ErrMemoryBudget
 		}
