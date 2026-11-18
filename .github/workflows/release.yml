@@ -61,6 +61,11 @@ jobs:
         with:
           version: ${{ steps.toolchain.outputs.task }}
 
+      - name: Verify cgroup memory arithmetic
+        id: cgroup-memory-proof
+        timeout-minutes: 5
+        run: task verify-cgroup-memory
+
       - name: Select native runtime release policy
         id: runtime-policy
         env:

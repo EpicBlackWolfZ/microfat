@@ -21,6 +21,7 @@ vars:
   GO_ROOT:
     sh: '{{.GO | shellQuote}} env GOROOT'
   GOFMT: '{{.GOFMT | default (printf "%s/bin/gofmt" .GO_ROOT)}}'
+  GOBRA_ENGINE: '{{.GOBRA_ENGINE | default "docker"}}'
   BIN_DIR: '{{.BIN_DIR | default "bin"}}'
   COVERAGE_FILE: '{{.COVERAGE_FILE | default "coverage.out"}}'
   COVERAGE_THRESHOLD: '{{.COVERAGE_THRESHOLD | default "95"}}'
@@ -293,6 +294,10 @@ tasks:
     - |-
       {{.TASK_ENV}}
       bash scripts/test-profiles.sh test
+  verify-cgroup-memory:
+    desc: Check the production memory arithmetic laws with pinned Gobra (GOBRA_ENGINE=docker|podman)
+    cmds:
+    - GOBRA_ENGINE={{.GOBRA_ENGINE | shellQuote}} bash scripts/verify-cgroup-memory.sh
   e2e:
     desc: Build and run both black-box test profiles with race detection
     cmds:
