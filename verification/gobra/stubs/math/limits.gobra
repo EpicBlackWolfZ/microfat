@@ -1,0 +1,4 @@
+package math
+
+// The untyped constant declared by Go's math package. No math routines are modeled.
+const MaxInt64 = 9223372036854775807

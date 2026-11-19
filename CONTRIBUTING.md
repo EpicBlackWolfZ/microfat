@@ -200,6 +200,11 @@ release evidence and publication retain their own workflows. Reusable jobs have 
 concurrency groups so they cannot cancel their parent CI run. Snapshots sharing `dist/` remain
 serialized within one job.
 
+The lint job also runs `task verify-cgroup-memory` for code changes, and the release gate runs
+the same task. It checks two [production memory arithmetic laws](docs/design/cgroup-memory-verification.md);
+it does not replace native tests or prove that a deployment avoids OOM. Use
+`task verify-cgroup-memory GOBRA_ENGINE=podman` to run it locally with Podman instead of Docker.
+
 Maintainers can use the CI workflow's manual `failure_probe` input to verify propagation of a
 fast, unit, final-stage or matrix failure, or an unexpected skip. The `cancel` probe holds a
 bounded cancellation window before unit tests; cancelling that run must not produce a green

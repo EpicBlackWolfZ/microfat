@@ -24,7 +24,7 @@ func TestToolPins(t *testing.T) {
 	require.True(t, ok)
 	require.Regexp(t, `^v[0-9]+\.[0-9]+\.[0-9]+$`, version)
 	require.Regexp(t, `^[0-9a-f]{40}$`, commit)
-	for _, tool := range []string{"COSIGN", "CDXGEN", "SHELLCHECK"} {
+	for _, tool := range []string{"COSIGN", "CDXGEN", "SHELLCHECK", "GOBRA"} {
 		t.Run(tool, func(t *testing.T) {
 			t.Parallel()
 			amd64, digest, ok := strings.Cut(ToolPin(tool+"_LINUX_AMD64"), "@")
@@ -33,7 +33,7 @@ func TestToolPins(t *testing.T) {
 			decoded, err := hex.DecodeString(digest)
 			require.NoError(t, err)
 			require.Len(t, decoded, 32)
-			if tool != "SHELLCHECK" {
+			if tool == "COSIGN" || tool == "CDXGEN" {
 				arm64, armDigest, ok := strings.Cut(ToolPin(tool+"_LINUX_ARM64"), "@")
 				require.True(t, ok)
 				require.Equal(t, amd64, arm64, "platform pins must advance together")
