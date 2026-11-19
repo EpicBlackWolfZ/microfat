@@ -33,9 +33,15 @@ type gzipArchiveCase struct {
 
 func gzipTestMember(t *testing.T, data []byte) []byte {
 	t.Helper()
+	return gzipTestMemberLevel(t, data, gzip.NoCompression)
+}
+
+func gzipTestMemberLevel(t *testing.T, data []byte, level int) []byte {
+	t.Helper()
 	var compressed bytes.Buffer
-	writer := gzip.NewWriter(&compressed)
-	_, err := writer.Write(data)
+	writer, err := gzip.NewWriterLevel(&compressed, level)
+	require.NoError(t, err)
+	_, err = writer.Write(data)
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 	return compressed.Bytes()
@@ -53,16 +59,9 @@ func gzipTestAppend(base, suffix []byte) []byte {
 
 func gzipTestTarData(t *testing.T, contract *releasecheck.ReleaseContract) []byte {
 	t.Helper()
-	archivePath := filepath.Join(t.TempDir(), "microfat_0.3.0_linux_amd64.tar.gz")
-	createOrderedTarGz(t, archivePath, createStandardValidEntries(t, releasecheck.ArchAMD64, contract))
-	compressed, err := os.ReadFile(archivePath)
-	require.NoError(t, err)
-	reader, err := gzip.NewReader(bytes.NewReader(compressed))
-	require.NoError(t, err)
-	data, err := io.ReadAll(reader)
-	require.NoError(t, err)
-	require.NoError(t, reader.Close())
-	return data
+	var buf bytes.Buffer
+	writeTarEntries(t, &buf, createStandardValidEntries(t, releasecheck.ArchAMD64, contract))
+	return buf.Bytes()
 }
 
 func TestArchiveGzipIntegrity(t *testing.T) {
@@ -80,6 +79,7 @@ func TestArchiveGzipIntegrity(t *testing.T) {
 
 	cases := []gzipArchiveCase{
 		{name: "valid_no_padding", data: unpaddedArchive},
+		{name: "valid_deflate_compressed", data: gzipTestMemberLevel(t, tarData, gzip.BestSpeed)},
 		{name: "valid_zero_padding", data: paddedArchive},
 		{name: "valid_empty_member", data: gzipTestAppend(paddedArchive, emptyMember)},
 		{name: "valid_zero_member", data: gzipTestAppend(paddedArchive, zeroMember)},
