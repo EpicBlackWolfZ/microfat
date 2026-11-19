@@ -103,18 +103,18 @@ one at a time per checkout, since GoReleaser owns `dist/`. `NO_COLOR=1`, `COLOR=
 disable optional colors; redirected output stays plain. Profiling stops on occupied or unknown ports
 and cleans up only its own child processes.
 
-`task test` runs all default and minimal package tests with the race detector. `task coverage` uses
+`task test` runs the default package suite and the minimal-tagged `cmd/microfat-stub` suite with the race detector (`internal/cigate` fails closed if any other package introduces `minimal` build constraints). `task coverage` uses
 the same profile definitions and includes `cmd`, `internal`, `runtimeinit` and `benchmarks` code.
-Example and E2E packages run in both profiles; their source is not included as production statements.
+Example and E2E packages run in the default profile (and build/exercise both full and minimal stubs); their source is not included as production statements.
 Default/minimal profiles remain under ignored `.work/tests/`; `coverage.out` is their source-block
 union. Shared blocks count once, exclusive files count once, incompatible instrumentation fails,
 and the >=95% overall gate counts statements rather than averaging package percentages. JUnit
 artifacts use separate profile names. Temporary planning documents and verification evidence belong
 under ignored `.work/`, not published documentation directories.
 
-CI uses `task coverage-unit` for its middle stage. It runs the unit tests in `cmd`, `internal`,
-`runtimeinit` and `benchmarks` with both profiles and the same production statement universe.
-The dedicated black-box suite runs afterwards through `task e2e`, also with both profiles.
+CI uses `task coverage-unit` with `MICROFAT_TEST_LEAKS=1` for its middle stage. It runs the unit tests in `cmd`, `internal`,
+`runtimeinit` and `benchmarks` (plus the `-tags minimal` `cmd/microfat-stub` profile) with the same production statement universe.
+The dedicated black-box suite runs afterwards through `task e2e` with `MICROFAT_TEST_LEAKS=1`, exercising both full and minimal stubs in one pass.
 Native amd64/arm64 mount qualification runs in a separate required stage using
 `task qualify-mounts MOUNT_TESTS=required MOUNT_BACKEND=sudo`. Locally,
 `task qualify-mounts` uses rootless namespaces and records prerequisite skips explicitly.
@@ -189,9 +189,9 @@ the code stages of a positively classified documentation-only PR, as described b
 
 All PR work shares one dependency graph. Formatting, module/configuration/workflow checks,
 Go/ShellCheck lint, title validation, secrets and vulnerability checks run first. Only after they
-succeed can unit/race/coverage run. Integration/chaos/fuzz, developer regressions and leak checks,
-serialized release snapshots, benchmark smoke, archive contracts, all three kernel modes and
-CodeQL wait for the unit gate. `CI Complete` explicitly requires every stage, including the
+succeed can unit/race/coverage/leak checks run. Integration/fuzz/leak checks, developer regressions
+and live leak probes, release snapshots, benchmark smoke, all three kernel modes and CodeQL wait for
+the unit gate. `CI Complete` explicitly requires every stage, including the
 reusable workflow results. CodeFactor remains a separate quality signal and release acceptance
 check; it is not a named ruleset requirement.
 

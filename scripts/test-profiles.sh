@@ -14,6 +14,8 @@ if [[ "${1:-test}" == coverage-unit ]]; then
     # Keep the full production statement universe while staging black-box tests later.
     test_packages=(. ./cmd/... ./internal/... ./runtimeinit/... ./runtimeinfo/... ./benchmarks/... ./tests/e2e/testdata/mount_runner)
 fi
+# Only cmd/microfat-stub declares minimal/!minimal build constraints (verified by internal/cigate).
+minimal_packages=(./cmd/microfat-stub)
 run_tests() {
     local profile="${1}"
     shift
@@ -34,9 +36,9 @@ if [[ "${1:-test}" == coverage || "${1:-test}" == coverage-unit ]]; then
     run_tests default -race -covermode=atomic -coverprofile="${TEST_ARTIFACT_DIR}/default.out" \
         -coverpkg=.,./cmd/...,./internal/...,./runtimeinit/...,./runtimeinfo/...,./benchmarks/... "${test_packages[@]}"
     run_tests minimal -race -tags minimal -covermode=atomic -coverprofile="${TEST_ARTIFACT_DIR}/minimal.out" \
-        -coverpkg=.,./cmd/...,./internal/...,./runtimeinit/...,./runtimeinfo/...,./benchmarks/... "${test_packages[@]}"
+        -coverpkg=./cmd/microfat-stub "${minimal_packages[@]}"
     "${GO}" run ./internal/cmd/coverage "${COVERAGE_FILE}" "${TEST_ARTIFACT_DIR}/default.out" "${TEST_ARTIFACT_DIR}/minimal.out"
 else
     run_tests default -race "${test_packages[@]}"
-    run_tests minimal -race -tags minimal "${test_packages[@]}"
+    run_tests minimal -race -tags minimal "${minimal_packages[@]}"
 fi
