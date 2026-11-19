@@ -80,13 +80,7 @@ func writeAllVariantPayloads(
 		return nil, 0, err
 	}
 
-	workers := resolvePackWorkerCount(plans)
-	if opts.VariantWorkerLimit > 0 {
-		workers = min(workers, opts.VariantWorkerLimit)
-	}
-	if opts.VariantWorkers != nil {
-		opts.VariantWorkers(workers)
-	}
+	workers := resolvePackWorkersForOptions(plans, opts)
 	if workers < packMinParallelVariants {
 		entries := make([]format.VariantEntry, 0, len(plans))
 		offset := currentOffset
@@ -129,6 +123,19 @@ func prepareVariantWorkPlans(levels []string, opts *Options) ([]variantWorkPlan,
 		})
 	}
 	return plans, nil
+}
+
+// resolvePackWorkersForOptions resolves bounded worker concurrency for the plan
+// set, enforces any positive caller limit, and notifies VariantWorkers once.
+func resolvePackWorkersForOptions(plans []variantWorkPlan, opts *Options) int {
+	workers := max(resolvePackWorkerCount(plans), 1)
+	if opts != nil && opts.VariantWorkerLimit > 0 {
+		workers = min(workers, opts.VariantWorkerLimit)
+	}
+	if opts != nil && opts.VariantWorkers != nil {
+		opts.VariantWorkers(workers)
+	}
+	return workers
 }
 
 func resolvePackWorkerCount(plans []variantWorkPlan) int {
