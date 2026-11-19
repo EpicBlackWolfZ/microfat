@@ -19,6 +19,7 @@ const (
 	trailerOffsetIndexSize       = 48
 	invalidOffsetBeyondEOF       = 999999999
 	invalidSmallSize             = 1
+	tamperedIndexOffsetPadding   = 8
 	tamperedPayloadOffsetPadding = 100
 	tamperedDictOffsetPadding    = 16
 	tamperedInvalidSize          = 10
@@ -100,8 +101,8 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 
 		trailer, _ := readTrailerAndIndex(t, corruptPath)
 
-		// Flip a byte in the middle of the serialized index table
-		mutateFileBytes(t, corruptPath, trailer.IndexOffset+8, []byte{0xFF})
+		// Change the serialized index without updating its trailer checksum.
+		flipFixtureByte(t, corruptPath, trailer.IndexOffset+tamperedIndexOffsetPadding)
 
 		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, nil)
 		if err == nil && exitCode == defaultExitCode {
@@ -129,7 +130,7 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 		// Force source extraction even if this payload is already cached.
 		// Mutate a byte in the payload stream of the selected variant
 		payloadTarget := entry.Offset + tamperedPayloadOffsetPadding
-		mutateFileBytes(t, corruptPath, payloadTarget, []byte{0xEE})
+		flipFixtureByte(t, corruptPath, payloadTarget)
 
 		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue, format.EnvExecMode + "=" + format.ExecModeMemfd})
 		if err == nil && exitCode == defaultExitCode {
@@ -209,7 +210,7 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 
 		// Mutate a byte inside the shared dictionary region
 		dictTarget := idx.DictionaryOffset + tamperedDictOffsetPadding
-		mutateFileBytes(t, corruptPath, dictTarget, []byte{0xCC})
+		flipFixtureByte(t, corruptPath, dictTarget)
 
 		stdout, stderr, exitCode, err := executeFatBinary(t, corruptPath, []string{envDebugTrue, format.EnvExecMode + "=" + format.ExecModeMemfd})
 		if err == nil && exitCode == defaultExitCode {
@@ -273,6 +274,52 @@ func TestCorruptionAndSecurityBoundary(t *testing.T) {
 			t.Fatalf("expected semantic validation error diagnostics (exitCode %d, err %v), got:\n%s", exitCode, err, stderr)
 		}
 	})
+}
+
+func flipFixtureByte(t testing.TB, path string, offset int64) {
+	t.Helper()
+	before := readFixtureByte(t, path, offset)
+	changed := before ^ 1
+	mutateFileBytes(t, path, offset, []byte{changed})
+	require.Equalf(t, changed, readFixtureByte(t, path, offset), "fixture byte at offset %d did not change as expected", offset)
+}
+
+func readFixtureByte(t testing.TB, path string, offset int64) byte {
+	t.Helper()
+	f, err := os.Open(path)
+	require.NoErrorf(t, err, "open fixture %s", path)
+	var data [1]byte
+	_, readErr := f.ReadAt(data[:], offset)
+	closeErr := f.Close()
+	require.NoErrorf(t, readErr, "read fixture byte at offset %d in %s", offset, path)
+	require.NoErrorf(t, closeErr, "close fixture %s", path)
+	return data[0]
+}
+
+func TestFlipFixtureByte(t *testing.T) {
+	t.Parallel()
+	const targetOffset = 1
+	for _, tc := range []struct {
+		name            string
+		before, changed byte
+	}{
+		{"all_bits_set", 0xff, 0xfe},
+		{"all_bits_clear", 0x00, 0x01},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "fixture")
+			want := []byte{0x12, tc.before, 0x34}
+			require.NoError(t, os.WriteFile(path, want, privateFilePerm))
+
+			flipFixtureByte(t, path, targetOffset)
+
+			got, err := os.ReadFile(path)
+			require.NoError(t, err)
+			want[targetOffset] = tc.changed
+			require.Equal(t, want, got, "only the targeted byte should change")
+		})
+	}
 }
 
 const ioSeekStart = 0
