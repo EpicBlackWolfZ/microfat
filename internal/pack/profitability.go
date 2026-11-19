@@ -83,7 +83,7 @@ func assembleProfitableArtifact(
 		return nil, err
 	}
 
-	workers := max(resolvePackWorkerCount(plans), 1)
+	workers := resolvePackWorkersForOptions(plans, opts)
 	tracker := newSpoolBudgetTracker(opts.MaxSpoolBytes)
 
 	var createdPaths []string
