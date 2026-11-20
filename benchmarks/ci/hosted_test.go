@@ -3,6 +3,7 @@ package ci
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -148,7 +149,7 @@ func TestCalibration(t *testing.T) {
 	p, reason := c.Policy(exps[0])
 	assert.True(t, p.Calibrated, reason)
 	assert.Equal(t, 2.0, p.StartupFloorNS)
-	_, err = Calibrate(append(exps, exps[0]))
+	_, err = Calibrate([]*schema.ExperimentV2{exps[0], exps[0]})
 	require.ErrorContains(t, err, "duplicate")
 	small, err := Calibrate(exps[:1])
 	require.NoError(t, err)
@@ -176,8 +177,8 @@ func TestCalibration(t *testing.T) {
 	}
 	for _, mutate := range []func(*Calibration){func(c *Calibration) { c.Version = "bad" }, func(c *Calibration) { c.Classes = nil },
 		func(c *Calibration) { c.Classes[0].FloorNS = math.NaN() }} {
-		calibration, err := Calibrate(exps)
-		require.NoError(t, err)
+		calibration := c
+		calibration.Classes = slices.Clone(c.Classes)
 		mutate(&calibration)
 		p, _ := calibration.Policy(exps[0])
 		assert.False(t, p.Calibrated)

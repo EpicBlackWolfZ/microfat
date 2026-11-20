@@ -9,6 +9,7 @@ import (
 	"debug/elf"
 	"encoding/binary"
 	"encoding/hex"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,17 +35,10 @@ type tarEntry struct {
 	Linkname string
 }
 
-func createOrderedTarGz(t *testing.T, archivePath string, entries []tarEntry) {
+func writeTarEntries(t *testing.T, w io.Writer, entries []tarEntry) {
 	t.Helper()
-	f, err := os.Create(archivePath)
-	require.NoError(t, err)
-	defer func() { _ = f.Close() }()
-
-	gw := gzip.NewWriter(f)
-	defer func() { _ = gw.Close() }()
-
-	tw := tar.NewWriter(gw)
-	defer func() { _ = tw.Close() }()
+	tw := tar.NewWriter(w)
+	defer func() { require.NoError(t, tw.Close()) }()
 
 	for _, e := range entries {
 		hdr := &tar.Header{
@@ -72,9 +66,23 @@ func createOrderedTarGz(t *testing.T, archivePath string, entries []tarEntry) {
 	}
 }
 
+func createOrderedTarGz(t *testing.T, archivePath string, entries []tarEntry) {
+	t.Helper()
+	f, err := os.Create(archivePath)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	gw, err := gzip.NewWriterLevel(f, gzip.NoCompression)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, gw.Close()) }()
+
+	writeTarEntries(t, gw, entries)
+}
+
 var (
-	testBinaryCache = make(map[string][]byte)
-	testBinaryMu    sync.Mutex
+	testBinaryCache    = make(map[string][]byte)
+	testFatBinaryCache = make(map[string][]byte)
+	testBinaryMu       sync.Mutex
 )
 
 func getCompiledTestBinary(t *testing.T, arch, tier string) []byte {
@@ -196,7 +204,25 @@ func createValidFatBinaryWithCodec(t *testing.T, arch string, tiers []string, di
 }
 
 func createValidFatBinary(t *testing.T, arch string, tiers []string) []byte {
-	return createValidFatBinaryWithDict(t, arch, tiers, nil)
+	t.Helper()
+	key := arch + "|" + strings.Join(tiers, ",")
+	testBinaryMu.Lock()
+	if cached, ok := testFatBinaryCache[key]; ok {
+		testBinaryMu.Unlock()
+		return cached
+	}
+	testBinaryMu.Unlock()
+
+	built := createValidFatBinaryWithDict(t, arch, tiers, nil)
+
+	testBinaryMu.Lock()
+	if cached, ok := testFatBinaryCache[key]; ok {
+		testBinaryMu.Unlock()
+		return cached
+	}
+	testFatBinaryCache[key] = built
+	testBinaryMu.Unlock()
+	return built
 }
 
 func createStandardValidEntries(t *testing.T, arch string, contract *releasecheck.ReleaseContract) []tarEntry {
@@ -528,7 +554,8 @@ func createTruncatedTarGz(t *testing.T, archivePath, name string, advertisedSize
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 
-	gw := gzip.NewWriter(f)
+	gw, err := gzip.NewWriterLevel(f, gzip.NoCompression)
+	require.NoError(t, err)
 	defer func() { _ = gw.Close() }()
 
 	hdr := &tar.Header{

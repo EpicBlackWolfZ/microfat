@@ -524,7 +524,7 @@ task demo-check
 > **Terminal Detection & Port Safety**:
 > - Piped or redirected stdout automatically disables ANSI escapes and uses ASCII markers (`[OK]`, `[FAIL]`). Use `NO_COLOR=1` or `COLOR=0` to force disable colors.
 > - Profiling targets check port occupancy before spawning servers and fail cleanly without terminating unrelated processes. Cleanup sends graceful `SIGTERM` before `SIGKILL` strictly to target-spawned child processes.
-> - Developer workflow regressions (`test-dx`, `test-leaks`, `check-leaks`, `demo-check`) are CI-enforced in GitHub Actions.
+> - Developer workflow regressions (`test-dx`, `check-leaks`, `demo-check`) and goroutine leak checks (`MICROFAT_TEST_LEAKS=1` in unit and E2E stages) are CI-enforced in GitHub Actions.
 
 ---
 

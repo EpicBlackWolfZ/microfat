@@ -299,13 +299,12 @@ tasks:
     cmds:
     - GOBRA_ENGINE={{.GOBRA_ENGINE | shellQuote}} bash scripts/verify-cgroup-memory.sh
   e2e:
-    desc: Build and run both black-box test profiles with race detection
+    desc: Build and run black-box tests with race detection (exercises full and minimal stubs)
     cmds:
     - task: build
     - |-
       {{.TASK_ENV}}
       "$GO" test -race -v ./tests/e2e/...
-      "$GO" test -race -tags minimal -v ./tests/e2e/...
   qualify-mounts:
     desc: Qualify native mount layouts (MOUNT_TESTS=auto|required, MOUNT_BACKEND=userns|sudo)
     cmds:

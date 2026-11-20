@@ -17,12 +17,12 @@ import (
 
 const (
 	creationEpochFailure = 73
-	creationEpochLog     = ".work/runtime-qualification/creation-epochs.log"
-	creationEpochMarker  = "creation epoch qualification ran\n"
+	creationEpochLog     = ".work/runtime-qualification/e2e-qualification.log"
+	creationEpochMarker  = "creation epoch qualification ran:"
 	creationEpochFakeGo  = `#!/bin/bash
 set -euo pipefail
 IFS=$'\n\t'
-printf 'creation epoch qualification ran\n'
+printf 'creation epoch qualification ran: %s\n' "$*"
 exit "${CREATION_EPOCH_TEST_EXIT}"
 `
 )
@@ -34,8 +34,8 @@ func TestCreationEpochQualificationPropagatesFailuresAndRetainsEvidence(t *testi
 	var qualification *workflowStep
 	qualificationPosition, evidencePosition := -1, -1
 	for position, step := range job.Steps {
-		if step.Name == "Qualify reproducible package epochs and native dispatch" {
-			require.Nil(t, qualification, "the epoch qualification step must be unique")
+		if step.Name == "Qualify native E2E fixtures, epochs, cache descriptors and telemetry" {
+			require.Nil(t, qualification, "the native E2E qualification step must be unique")
 			qualification = &step
 			qualificationPosition = position
 		}
@@ -53,17 +53,24 @@ func TestCreationEpochQualificationPropagatesFailuresAndRetainsEvidence(t *testi
 	require.NotNil(t, qualification)
 	assert.Empty(t, qualification.If, "epoch qualification must run whenever native runtime qualification runs")
 	assert.Nil(t, qualification.ContinueOnError)
+	assert.Equal(t, "${{ matrix.arch }}", qualification.Env["MATRIX_ARCH"])
 	assert.Contains(t, qualification.Run, "-race")
-	assert.Contains(t, qualification.Run, "^Test(ReproducibleEpoch|CreationEpochNumericMetadata)")
+	assert.Contains(t, qualification.Run, "ReproducibleEpoch|CreationEpochNumericMetadata")
+	assert.Contains(t, qualification.Run, "RuntimeFixture")
+	assert.Contains(t, qualification.Run, "NativeARM64HighFeatureDetection$")
+	assert.Contains(t, qualification.Run, "VerifiedCacheDescriptorCompatibility$")
+	assert.Contains(t, qualification.Run, "Telemetry")
 	assert.Contains(t, qualification.Run, creationEpochLog)
 	assert.Greater(t, evidencePosition, qualificationPosition, "retain epoch logs after successful or failed qualification")
 
 	for _, tc := range []struct {
 		name string
+		arch string
 		exit int
 	}{
-		{"failed test", creationEpochFailure},
-		{"successful test", 0},
+		{"failed test amd64", handoffAMD64, creationEpochFailure},
+		{"successful test amd64", handoffAMD64, 0},
+		{"successful test arm64", handoffARM64, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -71,7 +78,6 @@ func TestCreationEpochQualificationPropagatesFailuresAndRetainsEvidence(t *testi
 			tools := filepath.Join(dir, "tools")
 			require.NoError(t, os.Mkdir(tools, 0o755))
 			writeExecutableTestStub(t, filepath.Join(tools, "go"), creationEpochFakeGo)
-			require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(dir, creationEpochLog)), 0o755))
 			script := filepath.Join(dir, "qualification.sh")
 			require.NoError(t, os.WriteFile(script, []byte(qualification.Run), 0o600))
 
@@ -81,6 +87,7 @@ func TestCreationEpochQualificationPropagatesFailuresAndRetainsEvidence(t *testi
 			cmd.Dir = dir
 			cmd.Env = []string{
 				"PATH=" + tools + string(os.PathListSeparator) + os.Getenv("PATH"),
+				"MATRIX_ARCH=" + tc.arch,
 				"CREATION_EPOCH_TEST_EXIT=" + strconv.Itoa(tc.exit),
 			}
 			output, err := combinedOutputSafe(cmd)
@@ -94,7 +101,12 @@ func TestCreationEpochQualificationPropagatesFailuresAndRetainsEvidence(t *testi
 			assert.Contains(t, string(output), creationEpochMarker)
 			log, err := os.ReadFile(filepath.Join(dir, creationEpochLog))
 			require.NoError(t, err)
-			assert.Equal(t, creationEpochMarker, string(log), "tee must retain evidence even when go test fails")
+			assert.Contains(t, string(log), creationEpochMarker, "tee must retain evidence even when go test fails")
+			if tc.arch == handoffARM64 {
+				assert.Contains(t, string(log), "NativeARM64HighFeatureDetection$")
+			} else {
+				assert.NotContains(t, string(log), "NativeARM64HighFeatureDetection$")
+			}
 		})
 	}
 }
