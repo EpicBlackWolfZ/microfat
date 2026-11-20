@@ -23,12 +23,32 @@ type Job struct {
 // RequiredJobs must match the final CI job's explicit needs list. Keeping every
 // expected job here prevents a removed dependency from silently approving a PR.
 func RequiredJobs() []string {
-	return []string{"pr-lint", "lint", "gitleaks", "vulncheck", "test", "integration", "dx", "build",
+	return []string{"lint", "gitleaks", "vulncheck", "test", "integration", "dx", "build",
 		"benchmark-smoke", "kernel", "codeql", "installer", "mounts", "qemu", "homebrew", "runtime"}
 }
 
-// Evaluate accepts only a complete, successful code pipeline or the documented
-// docs-only skip set. A failed/cancelled matrix is represented by its job result.
+// PushBaselineJobs lists the jobs that run on push to main to maintain default-branch
+// lint, Codecov, and CodeQL baselines without duplicating the full PR qualification matrix.
+func PushBaselineJobs() []string {
+	return []string{"lint", "test", "codeql"}
+}
+
+func expectedResult(name, event, code string) string {
+	if event == "push" {
+		if slices.Contains(PushBaselineJobs(), name) {
+			return Success
+		}
+		return Skipped
+	}
+	if code == "false" && name != "lint" && name != "gitleaks" {
+		return Skipped
+	}
+	return Success
+}
+
+// Evaluate accepts only a complete, successful code pipeline, the documented
+// docs-only PR skip set, or the default-branch push baseline set. A failed or
+// cancelled matrix is represented by its job result.
 func Evaluate(data []byte, event string) error {
 	if !slices.Contains([]string{"pull_request", "push", "workflow_dispatch"}, event) {
 		return fmt.Errorf("unsupported CI event %q", event)
@@ -58,10 +78,7 @@ func Evaluate(data []byte, event string) error {
 	}
 	var failures []error
 	for _, name := range required {
-		want := Success
-		if code == "false" && name != "pr-lint" && name != "lint" && name != "gitleaks" {
-			want = Skipped
-		}
+		want := expectedResult(name, event, code)
 		if jobs[name].Result != want {
 			failures = append(failures, fmt.Errorf("CI prerequisite %s: got %q, require %q", name, jobs[name].Result, want))
 		}
