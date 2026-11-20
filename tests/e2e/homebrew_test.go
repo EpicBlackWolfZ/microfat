@@ -26,6 +26,8 @@ import (
 
 const brewTestTap = "microfat/qualification"
 const brewTestCask = brewTestTap + "/microfat"
+const brewPlatformTap = "microfat/platforms"
+const brewPlatformCask = brewPlatformTap + "/microfat"
 const brewTimeout = 5 * time.Minute
 
 type brewFixture struct {
@@ -166,19 +168,27 @@ func (b brewFixture) refresh() {
 func (b brewFixture) verifyPlatforms() {
 	b.t.Helper()
 	// Evaluate the unmodified production template with distinct, test-only archive hashes.
-	// Loading metadata does not acquire or install these unsigned fixture inputs.
+	// Loading metadata from a disposable local tap does not acquire or install these inputs.
 	data, err := homebrew.Render(homebrew.Recipe{Version: "0.3.0", AMD64: strings.Repeat("a", 64), ARM64: strings.Repeat("b", 64)})
 	require.NoError(b.t, err)
-	filename := filepath.Join(b.root, "microfat.rb")
-	require.NoError(b.t, os.WriteFile(filename, data, 0o600))
+	tapDir := filepath.Join(b.root, "platform-tap")
+	require.NoError(b.t, os.MkdirAll(filepath.Join(tapDir, "Casks"), 0o700))
+	b.command(true, "git", "init", "--quiet", "--initial-branch=main", tapDir)
+	require.NoError(b.t, os.WriteFile(filepath.Join(tapDir, "Casks", "microfat.rb"), data, 0o600))
+	b.command(true, "git", "-C", tapDir, "add", "Casks/microfat.rb")
+	b.command(true, "git", "-C", tapDir, "-c", "user.name=Microfat qualification", "-c", "user.email=qualification@invalid",
+		"commit", "--quiet", "-m", "test: unmodified cask platform template")
+	b.command(true, b.brew, "tap", brewPlatformTap, "file://"+tapDir)
+	defer b.command(true, b.brew, "untap", brewPlatformTap)
+	b.command(true, b.brew, "trust", "--cask", brewPlatformCask)
 	metadata := b.command(true, b.brew, "ruby", "-e", `require "cask/cask_loader"; `+
-		`puts Cask::CaskLoader.load(Pathname.new(ARGV.fetch(0))).to_hash_with_variations.to_json`, filename)
+		`puts Cask::CaskLoader.load(ARGV.fetch(0)).to_hash_with_variations.to_json`, brewPlatformCask)
 	// The auditor uses Homebrew's API for package-name comparisons. Disabling that API
 	// would clone the complete core tap history into this otherwise isolated prefix.
 	b.command(true, "env", "-u", "HOMEBREW_NO_INSTALL_FROM_API", b.brew, "ruby", "-e",
 		`require "cask/cask_loader"; require "cask/auditor"; `+
-			`errors = Cask::Auditor.audit(Cask::CaskLoader.load(Pathname.new(ARGV.fetch(0)))).to_a; `+
-			`puts errors.to_json; exit(errors.empty? ? 0 : 1)`, filename)
+			`errors = Cask::Auditor.audit(Cask::CaskLoader.load(ARGV.fetch(0))).to_a; `+
+			`puts errors.to_json; exit(errors.empty? ? 0 : 1)`, brewPlatformCask)
 	type selection struct {
 		URL    string `json:"url"`
 		SHA256 string `json:"sha256"`
