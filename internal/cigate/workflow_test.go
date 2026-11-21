@@ -45,6 +45,10 @@ const (
 		"needs.lint.outputs.run-code-checks == 'true' && " +
 		"((github.event_name == 'push' && needs.gitleaks.result == 'skipped' && needs.vulncheck.result == 'skipped') || " +
 		"(github.event_name != 'push' && needs.gitleaks.result == 'success' && needs.vulncheck.result == 'success'))"
+	// Explicit !cancelled() is required so GitHub Actions' implicit success() does not
+	// transitively skip codeql on push when upstream ancestors gitleaks/vulncheck are skipped.
+	ciCodeQLCondition = "!cancelled() && needs.lint.result == 'success' && " +
+		"needs.test.result == 'success' && needs.lint.outputs.run-code-checks == 'true'"
 )
 
 type pullRequestTrigger struct {
@@ -143,7 +147,14 @@ func TestWorkflowDependencyContract(t *testing.T) {
 	assert.Equal(t, nonPushCodeCondition, w.Jobs["vulncheck"].If)
 	assert.ElementsMatch(t, []string{"lint", "gitleaks", "vulncheck"}, needs(t, w.Jobs["test"]))
 	assert.Equal(t, ciTestCondition, w.Jobs["test"].If)
-	assert.Equal(t, "needs.lint.outputs.run-code-checks == 'true'", w.Jobs["codeql"].If)
+	assert.Equal(t, ciCodeQLCondition, w.Jobs["codeql"].If)
+	for _, name := range PushBaselineJobs() {
+		job := w.Jobs[name]
+		if len(needs(t, job)) > 0 {
+			assert.Contains(t, job.If, "!cancelled()",
+				"push baseline job %s with upstream needs must override implicit success() transitive skip", name)
+		}
+	}
 	assert.ElementsMatch(t, []string{"lint", "test", "build"}, needs(t, w.Jobs["homebrew"]))
 	assert.Equal(t, nonPushCodeCondition, w.Jobs["homebrew"].If)
 	assert.Equal(t, nonPushCodeCondition+" && inputs.failure_probe != 'skip'", w.Jobs["integration"].If)
