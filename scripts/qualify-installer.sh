@@ -3,6 +3,10 @@
 # Optional VERSION RELEASE_DIR adds a signed draft; no release assets are changed.
 set -euo pipefail
 IFS=$'\n\t'
+# Capture optional read-only GitHub token only for authenticated candidate
+# updater metadata checks; keep download, helper, pack, and payload runs clean.
+update_gh_token=${GH_TOKEN:-${GITHUB_TOKEN:-}}
+unset GH_TOKEN GITHUB_TOKEN
 # shellcheck source=../.config/tool-versions.env
 source "$(dirname -- "${BASH_SOURCE[0]}")/../.config/tool-versions.env"
 : "${COSIGN_LINUX_AMD64:?missing shared Cosign pin}" "${COSIGN_LINUX_ARM64:?missing shared Cosign pin}"
@@ -50,6 +54,20 @@ record_installed_version() {
     }
 }
 
+run_updater() {
+    local mode=$1
+    shift
+    if [[ -n ${update_gh_token} ]]; then
+        PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" \
+            MICROFAT_EXEC_MODE="${mode}" GH_TOKEN="${update_gh_token}" \
+            "${bin}/microfat" update "$@"
+    else
+        PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" \
+            MICROFAT_EXEC_MODE="${mode}" \
+            "${bin}/microfat" update "$@"
+    fi
+}
+
 versions=(0.2.3 0.2.4 0.2.5 0.3.0 0.3.1)
 if [[ -n ${candidate} ]]; then versions+=("${candidate}"); fi
 for version in "${versions[@]}"; do
@@ -85,11 +103,9 @@ for version in "${versions[@]}"; do
         # Restore the candidate with the trusted helper after each downgrade.
         for mode in memfd cache; do
             for previous in 0.2.5 0.3.1; do
-                PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" MICROFAT_EXEC_MODE="${mode}" \
-                    "${bin}/microfat" update --check --version "${previous}" --json \
+                run_updater "${mode}" --check --version "${previous}" --json \
                     > "${output}/updater-${mode}-${previous}-check.json"
-                PATH=/nonexistent HOME="${fixture_home}" XDG_CACHE_HOME="${private}/cache" MICROFAT_EXEC_MODE="${mode}" \
-                    "${bin}/microfat" update --version "${previous}" --allow-downgrade \
+                run_updater "${mode}" --version "${previous}" --allow-downgrade \
                     --cosign "${cosign}" --cosign-sha256 "${pin}" --staging-dir "${private}" --json \
                     > "${output}/updater-${mode}-${previous}-signed-downgrade.json"
                 record_installed_version "${previous}" "${mode}" "${output}/updater-${mode}-${previous}-installed.txt"
