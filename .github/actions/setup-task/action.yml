@@ -1,0 +1,26 @@
+name: Install pinned Task
+description: Install the pinned static Task CLI via Go module verification with optional Actions caching
+inputs:
+  version:
+    description: Exact Task version from .config/tool-versions.env
+    required: true
+  cache:
+    description: Cache the static Task binary across workflow runs
+    required: false
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - name: Cache pinned static Task binary
+      if: inputs.cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/microfat-task
+        key: microfat-task-${{ runner.os }}-${{ runner.arch }}-v${{ inputs.version }}
+    - name: Install and verify pinned Task binary
+      shell: bash
+      env:
+        EXPECTED_TASK_VERSION: ${{ inputs.version }}
+      run: |
+        bash scripts/install-task.sh "$RUNNER_TEMP/microfat-task" "$EXPECTED_TASK_VERSION"
+        echo "$RUNNER_TEMP/microfat-task" >> "$GITHUB_PATH"

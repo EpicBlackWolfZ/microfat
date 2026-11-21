@@ -72,7 +72,7 @@ jobs:
           echo "BENCHMARK_BASE=$GITHUB_WORKSPACE/.work/benchmark-base" >> "$GITHUB_ENV"
           echo "BENCHMARK_TIER=$tier" >> "$GITHUB_ENV"
       - name: Install pinned Task
-        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
 
@@ -210,7 +210,7 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Install pinned Task
-        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
       - name: Build pinned investigation tools
@@ -285,7 +285,7 @@ jobs:
           cache: false
       - run: git worktree add --detach .work/benchmark-base HEAD
       - name: Install pinned Task
-        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
 
@@ -324,7 +324,7 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Install pinned Task
-        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
 
@@ -365,7 +365,7 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Install pinned Task
-        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
 
@@ -397,7 +397,7 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Install pinned Task
-        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
 

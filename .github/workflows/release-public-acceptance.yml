@@ -45,9 +45,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+      - uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
+          cache: 'false'
       - name: Authenticate complete public immutable inventory before qualification
         env:
           GH_TOKEN: ${{ github.token }}
@@ -110,9 +111,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+      - uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
+          cache: 'false'
       - name: Authenticate public release and prepare disposable Homebrew lifecycle fixture
         env:
           GH_TOKEN: ${{ github.token }}

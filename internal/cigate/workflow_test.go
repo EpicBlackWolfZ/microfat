@@ -273,14 +273,34 @@ func checkJobBoundaries(t *testing.T, job workflowJob, pin *regexp.Regexp) {
 		if step.Uses == "" {
 			continue
 		}
-		if step.Uses == "./.github/actions/toolchain-config" {
-			require.FileExists(t, "../../.github/actions/toolchain-config/action.yml")
-			continue // Local code is bound to the checkout commit.
+		if strings.HasPrefix(step.Uses, "./.github/actions/") {
+			actionPath := filepath.Join("..", "..", filepath.FromSlash(strings.TrimPrefix(step.Uses, "./")), "action.yml")
+			require.FileExists(t, actionPath)
+			checkLocalActionPins(t, actionPath, pin)
+			continue // Local code is bound to the checkout commit; nested third-party actions must still be SHA-pinned.
 		}
 		assert.Regexp(t, pin, step.Uses, "actions must use full commit pins")
 		if strings.HasPrefix(step.Uses, "actions/checkout@") {
 			assert.Equal(t, false, step.With["persist-credentials"], "untrusted subprocesses must not inherit checkout credentials")
 		}
+	}
+}
+
+func checkLocalActionPins(t *testing.T, actionPath string, pin *regexp.Regexp) {
+	t.Helper()
+	data, err := os.ReadFile(actionPath)
+	require.NoError(t, err)
+	var action struct {
+		Runs struct {
+			Steps []workflowStep `yaml:"steps"`
+		} `yaml:"runs"`
+	}
+	require.NoError(t, yaml.Unmarshal(data, &action))
+	for _, step := range action.Runs.Steps {
+		if step.Uses == "" {
+			continue
+		}
+		assert.Regexp(t, pin, step.Uses, "actions inside %s must use full commit pins", actionPath)
 	}
 }
 
