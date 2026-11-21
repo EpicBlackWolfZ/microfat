@@ -39,6 +39,7 @@ func TestWorkflowsReadGoVersionFromCheckedOutModule(t *testing.T) {
 }
 
 const (
+	permissionRead        = "read"
 	nonPushCodeCondition  = "github.event_name != 'push' && needs.lint.outputs.run-code-checks == 'true'"
 	prTitleTimeoutMinutes = 5
 	ciTestCondition       = "!cancelled() && needs.lint.result == 'success' && " +
@@ -199,7 +200,7 @@ func TestOnlySharedCIAndTitleWorkflowHandlePullRequests(t *testing.T) {
 	titlePR := decodePullRequestTrigger(t, title)
 	assert.Equal(t, expectedBranches, titlePR.Branches)
 	assert.ElementsMatch(t, []string{"opened", "edited", "reopened", "synchronize"}, titlePR.Types)
-	assert.Equal(t, map[string]string{"pull-requests": "read"}, title.Permissions)
+	assert.Equal(t, map[string]string{"pull-requests": permissionRead}, title.Permissions)
 	assert.Equal(t, "${{ github.workflow }}-${{ github.ref }}", title.Concurrency.Group)
 	assert.Equal(t, true, title.Concurrency.CancelInProgress)
 	require.Len(t, title.Jobs, 1)
@@ -249,9 +250,9 @@ func TestCIExecutionBoundaries(t *testing.T) {
 			t.Parallel()
 			w := readWorkflow(t, name)
 			if name == "pr-title.yml" {
-				assert.Equal(t, map[string]string{"pull-requests": "read"}, w.Permissions)
+				assert.Equal(t, map[string]string{"pull-requests": permissionRead}, w.Permissions)
 			} else {
-				assert.Equal(t, "read", w.Permissions["contents"])
+				assert.Equal(t, permissionRead, w.Permissions["contents"])
 			}
 			for _, job := range w.Jobs {
 				checkJobBoundaries(t, job, pin)

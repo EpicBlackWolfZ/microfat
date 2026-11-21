@@ -32,7 +32,7 @@ func extractBashFunction(t *testing.T, script, name string) string {
 func TestPublicAcceptanceWorkflowTokenBoundaries(t *testing.T) {
 	t.Parallel()
 	w := readWorkflow(t, "release-public-acceptance.yml")
-	assert.Equal(t, map[string]string{"contents": "read"}, w.Permissions)
+	assert.Equal(t, map[string]string{"contents": permissionRead}, w.Permissions)
 
 	installerJob := w.Jobs["installer"]
 	assert.Empty(t, installerJob.Permissions)

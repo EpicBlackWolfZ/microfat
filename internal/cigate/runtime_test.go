@@ -49,7 +49,7 @@ func TestRuntimeQualificationIsRequiredAndRetainsEvidence(t *testing.T) {
 			assert.True(t, qualified)
 			assert.True(t, retained)
 			if tc.candidate {
-				assert.Equal(t, map[string]string{"contents": "read"}, w.Permissions)
+				assert.Equal(t, map[string]string{"contents": permissionRead}, w.Permissions)
 			}
 		})
 	}
@@ -82,7 +82,7 @@ func TestSignedDraftTransfersAcrossThePermissionBoundary(t *testing.T) {
 	}
 	require.True(t, acquired)
 	require.True(t, uploaded)
-	assert.Equal(t, map[string]string{"contents": "read"}, release.Jobs["runtime-qualification"].Permissions)
+	assert.Equal(t, map[string]string{"contents": permissionRead}, release.Jobs["runtime-qualification"].Permissions)
 	for _, tc := range []struct {
 		workflow, job, path string
 		allowUpdaterToken   bool
@@ -93,7 +93,7 @@ func TestSignedDraftTransfersAcrossThePermissionBoundary(t *testing.T) {
 		t.Run(tc.job, func(t *testing.T) {
 			w := readWorkflow(t, tc.workflow)
 			job := w.Jobs[tc.job]
-			assert.Equal(t, "read", w.Permissions["contents"])
+			assert.Equal(t, permissionRead, w.Permissions["contents"])
 			assert.Empty(t, job.Permissions)
 			downloaded, authenticated, qualifiedWithToken := false, false, false
 			for _, step := range job.Steps {
