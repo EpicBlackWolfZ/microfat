@@ -822,7 +822,11 @@ jobs:
   codeql:
     name: CodeQL
     needs: [lint, test]
-    if: needs.lint.outputs.run-code-checks == 'true'
+    if: >-
+      !cancelled() &&
+      needs.lint.result == 'success' &&
+      needs.test.result == 'success' &&
+      needs.lint.outputs.run-code-checks == 'true'
     permissions:
       contents: read
       security-events: write
