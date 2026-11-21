@@ -3,6 +3,10 @@
 # qualification. Operate only inside that qualification's disposable prefix.
 set -euo pipefail
 IFS=$'\n\t'
+# Capture optional read-only GitHub token only for microfat update --check
+# without leaking it into recorded command logs or Homebrew invocations.
+update_gh_token=${GH_TOKEN:-${GITHUB_TOKEN:-}}
+unset GH_TOKEN GITHUB_TOKEN
 # shellcheck source=../.config/tool-versions.env
 source "$(dirname -- "${BASH_SOURCE[0]}")/../.config/tool-versions.env"
 : "${HOMEBREW_SOURCE:?missing shared Homebrew pin}"
@@ -69,6 +73,24 @@ run_recorded() {
     else
         (( command_status > 0 && command_status != 124 && command_status != 137 )) || fail "${record} did not refuse cleanly"
     fi
+}
+
+run_recorded_update_check() {
+    local record=$1 mode=$2 command_status=0
+    shift 2
+    local -a logged_command=("${application_environment[@]}" "MICROFAT_EXEC_MODE=${mode}" microfat "$@")
+    local -a exec_command=("${application_environment[@]}" "MICROFAT_EXEC_MODE=${mode}")
+    if [[ -n ${update_gh_token} ]]; then
+        exec_command+=("GH_TOKEN=${update_gh_token}")
+    fi
+    exec_command+=(microfat "$@")
+    printf '%q ' "${logged_command[@]}" >> "${evidence_root}/commands.log"
+    printf '\n' >> "${evidence_root}/commands.log"
+    timeout --signal=TERM --kill-after=10s 5m "${exec_command[@]}" \
+        > "${evidence_root}/${record}" 2>&1 || command_status=$?
+    cat -- "${evidence_root}/${record}" >> "${evidence_root}/commands.log"
+    printf '\nexit: %s\n' "${command_status}" >> "${evidence_root}/commands.log"
+    [[ ${command_status} == 0 ]] || fail "${record} failed with exit ${command_status}"
 }
 
 digest_file() {
@@ -142,8 +164,8 @@ verify_installation() {
                 "MICROFAT_EXEC_MODE=${mode}" "${packed}" --helper-version
             cmp -- "${evidence_root}/helper-version.log" "${evidence_root}/payload-${phase}-${mode}-${profile}.log"
         done
-        run_recorded success "update-${phase}-${mode}.json" "${application_environment[@]}" "MICROFAT_EXEC_MODE=${mode}" \
-            microfat update --check --version 0.2.5 --json
+        run_recorded_update_check "update-${phase}-${mode}.json" "${mode}" \
+            update --check --version "${release_version}" --json
         jq -e '.management == "homebrew" and .can_self_update == false' "${evidence_root}/update-${phase}-${mode}.json" >/dev/null
         run_recorded refusal "update-refusal-${phase}-${mode}.log" "${application_environment[@]}" \
             "MICROFAT_EXEC_MODE=${mode}" microfat update --version 0.2.5 --allow-downgrade

@@ -49,7 +49,7 @@ func TestRuntimeQualificationIsRequiredAndRetainsEvidence(t *testing.T) {
 			assert.True(t, qualified)
 			assert.True(t, retained)
 			if tc.candidate {
-				assert.Equal(t, map[string]string{"contents": "read"}, w.Permissions)
+				assert.Equal(t, map[string]string{"contents": permissionRead}, w.Permissions)
 			}
 		})
 	}
@@ -82,20 +82,31 @@ func TestSignedDraftTransfersAcrossThePermissionBoundary(t *testing.T) {
 	}
 	require.True(t, acquired)
 	require.True(t, uploaded)
-	assert.Equal(t, map[string]string{"contents": "read"}, release.Jobs["runtime-qualification"].Permissions)
-	for _, tc := range []struct{ workflow, job, path string }{
-		{"runtime-qualification.yml", "qualify", ".work/runtime-dist"},
-		{"release.yml", "installer-qualification", ".work/draft"},
+	assert.Equal(t, map[string]string{"contents": permissionRead}, release.Jobs["runtime-qualification"].Permissions)
+	for _, tc := range []struct {
+		workflow, job, path string
+		allowUpdaterToken   bool
+	}{
+		{"runtime-qualification.yml", "qualify", ".work/runtime-dist", false},
+		{"release.yml", "installer-qualification", ".work/draft", true},
 	} {
 		t.Run(tc.job, func(t *testing.T) {
 			w := readWorkflow(t, tc.workflow)
 			job := w.Jobs[tc.job]
-			assert.Equal(t, "read", w.Permissions["contents"])
+			assert.Equal(t, permissionRead, w.Permissions["contents"])
 			assert.Empty(t, job.Permissions)
-			downloaded, authenticated := false, false
+			downloaded, authenticated, qualifiedWithToken := false, false, false
 			for _, step := range job.Steps {
-				assert.NotContains(t, step.Env, "GH_TOKEN")
 				assert.NotContains(t, step.Run, "gh release")
+				assert.NotContains(t, step.Run, "gh api")
+				isUpdaterStep := tc.allowUpdaterToken && strings.Contains(step.Run, "scripts/qualify-installer.sh")
+				if isUpdaterStep {
+					assert.True(t, authenticated, "read-only updater token may only appear after draft authentication")
+					assert.Equal(t, "${{ github.token }}", step.Env["GH_TOKEN"])
+					qualifiedWithToken = true
+				} else {
+					assert.NotContains(t, step.Env, "GH_TOKEN")
+				}
 				if strings.HasPrefix(step.Uses, "actions/download-artifact@") {
 					downloaded = true
 					assert.Equal(t, artifact, step.With["name"])
@@ -108,6 +119,7 @@ func TestSignedDraftTransfersAcrossThePermissionBoundary(t *testing.T) {
 			}
 			assert.True(t, downloaded)
 			assert.True(t, authenticated)
+			assert.Equal(t, tc.allowUpdaterToken, qualifiedWithToken)
 		})
 	}
 }

@@ -130,6 +130,7 @@ jobs:
             CASK="$PWD/.work/public-homebrew/acquisition/microfat.rb"
       - name: Verify documented official tap installation and lifecycle
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
           TAP_SOURCE: ${{ inputs.tap_source }}
         run: |
