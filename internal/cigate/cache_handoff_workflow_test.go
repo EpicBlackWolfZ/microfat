@@ -16,28 +16,25 @@ import (
 )
 
 const (
-	handoffBranchCondition = "(github.head_ref || github.ref_name) == 'perf/verified-cache-descriptor' && " +
-		"!(" + ciMetadataCondition + ")"
-	handoffBaselineSHA    = "c28bbe73fb4a43ddab85443865ba52c6f3ef4e01"
-	handoffExpectedSource = "${{ github.event.pull_request.head.sha || github.sha }}"
-	handoffEvidencePath   = ".work/fd-handoff-confirmation/"
-	handoffMarker         = "verified descriptor confirmation ran\n"
-	handoffFailure        = 73
-	handoffAMD64          = "amd64"
-	handoffARM64          = "arm64"
-	handoffLintJob        = "lint"
+	handoffBranchCondition = "(github.head_ref || github.ref_name) == 'perf/verified-cache-descriptor'"
+	handoffBaselineSHA     = "c28bbe73fb4a43ddab85443865ba52c6f3ef4e01"
+	handoffExpectedSource  = "${{ github.event.pull_request.head.sha || github.sha }}"
+	handoffEvidencePath    = ".work/fd-handoff-confirmation/"
+	handoffMarker          = "verified descriptor confirmation ran\n"
+	handoffFailure         = 73
+	handoffAMD64           = "amd64"
+	handoffARM64           = "arm64"
+	handoffLintJob         = "lint"
 )
 
-func TestMetadataEditsCannotReplaceOrCancelSourceQualification(t *testing.T) {
+func TestPRMetadataEditsOnlyRunTitleValidation(t *testing.T) {
 	t.Parallel()
 	w := readWorkflow(t, "ci.yml")
-	assert.Equal(t, "${{ github.workflow }}-${{ github.ref }}-${{ "+ciMetadataCondition+" && 'metadata' || 'source' }}",
-		w.Concurrency.Group)
+	assert.Equal(t, "${{ github.workflow }}-${{ github.ref }}", w.Concurrency.Group)
 	assert.Equal(t, true, w.Concurrency.CancelInProgress)
-	assert.Equal(t, "${{ "+ciMetadataCondition+" && 'CI Metadata Complete' || 'CI Complete' }}", w.Jobs["complete"].Name)
-	assert.Equal(t, "${{ "+ciMetadataCondition+
-		" && 'Native metadata runtime qualification' || 'Native runtime qualification' }} (${{ matrix.arch }})",
-		w.Jobs["runtime"].Name)
+	assert.Equal(t, "CI Complete", w.Jobs["complete"].Name)
+	assert.Equal(t, "Native runtime qualification (${{ matrix.arch }})", w.Jobs["runtime"].Name)
+	assert.NotContains(t, decodePullRequestTrigger(t, w).Types, "edited")
 }
 
 func TestVerifiedCacheConfirmationSharesFastGatesAndRetainsEveryOutcome(t *testing.T) {
@@ -46,7 +43,7 @@ func TestVerifiedCacheConfirmationSharesFastGatesAndRetainsEveryOutcome(t *testi
 	job := w.Jobs["runtime"]
 	assert.ElementsMatch(t, []string{handoffLintJob, "test"}, needs(t, job))
 	assert.Contains(t, needs(t, w.Jobs["complete"]), "runtime")
-	assert.Equal(t, "needs.lint.outputs.run-code-checks == 'true'", job.If)
+	assert.Equal(t, nonPushCodeCondition, job.If)
 	assert.ElementsMatch(t, []string{handoffAMD64, handoffARM64}, job.Strategy.Matrix.Arch)
 	require.NotNil(t, job.Strategy.FailFast)
 	assert.False(t, *job.Strategy.FailFast)

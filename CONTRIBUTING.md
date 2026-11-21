@@ -176,29 +176,36 @@ We strictly follow the [Conventional Commits](https://www.conventionalcommits.or
 ## 6. Automated Quality & Security Gates
 
 The `main` ruleset requires **`CI Complete`** together with the existing six checks below.
-`CI Complete` validates every expected stage result; missing jobs, failure, cancellation and
-unexpected skips fail the gate. A matrix must succeed as a whole. The only accepted skips are
-the code stages of a positively classified documentation-only PR, as described below.
+`CI Complete` validates every expected stage result in `.github/workflows/ci.yml`; missing jobs,
+failure, cancellation and unexpected skips fail the gate. A matrix must succeed as a whole.
+The only accepted skips are the code stages of a positively classified documentation-only PR
+and the non-baseline stages on default-branch pushes, as described below.
 
-1. **`Validate Conventional PR Title`**: Verifies PR title follows Conventional Commits.
+1. **`Validate Conventional PR Title`**: Verifies PR title follows Conventional Commits in standalone `.github/workflows/pr-title.yml` (`pull_request` types `opened`, `edited`, `reopened`, `synchronize`), so PR title or body edits re-validate the title without cancelling or restarting `.github/workflows/ci.yml`.
 2. **`Lint (golangci-lint)`**: Zero tolerance for Go linter errors (`errcheck`, `goconst`, `lll`, `mnd`, `govet`, etc.) and ShellCheck (v0.11.0) static analysis violations across all tracked Bash scripts.
 3. **`Unit Tests & Coverage Gate (>= 95%)`**: Default/minimal unit tests with `-race`, enforcing the exact **>= 95%** production statement union across `cmd`, `internal`, `runtimeinit` and `benchmarks`.
 4. **`Vulnerability Scan (govulncheck)`**: Automated scanning against the official Go Vulnerability Database.
 5. **`Secrets Detection (gitleaks)`**: Audits commits for accidental credential leaks.
 6. **`Build, GoReleaser Snapshot & Self-Bundling Verification`**: Verifies multi-architecture builds and self-dispatching stubs.
 
-All PR work shares one dependency graph. Formatting, module/configuration/workflow checks,
-Go/ShellCheck lint, title validation, secrets and vulnerability checks run first. Only after they
-succeed can unit/race/coverage/leak checks run. Integration/fuzz/leak checks, developer regressions
-and live leak probes, release snapshots, benchmark smoke, all three kernel modes and CodeQL wait for
-the unit gate. `CI Complete` explicitly requires every stage, including the
-reusable workflow results. CodeFactor remains a separate quality signal and release acceptance
-check; it is not a named ruleset requirement.
+All heavy PR work shares one dependency graph in `.github/workflows/ci.yml` (`pull_request` types
+`opened`, `synchronize`, `reopened`), while `.github/workflows/pr-title.yml` enforces PR title
+syntax independently through the `main` ruleset. Formatting, module/configuration/workflow checks,
+Go/ShellCheck lint, secrets and vulnerability checks run first. Only after they succeed can
+unit/race/coverage/leak checks run. Integration/fuzz/leak checks, developer regressions and live
+leak probes, release snapshots, benchmark smoke, all three kernel modes, native qualification and
+CodeQL wait for the unit gate. `CI Complete` explicitly requires every stage in `ci.yml`,
+including the reusable workflow results. CodeFactor remains a separate quality signal and release
+acceptance check; it is not a named ruleset requirement.
 
-Main pushes use the same staged validation. Scheduled/manual deep benchmarks, calibration,
-release evidence and publication retain their own workflows. Reusable jobs have distinct
-concurrency groups so they cannot cancel their parent CI run. Snapshots sharing `dist/` remain
-serialized within one job.
+Because the `main` ruleset enforces up-to-date branches (`strict_required_status_checks_policy`)
+and squash merging, `push` runs on `main` execute only the default-branch baseline stages (`lint`,
+`test` for Codecov baselines, `codeql` for Code Scanning baselines, and `CI Complete`) and fail
+closed if any baseline stage fails or any non-baseline stage runs unexpectedly. Manual
+`workflow_dispatch` runs and tag releases (`release.yml`) retain the full validation matrix.
+Scheduled/manual deep benchmarks, calibration, release evidence and publication retain their own
+workflows. Reusable jobs have distinct concurrency groups so they cannot cancel their parent CI
+run. Snapshots sharing `dist/` remain serialized within one job.
 
 The lint job also runs `task verify-cgroup-memory` for code changes, and the release gate runs
 the same task. It checks two [production memory arithmetic laws](docs/design/cgroup-memory-verification.md);
@@ -266,9 +273,11 @@ finish instead of remaining pending. Other paths, mixed changes and empty diffs 
 
 Classification uses the complete Git diff of the PR merge result against its first parent, with
 rename detection disabled. A Git or classifier failure fails the required lint job; it cannot approve
-a documentation-only skip. The final aggregate checks the explicit skip set while title, lint
-classification and secrets must succeed. Push and ordinary manual runs retain the full CI checks.
-Run `bash scripts/ci-code-changes-test.sh` to verify the policy and `go test ./internal/cigate`
+a documentation-only skip. The final aggregate checks the explicit skip set while lint
+classification and secrets must succeed (and standalone `.github/workflows/pr-title.yml` validates
+the PR title independently). Default-branch `push` runs validate the narrowed baseline set (`lint`,
+`test`, `codeql`, `CI Complete`), while ordinary manual `workflow_dispatch` runs retain the full CI
+checks. Run `bash scripts/ci-code-changes-test.sh` to verify the policy and `go test ./internal/cigate`
 to check the workflow dependency and completion contracts.
 
 To inspect a staged run, open the PR's **CI Complete** check and follow its prerequisites in
