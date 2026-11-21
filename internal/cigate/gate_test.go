@@ -2,9 +2,16 @@ package cigate
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	eventPullRequest      = "pull_request"
+	eventPush             = "push"
+	eventWorkflowDispatch = "workflow_dispatch"
 )
 
 func pipeline(t *testing.T, docs bool) map[string]Job {
@@ -12,7 +19,7 @@ func pipeline(t *testing.T, docs bool) map[string]Job {
 	jobs := map[string]Job{}
 	for _, name := range RequiredJobs() {
 		result := Success
-		if docs && name != "pr-lint" && name != "lint" && name != "gitleaks" {
+		if docs && name != "lint" && name != "gitleaks" {
 			result = Skipped
 		}
 		jobs[name] = Job{Result: result}
@@ -25,6 +32,21 @@ func pipeline(t *testing.T, docs bool) map[string]Job {
 	return jobs
 }
 
+func pushPipeline(t *testing.T) map[string]Job {
+	t.Helper()
+	jobs := map[string]Job{}
+	baseline := PushBaselineJobs()
+	for _, name := range RequiredJobs() {
+		result := Skipped
+		if slices.Contains(baseline, name) {
+			result = Success
+		}
+		jobs[name] = Job{Result: result}
+	}
+	jobs["lint"] = Job{Result: Success, Outputs: map[string]string{"run-code-checks": "true"}}
+	return jobs
+}
+
 func encode(t *testing.T, jobs map[string]Job) []byte {
 	t.Helper()
 	data, err := json.Marshal(jobs)
@@ -34,29 +56,78 @@ func encode(t *testing.T, jobs map[string]Job) []byte {
 
 func TestAcceptedPipelines(t *testing.T) {
 	t.Parallel()
-	for _, event := range []string{"pull_request", "push", "workflow_dispatch"} {
-		t.Run(event, func(t *testing.T) { t.Parallel(); require.NoError(t, Evaluate(encode(t, pipeline(t, false)), event)) })
+	for _, event := range []string{eventPullRequest, eventWorkflowDispatch} {
+		t.Run(event, func(t *testing.T) {
+			t.Parallel()
+			require.NoError(t, Evaluate(encode(t, pipeline(t, false)), event))
+		})
 	}
-	require.NoError(t, Evaluate(encode(t, pipeline(t, true)), "pull_request"))
+	t.Run("docs_pull_request", func(t *testing.T) {
+		t.Parallel()
+		require.NoError(t, Evaluate(encode(t, pipeline(t, true)), eventPullRequest))
+	})
+	t.Run("push_baseline", func(t *testing.T) {
+		t.Parallel()
+		require.NoError(t, Evaluate(encode(t, pushPipeline(t)), eventPush))
+	})
 }
 
 func TestEveryPrerequisiteFailsClosed(t *testing.T) {
 	t.Parallel()
-	for _, name := range RequiredJobs() {
-		t.Run(name, func(t *testing.T) {
+	for _, event := range []string{eventPullRequest, eventWorkflowDispatch} {
+		t.Run(event, func(t *testing.T) {
 			t.Parallel()
-			for _, result := range []string{"failure", "cancelled", Skipped, "", "unknown"} {
-				t.Run(result, func(t *testing.T) {
+			for _, name := range RequiredJobs() {
+				t.Run(name, func(t *testing.T) {
 					t.Parallel()
-					jobs := pipeline(t, false)
-					job := jobs[name]
-					job.Result = result
-					jobs[name] = job
-					require.Error(t, Evaluate(encode(t, jobs), "pull_request"))
+					for _, result := range []string{"failure", "cancelled", Skipped, "", "unknown"} {
+						t.Run(result, func(t *testing.T) {
+							t.Parallel()
+							jobs := pipeline(t, false)
+							job := jobs[name]
+							job.Result = result
+							jobs[name] = job
+							require.Error(t, Evaluate(encode(t, jobs), event))
+						})
+					}
 				})
 			}
 		})
 	}
+}
+
+func TestPushBaselineFailsClosed(t *testing.T) {
+	t.Parallel()
+	baseline := PushBaselineJobs()
+	for _, name := range RequiredJobs() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			badResults := []string{"failure", "cancelled", Success, "", "unknown"}
+			if slices.Contains(baseline, name) {
+				badResults = []string{"failure", "cancelled", Skipped, "", "unknown"}
+			}
+			for _, result := range badResults {
+				t.Run(result, func(t *testing.T) {
+					t.Parallel()
+					jobs := pushPipeline(t)
+					job := jobs[name]
+					job.Result = result
+					jobs[name] = job
+					require.Error(t, Evaluate(encode(t, jobs), eventPush))
+				})
+			}
+		})
+	}
+	t.Run("all_success_rejected_on_push", func(t *testing.T) {
+		t.Parallel()
+		require.Error(t, Evaluate(encode(t, pipeline(t, false)), eventPush))
+	})
+	t.Run("docs_skip_rejected_on_push", func(t *testing.T) {
+		t.Parallel()
+		jobs := pushPipeline(t)
+		jobs["lint"] = Job{Result: Success, Outputs: map[string]string{"run-code-checks": "false"}}
+		require.Error(t, Evaluate(encode(t, jobs), eventPush))
+	})
 }
 
 func TestDocsCannotHideFailure(t *testing.T) {
@@ -68,10 +139,10 @@ func TestDocsCannotHideFailure(t *testing.T) {
 			job := jobs[name]
 			job.Result = "failure"
 			jobs[name] = job
-			require.Error(t, Evaluate(encode(t, jobs), "pull_request"))
+			require.Error(t, Evaluate(encode(t, jobs), eventPullRequest))
 		})
 	}
-	for _, event := range []string{"push", "workflow_dispatch", "unknown"} {
+	for _, event := range []string{eventPush, eventWorkflowDispatch, "unknown"} {
 		require.Error(t, Evaluate(encode(t, pipeline(t, true)), event))
 	}
 }
@@ -81,6 +152,7 @@ func TestMissingAndUnexpectedPrerequisites(t *testing.T) {
 	for name, mutate := range map[string]func(map[string]Job){
 		"missing":                func(j map[string]Job) { delete(j, "kernel") },
 		"extra":                  func(j map[string]Job) { j["extra"] = Job{Result: Success} },
+		"legacy_pr_lint":         func(j map[string]Job) { j["pr-lint"] = Job{Result: Success} },
 		"renamed":                func(j map[string]Job) { delete(j, "kernel"); j["renamed"] = Job{Result: Success} },
 		"missing_classification": func(j map[string]Job) { j["lint"] = Job{Result: Success} },
 		"invalid_classification": func(j map[string]Job) {
@@ -91,10 +163,10 @@ func TestMissingAndUnexpectedPrerequisites(t *testing.T) {
 			t.Parallel()
 			jobs := pipeline(t, false)
 			mutate(jobs)
-			require.Error(t, Evaluate(encode(t, jobs), "pull_request"))
+			require.Error(t, Evaluate(encode(t, jobs), eventPullRequest))
 		})
 	}
 	for _, data := range [][]byte{nil, []byte("{}"), []byte("null"), []byte("[]"), make([]byte, MaxNeedsBytes+1)} {
-		require.Error(t, Evaluate(data, "pull_request"))
+		require.Error(t, Evaluate(data, eventPullRequest))
 	}
 }

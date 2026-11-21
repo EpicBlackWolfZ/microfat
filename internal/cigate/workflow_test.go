@@ -38,9 +38,28 @@ func TestWorkflowsReadGoVersionFromCheckedOutModule(t *testing.T) {
 	}
 }
 
-const ciMetadataCondition = "github.event_name == 'pull_request' && github.head_ref == 'perf/verified-cache-descriptor' && " +
-	"github.event.action == 'edited' && " +
-	"github.event.changes.base == null"
+const (
+	nonPushCodeCondition  = "github.event_name != 'push' && needs.lint.outputs.run-code-checks == 'true'"
+	prTitleTimeoutMinutes = 5
+	ciTestCondition       = "!cancelled() && needs.lint.result == 'success' && " +
+		"needs.lint.outputs.run-code-checks == 'true' && " +
+		"((github.event_name == 'push' && needs.gitleaks.result == 'skipped' && needs.vulncheck.result == 'skipped') || " +
+		"(github.event_name != 'push' && needs.gitleaks.result == 'success' && needs.vulncheck.result == 'success'))"
+)
+
+type pullRequestTrigger struct {
+	Branches []string `yaml:"branches"`
+	Types    []string `yaml:"types"`
+}
+
+func decodePullRequestTrigger(t *testing.T, w workflow) pullRequestTrigger {
+	t.Helper()
+	node, ok := w.On[eventPullRequest]
+	require.True(t, ok, "expected pull_request trigger")
+	var trigger pullRequestTrigger
+	require.NoError(t, node.Decode(&trigger))
+	return trigger
+}
 
 type workflow struct {
 	On          map[string]yaml.Node   `yaml:"on"`
@@ -108,9 +127,7 @@ func TestWorkflowDependencyContract(t *testing.T) {
 	t.Parallel()
 	w := readWorkflow(t, "ci.yml")
 	complete := w.Jobs["complete"]
-	assert.Equal(t,
-		"${{ "+ciMetadataCondition+" && 'CI Metadata Complete' || 'CI Complete' }}",
-		complete.Name)
+	assert.Equal(t, "CI Complete", complete.Name)
 	assert.Equal(t, "always()", complete.If)
 	assert.ElementsMatch(t, RequiredJobs(), needs(t, complete))
 	var jobs []string
@@ -120,32 +137,70 @@ func TestWorkflowDependencyContract(t *testing.T) {
 		}
 	}
 	assert.ElementsMatch(t, RequiredJobs(), jobs, "every job must be accounted for by the aggregate")
-	assert.ElementsMatch(t, []string{"pr-lint", "lint", "gitleaks", "vulncheck"}, needs(t, w.Jobs["test"]))
-	assert.Empty(t, w.Jobs["pr-lint"].If, "title job must succeed explicitly for non-PR events")
+	assert.NotContains(t, w.Jobs, "pr-lint", "PR title validation belongs in standalone pr-title.yml")
+	assert.Empty(t, w.Jobs["lint"].If)
+	assert.Equal(t, "github.event_name != 'push'", w.Jobs["gitleaks"].If)
+	assert.Equal(t, nonPushCodeCondition, w.Jobs["vulncheck"].If)
+	assert.ElementsMatch(t, []string{"lint", "gitleaks", "vulncheck"}, needs(t, w.Jobs["test"]))
+	assert.Equal(t, ciTestCondition, w.Jobs["test"].If)
+	assert.Equal(t, "needs.lint.outputs.run-code-checks == 'true'", w.Jobs["codeql"].If)
 	assert.ElementsMatch(t, []string{"lint", "test", "build"}, needs(t, w.Jobs["homebrew"]))
+	assert.Equal(t, nonPushCodeCondition, w.Jobs["homebrew"].If)
+	assert.Equal(t, nonPushCodeCondition+" && inputs.failure_probe != 'skip'", w.Jobs["integration"].If)
 	for _, name := range []string{
 		"integration", "dx", "build", "benchmark-smoke", "kernel", "codeql", "installer", "mounts", "qemu", "runtime",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			assert.ElementsMatch(t, []string{"lint", "test"}, needs(t, w.Jobs[name]))
+			if name != "codeql" && name != "integration" {
+				assert.Equal(t, nonPushCodeCondition, w.Jobs[name].If)
+			}
 		})
 	}
 }
 
-func TestOnlySharedCIHandlesPullRequests(t *testing.T) {
+func TestOnlySharedCIAndTitleWorkflowHandlePullRequests(t *testing.T) {
 	t.Parallel()
 	files, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
 	require.NoError(t, err)
+	expectedBranches := []string{"main", "fix/**", "feat/**"}
 	for _, path := range files {
-		t.Run(filepath.Base(path), func(t *testing.T) {
+		base := filepath.Base(path)
+		t.Run(base, func(t *testing.T) {
 			t.Parallel()
-			w := readWorkflow(t, filepath.Base(path))
-			_, pr := w.On["pull_request"]
-			assert.Equal(t, filepath.Base(path) == "ci.yml", pr, "expensive PR work must share the CI gates")
+			w := readWorkflow(t, base)
+			_, pr := w.On[eventPullRequest]
+			wantPR := base == "ci.yml" || base == "pr-title.yml"
+			assert.Equal(t, wantPR, pr, "only shared CI and standalone PR title validation may handle pull_request")
 			assert.NotContains(t, w.On, "pull_request_target", "untrusted PR code must not receive privileged target events")
 		})
 	}
+
+	ci := readWorkflow(t, "ci.yml")
+	ciPR := decodePullRequestTrigger(t, ci)
+	assert.Equal(t, expectedBranches, ciPR.Branches)
+	assert.ElementsMatch(t, []string{"opened", "synchronize", "reopened"}, ciPR.Types)
+	assert.NotContains(t, ciPR.Types, "edited", "PR metadata edits must not restart full CI")
+
+	title := readWorkflow(t, "pr-title.yml")
+	assert.Len(t, title.On, 1, "pr-title.yml must only trigger on pull_request")
+	titlePR := decodePullRequestTrigger(t, title)
+	assert.Equal(t, expectedBranches, titlePR.Branches)
+	assert.ElementsMatch(t, []string{"opened", "edited", "reopened", "synchronize"}, titlePR.Types)
+	assert.Equal(t, map[string]string{"pull-requests": "read"}, title.Permissions)
+	assert.Equal(t, "${{ github.workflow }}-${{ github.ref }}", title.Concurrency.Group)
+	assert.Equal(t, true, title.Concurrency.CancelInProgress)
+	require.Len(t, title.Jobs, 1)
+	job, ok := title.Jobs["pr-lint"]
+	require.True(t, ok)
+	assert.Equal(t, "Validate Conventional PR Title", job.Name)
+	assert.Empty(t, job.If)
+	assert.Equal(t, prTitleTimeoutMinutes, job.Timeout)
+	require.Len(t, job.Steps, 1)
+	assert.True(t, strings.HasPrefix(job.Steps[0].Uses, "amannn/action-semantic-pull-request@"))
+	assert.Empty(t, job.Steps[0].If)
+	assert.Equal(t, false, job.Steps[0].With["requireScope"])
 }
 
 func TestReusableStagesCannotSilentlySkip(t *testing.T) {
@@ -178,11 +233,15 @@ func TestReusableStagesCannotSilentlySkip(t *testing.T) {
 func TestCIExecutionBoundaries(t *testing.T) {
 	t.Parallel()
 	pin := regexp.MustCompile(`^[^@]+@[0-9a-f]{40}$`)
-	for _, name := range []string{"ci.yml", "benchmark-smoke.yml", "benchmark-kernel.yml", "codeql.yml"} {
+	for _, name := range []string{"ci.yml", "pr-title.yml", "benchmark-smoke.yml", "benchmark-kernel.yml", "codeql.yml"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			w := readWorkflow(t, name)
-			assert.Equal(t, "read", w.Permissions["contents"])
+			if name == "pr-title.yml" {
+				assert.Equal(t, map[string]string{"pull-requests": "read"}, w.Permissions)
+			} else {
+				assert.Equal(t, "read", w.Permissions["contents"])
+			}
 			for _, job := range w.Jobs {
 				checkJobBoundaries(t, job, pin)
 			}

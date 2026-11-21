@@ -17,7 +17,7 @@ func TestMountQualificationCannotSilentlySkip(t *testing.T) {
 	assert.ElementsMatch(t, []string{"amd64", "arm64"}, job.Strategy.Matrix.Arch)
 	require.NotNil(t, job.Strategy.FailFast)
 	assert.False(t, *job.Strategy.FailFast)
-	assert.Equal(t, "needs.lint.outputs.run-code-checks == 'true'", job.If)
+	assert.Equal(t, nonPushCodeCondition, job.If)
 	qualification, evidence := false, false
 	for _, step := range job.Steps {
 		if strings.Contains(step.Run, "task qualify-mounts") {

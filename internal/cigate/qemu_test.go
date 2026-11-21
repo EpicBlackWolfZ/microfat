@@ -11,7 +11,7 @@ func TestQemuQualificationCannotSilentlySkip(t *testing.T) {
 	t.Parallel()
 	job := readWorkflow(t, "ci.yml").Jobs["qemu"]
 	assert.Equal(t, 30, job.Timeout)
-	assert.Equal(t, "needs.lint.outputs.run-code-checks == 'true'", job.If)
+	assert.Equal(t, nonPushCodeCondition, job.If)
 	qualification, acquisition, evidence := false, false, false
 	for _, step := range job.Steps {
 		if strings.Contains(step.Run, "task qualify-qemu") {
