@@ -77,7 +77,7 @@ jobs:
 
       - name: Install pinned Task
         if: steps.changes.outputs.run-code-checks == 'true'
-        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
 
@@ -167,7 +167,7 @@ jobs:
         run: go install gotest.tools/gotestsum@${{ steps.toolchain.outputs.gotestsum }}
 
       - name: Install pinned Task
-        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
 
@@ -330,7 +330,7 @@ jobs:
           cache: true
 
       - name: Install pinned Task
-        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
 
@@ -451,7 +451,7 @@ jobs:
           go test ./internal/installrelease -run 'TestCosignPublishedSignature|TestDefaultPinnedVerifier' -count=1
 
       - name: Install pinned Task
-        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
 
@@ -526,7 +526,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+      - uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -571,7 +571,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+      - uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
       - name: Build baseline native helper
@@ -632,7 +632,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+      - uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
       - name: Require real mounts, chroots, procfs controls and deployment changes
@@ -670,7 +670,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+      - uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
       - name: Qualify native E2E fixtures, epochs, cache descriptors and telemetry
@@ -749,7 +749,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+      - uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
       - name: Extract authenticated static emulator without installing handlers
@@ -789,7 +789,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+      - uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
       - name: Install user-mode CPU emulator
@@ -852,7 +852,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+      - uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
       - name: Verify every prerequisite result
