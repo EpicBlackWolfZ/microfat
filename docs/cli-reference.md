@@ -891,7 +891,7 @@ Check official release metadata or explicitly update an installer-owned Linux am
 ```bash
 microfat update --check --json
 microfat update
-microfat update --version 0.4.0
+microfat update --version 0.4.1
 microfat update --version 0.2.5 --allow-downgrade
 ```
 

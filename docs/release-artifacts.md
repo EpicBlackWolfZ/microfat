@@ -90,7 +90,7 @@ new releases and v0.2.5 snapshots reject the historical schemas.
 Maintainers can dispatch [Published Release Audit](https://github.com/EpicBlackWolfZ/microfat/actions/workflows/release-audit.yml)
 with a published immutable tag. It verifies the checksum signature against the exact tag workflow
 and source commit before executing the downloaded products on native amd64 and arm64 runners.
-The v0.4.0 audit runs eight Format v2 cases per architecture. Each full or minimal launcher
+The v0.4.1 audit runs eight Format v2 cases per architecture. Each full or minimal launcher
 exercises `none`, `lz4`, and Zstandard with and without a dictionary. The matrix checks auto,
 memfd and cache dispatch, metadata operations and corrupt-payload rejection. Its retained
 evidence identifies the downloaded bytes. The archive audit uses Go, gofmt and Cosign.
@@ -106,10 +106,11 @@ Those checks install from the official remote tap and retain product hashes, own
 results. Signed-draft helper qualification, published archive audits and these public-path checks
 retain separate evidence.
 
-The [v0.4.0 acceptance record](releases/v0.4.0.md#release-acceptance) identifies its immutable publication,
+The [v0.4.1 acceptance record](releases/v0.4.1.md#release-acceptance) identifies its immutable publication,
 signed-candidate and hosted qualification, and the independently reviewed public installer/tap results.
 
-The [v0.3.1 acceptance record](releases/v0.3.1.md#release-acceptance) and
+The [v0.4.0 acceptance record](releases/v0.4.0.md#release-acceptance),
+[v0.3.1 acceptance record](releases/v0.3.1.md#release-acceptance) and
 [v0.3.0 acceptance record](releases/v0.3.0.md#release-acceptance) retain historical publication and
 public acceptance records.
 
@@ -141,7 +142,7 @@ Extracting `microfat_<version>_linux_<arch>.tar.gz` provides:
 3. **`microfat-stub-minimal` (Minimal Launcher Stub)**:
    - A lightweight stub compiled with `-tags=minimal`.
    - Removes interactive meta-command handlers (`--microfat:*`) for a reduced ELF footprint while retaining container resource auto-tuning and environment controls, including `MICROFAT_FORCE_LEVEL`, `MICROFAT_EXEC_MODE`, and `MICROFAT_GC_PROFILE`.
-   - Size varies with architecture, toolchain, and build flags. The published v0.4.0 Linux amd64 minimal stub is 2,896,032 bytes; its full counterpart is 3,920,032 bytes.
+   - Size varies with architecture, toolchain, and build flags. The published v0.4.1 Linux amd64 minimal stub is 2,900,128 bytes; its full counterpart is 3,920,032 bytes.
    - Recommended for extreme cold-start sensitivity or deeply constrained serverless/embedded Linux containers.
 
 ---
@@ -151,14 +152,14 @@ Extracting `microfat_<version>_linux_<arch>.tar.gz` provides:
 ### Scenario A: Installing the `microfat` CLI
 
 The [official Homebrew tap](https://github.com/EpicBlackWolfZ/homebrew-tap) selects these same archives
-for Linux amd64 and arm64. The authenticated v0.4.0 recipe and official remote installation passed
+for Linux amd64 and arm64. The authenticated v0.4.1 recipe and official remote installation passed
 on both native architectures. See [Homebrew commands](installation.md#homebrew-linux-amd64-and-arm64)
-and the [release acceptance record](releases/v0.4.0.md#release-acceptance). The tap generator consumes
+and the [release acceptance record](releases/v0.4.1.md#release-acceptance). The tap generator consumes
 the authenticated release inventory directly, so GoReleaser's `meta: true` archive output does not
 need fabricated platform metadata or a second packaging pass.
 
 Use the [verified installer](installation.md) to authenticate the release and publish all three products
-as one owned generation. Signed v0.4.0 helper assets are published; their public bootstrap passed
+as one owned generation. Signed v0.4.1 helper assets are published; their public bootstrap passed
 in fresh nonroot native amd64/arm64 containers without Go or preinstalled Cosign, using default user
 roots. The retained evidence identifies the exact bootstrap digest and authenticated product hashes.
 The guide also covers a trusted source helper and independently provisioned verifier.
