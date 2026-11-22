@@ -3,26 +3,19 @@ package releasecheck
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
 	"github.com/EpicBlackWolfZ/microfat/internal/releasechecksums"
 )
 
 // ValidateChecksums parses and verifies distDir/checksums.txt against the ReleaseContract.
 func ValidateChecksums(distDir string, contract *ReleaseContract) (map[string]string, error) {
 	checksumsPath := filepath.Join(distDir, "checksums.txt")
-	fi, err := os.Lstat(checksumsPath)
-	if err != nil {
-		return nil, fmt.Errorf("opening checksums.txt: %w", err)
-	}
-	if !fi.Mode().IsRegular() {
-		return nil, fmt.Errorf("checksums.txt is not a regular file")
-	}
-
 	parsedChecksums, err := parseChecksumsFile(checksumsPath)
 	if err != nil {
 		return nil, err
@@ -40,10 +33,12 @@ func ValidateChecksums(distDir string, contract *ReleaseContract) (map[string]st
 }
 
 func parseChecksumsFile(checksumsPath string) (map[string]string, error) {
-	// #nosec G304 -- checksums.txt validated path
-	f, err := os.Open(checksumsPath)
+	f, _, err := inputfile.OpenRegularNoFollow(checksumsPath)
 	if err != nil {
-		return nil, fmt.Errorf("reading checksums.txt: %w", err)
+		if errors.Is(err, inputfile.ErrNotRegular) || errors.Is(err, inputfile.ErrSymlink) {
+			return nil, fmt.Errorf("checksums.txt is not a regular file: %w", err)
+		}
+		return nil, fmt.Errorf("opening checksums.txt: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 
@@ -76,16 +71,11 @@ func verifyChecksumCompleteness(parsed map[string]string, contract *ReleaseContr
 func verifyDiskArtifacts(distDir string, parsed map[string]string) error {
 	for name, expectedDigest := range parsed {
 		targetPath := filepath.Join(distDir, name)
-		tfi, err := os.Lstat(targetPath)
-		if err != nil {
-			return fmt.Errorf("stat artifact %s: %w", name, err)
-		}
-		if !tfi.Mode().IsRegular() {
-			return fmt.Errorf("artifact %s is not a regular file (symlinks forbidden)", name)
-		}
-
 		actualDigest, err := computeFileSHA256(targetPath)
 		if err != nil {
+			if errors.Is(err, inputfile.ErrSymlink) || errors.Is(err, inputfile.ErrNotRegular) {
+				return fmt.Errorf("artifact %s is not a regular file (symlinks forbidden): %w", name, err)
+			}
 			return fmt.Errorf("computing hash for %s: %w", name, err)
 		}
 		if actualDigest != expectedDigest {
@@ -96,8 +86,7 @@ func verifyDiskArtifacts(distDir string, parsed map[string]string) error {
 }
 
 func computeFileSHA256(path string) (string, error) {
-	// #nosec G304 -- path within validated distribution directory
-	f, err := os.Open(path)
+	f, _, err := inputfile.OpenRegularNoFollow(path)
 	if err != nil {
 		return "", err
 	}

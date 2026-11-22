@@ -40,3 +40,42 @@ func TestFIFOReplacement(t *testing.T) {
 	require.NoError(t, ctx.Err(), "FIFO open blocked")
 	require.NoError(t, err, string(output))
 }
+
+func TestOpenRegularNoFollow_UnixTOCTOU(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	fifo := filepath.Join(dir, "fifo")
+	require.NoError(t, unix.Mkfifo(fifo, 0o600))
+	_, _, err := OpenRegularNoFollow(fifo)
+	require.ErrorIs(t, err, ErrNotRegular)
+
+	target := filepath.Join(dir, "target")
+	require.NoError(t, os.WriteFile(target, []byte("regular"), 0o600))
+
+	t.Run("swapped to symlink between Lstat and open", func(t *testing.T) {
+		t.Parallel()
+		subDir := t.TempDir()
+		swapped := filepath.Join(subDir, "swapped")
+		require.NoError(t, os.WriteFile(swapped, []byte("regular"), 0o600))
+		_, _, err := openRegularNoFollow(swapped, func(p string) (*os.File, error) {
+			require.NoError(t, os.Remove(p))
+			require.NoError(t, os.Symlink(target, p))
+			return openNoFollowNonblock(p)
+		})
+		require.ErrorIs(t, err, ErrSymlink)
+	})
+
+	t.Run("swapped to FIFO between Lstat and open without blocking", func(t *testing.T) {
+		t.Parallel()
+		subDir := t.TempDir()
+		swapped := filepath.Join(subDir, "swapped-fifo")
+		require.NoError(t, os.WriteFile(swapped, []byte("regular"), 0o600))
+		_, _, err := openRegularNoFollow(swapped, func(p string) (*os.File, error) {
+			require.NoError(t, os.Remove(p))
+			require.NoError(t, unix.Mkfifo(p, 0o600))
+			return openNoFollowNonblock(p)
+		})
+		require.ErrorIs(t, err, ErrNotRegular)
+	})
+}

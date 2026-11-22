@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
 	"github.com/EpicBlackWolfZ/microfat/internal/install"
 )
 
@@ -26,16 +27,16 @@ func VerifyDigest(path, expected string, limit int64) error {
 	if !digestSyntax.MatchString(expected) {
 		return errors.New("invalid SHA-256 trust pin")
 	}
-	info, err := os.Lstat(path)
+	file, info, err := inputfile.OpenRegularNoFollow(path)
 	if err != nil {
+		if errors.Is(err, inputfile.ErrNotRegular) || errors.Is(err, inputfile.ErrSymlink) {
+			return errors.New("digest input must be a bounded regular file")
+		}
 		return err
 	}
-	if !info.Mode().IsRegular() || info.Size() > limit {
+	if info.Size() > limit {
+		_ = file.Close()
 		return errors.New("digest input must be a bounded regular file")
-	}
-	file, err := os.Open(path) // #nosec G304 -- explicit authenticated staging/verifier path, regular file checked.
-	if err != nil {
-		return err
 	}
 	hash := sha256.New()
 	n, readErr := io.Copy(hash, io.LimitReader(file, limit+1))

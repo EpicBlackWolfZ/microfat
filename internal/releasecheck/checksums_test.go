@@ -313,3 +313,17 @@ func TestValidateChecksums_MissingChecksumsFile(t *testing.T) {
 	_, err = releasecheck.ValidateChecksums(distDir, contract)
 	require.Error(t, err)
 }
+
+func TestValidateChecksums_SymlinkChecksumsFileRejected(t *testing.T) {
+	t.Parallel()
+	distDir, contract, _ := createValidDistFixture(t, "0.2.3")
+
+	checksumsPath := filepath.Join(distDir, "checksums.txt")
+	realChecksums := filepath.Join(distDir, "real-checksums.txt")
+	require.NoError(t, os.Rename(checksumsPath, realChecksums))
+	require.NoError(t, os.Symlink(realChecksums, checksumsPath))
+
+	_, err := releasecheck.ValidateChecksums(distDir, contract)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a regular file")
+}
