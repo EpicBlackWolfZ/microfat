@@ -5,9 +5,10 @@ cask in the shared [EpicBlackWolfZ/homebrew-tap](https://github.com/EpicBlackWol
 repository. The Homebrew identifier is `EpicBlackWolfZ/tap`; future packages can coexist in the
 same repository. Only `Casks/microfat.rb` belongs to microfat's automatic update path.
 
-The [v0.4.0 acceptance record](releases/v0.4.0.md#release-acceptance) tracks the current immutable
+The [v0.4.1 acceptance record](releases/v0.4.1.md#release-acceptance) tracks the current immutable
 release, authenticated recipe generation and separate official public installation checks.
-The [v0.3.1 record](releases/v0.3.1.md#release-acceptance) and the first-publication evidence below
+The [v0.4.0 record](releases/v0.4.0.md#release-acceptance),
+[v0.3.1 record](releases/v0.3.1.md#release-acceptance) and the first-publication evidence below
 retain historical releases.
 
 ## v0.3.0 first-publication evidence
@@ -55,7 +56,7 @@ Approval-required runs and event suppression by GITHUB_TOKEN are separate condit
 For a missing run, the tap supports explicit full CI on the recipe branch, for example:
 
 ```bash
-gh workflow run ci.yml --repo EpicBlackWolfZ/homebrew-tap --ref chore/microfat-v0.4.0
+gh workflow run ci.yml --repo EpicBlackWolfZ/homebrew-tap --ref chore/microfat-v0.4.1
 ```
 
 Require completed checks at the recipe's final head: **Scripts and update policy**, native Homebrew
@@ -116,7 +117,7 @@ Use Go from `go.mod` and Task from `.config/tool-versions.env` from a reviewed c
 
 ```bash
 task homebrew-check
-task homebrew-prepare TAG=v0.4.0 OUTPUT=/absolute/new-candidate-directory
+task homebrew-prepare TAG=v0.4.1 OUTPUT=/absolute/new-candidate-directory
 task homebrew-check CASK=/absolute/new-candidate-directory/microfat.rb
 task qualify-homebrew OUTPUT=/absolute/new-qualification-directory \
   CASK=/absolute/new-candidate-directory/microfat.rb

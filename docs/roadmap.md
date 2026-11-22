@@ -1,16 +1,22 @@
 # Production roadmap
 
-Updated 2026-11-16: v0.4.0 passed source/candidate qualification, hosted evidence and advisory
+Updated 2026-11-22: v0.4.1 passed source/candidate qualification, hosted evidence and advisory
 scan gates and was published immutable. Independently reviewed public archive audits and clean native
-bootstrap checks passed, the authenticated v0.4.0 Homebrew recipe is merged, and final combined
+bootstrap checks passed, the authenticated v0.4.1 Homebrew recipe is merged, and final combined
 public installer/tap acceptance passed on both native architectures.
 GitHub issues define remaining scope,
 dependencies and acceptance criteria. Milestones group deliverable outcomes; they are not dates.
 
 ## Current baseline
 
-[v0.4.0](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.4.0) is the latest published
-release, published on 2026-11-16 at 09:48:04 UTC as immutable release `446786773` from source
+[v0.4.1](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.4.1) is the latest published
+release, published on 2026-11-22 at 15:31:10 UTC as immutable release `454465507` from source
+`118fd760d22db272b9e35883928906a2f1705a56`, built with Go 1.27.4. Its
+[acceptance record](releases/v0.4.1.md#release-acceptance) separates source CI, signed-candidate
+qualification, hosted measurements, publication, advisory scan and public installer/tap results.
+
+[v0.4.0](https://github.com/EpicBlackWolfZ/microfat/releases/tag/v0.4.0) was published on
+2026-11-16 at 09:48:04 UTC as immutable release `446786773` from source
 `48032c2c6b9b66e0f2148ae023a74466ccd2c391`, built with Go 1.27.4 and clearing `GO-2026-6859`. Its
 [acceptance record](releases/v0.4.0.md#release-acceptance) separates source CI, signed-candidate
 qualification, hosted measurements, publication, advisory scan and public installer/tap results.
@@ -62,7 +68,7 @@ added ShellCheck. They are merged into `main`; they are not new work to implemen
 | [v0.3.0](https://github.com/EpicBlackWolfZ/microfat/milestone/2) | Coherent installation and executable lifecycle contracts | Native macOS support and new compression formats |
 | [v0.3.1](releases/v0.3.1.md) | Installer/dictionary corrections and dependency/toolchain updates | New binary formats and dedicated-hardware certification |
 | [v0.4.0](releases/v0.4.0.md) | Observability, Format v2 migration and evidence-backed cold-cache improvements | Arbitrary latency targets and dedicated-hardware availability |
-| [v0.4.1](https://github.com/EpicBlackWolfZ/microfat/milestone/15) | Patch follow-ups, CI API rate-limit hardening and release workflow defaults | Speculative format changes |
+| [v0.4.1](releases/v0.4.1.md) | Security hardening, Format v2 index validation, launcher telemetry, and release tooling updates | Speculative format changes |
 
 Urgent, independently validated corrections can ship earlier in the patch stream. A tooling
 migration must not hold a known runtime fix. Work can proceed independently where dependencies

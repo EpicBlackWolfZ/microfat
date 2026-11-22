@@ -319,7 +319,7 @@ checksum:
   name_template: "checksums.txt"
 
 snapshot:
-  version_template: "0.4.1-SNAPSHOT-{{ .ShortCommit }}"
+  version_template: "0.4.2-SNAPSHOT-{{ .ShortCommit }}"
 
 changelog:
   sort: asc
