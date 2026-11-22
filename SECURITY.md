@@ -10,9 +10,8 @@ The release streams marked supported below receive security updates and bug fixe
 
 | Version | Supported | Notes |
 | :--- | :--- | :--- |
-| `v0.2.x` | :white_check_mark: | Current active release stream |
-| `v0.1.x` | :white_check_mark: | Supported maintenance release stream |
-| `< v0.1.0` | :x: | End of life |
+| `v0.4.x` | :white_check_mark: | Current active release stream |
+| `< v0.4.0` | :x: | End of life |
 
 ---
 

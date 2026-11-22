@@ -828,6 +828,7 @@ Whenever the launcher stub executes a payload variant, it exports runtime metada
 
 | Environment Variable | Type | Example Value | Description |
 | :--- | :--- | :--- | :--- |
+| `MICROFAT_ORIGINAL_EXE` | `string` | `/usr/local/bin/myapp` | Original fat executable path prior to `memfd`/cache dispatch (when non-empty). Informational asset-resolution hint only; do not use as a cryptographic identity or access-control token. |
 | `MICROFAT_SELECTED_VARIANT` | `string` | `v3` | Microarchitecture level selected for execution. |
 | `MICROFAT_HOST_ARCH` | `string` | `amd64` | Detected host CPU architecture. |
 | `MICROFAT_HOST_LEVEL` | `string` | `v4` | Highest detected microarchitecture capability of host CPU. |
@@ -839,15 +840,14 @@ Whenever the launcher stub executes a payload variant, it exports runtime metada
 | `MICROFAT_SELECTED_SIZE` | `int64` | `7389447` | Uncompressed byte length of selected payload. |
 | `MICROFAT_CGROUP_VERSION` | `int` | `2` | Detected cgroup version (`1` or `2`). |
 | `MICROFAT_CGROUP_LIMIT_BYTES` | `int64` | `2147483648` | Raw container memory limit in bytes. |
+| `MICROFAT_CGROUP_HIGH_BYTES` | `int64` | `1932735283` | Container `memory.high` watermark in bytes (exported when set). |
+| `MICROFAT_CGROUP_EFFECTIVE_LIMIT_BYTES` | `int64` | `1932735283` | Effective finite container memory bound in bytes used for autotuning (exported when finite). |
 | `MICROFAT_CGROUP_CPUS` | `float64` | `4.00` | Raw container CPU CFS quota. |
 | `MICROFAT_CGROUP_GOMEMLIMIT` | `string` | `1932735283B` | Auto-computed `GOMEMLIMIT` ceiling. |
 | `MICROFAT_CGROUP_GOMAXPROCS` | `string` | `4` | Auto-computed `GOMAXPROCS` thread count. |
 | `MICROFAT_CGROUP_GOGC` | `string` | `75` | Auto-computed `GOGC` pacing target. |
+| `MICROFAT_CGROUP_GOGC_SKIPPED_REASON` | `string` | `live_heap_missing` | Reason automatic `GOGC` tuning was skipped when `GOGC` is unset in the parent environment. |
 | `MICROFAT_CGROUP_GC_PROFILE` | `string` | `latency_critical` | Active GC workload profile name. |
-
----
-
-[**← Architecture Specification**](architecture.md) | [**Main Index**](../README.md#documentation-guide) | [**Container Runtime Tuning →**](runtime-tuning.md)
 
 ### Paired server experiments
 
@@ -928,3 +928,7 @@ operational failures emit a JSON result when output can be written. JSON schema 
 Manual/Homebrew installations may check but cannot self-update. Failed activation completion may
 leave the new version active: inspect `activated` and the reported current version before recovery.
 See [installation and recovery](installation.md#explicit-release-checks-and-updates).
+
+---
+
+[**← Architecture Specification**](architecture.md) | [**Main Index**](../README.md#documentation-guide) | [**Container Runtime Tuning →**](runtime-tuning.md)
