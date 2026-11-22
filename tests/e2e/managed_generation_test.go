@@ -43,8 +43,8 @@ func managedLayoutFixture(t *testing.T, cli, minimal string) (bin, store, old st
 	bin, store = filepath.Join(root, "bin space"), filepath.Join(root, "store space")
 	require.NoError(t, os.Mkdir(bin, defaultFilePerm))
 	oldID, newID := strings.Repeat("1", 32), strings.Repeat("2", 32)
-	old = writeManagedGeneration(t, store, oldID, "0.3.0", cli, stubPath, minimal, nil)
-	writeManagedGeneration(t, store, newID, "0.3.1", cli, stubPath, minimal, []byte("new generation companion"))
+	old = writeManagedGeneration(t, store, oldID, updateFixtureVersion, cli, stubPath, minimal, nil)
+	writeManagedGeneration(t, store, newID, updateCandidateVersion, cli, stubPath, minimal, []byte("new generation companion"))
 	owner, err := json.Marshal(map[string]any{"schema": 1, "kind": "microfat-installer", "id": strings.Repeat("3", 32),
 		"uid": os.Geteuid(), "bin": bin, "store": store})
 	require.NoError(t, err)

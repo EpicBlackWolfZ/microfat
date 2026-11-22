@@ -21,8 +21,8 @@ import (
 )
 
 const updateQualification = "MICROFAT_UPDATE_TESTS"
-const updateFixtureVersion = "0.3.0"
-const updateCandidateVersion = "0.3.1"
+const updateFixtureVersion = "0.4.0"
+const updateCandidateVersion = "0.4.1"
 
 type updateCLIResult struct {
 	Status       string  `json:"status"`
