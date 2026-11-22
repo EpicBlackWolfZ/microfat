@@ -2542,3 +2542,229 @@ func TestFormat_MandatoryDictionarySHA256(t *testing.T) {
 		}
 	})
 }
+
+func TestBinaryIndex_ValidationAndBounds(t *testing.T) {
+	t.Parallel()
+
+	const (
+		validBoundary      = 4000
+		validVarOffset     = 1000
+		validVarCompSize   = 500
+		validVarUncompSize = 1000
+		pre1970Epoch       = int64(-123456789)
+	)
+
+	validVariant := VariantEntry{
+		Level:            "v1",
+		Offset:           validVarOffset,
+		CompressedSize:   validVarCompSize,
+		UncompressedSize: validVarUncompSize,
+		SHA256:           testSHA256Sample,
+		Compression:      testCompression,
+	}
+
+	t.Run("MarshalBinaryIndex rejects negative offsets and sizes", func(t *testing.T) {
+		t.Parallel()
+		cases := []struct {
+			name    string
+			mutate  func(*Index)
+			wantErr error
+		}{
+			{
+				name:    "negative DictionaryOffset",
+				mutate:  func(idx *Index) { idx.DictionaryOffset = -1 },
+				wantErr: ErrInvalidDictionary,
+			},
+			{
+				name:    "negative DictionarySize",
+				mutate:  func(idx *Index) { idx.DictionarySize = -1 },
+				wantErr: ErrInvalidDictionary,
+			},
+			{
+				name:    "negative variant Offset",
+				mutate:  func(idx *Index) { idx.Variants[0].Offset = -1 },
+				wantErr: ErrOutOfBounds,
+			},
+			{
+				name:    "negative variant CompressedSize",
+				mutate:  func(idx *Index) { idx.Variants[0].CompressedSize = -1 },
+				wantErr: ErrOutOfBounds,
+			},
+			{
+				name:    "negative variant UncompressedSize",
+				mutate:  func(idx *Index) { idx.Variants[0].UncompressedSize = -1 },
+				wantErr: ErrOutOfBounds,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				idx := &Index{
+					Version:    FormatVersion2,
+					AppName:    testAppName,
+					TargetOS:   testOSLinux,
+					TargetArch: testArchAMD64,
+					Variants:   []VariantEntry{validVariant},
+				}
+				tc.mutate(idx)
+				_, err := MarshalBinaryIndex(idx)
+				require.ErrorIs(t, err, tc.wantErr)
+			})
+		}
+	})
+
+	t.Run("Zero-size dictionary metadata rejected across Marshal, ValidateBounds, and Unmarshal", func(t *testing.T) {
+		t.Parallel()
+		const dictIDOffset = 30
+		const dictOffsetPos = 14
+		const dictIDNonZero = uint32(42)
+
+		validIdx := &Index{
+			Version:    FormatVersion2,
+			AppName:    testAppName,
+			TargetOS:   testOSLinux,
+			TargetArch: testArchAMD64,
+			Variants:   []VariantEntry{validVariant},
+		}
+		goodBytes, err := MarshalBinaryIndex(validIdx)
+		require.NoError(t, err)
+
+		metaCases := []struct {
+			name       string
+			mutateIdx  func(*Index)
+			craftBytes func([]byte) []byte
+		}{
+			{
+				name:      "non-zero DictionaryOffset",
+				mutateIdx: func(idx *Index) { idx.DictionaryOffset = validVarOffset },
+				craftBytes: func(base []byte) []byte {
+					buf := append([]byte(nil), base...)
+					binary.LittleEndian.PutUint64(buf[dictOffsetPos:dictOffsetPos+uint64FieldSize], uint64(validVarOffset))
+					return buf
+				},
+			},
+			{
+				name:      "non-zero DictionaryID",
+				mutateIdx: func(idx *Index) { idx.DictionaryID = dictIDNonZero },
+				craftBytes: func(base []byte) []byte {
+					buf := append([]byte(nil), base...)
+					binary.LittleEndian.PutUint32(buf[dictIDOffset:dictIDOffset+4], dictIDNonZero)
+					return buf
+				},
+			},
+			{
+				name:      "non-empty DictionarySHA256",
+				mutateIdx: func(idx *Index) { idx.DictionarySHA256 = "not-empty" },
+				craftBytes: func(base []byte) []byte {
+					const dictSHALenPos = 34
+					buf := make([]byte, 0, len(base)+1)
+					buf = append(buf, base[:dictSHALenPos]...)
+					buf = append(buf, 1, 'x')
+					buf = append(buf, base[dictSHALenPos+1:]...)
+					return buf
+				},
+			},
+		}
+		for _, tc := range metaCases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				idx := &Index{
+					Version:    FormatVersion2,
+					AppName:    testAppName,
+					TargetOS:   testOSLinux,
+					TargetArch: testArchAMD64,
+					Variants:   []VariantEntry{validVariant},
+				}
+				tc.mutateIdx(idx)
+				_, marshalErr := MarshalBinaryIndex(idx)
+				require.ErrorIs(t, marshalErr, ErrInvalidDictionary)
+				require.ErrorIs(t, idx.ValidateBounds(validBoundary), ErrInvalidDictionary)
+
+				crafted := tc.craftBytes(goodBytes)
+				_, unmarshalErr := UnmarshalBinaryIndex(crafted)
+				require.ErrorIs(t, unmarshalErr, ErrInvalidDictionary)
+			})
+		}
+	})
+
+	t.Run("UnmarshalBinaryIndex rejects trailing bytes", func(t *testing.T) {
+		t.Parallel()
+		idx := &Index{
+			Version:    FormatVersion2,
+			AppName:    testAppName,
+			TargetOS:   testOSLinux,
+			TargetArch: testArchAMD64,
+			Variants:   []VariantEntry{validVariant},
+		}
+		raw, err := MarshalBinaryIndex(idx)
+		require.NoError(t, err)
+
+		withTrailing := append(append([]byte(nil), raw...), 0xDE, 0xAD)
+		_, err = UnmarshalBinaryIndex(withTrailing)
+		require.ErrorIs(t, err, ErrInvalidIndexSize)
+	})
+
+	t.Run("UnmarshalBinaryIndex rejects uint64 > MaxInt64 for offsets and sizes but preserves signed CreatedUnix", func(t *testing.T) {
+		t.Parallel()
+		const highBitUint64 = uint64(math.MaxInt64) + 1
+
+		idx := &Index{
+			Version:          FormatVersion2,
+			AppName:          testAppName,
+			TargetOS:         testOSLinux,
+			TargetArch:       testArchAMD64,
+			CreatedUnix:      pre1970Epoch,
+			DictionaryOffset: 100,
+			DictionarySize:   200,
+			DictionarySHA256: testSHA256Sample,
+			Variants:         []VariantEntry{validVariant},
+		}
+		base, err := MarshalBinaryIndex(idx)
+		require.NoError(t, err)
+
+		decoded, err := UnmarshalBinaryIndex(base)
+		require.NoError(t, err)
+		require.Equal(t, pre1970Epoch, decoded.CreatedUnix)
+
+		const (
+			dictOffPos      = 14
+			dictSizePos     = 22
+			dictSHALenPos   = 34
+			varLevelPosBase = dictSHALenPos + 1 + maxSHA256HexLen
+		)
+		// Locate variant numeric fields dynamically right after AppName and variant level.
+		varNumericOffset := func(buf []byte) int {
+			pos := dictSHALenPos
+			pos += 1 + int(buf[pos])
+			pos += 1 + int(buf[pos])
+			pos += 1 + int(buf[pos])
+			pos += uint16LenPrefixSize + int(binary.LittleEndian.Uint16(buf[pos:pos+uint16LenPrefixSize]))
+			pos += uint16LenPrefixSize // variantCount
+			pos += 1 + int(buf[pos])   // variant[0].Level
+			return pos
+		}
+		vPos := varNumericOffset(base)
+		require.Greater(t, vPos, varLevelPosBase)
+
+		overflowCases := []struct {
+			name    string
+			pos     int
+			wantErr error
+		}{
+			{name: "DictionaryOffset overflow", pos: dictOffPos, wantErr: ErrInvalidDictionary},
+			{name: "DictionarySize overflow", pos: dictSizePos, wantErr: ErrInvalidDictionary},
+			{name: "variant Offset overflow", pos: vPos, wantErr: ErrOutOfBounds},
+			{name: "variant CompressedSize overflow", pos: vPos + uint64FieldSize, wantErr: ErrOutOfBounds},
+			{name: "variant UncompressedSize overflow", pos: vPos + 2*uint64FieldSize, wantErr: ErrOutOfBounds},
+		}
+		for _, tc := range overflowCases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				buf := append([]byte(nil), base...)
+				binary.LittleEndian.PutUint64(buf[tc.pos:tc.pos+uint64FieldSize], highBitUint64)
+				_, err := UnmarshalBinaryIndex(buf)
+				require.ErrorIs(t, err, tc.wantErr)
+			})
+		}
+	})
+}

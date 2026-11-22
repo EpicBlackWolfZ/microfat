@@ -68,7 +68,7 @@ run_updater() {
     fi
 }
 
-versions=(0.2.3 0.2.4 0.2.5 0.3.0 0.3.1)
+versions=(0.2.3 0.2.4 0.2.5 0.3.0 0.3.1 0.4.0)
 if [[ -n ${candidate} ]]; then versions+=("${candidate}"); fi
 for version in "${versions[@]}"; do
     args=(--version "${version}")
@@ -102,7 +102,7 @@ for version in "${versions[@]}"; do
         # Retain the older archive contract and the immediately prior release.
         # Restore the candidate with the trusted helper after each downgrade.
         for mode in memfd cache; do
-            for previous in 0.2.5 0.3.1; do
+            for previous in 0.2.5 0.4.0; do
                 run_updater "${mode}" --check --version "${previous}" --json \
                     > "${output}/updater-${mode}-${previous}-check.json"
                 run_updater "${mode}" --version "${previous}" --allow-downgrade \

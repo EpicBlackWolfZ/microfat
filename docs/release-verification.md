@@ -23,9 +23,9 @@ relative paths, mismatching bytes and nonexecutable tools fail. Ambient `COSIGN_
 options are removed before verification. Same-UID and privileged malicious writers remain outside
 this boundary.
 
-The v0.4.0 bootstrap is fixed to helper release v0.4.0. It authenticates that release's checksum file
-with Cosign, verifies `microfat-install_0.4.0_linux_<arch>`, and executes only the authenticated helper.
-Immutable v0.3.0 and v0.3.1 bootstraps retain their original helper pins. Each bootstrap's helper
+The v0.4.1 bootstrap is fixed to helper release v0.4.1. It authenticates that release's checksum file
+with Cosign, verifies `microfat-install_0.4.1_linux_<arch>`, and executes only the authenticated helper.
+Immutable v0.3.0, v0.3.1, and v0.4.0 bootstraps retain their original helper pins. Each bootstrap's helper
 version is independent of the requested product release and can install supported historical archives.
 A versioned bootstrap is usable only after its pinned helper release is published; an unsigned
 snapshot proves packaging, not publisher authentication.
@@ -96,9 +96,9 @@ workflow/tag, issuer, signed checksum and archive rules before installation. No 
 verification failure selects a different release. Same-version and newer-than-latest no-ops do
 not claim fresh artifact authentication.
 
-Native qualification installs and reinstalls signed historical releases through v0.3.1 before
+Native qualification installs and reinstalls signed historical releases through v0.4.0 before
 installing the signed draft. It executes the updater from authenticated candidate bytes, performs
-explicit downgrades to v0.2.5 and v0.3.1, and restores the candidate through the authenticated helper
+explicit downgrades to v0.2.5 and v0.4.0, and restores the candidate through the authenticated helper
 after each downgrade. The evidence records which installed CLI runs after each transition in both
 memfd and cache mode. Historical v0.2.x CLIs have no updater command. See the
 [release artifact guide](release-artifacts.md) for published release verification.

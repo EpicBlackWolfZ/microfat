@@ -1,15 +1,15 @@
 {
-  "package": "linux-image-5.15.0-203-generic",
-  "version": "5.15.0-203.213",
-  "url": "https://security.ubuntu.com/ubuntu/pool/main/l/linux-signed/linux-image-5.15.0-203-generic_5.15.0-203.213_amd64.deb",
-  "sha256": "6c589fa40523261185450e437d39456c8c3e2debf036c31b157f9fae5a803ed1",
+  "package": "linux-image-5.15.0-204-generic",
+  "version": "5.15.0-204.214",
+  "url": "https://security.ubuntu.com/ubuntu/pool/main/l/linux-signed/linux-image-5.15.0-204-generic_5.15.0-204.214_amd64.deb",
+  "sha256": "f64db5a37befdde1ca0bef10a5826614482ee903c3163e57ed776d97a5919c75",
   "suite": "jammy-security",
   "component": "main",
   "architecture": "amd64",
   "modules": {
-    "package": "linux-modules-5.15.0-203-generic",
-    "version": "5.15.0-203.213",
-    "sha256": "23a5e5edb4cf5a7d7e40ac8e93c67b6bd06e49b3922993ac9b03204000230200",
-    "url": "https://security.ubuntu.com/ubuntu/pool/main/l/linux/linux-modules-5.15.0-203-generic_5.15.0-203.213_amd64.deb"
+    "package": "linux-modules-5.15.0-204-generic",
+    "version": "5.15.0-204.214",
+    "sha256": "e205a3933a1f6551dc04e3975b46df119fe12a0ba4b5ea37bdcd30862ad69a98",
+    "url": "https://security.ubuntu.com/ubuntu/pool/main/l/linux/linux-modules-5.15.0-204-generic_5.15.0-204.214_amd64.deb"
   }
 }

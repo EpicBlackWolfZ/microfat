@@ -20,7 +20,8 @@ func TestBootstrapTrustBoundary(t *testing.T) {
 	t.Parallel()
 	for _, scenario := range []string{"success", "arm64", "verifier-tamper", "downloaded-verifier-tamper", "helper-tamper",
 		"signature", "missing-checksum", "duplicate-checksum", "invalid-checksum", "download-failure", "unsupported",
-		"relative-stage", "writable-stage", "symlink-stage", "writable-verifier", "hardlink-verifier", "noexec-staging"} {
+		"relative-stage", "writable-stage", "symlink-stage", "symlink-stage-trailing-slash", "dir-stage-trailing-slash",
+		"writable-verifier", "hardlink-verifier", "noexec-staging"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
@@ -54,7 +55,7 @@ case "${url}" in
  */checksums.txt) source=checksums ;;
  */checksums.txt.sig) source=signature ;;
  */cosign-linux-*) source=verifier ;;
- */microfat-install_0.4.0_linux_*) source=helper ;;
+ */microfat-install_0.4.1_linux_*) source=helper ;;
  *) exit 23 ;;
 esac
 /bin/cp "${TEST_ROOT}/${source}" "${out}"
@@ -80,7 +81,7 @@ esac
 			if scenario == "unsupported" {
 				uname = "riscv64"
 			}
-			checksum := fmt.Sprintf("%x  microfat-install_0.4.0_linux_%s\n", sha256.Sum256([]byte(helper)), arch)
+			checksum := fmt.Sprintf("%x  microfat-install_0.4.1_linux_%s\n", sha256.Sum256([]byte(helper)), arch)
 			switch scenario {
 			case "missing-checksum":
 				checksum = strings.ReplaceAll(checksum, "microfat-install", "unrelated")
@@ -103,9 +104,15 @@ esac
 			if scenario == "writable-stage" {
 				require.NoError(t, os.Chmod(root, 0o777))
 			}
-			if scenario == "symlink-stage" {
+			if scenario == "symlink-stage" || scenario == "symlink-stage-trailing-slash" {
 				stage = filepath.Join(root, "link")
 				require.NoError(t, os.Symlink(root, stage))
+				if scenario == "symlink-stage-trailing-slash" {
+					stage += "/"
+				}
+			}
+			if scenario == "dir-stage-trailing-slash" {
+				stage = root + "/"
 			}
 			if scenario == "relative-stage" {
 				stage = "relative"
@@ -127,18 +134,21 @@ esac
 				assert.Contains(t, string(installed), "--bin-dir\n/custom bin\n")
 				verified, err := os.ReadFile(filepath.Join(root, "verified"))
 				require.NoError(t, err)
-				assert.Contains(t, string(verified), "release.yml@refs/tags/v0.4.0")
+				assert.Contains(t, string(verified), "release.yml@refs/tags/v0.4.1")
 				assert.Contains(t, string(verified), "https://token.actions.githubusercontent.com")
 				requests, err := os.ReadFile(filepath.Join(root, "requests"))
 				require.NoError(t, err)
 				assert.Contains(t, string(requests), "--proto-redir\n=https\n")
 				assert.Contains(t, string(requests), "--max-filesize\n1048576\n")
-				assert.Contains(t, string(requests), "/releases/download/v0.4.0/microfat-install_0.4.0_linux_"+arch)
+				assert.Contains(t, string(requests), "/releases/download/v0.4.1/microfat-install_0.4.1_linux_"+arch)
 				assert.NotContains(t, string(requests), "/releases/download/v0.2.5/", "product selection must not change helper identity")
 			} else {
 				require.Error(t, err, "%s", output)
 				if scenario == "noexec-staging" {
 					assert.Contains(t, string(output), "staging must permit execution (use --staging-dir)")
+				}
+				if scenario == "symlink-stage-trailing-slash" || scenario == "dir-stage-trailing-slash" {
+					assert.Contains(t, string(output), "staging parent must be a clean absolute directory")
 				}
 				_, err = os.Stat(filepath.Join(root, "installed"))
 				require.ErrorIs(t, err, os.ErrNotExist, "untrusted helper must not execute")

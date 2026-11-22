@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -508,6 +509,12 @@ func (idx *Index) validateDictionaryBounds(indexOffset int64) (int64, error) {
 			ErrInvalidDictionary, idx.DictionarySize, MaxDictionarySize)
 	}
 
+	if err := validateZeroSizeDictionaryMetadata(
+		idx.DictionaryOffset, idx.DictionarySize, idx.DictionaryID, idx.DictionarySHA256,
+	); err != nil {
+		return 0, err
+	}
+
 	if idx.DictionarySize == 0 {
 		return 0, nil
 	}
@@ -589,6 +596,13 @@ func ValidateChecksum(s string) bool {
 	return true
 }
 
+func validateZeroSizeDictionaryMetadata(dictOffset, dictSize int64, dictID uint32, dictSHA string) error {
+	if dictSize == 0 && (dictOffset != 0 || dictID != 0 || dictSHA != "") {
+		return fmt.Errorf("%w: zero-size dictionary must not carry offset, ID, or SHA-256 metadata", ErrInvalidDictionary)
+	}
+	return nil
+}
+
 // MarshalBinaryIndex serializes an Index struct into a compact Format v2 binary representation.
 func MarshalBinaryIndex(idx *Index) ([]byte, error) {
 	if len(idx.TargetOS) > 255 || len(idx.TargetArch) > 255 || len(idx.AppName) > 65535 ||
@@ -596,6 +610,14 @@ func MarshalBinaryIndex(idx *Index) ([]byte, error) {
 		return nil, errors.New("index metadata field exceeds binary format limits")
 	}
 
+	if idx.DictionaryOffset < 0 || idx.DictionarySize < 0 {
+		return nil, fmt.Errorf("%w: dictionary offset and size must be non-negative", ErrInvalidDictionary)
+	}
+	if err := validateZeroSizeDictionaryMetadata(
+		idx.DictionaryOffset, idx.DictionarySize, idx.DictionaryID, idx.DictionarySHA256,
+	); err != nil {
+		return nil, err
+	}
 	if idx.DictionarySize > 0 && (idx.DictionarySHA256 == "" || !ValidateChecksum(idx.DictionarySHA256)) {
 		return nil, fmt.Errorf("%w: dictionary missing required SHA-256 digest in Format v2", ErrInvalidChecksum)
 	}
@@ -606,6 +628,9 @@ func MarshalBinaryIndex(idx *Index) ([]byte, error) {
 		comp := v.Compression
 		if comp == "" {
 			comp = defaultCompressionAlgorithm
+		}
+		if v.Offset < 0 || v.CompressedSize < 0 || v.UncompressedSize < 0 {
+			return nil, fmt.Errorf("%w: variant %s offset and sizes must be non-negative", ErrOutOfBounds, v.Level)
 		}
 		if v.SHA256 == "" || !ValidateChecksum(v.SHA256) {
 			return nil, fmt.Errorf("%w: variant %s missing required SHA-256 digest in Format v2", ErrInvalidChecksum, v.Level)
@@ -711,69 +736,56 @@ func UnmarshalBinaryIndex(data []byte) (*Index, error) {
 		return nil, fmt.Errorf("%w: expected binary index version %d, got %d", ErrUnsupportedVersion, FormatVersion2, version)
 	}
 
-	// #nosec G115 -- binary format integer decode
+	// #nosec G115 -- timestamps may be negative pre-1970 values (reproducible SOURCE_DATE_EPOCH)
 	createdUnix := int64(binary.LittleEndian.Uint64(data[6:14]))
-	// #nosec G115 -- binary format integer decode
-	dictOffset := int64(binary.LittleEndian.Uint64(data[14:22]))
-	// #nosec G115 -- binary format integer decode
-	dictSize := int64(binary.LittleEndian.Uint64(data[22:30]))
+	dictOffset, err := decodeNonNegativeInt64(data[14:22], ErrInvalidDictionary, "dictionary offset")
+	if err != nil {
+		return nil, err
+	}
+	dictSize, err := decodeNonNegativeInt64(data[22:30], ErrInvalidDictionary, "dictionary size")
+	if err != nil {
+		return nil, err
+	}
 	dictID := binary.LittleEndian.Uint32(data[30:34])
 
-	offset := 34
+	offset := binaryHeaderFixedSize
 
-	if offset >= len(data) {
-		return nil, fmt.Errorf("%w: truncated dictionary sha length", ErrTruncatedIndex)
+	dictSHA, offset, err := decodeUint8String(data, offset, "dictionary sha")
+	if err != nil {
+		return nil, err
 	}
-	dictSHALen := int(data[offset])
-	offset++
-	if offset+dictSHALen > len(data) {
-		return nil, fmt.Errorf("%w: truncated dictionary sha string", ErrTruncatedIndex)
+	if err := validateZeroSizeDictionaryMetadata(dictOffset, dictSize, dictID, dictSHA); err != nil {
+		return nil, err
 	}
-	dictSHA := string(data[offset : offset+dictSHALen])
-	offset += dictSHALen
-
 	if dictSize > 0 && (dictSHA == "" || !ValidateChecksum(dictSHA)) {
 		return nil, fmt.Errorf("%w: dictionary missing or invalid sha256 checksum in Format v2", ErrInvalidChecksum)
 	}
 
-	if offset >= len(data) {
-		return nil, fmt.Errorf("%w: truncated os length", ErrTruncatedIndex)
+	targetOS, offset, err := decodeUint8String(data, offset, "os")
+	if err != nil {
+		return nil, err
 	}
-	osLen := int(data[offset])
-	offset++
-	if offset+osLen > len(data) {
-		return nil, fmt.Errorf("%w: truncated os string", ErrTruncatedIndex)
+	targetArch, offset, err := decodeUint8String(data, offset, "arch")
+	if err != nil {
+		return nil, err
 	}
-	targetOS := string(data[offset : offset+osLen])
-	offset += osLen
 
-	if offset >= len(data) {
-		return nil, fmt.Errorf("%w: truncated arch length", ErrTruncatedIndex)
-	}
-	archLen := int(data[offset])
-	offset++
-	if offset+archLen > len(data) {
-		return nil, fmt.Errorf("%w: truncated arch string", ErrTruncatedIndex)
-	}
-	targetArch := string(data[offset : offset+archLen])
-	offset += archLen
-
-	if offset+2 > len(data) {
+	if offset+uint16LenPrefixSize > len(data) {
 		return nil, fmt.Errorf("%w: truncated app name length", ErrTruncatedIndex)
 	}
-	appLen := int(binary.LittleEndian.Uint16(data[offset : offset+2]))
-	offset += 2
+	appLen := int(binary.LittleEndian.Uint16(data[offset : offset+uint16LenPrefixSize]))
+	offset += uint16LenPrefixSize
 	if offset+appLen > len(data) {
 		return nil, fmt.Errorf("%w: truncated app name string", ErrTruncatedIndex)
 	}
 	appName := string(data[offset : offset+appLen])
 	offset += appLen
 
-	if offset+2 > len(data) {
+	if offset+uint16LenPrefixSize > len(data) {
 		return nil, fmt.Errorf("%w: truncated variant count", ErrTruncatedIndex)
 	}
-	variantCount := int(binary.LittleEndian.Uint16(data[offset : offset+2]))
-	offset += 2
+	variantCount := int(binary.LittleEndian.Uint16(data[offset : offset+uint16LenPrefixSize]))
+	offset += uint16LenPrefixSize
 
 	variants := make([]VariantEntry, 0, variantCount)
 	for i := range variantCount {
@@ -783,6 +795,10 @@ func UnmarshalBinaryIndex(data []byte) (*Index, error) {
 		}
 		offset = newOffset
 		variants = append(variants, entry)
+	}
+
+	if offset != len(data) {
+		return nil, fmt.Errorf("%w: unexpected trailing bytes (%d remaining)", ErrInvalidIndexSize, len(data)-offset)
 	}
 
 	return &Index{
@@ -799,56 +815,65 @@ func UnmarshalBinaryIndex(data []byte) (*Index, error) {
 	}, nil
 }
 
-func decodeBinaryVariant(data []byte, offset int, i int) (VariantEntry, int, error) {
-	if offset >= len(data) {
-		return VariantEntry{}, offset, fmt.Errorf("%w: truncated variant %d header", ErrTruncatedIndex, i)
+func decodeNonNegativeInt64(raw []byte, sentinel error, label string) (int64, error) {
+	v := binary.LittleEndian.Uint64(raw)
+	if v > math.MaxInt64 {
+		return 0, fmt.Errorf("%w: %s %d exceeds int64 range", sentinel, label, v)
 	}
-	levelLen := int(data[offset])
-	offset++
-	if offset+levelLen > len(data) {
-		return VariantEntry{}, offset, fmt.Errorf("%w: truncated variant %d level string", ErrTruncatedIndex, i)
-	}
-	level := string(data[offset : offset+levelLen])
-	offset += levelLen
+	// #nosec G115 -- checked v <= math.MaxInt64 above
+	return int64(v), nil
+}
 
-	if offset+24 > len(data) {
+func decodeUint8String(data []byte, offset int, field string) (string, int, error) {
+	if offset >= len(data) {
+		return "", offset, fmt.Errorf("%w: truncated %s length", ErrTruncatedIndex, field)
+	}
+	n := int(data[offset])
+	offset++
+	if offset+n > len(data) {
+		return "", offset, fmt.Errorf("%w: truncated %s string", ErrTruncatedIndex, field)
+	}
+	return string(data[offset : offset+n]), offset + n, nil
+}
+
+func decodeBinaryVariant(data []byte, offset int, i int) (VariantEntry, int, error) {
+	level, offset, err := decodeUint8String(data, offset, fmt.Sprintf("variant %d level", i))
+	if err != nil {
+		return VariantEntry{}, offset, err
+	}
+
+	const variantNumericFieldsSize = 3 * uint64FieldSize
+	if offset+variantNumericFieldsSize > len(data) {
 		return VariantEntry{}, offset, fmt.Errorf("%w: truncated variant %d numeric fields", ErrTruncatedIndex, i)
 	}
-	// #nosec G115 -- binary format integer decode
-	vOffset := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
-	offset += 8
-	// #nosec G115 -- binary format integer decode
-	compSize := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
-	offset += 8
-	// #nosec G115 -- binary format integer decode
-	uncompSize := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
-	offset += 8
+	vOffset, err := decodeNonNegativeInt64(data[offset:offset+uint64FieldSize], ErrOutOfBounds, "variant offset")
+	if err != nil {
+		return VariantEntry{}, offset, err
+	}
+	offset += uint64FieldSize
+	compSize, err := decodeNonNegativeInt64(data[offset:offset+uint64FieldSize], ErrOutOfBounds, "variant compressed size")
+	if err != nil {
+		return VariantEntry{}, offset, err
+	}
+	offset += uint64FieldSize
+	uncompSize, err := decodeNonNegativeInt64(data[offset:offset+uint64FieldSize], ErrOutOfBounds, "variant uncompressed size")
+	if err != nil {
+		return VariantEntry{}, offset, err
+	}
+	offset += uint64FieldSize
 
-	if offset >= len(data) {
-		return VariantEntry{}, offset, fmt.Errorf("%w: truncated variant %d sha length", ErrTruncatedIndex, i)
+	shaStr, offset, err := decodeUint8String(data, offset, fmt.Sprintf("variant %d sha", i))
+	if err != nil {
+		return VariantEntry{}, offset, err
 	}
-	shaLen := int(data[offset])
-	offset++
-	if offset+shaLen > len(data) {
-		return VariantEntry{}, offset, fmt.Errorf("%w: truncated variant %d sha string", ErrTruncatedIndex, i)
-	}
-	shaStr := string(data[offset : offset+shaLen])
-	offset += shaLen
 	if shaStr == "" || !ValidateChecksum(shaStr) {
 		return VariantEntry{}, offset, fmt.Errorf("%w: variant %d missing or invalid sha256 checksum in Format v2", ErrInvalidChecksum, i)
 	}
 
-	if offset >= len(data) {
-		return VariantEntry{}, offset, fmt.Errorf("%w: truncated variant %d compression length", ErrTruncatedIndex, i)
+	compStr, offset, err := decodeUint8String(data, offset, fmt.Sprintf("variant %d compression", i))
+	if err != nil {
+		return VariantEntry{}, offset, err
 	}
-	compLen := int(data[offset])
-	offset++
-	if offset+compLen > len(data) {
-		return VariantEntry{}, offset, fmt.Errorf("%w: truncated variant %d compression string", ErrTruncatedIndex, i)
-	}
-	compStr := string(data[offset : offset+compLen])
-	offset += compLen
-
 	if compStr == "" {
 		compStr = defaultCompressionAlgorithm
 	}

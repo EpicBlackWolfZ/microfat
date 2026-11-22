@@ -193,16 +193,9 @@ func preflight(filename string) error {
 		if err != nil {
 			return err
 		}
-		name := path.Clean(header.Name)
-		if header.Typeflag != tar.TypeReg || path.IsAbs(header.Name) || slices.Contains(strings.Split(header.Name, "/"), "..") ||
-			strings.ContainsAny(header.Name, "\\\x00") || name == "." || seen[name] {
-			return errors.New("unsafe or duplicate release archive entry")
+		if err := validatePreflightHeader(header, seen, &total); err != nil {
+			return err
 		}
-		if header.Size < 0 || header.Size > maxFileBytes || header.Size > maxArchiveBytes-total {
-			return errors.New("release archive exceeds extraction limits")
-		}
-		total += header.Size
-		seen[name] = true
 	}
 	drained, err := io.Copy(io.Discard, io.LimitReader(compressed, maxArchiveBytes+1))
 	if err != nil {
@@ -212,4 +205,38 @@ func preflight(filename string) error {
 		return errors.New("release archive trailer exceeds limit")
 	}
 	return nil
+}
+
+func validatePreflightHeader(header *tar.Header, seen map[string]bool, total *int64) error {
+	name := path.Clean(header.Name)
+	if path.IsAbs(header.Name) || slices.Contains(strings.Split(header.Name, "/"), "..") ||
+		strings.ContainsAny(header.Name, "\\\x00") {
+		return errors.New("unsafe or duplicate release archive entry")
+	}
+	switch header.Typeflag {
+	case tar.TypeDir:
+		if header.Size != 0 {
+			return errors.New("unsafe or duplicate release archive entry")
+		}
+		if name == "." {
+			return nil
+		}
+		if seen[name] {
+			return errors.New("unsafe or duplicate release archive entry")
+		}
+		seen[name] = true
+		return nil
+	case tar.TypeReg, tar.TypeRegA:
+		if name == "." || seen[name] {
+			return errors.New("unsafe or duplicate release archive entry")
+		}
+		if header.Size < 0 || header.Size > maxFileBytes || header.Size > maxArchiveBytes-*total {
+			return errors.New("release archive exceeds extraction limits")
+		}
+		*total += header.Size
+		seen[name] = true
+		return nil
+	default:
+		return errors.New("unsafe or duplicate release archive entry")
+	}
 }

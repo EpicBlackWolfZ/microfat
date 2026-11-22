@@ -147,15 +147,16 @@ func createValidFatBinaryWithCodec(t *testing.T, arch string, tiers []string, di
 	var compVariantsBuf bytes.Buffer
 	var variantEntries []format.VariantEntry
 
-	dictOffset := int64(len(stubBytes))
+	var dictOffset int64
 	dictSize := int64(len(dict))
 	dictHash := ""
+	payloadOffset := int64(len(stubBytes))
 	if dictSize > 0 {
+		dictOffset = payloadOffset
 		h := sha256.Sum256(dict)
 		dictHash = hex.EncodeToString(h[:])
+		payloadOffset += dictSize
 	}
-
-	payloadOffset := dictOffset + dictSize
 
 	for _, tier := range tiers {
 		variantPayload := getCompiledTestBinary(t, arch, tier)

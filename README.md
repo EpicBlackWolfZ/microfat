@@ -35,6 +35,7 @@ Explore the specialized deep-dive documentation in the [`docs/`](docs/) and [`ex
 
 | Guide | Description |
 | :--- | :--- |
+| [**v0.4.1 Release Notes**](docs/releases/v0.4.1.md) | Security hardening, Format v2 index validation, launcher telemetry, and installer updates (pre-publication). |
 | [**v0.4.0 Release Notes**](docs/releases/v0.4.0.md) | Format v2 migration, reproducible packaging, `runtimeinfo`, cold-cache speedup, and release acceptance evidence. |
 | [**v0.3.1 Release Notes**](docs/releases/v0.3.1.md) | Installer and dictionary fixes, dependency updates, and release acceptance evidence. |
 | [**v0.3.0 Release Notes**](docs/releases/v0.3.0.md) | Verified installation, updates, Linux Homebrew and release acceptance evidence. |

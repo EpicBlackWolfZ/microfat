@@ -146,3 +146,24 @@ func TestVerifierInterpreterExecutionDenied(t *testing.T) {
 	require.ErrorContains(t, err, "verifier execution denied")
 	require.ErrorContains(t, err, "--staging-dir")
 }
+
+func TestVerifyDigest_SymlinkAndDirectoryRejected(t *testing.T) {
+	t.Parallel()
+	const limit = 1024
+	dir := t.TempDir()
+	realFile := filepath.Join(dir, "real")
+	payload := []byte("verified")
+	require.NoError(t, os.WriteFile(realFile, payload, 0o600))
+	sum := sha256.Sum256(payload)
+	digest := hex.EncodeToString(sum[:])
+
+	require.NoError(t, VerifyDigest(realFile, digest, limit))
+
+	link := filepath.Join(dir, "link")
+	require.NoError(t, os.Symlink(realFile, link))
+	err := VerifyDigest(link, digest, limit)
+	require.ErrorContains(t, err, "bounded regular")
+
+	err = VerifyDigest(dir, digest, limit)
+	require.ErrorContains(t, err, "bounded regular")
+}

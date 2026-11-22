@@ -6,7 +6,7 @@ microfat_bootstrap() (
     set -euo pipefail
     IFS=$'\n\t'
 
-    readonly helper_version='0.4.0'
+    readonly helper_version='0.4.1'
     # renovate: datasource=github-release-attachments depName=sigstore/cosign
     readonly cosign_amd64='v3.1.4@424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa'
     # renovate: datasource=github-release-attachments depName=sigstore/cosign
@@ -33,6 +33,9 @@ microfat_bootstrap() (
     safe_staging_parent() {
         local parent=$1 info owner mode
         [[ ${parent} == /* ]] || fail 'staging parent must be absolute'
+        if [[ ${parent} != / && ${parent} == */ ]]; then
+            fail 'staging parent must be a clean absolute directory'
+        fi
         case "${parent}" in
             */../*|*/..|*/./*|*/.|*//*) fail 'staging parent must be a clean absolute directory' ;;
         esac

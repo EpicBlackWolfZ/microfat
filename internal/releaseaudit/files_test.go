@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/EpicBlackWolfZ/microfat/benchmarks/process"
+	"github.com/EpicBlackWolfZ/microfat/internal/releasecheck"
 	"github.com/stretchr/testify/require"
 )
 
@@ -150,4 +152,112 @@ func writeChecksum(t *testing.T, value string) string {
 	filename := filepath.Join(t.TempDir(), "checksums.txt")
 	write(t, filename, strings.TrimSpace(value)+"\n")
 	return filename
+}
+
+func TestPreflight_TarEntryTypes(t *testing.T) {
+	t.Parallel()
+
+	writeTarGz := func(t *testing.T, entries []struct {
+		hdr  tar.Header
+		body []byte
+	}) string {
+		t.Helper()
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(gz)
+		for _, e := range entries {
+			hdr := e.hdr
+			hdr.Size = int64(len(e.body))
+			if e.hdr.Size != 0 {
+				hdr.Size = e.hdr.Size
+			}
+			require.NoError(t, tw.WriteHeader(&hdr))
+			if len(e.body) > 0 {
+				_, err := tw.Write(e.body)
+				require.NoError(t, err)
+			}
+		}
+		require.NoError(t, tw.Close())
+		require.NoError(t, gz.Close())
+		archive := filepath.Join(t.TempDir(), "release.tar.gz")
+		require.NoError(t, os.WriteFile(archive, buf.Bytes(), fileMode))
+		return archive
+	}
+
+	t.Run("allows root directory, subdirectories, TypeReg, and legacy TypeRegA", func(t *testing.T) {
+		t.Parallel()
+		archive := writeTarGz(t, []struct {
+			hdr  tar.Header
+			body []byte
+		}{
+			{hdr: tar.Header{Name: "./", Typeflag: tar.TypeDir, Mode: 0o755}},
+			{hdr: tar.Header{Name: "sub/", Typeflag: tar.TypeDir, Mode: 0o755}},
+			{hdr: tar.Header{Name: "sub/README.md", Typeflag: tar.TypeReg, Mode: 0o644}, body: []byte("readme")},
+			{hdr: tar.Header{Name: "sub/legacy.txt", Typeflag: tar.TypeRegA, Mode: 0o644}, body: []byte("legacy")},
+		})
+		require.NoError(t, preflight(archive))
+		dest := t.TempDir()
+		require.NoError(t, releasecheck.ExtractArchiveSafely(archive, dest))
+	})
+
+	t.Run("rejects directory with non-zero size", func(t *testing.T) {
+		t.Parallel()
+		var rawTar bytes.Buffer
+		tw := tar.NewWriter(&rawTar)
+		body := []byte("bad")
+		require.NoError(t, tw.WriteHeader(&tar.Header{Name: "sub", Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len(body))}))
+		_, err := tw.Write(body)
+		require.NoError(t, err)
+		require.NoError(t, tw.Close())
+
+		rawBytes := rawTar.Bytes()
+		const typeflagOffset = 156
+		const chksumOffset = 148
+		const chksumLen = 8
+		const headerLen = 512
+		rawBytes[typeflagOffset] = tar.TypeDir
+		for i := range chksumLen {
+			rawBytes[chksumOffset+i] = ' '
+		}
+		var sum int
+		for _, b := range rawBytes[:headerLen] {
+			sum += int(b)
+		}
+		copy(rawBytes[chksumOffset:chksumOffset+chksumLen], fmt.Sprintf("%06o\x00 ", sum))
+
+		var compressed bytes.Buffer
+		gz := gzip.NewWriter(&compressed)
+		_, err = gz.Write(rawBytes)
+		require.NoError(t, err)
+		require.NoError(t, gz.Close())
+
+		archive := filepath.Join(t.TempDir(), "non-zero-dir.tar.gz")
+		require.NoError(t, os.WriteFile(archive, compressed.Bytes(), fileMode))
+		require.ErrorContains(t, preflight(archive), "unsafe or duplicate release archive entry")
+	})
+
+	t.Run("rejects duplicate directory entry", func(t *testing.T) {
+		t.Parallel()
+		archive := writeTarGz(t, []struct {
+			hdr  tar.Header
+			body []byte
+		}{
+			{hdr: tar.Header{Name: "sub/", Typeflag: tar.TypeDir, Mode: 0o755}},
+			{hdr: tar.Header{Name: "./sub", Typeflag: tar.TypeDir, Mode: 0o755}},
+		})
+		require.ErrorContains(t, preflight(archive), "unsafe or duplicate release archive entry")
+	})
+
+	t.Run("rejects symlink and hardlink entries", func(t *testing.T) {
+		t.Parallel()
+		for _, tf := range []byte{tar.TypeSymlink, tar.TypeLink} {
+			archive := writeTarGz(t, []struct {
+				hdr  tar.Header
+				body []byte
+			}{
+				{hdr: tar.Header{Name: "bad", Typeflag: tf, Linkname: "target", Mode: 0o777}},
+			})
+			require.ErrorContains(t, preflight(archive), "unsafe or duplicate release archive entry")
+		}
+	})
 }
