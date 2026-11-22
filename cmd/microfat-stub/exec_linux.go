@@ -3,8 +3,6 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -26,9 +24,7 @@ import (
 
 const (
 	privateCacheDirMode = 0o700
-	privateExecMode     = 0o700
 	extraEnvCapacity    = 16
-	maxTempFileAttempts = 1000
 	sha256HexDigestLen  = 64
 	// memfdTargetSeals defines the mandatory Linux kernel memory file descriptor seals applied to
 	// anonymous RAM payloads prior to execution via /proc/self/fd/<fd>.
@@ -51,7 +47,6 @@ var (
 	resolveCacheDirFunc         = format.ResolveCacheDirFD
 	resolveExistingCacheDirFunc = format.ResolveExistingCacheDirFD
 	userHomeDirFunc             = os.UserHomeDir
-	cryptoRandReader            = rand.Reader
 	openCachedBinaryFunc        = func(path string) (int, error) {
 		return cache.OpenFileFunc(path)
 	}
@@ -154,12 +149,13 @@ func executeExistingCache(
 	defer func() { _ = unix.Close(dirFD) }()
 	fd, err := cache.OpenAndValidateVariantAtFDWithOpener(dirFD, entry.SHA256, entry, false, openCachedBinaryAtFunc)
 	if err != nil {
-		if cache.IsSymlinkErr(err) || errors.Is(err, cache.ErrNonRegularFile) || errors.Is(err, cache.ErrUnsafeFile) {
+		if isUnsafeCacheEntryErr(err) {
+			reason := unsafeCacheReason(err)
 			if cache.IsSymlinkErr(err) {
-				err = fmt.Errorf("refusal to execute symlink: %w", err)
+				err = fmt.Errorf("%s: %w", reason, err)
 			}
 			return false, handleCacheError(format.ErrCacheWrite, format.StageCacheCreateTemp, err,
-				nil, format.ExecModeAuto, hostInfo, entry, policyRes, "refusal to execute unsafe cache entry")
+				nil, format.ExecModeAuto, hostInfo, entry, policyRes, reason)
 		}
 		return false, nil
 	}
@@ -718,16 +714,12 @@ func executeViaCache(
 	var decompDuration time.Duration
 
 	fd, openErr := openAndValidateCacheAtFD(dirFD, cachedName, entry)
-	if openErr != nil &&
-		(cache.IsSymlinkErr(openErr) || errors.Is(openErr, cache.ErrNonRegularFile) || errors.Is(openErr, cache.ErrUnsafeFile)) {
-		reason := "refusal to execute unsafe cache entry"
-		if cache.IsSymlinkErr(openErr) {
-			reason = "refusal to execute symlink"
-		}
+	if openErr != nil && isUnsafeCacheEntryErr(openErr) {
+		reason := unsafeCacheReason(openErr)
 		rawErr := fmt.Errorf("%s at %s: %w", reason, cachedBinary, openErr)
 		return handleCacheError(
 			format.ErrCacheWrite, format.StageCacheCreateTemp, rawErr,
-			primaryErr, requestedMode, hostInfo, entry, policyRes, "symlink detected in cache",
+			primaryErr, requestedMode, hostInfo, entry, policyRes, reason,
 		)
 	}
 
@@ -772,22 +764,15 @@ func executeViaCache(
 	)
 }
 
-func createTempFileAt(dirFD int, dirPath string) (int, string, string, error) {
-	var rnd [8]byte
-	for range maxTempFileAttempts {
-		if _, err := io.ReadFull(cryptoRandReader, rnd[:]); err != nil {
-			return -1, "", "", fmt.Errorf("generating random suffix: %w", err)
-		}
-		name := fmt.Sprintf(".exec-%s.tmp", hex.EncodeToString(rnd[:]))
-		fd, err := unix.Openat(dirFD, name, unix.O_RDWR|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC, privateExecMode)
-		if err == nil {
-			return fd, name, filepath.Join(dirPath, name), nil
-		}
-		if !errors.Is(err, unix.EEXIST) && !errors.Is(err, syscall.EEXIST) {
-			return -1, "", "", err
-		}
+func isUnsafeCacheEntryErr(err error) bool {
+	return cache.IsSymlinkErr(err) || errors.Is(err, cache.ErrNonRegularFile) || errors.Is(err, cache.ErrUnsafeFile)
+}
+
+func unsafeCacheReason(err error) string {
+	if cache.IsSymlinkErr(err) {
+		return "refusal to execute symlink"
 	}
-	return -1, "", "", errors.New("failed to create temporary file in cache directory")
+	return "refusal to execute unsafe cache entry"
 }
 
 func openAndValidateCacheAtFD(dirFD int, name string, entry *format.VariantEntry) (int, error) {

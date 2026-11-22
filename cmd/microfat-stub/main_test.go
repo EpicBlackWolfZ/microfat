@@ -2943,39 +2943,121 @@ func TestOpenAndValidateCacheFD_SecurityContract(t *testing.T) {
 	})
 }
 
-type failReader struct{}
-
-func (failReader) Read([]byte) (int, error) {
-	return 0, errors.New("simulated rand failure")
-}
-
-func TestCreateTempFileAt_Errors(t *testing.T) {
+func TestCacheExecution_UnsafeEntryErrorTelemetryDetails(t *testing.T) {
 	tmpDir := t.TempDir()
-	dirFD, err := unix.Open(tmpDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
-	if err != nil {
-		t.Fatalf("open dir: %v", err)
+	payload := []byte("unsafe cache entry telemetry payload")
+	entry, rawFile := createDummyVariantFile(t, tmpDir, payload)
+	defer func() { _ = rawFile.Close() }()
+
+	hostInfo := microarch.Info{
+		OS:    testOSLinux,
+		Arch:  testArchAMD64,
+		Level: "v1",
 	}
-	defer func() { _ = unix.Close(dirFD) }()
+	policyRes := microarch.PolicyResult{
+		SelectedVariant: "v1",
+	}
 
-	t.Run("InvalidDirFD", func(t *testing.T) {
-		fd, _, _, err := createTempFileAt(-1, tmpDir)
-		if err == nil {
-			_ = unix.Close(fd)
-			t.Fatalf("expected error for invalid dirFD, got nil")
+	origExecve := execveFunc
+	t.Cleanup(func() { execveFunc = origExecve })
+	execveFunc = func(string, []string, []string) error {
+		return errors.New("execve must not be called on unsafe cache entries")
+	}
+
+	cases := []struct {
+		name        string
+		setupEntry  func(t *testing.T, cacheDir, targetPath string)
+		wantDetails string
+	}{
+		{
+			name: "symlink entry",
+			setupEntry: func(t *testing.T, cacheDir, targetPath string) {
+				t.Helper()
+				trap := filepath.Join(cacheDir, "trap")
+				require.NoError(t, os.WriteFile(trap, []byte("trap"), 0o700))
+				require.NoError(t, os.Symlink(trap, targetPath))
+			},
+			wantDetails: "refusal to execute symlink",
+		},
+		{
+			name: "non-regular directory entry",
+			setupEntry: func(t *testing.T, _ string, targetPath string) {
+				t.Helper()
+				require.NoError(t, os.Mkdir(targetPath, 0o700))
+			},
+			wantDetails: "refusal to execute unsafe cache entry",
+		},
+		{
+			name: "world-writable unsafe regular file",
+			setupEntry: func(t *testing.T, _ string, targetPath string) {
+				t.Helper()
+				require.NoError(t, os.WriteFile(targetPath, payload, 0o700))
+				require.NoError(t, os.Chmod(targetPath, 0o777))
+			},
+			wantDetails: "refusal to execute unsafe cache entry",
+		},
+	}
+
+	captureTelemetry := func(t *testing.T, fn func()) format.ErrorTelemetry {
+		t.Helper()
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+		oldStderr := os.Stderr
+		os.Stderr = w
+		defer func() { os.Stderr = oldStderr }()
+
+		fn()
+
+		require.NoError(t, w.Close())
+		data, readErr := io.ReadAll(r)
+		require.NoError(t, readErr)
+		require.NoError(t, r.Close())
+
+		var telemetry format.ErrorTelemetry
+		for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+			if strings.HasPrefix(line, "[microfat] ") {
+				require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(line, "[microfat] ")), &telemetry))
+			}
 		}
-	})
+		require.NotEmpty(t, telemetry.Event, "expected JSON error telemetry on stderr, got: %s", string(data))
+		return telemetry
+	}
 
-	t.Run("CryptoRandReaderError", func(t *testing.T) {
-		origRand := cryptoRandReader
-		defer func() { cryptoRandReader = origRand }()
-		cryptoRandReader = failReader{}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cacheHome := t.TempDir()
+			microfatCache := filepath.Join(cacheHome, "microfat")
+			require.NoError(t, os.MkdirAll(microfatCache, 0o700))
+			targetPath := filepath.Join(microfatCache, entry.SHA256)
+			tc.setupEntry(t, cacheHome, targetPath)
 
-		fd, _, _, err := createTempFileAt(dirFD, tmpDir)
-		if err == nil {
-			_ = unix.Close(fd)
-			t.Fatalf("expected error on rand reader failure, got nil")
-		}
-	})
+			t.Setenv("XDG_CACHE_HOME", cacheHome)
+			t.Setenv(format.EnvLog, "json")
+			t.Setenv(format.EnvDebug, "")
+
+			viaCacheTelemetry := captureTelemetry(t, func() {
+				err := executeViaCache(
+					rawFile.Name(), rawFile, entry, nil,
+					[]string{testAppArg}, []string{testPathEnv},
+					hostInfo, policyRes, nil, time.Now(),
+				)
+				require.ErrorIs(t, err, format.ErrCacheWrite)
+				require.ErrorContains(t, err, tc.wantDetails)
+			})
+			require.Equal(t, tc.wantDetails, viaCacheTelemetry.Details)
+			require.NotEqual(t, "symlink detected in cache", viaCacheTelemetry.Details)
+
+			tryCachedTelemetry := captureTelemetry(t, func() {
+				tried, err := executeExistingCache(
+					rawFile.Name(), entry, []string{testAppArg}, []string{testPathEnv},
+					hostInfo, policyRes, time.Now(),
+				)
+				require.False(t, tried)
+				require.ErrorIs(t, err, format.ErrCacheWrite)
+			})
+			require.Equal(t, tc.wantDetails, tryCachedTelemetry.Details)
+		})
+	}
 }
 
 func TestCacheExecution_PostExtractionValidationFailure(t *testing.T) {
