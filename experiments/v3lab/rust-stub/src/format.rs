@@ -411,7 +411,9 @@ mod tests {
     use super::*;
     use crate::sha256::encode_hex_lower;
 
-    fn build_valid_index(variants: &[(&[u8], i64, i64, i64, &[u8])]) -> Vec<u8> {
+    type TestVariantSpec<'a> = (&'a [u8], i64, i64, i64, &'a [u8]);
+
+    fn build_valid_index(variants: &[TestVariantSpec<'_>]) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(INDEX_MAGIC_V2);
         out.extend_from_slice(&FORMAT_VERSION_2.to_le_bytes());

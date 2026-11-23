@@ -146,7 +146,7 @@ fn create_sealable_memfd() -> RawFd {
     // SAFETY: NUL-terminated static string passed cleanly to `memfd_create`.
     let fd = unsafe {
         libc::memfd_create(
-            b"microfat-rs\0".as_ptr().cast(),
+            c"microfat-rs".as_ptr(),
             libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING,
         )
     };
