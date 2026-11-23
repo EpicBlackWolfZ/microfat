@@ -13,9 +13,14 @@ name = "microfat-stub-rs"
 path = "src/main.rs"
 
 [dependencies]
-libc = "0.2"
-ruzstd = { version = "0.9.1", default-features = false, features = ["std", "hash"] }
-lz4_flex = { version = "0.14.2", default-features = false, features = ["std", "safe-decode", "checked-decode", "frame"] }
+libc = { version = "0.2", default-features = false }
+zrip-core = { version = "0.14.0", default-features = false, features = ["alloc"] }
+zrip-decode = { version = "0.8.18", default-features = false, features = ["alloc"] }
+lz4_flex = { version = "0.14.2", default-features = false, features = ["alloc", "checked-decode"] }
+twox-hash = { version = "2.1.5", default-features = false, features = ["xxhash32"] }
+
+[profile.dev]
+panic = "abort"
 
 [profile.release]
 opt-level = "z"
@@ -24,7 +29,10 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
-[profile.release.package.ruzstd]
+[profile.release.package.zrip-core]
+opt-level = 3
+
+[profile.release.package.zrip-decode]
 opt-level = 3
 
 [profile.release.package.lz4_flex]

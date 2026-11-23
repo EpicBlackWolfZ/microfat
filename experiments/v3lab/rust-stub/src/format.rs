@@ -1,7 +1,8 @@
 //! Format v2 EOF trailer and compact binary index parser matching `internal/format/format.go`.
 
 use crate::microarch::{
-    amd64_level_str, is_compatible_level, parse_level_rank, HostCaps, TargetArch,
+    amd64_level_str, is_compatible_level, parse_level_rank, should_replace_variant_with_policy,
+    HostCaps, SelectionPolicy, TargetArch,
 };
 use crate::sha256::{decode_hex_digest, Sha256};
 
@@ -322,6 +323,24 @@ pub fn parse_and_select_v2_index<'a>(
     expected_arch: &[u8],
     host: HostCaps,
 ) -> Result<ValidatedIndex<'a>, FormatError> {
+    parse_and_select_v2_index_with_policy(
+        index_bytes,
+        index_offset,
+        expected_arch,
+        host,
+        &SelectionPolicy::default_none(),
+    )
+}
+
+/// Parses a Format v2 compact binary index and applies explicit `SelectionPolicy` overrides
+/// while preserving strict host CPU compatibility (SIGILL-freedom) and segment disjointness.
+pub fn parse_and_select_v2_index_with_policy<'a>(
+    index_bytes: &'a [u8],
+    index_offset: u64,
+    expected_arch: &[u8],
+    host: HostCaps,
+    policy: &SelectionPolicy,
+) -> Result<ValidatedIndex<'a>, FormatError> {
     match host {
         HostCaps::Amd64(r) if amd64_level_str(r).is_none() => {
             return Err(FormatError::NoCompatibleVariant);
@@ -403,7 +422,7 @@ pub fn parse_and_select_v2_index<'a>(
             }
         }
 
-        if should_replace_variant(best.map(|b| b.rank), cand.rank, host) {
+        if should_replace_variant_with_policy(best.map(|b| b.rank), cand.rank, host, policy) {
             best = Some(cand);
         }
     }
@@ -530,6 +549,54 @@ mod tests {
         assert_eq!(
             parse_and_select_v2_index(&idx, 2000, b"amd64", HostCaps::Amd64(2)),
             Err(FormatError::TrailingBytes)
+        );
+    }
+
+    #[test]
+    fn enforces_selection_policy_overrides() {
+        let idx = build_valid_index(
+            b"amd64",
+            &[
+                (b"v1", 1000, 100, 200, b"zstd"),
+                (b"v2", 1100, 100, 200, b"zstd"),
+                (b"v3", 1200, 100, 200, b"zstd"),
+                (b"v4", 1300, 100, 200, b"zstd"),
+            ],
+        );
+        let host = HostCaps::Amd64(3);
+
+        let p_force = SelectionPolicy {
+            force_rank: Some(1),
+            ..SelectionPolicy::default_none()
+        };
+        assert_eq!(
+            parse_and_select_v2_index_with_policy(&idx, 2000, b"amd64", host, &p_force)
+                .unwrap()
+                .selected
+                .level,
+            b"v1"
+        );
+
+        let p_force_unsafe = SelectionPolicy {
+            force_rank: Some(4),
+            ..SelectionPolicy::default_none()
+        };
+        assert_eq!(
+            parse_and_select_v2_index_with_policy(&idx, 2000, b"amd64", host, &p_force_unsafe),
+            Err(FormatError::NoCompatibleVariant)
+        );
+
+        let mut p_dis = SelectionPolicy {
+            max_rank: Some(3),
+            ..SelectionPolicy::default_none()
+        };
+        p_dis.push_disabled(3);
+        assert_eq!(
+            parse_and_select_v2_index_with_policy(&idx, 2000, b"amd64", host, &p_dis)
+                .unwrap()
+                .selected
+                .level,
+            b"v2"
         );
     }
 }
