@@ -34,7 +34,7 @@ const (
 	nativeOutside          = "outside"
 	nativeProofTimeout     = 15 * time.Second
 	nativeHelperLifetime   = time.Minute
-	nativePollTimeout      = 1000
+	nativePollTimeout      = time.Second
 	nativeDirectoryMode    = 0o755
 	nativeMarkerMode       = 0o600
 )
@@ -197,18 +197,158 @@ func nativeOpenOrphan(t *testing.T, pid int) *nativeOrphan {
 	return child
 }
 
+func nativePollWith(
+	fd int,
+	timeout time.Duration,
+	poll func([]unix.PollFd, int) (int, error),
+	now func() time.Time,
+) (int, error) {
+	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+	var deadline time.Time
+	if timeout > 0 {
+		deadline = now().Add(timeout)
+	}
+	for {
+		fds[0].Revents = 0
+		timeoutMillis := 0
+		if timeout > 0 {
+			remaining := max(deadline.Sub(now()), 0)
+			timeoutMillis = int(remaining / time.Millisecond)
+			if remaining > 0 && timeoutMillis == 0 {
+				timeoutMillis = 1
+			}
+		}
+		ready, err := poll(fds, timeoutMillis)
+		if errors.Is(err, unix.EINTR) {
+			if timeout <= 0 || now().Before(deadline) {
+				continue
+			}
+			// Perform one final non-blocking probe once the positive timeout deadline expires.
+			timeout = 0
+			continue
+		}
+		return ready, err
+	}
+}
+
 func nativeAssertAlive(t *testing.T, fd int) {
 	t.Helper()
-	ready, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, 0)
+	ready, err := nativePollWith(fd, 0, unix.Poll, time.Now)
 	require.NoError(t, err)
 	require.Zero(t, ready, "outside process was terminated by delegation cleanup")
 }
 
 func nativeAssertExited(t *testing.T, fd int) {
 	t.Helper()
-	ready, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, nativePollTimeout)
+	ready, err := nativePollWith(fd, nativePollTimeout, unix.Poll, time.Now)
 	require.NoError(t, err)
 	require.Equal(t, 1, ready, "owned process survived delegation cleanup")
+}
+
+func TestNativePollWithRetriesEINTR(t *testing.T) {
+	t.Parallel()
+
+	const (
+		testFD             = 42
+		quarterSecond      = 250 * time.Millisecond
+		subMillisecondStep = 999*time.Millisecond + 500*time.Microsecond
+		pastDeadlineStep   = 1500 * time.Millisecond
+		fullTimeoutMillis  = 1000
+		remAfterQuarter    = 750
+	)
+
+	type pollOutcome struct {
+		advance time.Duration
+		ready   int
+		err     error
+	}
+
+	cases := []struct {
+		name         string
+		timeout      time.Duration
+		outcomes     []pollOutcome
+		wantTimeouts []int
+		wantReady    int
+		wantErr      error
+	}{
+		{
+			name:    "zero timeout retries EINTR until alive",
+			timeout: 0,
+			outcomes: []pollOutcome{
+				{err: unix.EINTR},
+				{err: unix.EINTR},
+				{ready: 0, err: nil},
+			},
+			wantTimeouts: []int{0, 0, 0},
+			wantReady:    0,
+		},
+		{
+			name:    "positive timeout shrinks remaining wait across EINTR",
+			timeout: nativePollTimeout,
+			outcomes: []pollOutcome{
+				{advance: quarterSecond, err: unix.EINTR},
+				{advance: subMillisecondStep - quarterSecond, err: unix.EINTR},
+				{ready: 1, err: nil},
+			},
+			wantTimeouts: []int{fullTimeoutMillis, remAfterQuarter, 1},
+			wantReady:    1,
+		},
+		{
+			name:    "expired positive timeout performs final zero-timeout probe",
+			timeout: nativePollTimeout,
+			outcomes: []pollOutcome{
+				{advance: pastDeadlineStep, err: unix.EINTR},
+				{ready: 1, err: nil},
+			},
+			wantTimeouts: []int{fullTimeoutMillis, 0},
+			wantReady:    1,
+		},
+		{
+			name:    "non-EINTR error returns immediately",
+			timeout: nativePollTimeout,
+			outcomes: []pollOutcome{
+				{err: unix.EBADF},
+			},
+			wantTimeouts: []int{fullTimeoutMillis},
+			wantErr:      unix.EBADF,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			clock := time.Unix(0, 0)
+			var seenTimeouts []int
+			calls := 0
+
+			ready, err := nativePollWith(
+				testFD,
+				tc.timeout,
+				func(fds []unix.PollFd, timeoutMillis int) (int, error) {
+					require.Len(t, fds, 1)
+					require.Equal(t, int32(testFD), fds[0].Fd)
+					require.Equal(t, int16(unix.POLLIN), fds[0].Events)
+					require.Less(t, calls, len(tc.outcomes))
+
+					seenTimeouts = append(seenTimeouts, timeoutMillis)
+					outcome := tc.outcomes[calls]
+					calls++
+					clock = clock.Add(outcome.advance)
+					return outcome.ready, outcome.err
+				},
+				func() time.Time { return clock },
+			)
+
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tc.wantReady, ready)
+			assert.Equal(t, tc.wantTimeouts, seenTimeouts)
+		})
+	}
 }
 
 func nativeAssertMembership(t *testing.T, pid int, group string) {
