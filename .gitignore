@@ -10,3 +10,7 @@ results/
 
 # Local implementation plans and verification evidence
 .work/
+
+# Formal verification and lab build artifacts
+formal/lean/.lake/
+experiments/v3lab/rust-stub/target/
