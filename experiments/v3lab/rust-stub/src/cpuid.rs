@@ -19,6 +19,7 @@ use microfat_stub_core::microarch::ARM_LVL_V8_0;
 use microfat_stub_core::microarch::HostCaps;
 
 #[cfg(target_arch = "x86_64")]
+#[cfg_attr(test, allow(dead_code))]
 #[inline]
 fn cpuid_count(leaf: u32, subleaf: u32) -> (u32, u32, u32, u32) {
     let res = core::arch::x86_64::__cpuid_count(leaf, subleaf);
@@ -26,6 +27,7 @@ fn cpuid_count(leaf: u32, subleaf: u32) -> (u32, u32, u32, u32) {
 }
 
 #[cfg(target_arch = "x86_64")]
+#[cfg_attr(test, allow(dead_code))]
 #[inline]
 unsafe fn read_xcr0() -> u64 {
     let eax: u32;
@@ -45,6 +47,7 @@ unsafe fn read_xcr0() -> u64 {
 
 /// Probes host x86-64 CPUID leaves and OS XSAVE state and returns the 21-bit feature set.
 #[cfg(target_arch = "x86_64")]
+#[cfg_attr(test, allow(dead_code))]
 pub fn probe_x86_features() -> X86Features {
     let mut bits = 0u32;
     let (max_basic, _, _, _) = cpuid_count(0, 0);
@@ -237,6 +240,44 @@ pub fn parse_arm64_auxv_features(auxv: &[u8]) -> Arm64Features {
     arm64_features_from_hwcap(hwcap, hwcap2)
 }
 
+#[cfg(target_arch = "aarch64")]
+fn read_proc_auxv() -> alloc::vec::Vec<u8> {
+    let mut out = alloc::vec::Vec::new();
+    // SAFETY: static NUL-terminated path passed to read-only open.
+    let fd = unsafe {
+        libc::open(
+            c"/proc/self/auxv".as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return out;
+    }
+    let mut buf = [0u8; 512];
+    while out.len() < 16 * 1024 {
+        // SAFETY: `fd` is valid and `buf` is stack-allocated writable memory.
+        let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
+        if n < 0 {
+            // SAFETY: thread-local errno pointer on Linux.
+            let err = unsafe { *libc::__errno_location() };
+            if err == libc::EINTR {
+                continue;
+            }
+            break;
+        }
+        if n == 0 {
+            break;
+        }
+        out.extend_from_slice(&buf[..n as usize]);
+    }
+    // SAFETY: `fd` was returned by `libc::open`.
+    unsafe {
+        let _ = libc::close(fd);
+    }
+    out
+}
+
+#[cfg_attr(test, allow(dead_code))]
 pub fn detect_host_caps() -> HostCaps {
     #[cfg(target_arch = "x86_64")]
     {
@@ -251,7 +292,7 @@ pub fn detect_host_caps() -> HostCaps {
         let feat = if hwcap != 0 || hwcap2 != 0 {
             arm64_features_from_hwcap(hwcap, hwcap2)
         } else {
-            let auxv = std::fs::read("/proc/self/auxv").unwrap_or_default();
+            let auxv = read_proc_auxv();
             parse_arm64_auxv_features(&auxv)
         };
         HostCaps::Arm64(evaluate_arm64_mask(feat) | ARM_LVL_V8_0)
