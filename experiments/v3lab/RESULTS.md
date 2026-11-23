@@ -1,10 +1,10 @@
 # Post-`v0.4.1` Formal Verification & Compression Research Results (`v3lab`)
 
-- **Topic Branch**: `feat/formal-verification-and-v3-lab` (rebased cleanly onto `origin/main` `4dd5dbf`)
+- **Topic Branches**: Phase 1 (`#502`) merged onto `origin/main` (`d6f6ff6`); Phase 2 Track 1 (`perf/rust-stub-shani-musl`) advances [`microfat-stub-rs`](rust-stub/) on top of `d6f6ff6`
 - **Design Decision & Promotion Gates**: [ADR-0001](../../docs/design/adr-0001-formal-verification-and-v3-lab.md)
 - **Related Issues**: [#378](https://github.com/EpicBlackWolfZ/microfat/issues/378), [#497](https://github.com/EpicBlackWolfZ/microfat/issues/497), [#498](https://github.com/EpicBlackWolfZ/microfat/issues/498), [#499](https://github.com/EpicBlackWolfZ/microfat/issues/499), [#500](https://github.com/EpicBlackWolfZ/microfat/issues/500), [#501](https://github.com/EpicBlackWolfZ/microfat/issues/501)
 
-This document summarizes all observed verification results, benchmarks, and promotion-gate assessments from the post-`v0.4.1` dual-track engineering sprint. Every figure below comes directly from artifacts and command runs on this machine; unverified production claims or absent hardware backends (specifically absent CUDA Toolkit / `nvrtc.h` for Bend GPU codegen) are explicitly noted.
+This document summarizes all observed verification results, benchmarks, and promotion-gate assessments from the post-`v0.4.1` research tracks. Every figure below comes directly from artifacts and command runs on this machine; unverified production claims or absent/emulated hardware backends (no CUDA Toolkit / `nvrtc.h` for Bend GPU codegen; QEMU user-mode emulation rather than native ARM64 hardware) are explicitly noted.
 
 ---
 
@@ -16,13 +16,13 @@ This document summarizes all observed verification results, benchmarks, and prom
 | **Z3 (`QF_BV`)** | `v5.3.3` on 64-bit bitvector SMT-LIB2 ([`formal/smt/`](../../formal/smt/README.md)) | **PASS** | `format_v2_bounds.smt2`: `sat` (premise satisfiability) + 3× `unsat` (negated overflow, bounds, and overlap checks). `cgroup_memory.smt2`: 3× `sat` + 3× `unsat` (overflow guard, `RetainedMemoryLimit`, `GOMEMLIMIT` headroom/ceiling bounds across all `2^64` words). | Models exact two's-complement 64-bit signed/unsigned arithmetic of the guards; independent of allocator/sysfs I/O. |
 | **Gobra** | `0.1.0-SNAPSHOT` (`viperproject/gobra-ide v3.1.2` local `--overflow`) + canonical CI gate (`v26.09`, [#479](https://github.com/EpicBlackWolfZ/microfat/pull/479)) directly on **production Go** [`internal/cgroup/memory.go`](../../internal/cgroup/memory.go) | **PASS** (`--overflow`, `Gobra found 0 errors.`) | Directly proves signed 64-bit overflow freedom and exact functional pre/postconditions on production `ExtractionMemory` and `RetainedMemoryLimit`, matching the canonical `scripts/verify-cgroup-memory.sh` / [`cgroup-memory-verification.md`](../../docs/design/cgroup-memory-verification.md) contract. | Scoped via `-i internal/cgroup/memory.go` with [`verification/gobra/stubs/math/limits.gobra`](../../verification/gobra/stubs/math/limits.gobra) (`MaxInt64`); remaining sysfs/float helpers and Format v2 bounds (`#501`) remain covered by Go tests, Lean 4, and Z3. |
 | **Bend 2** | `v2.0.40` (`--verdict`) on [`experiments/v3lab/bend/filter_proof.bend`](bend/filter_proof.bend) | **PASS** (`ALL PROOFS CHECK`, zero `@unsafe`) | Machine-checks pure bidirectional step & wraparound round-trip properties for normalized x86/ARM64 offset transforms inside pure Bend code. | Model-level check in Bend (`filter_proof.bend`); does not directly inspect Go ELF parsing. |
-| **Kani** | `v0.68.0` standalone (`CBMC 6.11.0`, `nightly-2026-08-21`) directly on **Rust stub core** [`experiments/v3lab/rust-stub/src/lib.rs`](rust-stub/src/lib.rs) | **PASS** (`8/8 harnesses`, 0 failures) | Verifies compiled `#![no_std]` `#![forbid(unsafe_code)]` Rust code directly: `verify_arm64_step_word_bijection` (`0.21s`), `verify_x86_step_bijection` (`1.39s`), `verify_x86_transform_roundtrip_8` (`28.88s`), `verify_evaluate_amd64_exhaustive` over all `2^21` feature masks (`0.08s`), `verify_trailer_never_panics_and_enforces_exact_layout` (`0.69s`), `verify_cursor_primitives_safe` (`1.76s`), `verify_decode_hex_digest_no_panic` (`3.65s`), `verify_segment_bounds_disjointness_and_selection` for `1..=4` symbolic variants (`34.40s`). | Checks Rust implementation under explicit symbolic buffer/loop bounds (`len <= 8` for multi-step x86 filter, `1..=4` variants for segment layout, `<= 64B` cursor slice); full arbitrarily-long x86 stream bijection is proven unbounded in Lean 4. `main.rs` Linux syscalls (`memfd_create`, `fcntl`, `execve`) and `cpuid.rs` asm probe are tested E2E rather than Kani-modeled. |
+| **Kani** | `v0.68.0` standalone (`CBMC 6.11.0`, `nightly-2026-08-21`) directly on **Rust stub core** [`experiments/v3lab/rust-stub/src/lib.rs`](rust-stub/src/lib.rs) | **PASS** (`9/9 harnesses`, 0 failures) | Verifies compiled `#![no_std]` `#![forbid(unsafe_code)]` Rust code directly: `verify_arm64_step_word_bijection` (`0.16s`), `verify_x86_step_bijection` (`1.38s`), `verify_x86_transform_roundtrip_8` (`27.33s`), `verify_evaluate_amd64_exhaustive` over all `2^21` x86 feature masks (`0.09s`), `verify_evaluate_arm64_dag_exhaustive` over all `2^24` ARM64 capability masks (`0.23s`), `verify_trailer_never_panics_and_enforces_exact_layout` (`0.70s`), `verify_cursor_primitives_safe` (`1.88s`), `verify_decode_hex_digest_no_panic` (`3.64s`), `verify_segment_bounds_disjointness_and_selection` for `1..=4` symbolic variants across AMD64 + ARM64 DAG (`34.59s`). | Checks Rust core under explicit symbolic bounds (`len <= 8` for multi-step x86 filter, `1..=4` variants for segment layout, `<= 64B` cursor slice); full arbitrarily-long x86 stream bijection is proven unbounded in Lean 4. Hardware SHA-NI intrinsics ([`sha256_hw.rs`](rust-stub/src/sha256_hw.rs)), host probes ([`cpuid.rs`](rust-stub/src/cpuid.rs)), and Linux syscalls ([`main.rs`](rust-stub/src/main.rs)) are verified via unit/differential tests and E2E/QEMU checks rather than Kani models. |
 
-### Alignment with `origin/main` Hardening (`#479` & `v0.4.1`)
+### Alignment with `origin/main` Hardening (`#479`, `#502`, & `v0.4.1`)
 
-`origin/main` (`4dd5dbf`) already hardened [`internal/format/format.go`](../../internal/format/format.go) (rejecting trailing index bytes, negative dictionary/variant dimensions, and non-zero offsets/IDs on zero-size dictionaries while allowing negative `CreatedUnix`) and merged direct production Gobra verification of [`internal/cgroup/memory.go`](../../internal/cgroup/memory.go) via [#479](https://github.com/EpicBlackWolfZ/microfat/pull/479). Accordingly, this branch introduces no unpromoted production Format v2 or Go stub behavior edits; all research code stays isolated under `formal/` and `experiments/v3lab/`.
+`origin/main` already hardened [`internal/format/format.go`](../../internal/format/format.go) (rejecting trailing index bytes, negative dictionary/variant dimensions, and non-zero offsets/IDs on zero-size dictionaries while allowing negative `CreatedUnix`) and merged direct production Gobra verification of [`internal/cgroup/memory.go`](../../internal/cgroup/memory.go) via [#479](https://github.com/EpicBlackWolfZ/microfat/pull/479). Accordingly, `perf/rust-stub-shani-musl` introduces no production Format v2 or Go stub behavior edits; all work stays isolated under `experiments/v3lab/`.
 
-Follow-up issues track the measured gaps before promotion: [#499](https://github.com/EpicBlackWolfZ/microfat/issues/499) (Rust stub SHA-NI, `opt-level=3` crypto/Zstd, static `musl`, chaos parity), [#500](https://github.com/EpicBlackWolfZ/microfat/issues/500) (Format v3 fused per-extent parallel unfilter, seeded Zstd block dictionary, ARM64 corpus), and [#501](https://github.com/EpicBlackWolfZ/microfat/issues/501) (window-accurate Zstd extraction budget in production + expanded Gobra/CI checks).
+Follow-up issues track the research roadmap: [#499](https://github.com/EpicBlackWolfZ/microfat/issues/499) (Rust stub SHA-NI, `opt-level=3` hot paths, static `musl`, ARM64 DAG, warm cache, chaos parity), [#500](https://github.com/EpicBlackWolfZ/microfat/issues/500) (Format v3 fused per-extent parallel unfilter, seeded Zstd block dictionary, ARM64 corpus), and [#501](https://github.com/EpicBlackWolfZ/microfat/issues/501) (window-accurate Zstd extraction budget in production + expanded Gobra/CI checks).
 
 ---
 
@@ -95,43 +95,69 @@ Built from real `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1|v2|v3` Go bina
 
 ---
 
-## 4. Track B3 — Ultra-Lean Rust Stub vs Go Stubs (`#497` & `#498`)
+## 4. Track B3 — Ultra-Lean Rust Stub vs Go Stubs (`#497`, `#498`, `#499`)
 
-Experimental prototype [`experiments/v3lab/rust-stub/`](rust-stub/) (`microfat-stub-rs`) packed alongside real `demo-stripped` `v1`/`v2`/`v3` ELF payloads via `bin/microfat pack`.
+Experimental prototype [`experiments/v3lab/rust-stub/`](rust-stub/) (`microfat-stub-rs`) packed alongside real `demo-stripped` Go ELF payloads via `bin/microfat pack`.
+
+In **v0.2 (`perf/rust-stub-shani-musl`)**, `microfat-stub-rs` upgrades from the dynamic glibc v0.1 prototype (`#502`) to:
+- Static **`x86_64-unknown-linux-musl`** and **`aarch64-unknown-linux-musl`** builds (`+crt-static`, `force-unwind-tables=no`, `aarch64` linked via `rust-lld`).
+- Runtime-dispatched x86-64 hardware **SHA-NI** ([`sha256_hw.rs`](rust-stub/src/sha256_hw.rs)) with pure-Rust `microfat_stub_core::sha256` fallback.
+- Generalized Kani-verified **ARM64 non-linear DAG** (`v8.0..v8.9`, `v9.0..v9.5`) + Linux `getauxval` / `/proc/self/auxv` `AT_HWCAP`/`AT_HWCAP2` capability probing ([`microarch.rs`](rust-stub/src/microarch.rs), [`cpuid.rs`](rust-stub/src/cpuid.rs)).
+- Zero-copy read-only `mmap` self-mapping (with `FileSectionReader` fallback), `ftruncate` pre-sized `memfd`, `256 KiB` copy buffer, `[profile.release.package.*] opt-level = 3` on `ruzstd` / `lz4_flex` / `twox-hash`, and read-only warm-cache fast path (`MICROFAT_EXEC_MODE` / `MICROFAT_DISPATCH_MODE` / `MICROFAT_CACHE_DIR`) enforcing Go's `O_NOFOLLOW`/uid/mode/SHA-256 fail-closed contract ([`main.rs`](rust-stub/src/main.rs)).
 
 ### Binary Footprint & Linkage
 
-| Launcher Stub | File Size (Bytes) | `.text` / `.data` / `.bss` (`size`) | Linkage (`ldd`) | Host Selection & Verify Parity |
+| Launcher Stub | File Size (Bytes) | `.text` / `.data` / `.bss` (`size`) | Linkage | Notes |
 | :--- | :---: | :---: | :--- | :--- |
-| **`bin/microfat-stub`** (Go full) | `3,940,512 B` (`3.76 MiB`) | `3,839,067 / 92,339 / 33,799,016` | Static (`CGO_ENABLED=0`) | Baseline `v3` (`MICROFAT_EXEC_MODE=memfd`) |
-| **`bin/microfat-stub-minimal`** (Go minimal) | `2,916,512 B` (`2.78 MiB`) | `2,835,037 / 71,251 / 33,798,240` | Static (`CGO_ENABLED=0`) | Baseline `v3` (`MICROFAT_EXEC_MODE=memfd`) |
-| **`microfat-stub-rs`** (Rust prototype) | **`436,400 B`** (`426.2 KiB`) | **`414,480 / 17,864 / 3,882`** | Dynamic (`libc.so.6`, `libgcc_s.so.1`, `ld-linux-x86-64.so.2`) | Verified `v3` selection (skipped `v1`/`v2`/unsafe `v4`), `microfat verify` PASS |
+| **`bin/microfat-stub`** (Go full x86-64) | `3,940,512 B` (`3.76 MiB`) | `3,839,067 / 92,339 / 33,799,016` | Static (`CGO_ENABLED=0`) | Production baseline (`#502` `size`) |
+| **`bin/microfat-stub-minimal`** (Go minimal x86-64) | `2,916,512 B` (`2.78 MiB`) | `2,835,037 / 71,251 / 33,798,240` | Static (`CGO_ENABLED=0`) | Production minimal baseline (`#502` `size`) |
+| Go `stub-minimal` (cross `arm64`) | `2,752,672 B` (`2.63 MiB`) | `-` | Static (`CGO_ENABLED=0 GOOS=linux GOARCH=arm64`) | ARM64 QEMU control |
+| `microfat-stub-rs` **v0.1** (`#502`, glibc x86-64) | `436,400 B` (`426.2 KiB`) | `414,480 / 17,864 / 3,882` | Dynamic (`libc.so.6`, `libgcc_s.so.1`, `ld-linux`) | Prior baseline (`opt-level="z"` scalar SHA) |
+| **`microfat-stub-rs` v0.2 (`x86_64-musl`)** | **`540,864 B`** (`528.2 KiB`) | **`524,105 / 3,472 / 4,184`** | **Static** (`x86_64-unknown-linux-musl`, stripped) | **5.39×** smaller than Go `stub-minimal`; **7.29×** smaller than `stub-full` |
+| **`microfat-stub-rs` v0.2 (`aarch64-musl`)** | **`478,512 B`** (`467.3 KiB`) | **`461,094 / 15,368 / 5,017`** | **Static** (`aarch64-unknown-linux-musl`, `rust-lld`) | **5.75×** smaller than Go `stub-minimal` ARM64 (`< 500 KiB`) |
 
-### End-to-End Compatibility & Cold `memfd` Latency (`15` runs, `demo-stripped --help`, `MICROFAT_EXEC_MODE=memfd`)
+### x86-64 End-to-End Cold `memfd` & Warm-Cache (`auto`) Latency (`15` runs, `demo-stripped --help`)
 
-All **12** fat binaries produced identical exit code `0` and identical stdout SHA-256 (`48ecd80e6b9b63edb0fcd0f2d2ddc7a821c87e427d1693a86b91d40893f3e45e`):
+All fat binaries and warm-cache invocations produced exit code `0` and identical stdout SHA-256 (`48ecd80e6b9b63ed`):
 
-| Stub | Codec Mode | Total Fat Binary Size | Cold `memfd` Median (Min–Max) | Notes |
-| :--- | :--- | :---: | :---: | :--- |
-| Go `stub-full` (`3.94 MB`) | `none` | `16,937,998 B` | `6.30 ms` (`6.03–10.57`) | Uses Go hardware SHA-NI |
-| Go `stub-full` | `lz4` | `11,511,190 B` | `9.60 ms` (`9.16–13.36`) | |
-| Go `stub-full` | `zstd` | `9,539,968 B` | `8.87 ms` (`8.00–14.59`) | |
-| Go `stub-full` | `zstd --dict` | `9,515,796 B` | `10.66 ms` (`8.64–16.08`) | |
-| Go `stub-minimal` (`2.92 MB`) | `none` | `15,913,998 B` | **`6.22 ms`** (`5.92–9.54`) | Baseline size-vs-speed trade |
-| Go `stub-minimal` | `lz4` | `10,487,190 B` | `9.19 ms` (`8.93–12.78`) | |
-| Go `stub-minimal` | `zstd` | `8,515,968 B` | `9.42 ms` (`7.93–15.76`) | |
-| Go `stub-minimal` | `zstd --dict` | `8,491,796 B` | `13.33 ms` (`8.73–23.98`) | |
-| **Rust `microfat-stub-rs`** (`436.4 KB`) | `none` | **`13,433,886 B`** | `20.34 ms` (`20.09–21.56`) | Pure scalar SHA-256 @ `opt-level="z"` bottleneck! |
-| **Rust `microfat-stub-rs`** | `lz4` | **`8,007,078 B`** | `28.61 ms` (`28.25–30.61`) | Scalar SHA-256 + `lz4_flex` @ `opt-level="z"` |
-| **Rust `microfat-stub-rs`** | `zstd` | **`6,035,856 B`** | `49.53 ms` (`49.08–50.58`) | Pure-Rust `ruzstd` @ `opt-level="z"` |
-| **Rust `microfat-stub-rs`** | `zstd --dict` | **`6,011,684 B`** (`-36.8%` vs full) | `49.82 ms` (`49.45–50.50`) | Full Format v2 dict compatibility proven |
+| Stub | Codec / Dispatch Mode | Total Fat Binary Size | v0.1 Median (`#502`) | v0.2 Median (Min–Max) | Delta vs v0.1 / Go `stub-minimal` |
+| :--- | :--- | :---: | :---: | :---: | :--- |
+| Go `stub-full` (`3.94 MB`) | `none` (cold `memfd`) | `16,937,998 B` | `6.30 ms` | `6.03 ms` (`5.66–7.34`) | Reference |
+| Go `stub-full` | `lz4` (cold `memfd`) | `11,511,190 B` | `9.60 ms` | `9.07 ms` (`8.74–9.37`) | Reference |
+| Go `stub-full` | `zstd` (cold `memfd`) | `9,539,968 B` | `8.87 ms` | `9.42 ms` (`7.63–12.74`) | Reference |
+| Go `stub-full` | `zstd --dict` (cold `memfd`) | `9,515,796 B` | `10.66 ms` | `11.92 ms` (`10.43–16.56`) | Reference |
+| Go `stub-full` | `warm-auto` (`zstd` cache hit) | `9,539,968 B` | `-` | `4.98 ms` (`4.74–5.38`) | Reference |
+| Go `stub-minimal` (`2.92 MB`) | `none` (cold `memfd`) | `15,913,998 B` | `6.22 ms` | `6.00 ms` (`5.75–6.48`) | Baseline |
+| Go `stub-minimal` | `lz4` (cold `memfd`) | `10,487,190 B` | `9.19 ms` | `9.19 ms` (`8.66–16.16`) | Baseline |
+| Go `stub-minimal` | `zstd` (cold `memfd`) | `8,515,968 B` | `9.42 ms` | `9.36 ms` (`7.92–18.80`) | Baseline |
+| Go `stub-minimal` | `zstd --dict` (cold `memfd`) | `8,491,796 B` | `13.33 ms` | `11.72 ms` (`9.89–13.12`) | Baseline |
+| Go `stub-minimal` | `warm-auto` (`zstd` cache hit) | `8,515,968 B` | `-` | `5.08 ms` (`4.67–5.48`) | Baseline |
+| **Rust `microfat-stub-rs` (`540.9 KB` static)** | `none` (cold `memfd`) | **`13,538,350 B`** | `20.34 ms` | **`5.30 ms`** (`5.08–5.48`) | **`3.84×` faster than v0.1**; **`-11.7%` vs `gom`** |
+| **Rust `microfat-stub-rs`** | `lz4` (cold `memfd`) | **`8,111,542 B`** | `28.61 ms` | **`15.52 ms`** (`15.22–15.78`) | **`1.84×` faster than v0.1** (`+6.33 ms` vs `gom`) |
+| **Rust `microfat-stub-rs`** | `zstd` (cold `memfd`) | **`6,140,320 B`** | `49.53 ms` | **`26.36 ms`** (`25.93–26.51`) | **`1.88×` faster than v0.1** (`ruzstd @ opt-level=3`) |
+| **Rust `microfat-stub-rs`** | `zstd --dict` (cold `memfd`) | **`6,116,148 B`** | `49.82 ms` | **`26.24 ms`** (`25.69–26.69`) | **`-28.0%` bytes vs `gom`** (`-35.7%` vs `gof`) |
+| **Rust `microfat-stub-rs`** | `warm-auto` (`zstd` cache hit) | `6,140,320 B` | `-` | **`4.02 ms`** (`3.84–4.30`) | **`-20.9%` latency vs `gom`** (`-19.3%` vs `gof`) |
 
-### Actionable Diagnosis Linking `#497` and `#498`
+### Zstd Backend Shootout (`ruzstd @ opt-level=3` vs `libzstd-rs-sys 0.0.1-prerelease.2`)
 
-Benchmarking `microfat-stub-rs` directly quantified the `#498` bottleneck hypothesis:
-1. On uncompressed `none` (`4.33 MiB` payload), Go `stub-minimal` executes cold `memfd` in `6.22 ms` because Go's `crypto/sha256` uses hardware **x86 SHA-NI** instructions; our size-optimized `opt-level = "z"` Rust stub uses scalar software SHA-256 without loop unrolling, spending **`~14 ms` solely hashing `4.33 MiB`** (`20.34 ms` total).
-2. On `zstd`, pure-Rust `ruzstd` compiled at `opt-level = "z"` adds another `~29 ms` over `none` (`49.53 ms` vs Go `8.87 ms` using tuned `klauspost/compress/zstd`).
-3. **Conclusion**: `microfat-stub-rs` achieves a dramatic **6.68× stub reduction** (`436 KB` vs `2.92 MB`, `-29.2%` to `-36.8%` on a real 3-variant CLI binary), proving the Rust stub footprint goal cleanly; **before promotion**, it needs runtime-dispatched x86 SHA-NI (tracking `#498`) and hot-path `opt-level=3` / faster Zstd kernels (tracking `#497`) to beat Go `stub-minimal` on cold-start wall latency as well as binary size.
+To test closing the remaining cold `zstd` decompression gap (`26.36 ms` vs Go's `klauspost/compress/zstd` assembly at `9.36 ms`), we benchmarked `libzstd-rs-sys 0.0.1-prerelease.2` (`--features libzstd-rs` temporarily):
+- **Speed (`x86_64-unknown-linux-musl`, `CC_x86_64_unknown_linux_musl=gcc`)**: Cold `memfd` median dropped to **`10.83 ms`** (`10.31–13.19`) on `zstd` and **`11.08 ms`** (`10.63–11.63`) on `zstd --dict` (`none`: `5.37 ms`, `lz4`: `17.33 ms`, `warm-auto`: `4.13 ms`), matching Go `zstd --dict` (`11.72–12.29 ms`).
+- **Disqualifying Blockers**:
+  1. **Binary Size Bloat**: Static `x86_64` stub size grew to **`688,752 B` (`672.6 KiB`, `> 500 KiB`)** even under `lto = "fat"` and `strip = true`.
+  2. **Broken Zero-C Cross-Compilation**: Upstream `libzstd-rs-sys` `build.rs` gates `huf_decompress_amd64.S` on host `#[cfg(target_arch = "x86_64")]` instead of `CARGO_CFG_TARGET_ARCH`, causing `aarch64-unknown-linux-musl` builds on x86-64 hosts to fail (`ToolNotFound: failed to find tool "aarch64-linux-musl-gcc"`).
+- **Decision**: Kept pure-Rust **`ruzstd @ opt-level=3`** cleanly in `Cargo.toml`/`Cargo.lock` with zero `cc` build scripts so `x86_64` and `aarch64` static `musl` builds work out of the box via `rust-lld` alone. Note also `x86_64-unknown-linux-musl` (`540,864 B`) is slightly above `500 KiB` (`512,000 B`) due to `ruzstd @ opt-level=3` unrolled tables (whereas `aarch64-unknown-linux-musl` is `478,512 B`); finding a zero-C, SIMD/BMI2-capable Zstd decoder under `500 KiB` remains open under `#498`/`#499`.
+
+### ARM64 Static `musl` Verification under QEMU (Emulated, Non-Native)
+
+> **Environment Note**: Executed on x86-64 Linux via `/usr/bin/qemu-aarch64-static` + `binfmt_misc` (`flags: F`). Native ARM64 hardware performance was not measured here.
+
+- **On-Target AArch64 Unit Tests (`cargo test --target aarch64-unknown-linux-musl`)**: **8/8** `microfat_stub_core` tests + **4/4** `microfat-stub-rs` binary tests passed (`cargo clippy --target aarch64-unknown-linux-musl -- -D warnings`: `0` warnings).
+- **Multi-Variant Packaging & Verification**: Built `./examples/demo` at `GOARM64=v8.0`, `v8.1`, `v8.2` (`4,063,392 B` each; direct QEMU `--help` stdout SHA-256 `48ecd80e6b9b63ed...`) and packed 4 ARM64 fat binaries with `microfat-stub-rs` (`478,512 B`): `arm64-rs-none` (`12,669,092 B`), `arm64-rs-lz4` (`7,310,603 B`), `arm64-rs-zstd` (`5,491,762 B`), `arm64-rs-zstd-dict` (`5,481,246 B`). All 4 passed `./bin/microfat verify`.
+- **`memfd` & Warm-Cache Security Checks under `/usr/bin/qemu-aarch64-static`**:
+  - All 4 codecs in `MICROFAT_EXEC_MODE=memfd` completed `AT_SECURE`, trailer/index SHA-256 verification, ARM64 `getauxval` DAG selection, decompression, SHA-256 verification, 4-seal `memfd` setup, and `execve("/proc/self/fd/11")`, stopping strictly at QEMU's documented user-mode `O_CLOEXEC`/`binfmt_misc` boundary (`Error while loading /proc/self/fd/11: No such file or directory`, matching Go `stub-minimal` ARM64 control parity `2,752,672 B` -> `/proc/self/fd/21` and [`tests/e2e/qemu_matrix_test.go`](../../tests/e2e/qemu_matrix_test.go)).
+  - Read-only `cache` mode miss (empty `0700` dir): exited `1` (`microfat-stub-rs: no valid warm cache entry found (read-only cache mode)`).
+  - Pre-populated `0700` warm-cache hit: validated metadata/SHA-256 and reached `execve("/proc/self/fd/12")` handoff (`stub_stderr` empty; same QEMU `/proc/self/fd/12` `O_CLOEXEC` boundary).
+  - Symlink cache entry in `auto` mode: failed closed (`exit 1`, `microfat-stub-rs: unsafe warm cache state: unsafe cache entry symlink`).
 
 ---
 
@@ -139,10 +165,10 @@ Benchmarking `microfat-stub-rs` directly quantified the `#498` bottleneck hypoth
 
 Per [ADR-0001 §3](../../docs/design/adr-0001-formal-verification-and-v3-lab.md#3-promotion--rollback-criteria), **production Format v2 and Go stubs remain the default in this PR**:
 
-| Promotion Criterion | Format v3 Status | Rust Stub (`#497`) Status | Open Work to Promote |
+| Promotion Criterion | Format v3 Status | Rust Stub (`#497` / `#499`) Status | Open Work to Promote |
 | :--- | :---: | :---: | :--- |
-| Complete-cost archive size win | **PASS** (`-3.33%` to `-9.36%` stripped vs best v2) | **PASS** (`-29.2%` vs minimal, `-36.8%` vs full) | Fix `zstd.BuildDict` history seeding in `v3container` for extra dictionary gain |
-| Cold `memfd` & warm-cache latency | **Partial** (`2×` faster without BCJ; sequential post-BCJ slower) | **FAIL (`20–50 ms` vs `6–13 ms`)** | Fuse per-extent BCJ unfilter into `Pwrite` workers (v3); add x86 SHA-NI + `opt-level=3` crypto/Zstd paths + warm cache / `fs-verity` (`#498`) |
-| Cross-arch & static ABI parity | **Partial** (x86-64 + ARM64 ELF filters implemented/tested; native bench x86-64 only) | **Partial** (dynamic glibc x86-64 only; `< 500 KiB`) | Static `x86_64-unknown-linux-musl` + `aarch64-unknown-linux-musl` builds, native ARM64 `AT_HWCAP` probing, cgroup tuning |
-| Security & chaos parity | **PASS in prototype** (SHA-256 index/block/full-image checks + 4-seal `memfd`) | **Partial** (`AT_SECURE`/uid/gid + SHA-256 + 4-seal `memfd` present; full chaos harness not ported yet) | Port full `tests/e2e` chaos & warm-cache symlink/FIFO tests |
+| Complete-cost archive size win | **PASS** (`-3.33%` to `-9.36%` stripped vs best v2) | **PASS** (`540.9 KiB` x86_64 static, `478.5 KiB` ARM64 static; `-28.0%` vs `gom`, `-35.7%` vs `gof`) | Fix `zstd.BuildDict` history seeding in `v3container`; trim x86_64 musl below `500 KiB` (`512,000 B`) without sacrificing decompression speed |
+| Cold `memfd` & warm-cache latency | **Partial** (`2×` faster without BCJ; sequential post-BCJ slower) | **Partial** (`warm-auto` **`4.02 ms`** and `none` **`5.30 ms`** beat Go `stub-minimal`; `zstd` `26.36 ms` vs Go `9.36 ms`, `lz4` `15.52 ms` vs Go `9.19 ms`) | Fuse per-extent BCJ unfilter into `Pwrite` workers (v3); replace `ruzstd` with a zero-C-cross-tool `< 500 KiB` fast Zstd decoder or upstream fix to `libzstd-rs-sys` `build.rs` (`#498`) |
+| Cross-arch & static ABI parity | **Partial** (x86-64 + ARM64 ELF filters implemented/tested; native bench x86-64 only) | **Partial** (Static `x86_64-unknown-linux-musl` + `aarch64-unknown-linux-musl` builds; ARM64 DAG + `getauxval` verified via Kani 9/9 & QEMU) | Native ARM64 hardware benchmark (beyond QEMU user-mode emulation); cgroup runtime tuning (`GOMEMLIMIT`/`GOMAXPROCS`) |
+| Security & chaos parity | **PASS in prototype** (SHA-256 index/block/full-image checks + 4-seal `memfd`) | **Partial** (`AT_SECURE`/uid/gid + SHA-NI + 4-seal `memfd` + read-only `O_NOFOLLOW`/uid/mode/SHA-256 warm cache verified) | Read-write cache materialization (`MICROFAT_EXEC_MODE=cache` cold path) & full `tests/e2e` chaos port |
 | Repository CI gate (`NO_COLOR=1 task all`) | **PASS** | **PASS** (Rust crate isolated under `experiments/v3lab/`) | Wire Rust/Kani/Lean/Gobra checks into optional/CI lab workflows if promoted |

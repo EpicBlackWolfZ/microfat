@@ -1,10 +1,22 @@
-//! Native x86-64 CPUID + XGETBV probe matching `internal/microarch/microarch.go`.
+//! Native host capability probing for Linux x86-64 (CPUID + XGETBV) and ARM64 (/proc/self/auxv).
 
+#[cfg(target_arch = "x86_64")]
 use microfat_stub_core::microarch::{
     evaluate_amd64_rank, X86Features, BIT_AVX, BIT_AVX2, BIT_AVX512BW, BIT_AVX512CD, BIT_AVX512DQ,
     BIT_AVX512F, BIT_AVX512VL, BIT_BMI1, BIT_BMI2, BIT_CX16, BIT_F16C, BIT_FMA, BIT_LAHF_SAHF,
     BIT_LZCNT, BIT_MOVBE, BIT_OSXSAVE, BIT_POPCNT, BIT_SSE3, BIT_SSE41, BIT_SSE42, BIT_SSSE3,
 };
+#[cfg(any(target_arch = "aarch64", test))]
+use microfat_stub_core::microarch::{
+    evaluate_arm64_mask, Arm64Features, ARM_BIT_ASIMD, ARM_BIT_ASIMDDP, ARM_BIT_ASIMDHP,
+    ARM_BIT_ATOMICS, ARM_BIT_BF16, ARM_BIT_CRC32, ARM_BIT_DCPOP, ARM_BIT_DIT, ARM_BIT_FCMA,
+    ARM_BIT_FP, ARM_BIT_FPHP, ARM_BIT_GCS, ARM_BIT_HBC, ARM_BIT_I8MM, ARM_BIT_JSCVT,
+    ARM_BIT_LRCPC, ARM_BIT_MOPS, ARM_BIT_SME, ARM_BIT_SME2, ARM_BIT_SVE, ARM_BIT_SVE2,
+    ARM_BIT_WFXT,
+};
+#[cfg(target_arch = "aarch64")]
+use microfat_stub_core::microarch::ARM_LVL_V8_0;
+use microfat_stub_core::microarch::HostCaps;
 
 #[cfg(target_arch = "x86_64")]
 #[inline]
@@ -127,11 +139,165 @@ pub fn probe_x86_features() -> X86Features {
     X86Features::new(bits)
 }
 
-#[cfg(not(target_arch = "x86_64"))]
-pub fn probe_x86_features() -> X86Features {
-    X86Features::new(0)
+#[cfg(any(target_arch = "aarch64", test))]
+pub fn arm64_features_from_hwcap(hwcap: u64, hwcap2: u64) -> Arm64Features {
+    let mut bits = 0u32;
+    if (hwcap & (1 << 0)) != 0 {
+        bits |= ARM_BIT_FP;
+    }
+    if (hwcap & (1 << 1)) != 0 {
+        bits |= ARM_BIT_ASIMD;
+    }
+    if (hwcap & (1 << 7)) != 0 {
+        bits |= ARM_BIT_CRC32;
+    }
+    if (hwcap & (1 << 8)) != 0 {
+        bits |= ARM_BIT_ATOMICS;
+    }
+    if (hwcap & (1 << 9)) != 0 {
+        bits |= ARM_BIT_FPHP;
+    }
+    if (hwcap & (1 << 10)) != 0 {
+        bits |= ARM_BIT_ASIMDHP;
+    }
+    if (hwcap & (1 << 13)) != 0 {
+        bits |= ARM_BIT_JSCVT;
+    }
+    if (hwcap & (1 << 14)) != 0 {
+        bits |= ARM_BIT_FCMA;
+    }
+    if (hwcap & (1 << 15)) != 0 {
+        bits |= ARM_BIT_LRCPC;
+    }
+    if (hwcap & (1 << 16)) != 0 {
+        bits |= ARM_BIT_DCPOP;
+    }
+    if (hwcap & (1 << 20)) != 0 {
+        bits |= ARM_BIT_ASIMDDP;
+    }
+    if (hwcap & (1 << 22)) != 0 {
+        bits |= ARM_BIT_SVE;
+    }
+    if (hwcap & (1 << 24)) != 0 {
+        bits |= ARM_BIT_DIT;
+    }
+    if (hwcap & (1 << 32)) != 0 {
+        bits |= ARM_BIT_GCS;
+    }
+
+    if (hwcap2 & (1 << 1)) != 0 {
+        bits |= ARM_BIT_SVE2;
+    }
+    if (hwcap2 & (1 << 13)) != 0 {
+        bits |= ARM_BIT_I8MM;
+    }
+    if (hwcap2 & (1 << 14)) != 0 {
+        bits |= ARM_BIT_BF16;
+    }
+    if (hwcap2 & (1 << 23)) != 0 {
+        bits |= ARM_BIT_SME;
+    }
+    if (hwcap2 & (1 << 31)) != 0 {
+        bits |= ARM_BIT_WFXT;
+    }
+    if (hwcap2 & (1 << 37)) != 0 {
+        bits |= ARM_BIT_SME2;
+    }
+    if (hwcap2 & (1 << 43)) != 0 {
+        bits |= ARM_BIT_MOPS;
+    }
+    if (hwcap2 & (1 << 44)) != 0 {
+        bits |= ARM_BIT_HBC;
+    }
+    // Deliberately leave ARM_BIT_NMI and ARM_BIT_THE unset (no safe Linux userspace ABI probe).
+    Arm64Features::new(bits)
 }
 
-pub fn detect_host_amd64_rank() -> u8 {
-    evaluate_amd64_rank(probe_x86_features())
+#[cfg(any(target_arch = "aarch64", test))]
+pub fn parse_arm64_auxv_features(auxv: &[u8]) -> Arm64Features {
+    const AT_HWCAP: u64 = 16;
+    const AT_HWCAP2: u64 = 26;
+
+    let mut hwcap = 0u64;
+    let mut hwcap2 = 0u64;
+    let mut off = 0usize;
+    while off + 16 <= auxv.len() {
+        let key = u64::from_le_bytes(auxv[off..off + 8].try_into().unwrap());
+        let val = u64::from_le_bytes(auxv[off + 8..off + 16].try_into().unwrap());
+        if key == 0 && val == 0 {
+            break;
+        }
+        match key {
+            AT_HWCAP => hwcap = val,
+            AT_HWCAP2 => hwcap2 = val,
+            _ => {}
+        }
+        off += 16;
+    }
+    arm64_features_from_hwcap(hwcap, hwcap2)
+}
+
+pub fn detect_host_caps() -> HostCaps {
+    #[cfg(target_arch = "x86_64")]
+    {
+        HostCaps::Amd64(evaluate_amd64_rank(probe_x86_features()))
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        // SAFETY: `libc::getauxval` takes integer constants and has no pointer preconditions.
+        let hwcap = unsafe { libc::getauxval(libc::AT_HWCAP) } as u64;
+        // SAFETY: `libc::getauxval` takes integer constants and has no pointer preconditions.
+        let hwcap2 = unsafe { libc::getauxval(libc::AT_HWCAP2) } as u64;
+        let feat = if hwcap != 0 || hwcap2 != 0 {
+            arm64_features_from_hwcap(hwcap, hwcap2)
+        } else {
+            let auxv = std::fs::read("/proc/self/auxv").unwrap_or_default();
+            parse_arm64_auxv_features(&auxv)
+        };
+        HostCaps::Arm64(evaluate_arm64_mask(feat) | ARM_LVL_V8_0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use microfat_stub_core::microarch::{
+        ARM_LVL_V8_0, ARM_LVL_V8_2, ARM_LVL_V8_5, ARM_LVL_V8_8, ARM_LVL_V9_0, ARM_LVL_V9_5,
+    };
+
+    #[test]
+    fn parses_synthetic_arm64_auxv() {
+        let hwcap: u64 = (1 << 0)
+            | (1 << 1)
+            | (1 << 7)
+            | (1 << 8)
+            | (1 << 9)
+            | (1 << 10)
+            | (1 << 13)
+            | (1 << 14)
+            | (1 << 15)
+            | (1 << 16)
+            | (1 << 20)
+            | (1 << 22)
+            | (1 << 24)
+            | (1 << 32);
+        let hwcap2: u64 =
+            (1 << 1) | (1 << 13) | (1 << 14) | (1 << 23) | (1 << 31) | (1 << 37) | (1 << 43) | (1 << 44);
+
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&16u64.to_le_bytes());
+        buf.extend_from_slice(&hwcap.to_le_bytes());
+        buf.extend_from_slice(&26u64.to_le_bytes());
+        buf.extend_from_slice(&hwcap2.to_le_bytes());
+        buf.extend_from_slice(&0u64.to_le_bytes());
+        buf.extend_from_slice(&0u64.to_le_bytes());
+
+        let mask = evaluate_arm64_mask(parse_arm64_auxv_features(&buf));
+        assert_ne!(mask & ARM_LVL_V8_0, 0);
+        assert_ne!(mask & ARM_LVL_V8_2, 0);
+        assert_ne!(mask & ARM_LVL_V8_5, 0);
+        assert_ne!(mask & ARM_LVL_V9_0, 0);
+        assert_ne!(mask & ARM_LVL_V9_5, 0);
+        assert_eq!(mask & ARM_LVL_V8_8, 0);
+    }
 }
