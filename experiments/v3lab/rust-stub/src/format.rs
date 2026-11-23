@@ -1,6 +1,8 @@
 //! Format v2 EOF trailer and compact binary index parser matching `internal/format/format.go`.
 
-use crate::microarch::{amd64_level_str, is_compatible_rank, parse_amd64_rank};
+use crate::microarch::{
+    amd64_level_str, is_compatible_level, parse_level_rank, HostCaps, TargetArch,
+};
 use crate::sha256::{decode_hex_digest, Sha256};
 
 pub const TRAILER_MAGIC: &[u8; 8] = b"\x00\xFA\x7FMICRO";
@@ -152,13 +154,13 @@ pub fn validate_variant_bounds(
     Ok(span)
 }
 
-/// Returns true iff `candidate_rank` is compatible with `host_rank` and strictly better than `current_best`.
+/// Returns true iff `candidate_rank` is compatible with `host` and strictly better than `current_best`.
 pub const fn should_replace_variant(
     current_best: Option<u8>,
     candidate_rank: u8,
-    host_rank: u8,
+    host: HostCaps,
 ) -> bool {
-    if !is_compatible_rank(host_rank, candidate_rank) {
+    if !is_compatible_level(host, candidate_rank) {
         return false;
     }
     match current_best {
@@ -209,8 +211,7 @@ pub fn parse_trailer(file_size: u64, trailer: &[u8; TRAILER_SIZE]) -> Result<Tra
 pub fn verify_and_select_v2<'a>(
     trailer: &TrailerInfo,
     index_bytes: &'a [u8],
-    expected_arch: &[u8],
-    host_rank: u8,
+    host: HostCaps,
 ) -> Result<ValidatedIndex<'a>, FormatError> {
     if index_bytes.len() != trailer.index_size {
         return Err(FormatError::InvalidIndexSize);
@@ -219,7 +220,12 @@ pub fn verify_and_select_v2<'a>(
     if actual != trailer.expected_index_sha256 {
         return Err(FormatError::IndexChecksumMismatch);
     }
-    parse_and_select_v2_index(index_bytes, trailer.index_offset, expected_arch, host_rank)
+    parse_and_select_v2_index(
+        index_bytes,
+        trailer.index_offset,
+        host.expected_arch_bytes(),
+        host,
+    )
 }
 
 struct Cursor<'a> {
@@ -265,6 +271,7 @@ fn decode_one_variant<'a>(
     index_offset: u64,
     dict_span: Option<SegmentSpan>,
     prev_spans: &[SegmentSpan],
+    arch: TargetArch,
 ) -> Result<(SelectedVariant<'a>, SegmentSpan), FormatError> {
     let lvl_len = cur.u8()? as usize;
     let level = cur.take(lvl_len)?;
@@ -292,7 +299,7 @@ fn decode_one_variant<'a>(
         _ => return Err(FormatError::UnsupportedCompression),
     };
 
-    let rank = parse_amd64_rank(level);
+    let rank = parse_level_rank(arch, level);
     Ok((
         SelectedVariant {
             level,
@@ -313,10 +320,14 @@ pub fn parse_and_select_v2_index<'a>(
     index_bytes: &'a [u8],
     index_offset: u64,
     expected_arch: &[u8],
-    host_rank: u8,
+    host: HostCaps,
 ) -> Result<ValidatedIndex<'a>, FormatError> {
-    if amd64_level_str(host_rank).is_none() {
-        return Err(FormatError::NoCompatibleVariant);
+    match host {
+        HostCaps::Amd64(r) if amd64_level_str(r).is_none() => {
+            return Err(FormatError::NoCompatibleVariant);
+        }
+        HostCaps::Arm64(0) => return Err(FormatError::NoCompatibleVariant),
+        _ => {}
     }
     let mut cur = Cursor {
         data: index_bytes,
@@ -370,9 +381,11 @@ pub fn parse_and_select_v2_index<'a>(
     let variants_start = cur.pos;
     let mut best: Option<SelectedVariant<'a>> = None;
 
+    let arch = host.target_arch();
     for i in 0..variant_count {
         let check_slice = if i < FAST_SPANS { &stack_spans[..i] } else { &[] };
-        let (cand, span) = decode_one_variant(&mut cur, index_offset, dict_span, check_slice)?;
+        let (cand, span) =
+            decode_one_variant(&mut cur, index_offset, dict_span, check_slice, arch)?;
         if i < FAST_SPANS {
             stack_spans[i] = span;
         } else {
@@ -382,14 +395,15 @@ pub fn parse_and_select_v2_index<'a>(
                 pos: variants_start,
             };
             for _ in 0..i {
-                let (_, prev_span) = decode_one_variant(&mut scan, index_offset, dict_span, &[])?;
+                let (_, prev_span) =
+                    decode_one_variant(&mut scan, index_offset, dict_span, &[], arch)?;
                 if spans_overlap(span, prev_span) {
                     return Err(FormatError::OverlappingSegments);
                 }
             }
         }
 
-        if should_replace_variant(best.map(|b| b.rank), cand.rank, host_rank) {
+        if should_replace_variant(best.map(|b| b.rank), cand.rank, host) {
             best = Some(cand);
         }
     }
@@ -409,11 +423,12 @@ pub fn parse_and_select_v2_index<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::microarch::{ARM_LVL_V8_0, ARM_LVL_V8_5, ARM_LVL_V9_0};
     use crate::sha256::encode_hex_lower;
 
     type TestVariantSpec<'a> = (&'a [u8], i64, i64, i64, &'a [u8]);
 
-    fn build_valid_index(variants: &[TestVariantSpec<'_>]) -> Vec<u8> {
+    fn build_valid_index(target_arch: &[u8], variants: &[TestVariantSpec<'_>]) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(INDEX_MAGIC_V2);
         out.extend_from_slice(&FORMAT_VERSION_2.to_le_bytes());
@@ -424,8 +439,8 @@ mod tests {
         out.push(0); // dict sha len
         out.push(5);
         out.extend_from_slice(b"linux");
-        out.push(5);
-        out.extend_from_slice(b"amd64");
+        out.push(target_arch.len() as u8);
+        out.extend_from_slice(target_arch);
         out.extend_from_slice(&4u16.to_le_bytes());
         out.extend_from_slice(b"demo");
         out.extend_from_slice(&(variants.len() as u16).to_le_bytes());
@@ -447,11 +462,14 @@ mod tests {
 
     #[test]
     fn parses_valid_and_selects_highest_compatible() {
-        let idx = build_valid_index(&[
-            (b"v1", 1000, 100, 200, b"zstd"),
-            (b"v2", 1100, 100, 200, b"lz4"),
-            (b"v4", 1200, 100, 200, b"none"),
-        ]);
+        let idx = build_valid_index(
+            b"amd64",
+            &[
+                (b"v1", 1000, 100, 200, b"zstd"),
+                (b"v2", 1100, 100, 200, b"lz4"),
+                (b"v4", 1200, 100, 200, b"none"),
+            ],
+        );
         let mut trailer = [0u8; TRAILER_SIZE];
         trailer[0..8].copy_from_slice(&2000u64.to_le_bytes());
         trailer[8..16].copy_from_slice(&(idx.len() as u64).to_le_bytes());
@@ -459,27 +477,58 @@ mod tests {
         trailer[48..56].copy_from_slice(TRAILER_MAGIC);
 
         let t = parse_trailer(2000 + idx.len() as u64 + TRAILER_SIZE as u64, &trailer).unwrap();
-        let parsed = verify_and_select_v2(&t, &idx, b"amd64", 3).unwrap();
+        let parsed = verify_and_select_v2(&t, &idx, HostCaps::Amd64(3)).unwrap();
         assert_eq!(parsed.selected.level, b"v2");
         assert_eq!(parsed.selected.compression, Compression::Lz4);
         assert_eq!(parsed.variant_count, 3);
     }
 
     #[test]
+    fn parses_arm64_and_respects_non_linear_dag() {
+        // Host supports v8.0, v8.5, and v9.0, but NOT v8.6 or v9.1.
+        let host = HostCaps::Arm64(ARM_LVL_V8_0 | ARM_LVL_V8_5 | ARM_LVL_V9_0);
+        let idx = build_valid_index(
+            b"arm64",
+            &[
+                (b"v8.0", 1000, 100, 200, b"none"),
+                (b"v8.6", 1100, 100, 200, b"zstd"),
+                (b"v9.0", 1200, 100, 200, b"lz4"),
+                (b"v9.1", 1300, 100, 200, b"zstd"),
+            ],
+        );
+        let parsed = parse_and_select_v2_index(&idx, 2000, b"arm64", host).unwrap();
+        assert_eq!(parsed.selected.level, b"v9.0");
+
+        let idx_no_90 = build_valid_index(
+            b"arm64",
+            &[
+                (b"v8.5", 1000, 100, 200, b"none"),
+                (b"v8.6", 1100, 100, 200, b"zstd"),
+                (b"v9.1", 1200, 100, 200, b"zstd"),
+            ],
+        );
+        let parsed_fallback = parse_and_select_v2_index(&idx_no_90, 2000, b"arm64", host).unwrap();
+        assert_eq!(parsed_fallback.selected.level, b"v8.5");
+    }
+
+    #[test]
     fn rejects_trailing_bytes_and_overlaps() {
-        let mut idx = build_valid_index(&[
-            (b"v1", 1000, 150, 200, b"zstd"),
-            (b"v2", 1100, 100, 200, b"zstd"),
-        ]);
+        let mut idx = build_valid_index(
+            b"amd64",
+            &[
+                (b"v1", 1000, 150, 200, b"zstd"),
+                (b"v2", 1100, 100, 200, b"zstd"),
+            ],
+        );
         assert_eq!(
-            parse_and_select_v2_index(&idx, 2000, b"amd64", 2),
+            parse_and_select_v2_index(&idx, 2000, b"amd64", HostCaps::Amd64(2)),
             Err(FormatError::OverlappingSegments)
         );
 
-        idx = build_valid_index(&[(b"v1", 1000, 100, 200, b"")]);
+        idx = build_valid_index(b"amd64", &[(b"v1", 1000, 100, 200, b"")]);
         idx.push(0x99);
         assert_eq!(
-            parse_and_select_v2_index(&idx, 2000, b"amd64", 2),
+            parse_and_select_v2_index(&idx, 2000, b"amd64", HostCaps::Amd64(2)),
             Err(FormatError::TrailingBytes)
         );
     }
@@ -542,8 +591,15 @@ mod kani_proofs {
         let index_offset: u64 = kani::any();
         let dict_off: i64 = kani::any();
         let dict_size: i64 = kani::any();
-        let host_rank: u8 = kani::any();
-        kani::assume((1..=4).contains(&host_rank));
+        let is_arm64: bool = kani::any();
+        let host = if is_arm64 {
+            let mask: u16 = kani::any();
+            HostCaps::Arm64(mask)
+        } else {
+            let host_rank: u8 = kani::any();
+            kani::assume((1..=4).contains(&host_rank));
+            HostCaps::Amd64(host_rank)
+        };
 
         let dict_res = validate_dict_bounds(dict_off, dict_size, index_offset);
         if let Ok(dict_span) = dict_res {
@@ -585,21 +641,21 @@ mod kani_proofs {
                 }
                 spans[i] = span;
                 ranks[i] = cand_rank;
-                if should_replace_variant(best_rank, cand_rank, host_rank) {
+                if should_replace_variant(best_rank, cand_rank, host) {
                     best_rank = Some(cand_rank);
                 }
             }
 
             if let Some(chosen) = best_rank {
-                assert!(is_compatible_rank(host_rank, chosen));
+                assert!(is_compatible_level(host, chosen));
                 for r in &ranks[..count] {
-                    if is_compatible_rank(host_rank, *r) {
+                    if is_compatible_level(host, *r) {
                         assert!(chosen >= *r);
                     }
                 }
             } else {
                 for r in &ranks[..count] {
-                    assert!(!is_compatible_rank(host_rank, *r));
+                    assert!(!is_compatible_level(host, *r));
                 }
             }
         }

@@ -24,5 +24,14 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+[profile.release.package.ruzstd]
+opt-level = 3
+
+[profile.release.package.lz4_flex]
+opt-level = 3
+
+[profile.release.package.twox-hash]
+opt-level = 3
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
