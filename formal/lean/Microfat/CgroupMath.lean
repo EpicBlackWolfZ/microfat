@@ -247,4 +247,58 @@ theorem admitWorkers_sum_le_budget (sortedDescCosts : List Nat) (maxWorkers ceil
         ((ceilingBytes / packUsableMemoryDenominator) * packUsableMemoryNumerator - packBaseMemoryReserveBytes) 1
       simpa using h0 (by simp) (fun h => by omega) hadm
 
+/-! ### Window-Accurate Zstd Decoder Budget (`ZstdDecoderMemory`) -/
+
+def zstdDecoderMemory (window maxWindow overhead maxDecoder : Nat) : Option Nat :=
+  if window = 0 ∨ maxWindow = 0 ∨ maxDecoder = 0 ∨ window > maxWindow then none
+  else match addChecked window window with
+  | none => none
+  | some doubled =>
+      match addChecked doubled overhead with
+      | none => none
+      | some total =>
+          if total > maxDecoder then none else some total
+
+theorem zstdDecoderMemory_iff (window maxWindow overhead maxDecoder total : Nat) :
+    zstdDecoderMemory window maxWindow overhead maxDecoder = some total ↔
+    0 < window ∧ window ≤ maxWindow ∧ 0 < maxDecoder ∧
+    total = 2 * window + overhead ∧ total ≤ maxInt64Nat ∧ total ≤ maxDecoder := by
+  simp only [zstdDecoderMemory, addChecked]
+  constructor
+  · intro h
+    by_cases hpre : window = 0 ∨ maxWindow = 0 ∨ maxDecoder = 0 ∨ window > maxWindow
+    · simp [hpre] at h
+    · simp only [hpre, ↓reduceIte] at h
+      by_cases hdbl : window > maxInt64Nat - window
+      · simp [hdbl] at h
+      · simp only [hdbl, ↓reduceIte] at h
+        by_cases hovh : overhead > maxInt64Nat - (window + window)
+        · simp [hovh] at h
+        · simp only [hovh, ↓reduceIte] at h
+          by_cases hcap : window + window + overhead > maxDecoder
+          · simp [hcap] at h
+          · simp only [hcap, ↓reduceIte, Option.some.injEq] at h
+            refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩ <;> omega
+  · rintro ⟨hwpos, hwmax, hdecpos, rfl, h64, hcap⟩
+    have hpre : ¬(window = 0 ∨ maxWindow = 0 ∨ maxDecoder = 0 ∨ window > maxWindow) := by omega
+    have hdbl : ¬(window > maxInt64Nat - window) := by omega
+    have hovh : ¬(overhead > maxInt64Nat - (window + window)) := by omega
+    have hcapn : ¬(window + window + overhead > maxDecoder) := by omega
+    simp only [hpre, ↓reduceIte, hdbl, hovh, hcapn, Option.some.injEq]
+    omega
+
+theorem zstdDecoderMemory_le_maxDecoder {window maxWindow overhead maxDecoder total : Nat}
+    (h : zstdDecoderMemory window maxWindow overhead maxDecoder = some total) :
+    total ≤ maxDecoder :=
+  ((zstdDecoderMemory_iff window maxWindow overhead maxDecoder total).1 h).2.2.2.2.2
+
+theorem zstdDecoderMemory_monotone {w1 w2 maxWindow overhead maxDecoder t1 t2 : Nat}
+    (hle : w1 ≤ w2)
+    (h1 : zstdDecoderMemory w1 maxWindow overhead maxDecoder = some t1)
+    (h2 : zstdDecoderMemory w2 maxWindow overhead maxDecoder = some t2) :
+    t1 ≤ t2 := by
+  rcases (zstdDecoderMemory_iff w1 maxWindow overhead maxDecoder t1).1 h1 with ⟨_, _, _, rfl, _, _⟩
+  rcases (zstdDecoderMemory_iff w2 maxWindow overhead maxDecoder t2).1 h2 with ⟨_, _, _, rfl, _, _⟩
+  omega
+
 end Microfat.CgroupMath

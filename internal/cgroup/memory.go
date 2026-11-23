@@ -68,3 +68,41 @@ func RetainedMemoryLimit(limit, retained int64) /*@ (result @*/ int64 /*@ ) @*/ 
 	}
 	return limit - retained
 }
+
+/*@
+ghost
+decreases
+pure func zstdDecoderFits(window, maxWindow, overhead, maxDecoder int64) bool {
+	return 0 < window && window <= maxWindow && 0 <= overhead && 0 < maxDecoder &&
+		2*integer(window)+integer(overhead) <= math.MaxInt64 &&
+		2*integer(window)+integer(overhead) <= integer(maxDecoder)
+}
+@*/
+
+// ZstdDecoderMemory estimates Zstd decoder workspace as 2*window + overhead,
+// bounding both the sliding window and total decoder memory against overflow.
+// @ requires ErrMemoryBudget != nil && isComparable(ErrMemoryBudget)
+// @ ensures (err == nil) == zstdDecoderFits(window, maxWindow, overhead, maxDecoder)
+// @ ensures err == nil ==> integer(result) == 2*integer(window) + integer(overhead)
+// @ ensures err != nil ==> result == 0 && isComparable(err) && err == ErrMemoryBudget
+// @ decreases
+func ZstdDecoderMemory(window, maxWindow, overhead, maxDecoder int64) (
+	/*@ result @*/ int64,
+	/*@ err @*/ error,
+) {
+	if window <= 0 || maxWindow <= 0 || overhead < 0 || maxDecoder <= 0 || window > maxWindow {
+		return 0, ErrMemoryBudget
+	}
+	if window > math.MaxInt64-window {
+		return 0, ErrMemoryBudget
+	}
+	doubled := window + window
+	if overhead > math.MaxInt64-doubled {
+		return 0, ErrMemoryBudget
+	}
+	total := doubled + overhead
+	if total > maxDecoder {
+		return 0, ErrMemoryBudget
+	}
+	return total, nil
+}

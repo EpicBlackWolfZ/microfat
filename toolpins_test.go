@@ -24,7 +24,7 @@ func TestToolPins(t *testing.T) {
 	require.True(t, ok)
 	require.Regexp(t, `^v[0-9]+\.[0-9]+\.[0-9]+$`, version)
 	require.Regexp(t, `^[0-9a-f]{40}$`, commit)
-	for _, tool := range []string{"COSIGN", "CDXGEN", "SHELLCHECK", "GOBRA"} {
+	for _, tool := range []string{"COSIGN", "CDXGEN", "SHELLCHECK", "GOBRA", "Z3", "KANI", "ELAN"} {
 		t.Run(tool, func(t *testing.T) {
 			t.Parallel()
 			amd64, digest, ok := strings.Cut(ToolPin(tool+"_LINUX_AMD64"), "@")

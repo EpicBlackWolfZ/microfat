@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 
 	"github.com/klauspost/compress/zstd"
@@ -27,14 +28,21 @@ const (
 	// DefaultDecoderMaxWindow is the maximum sliding window size allowed for the zstd decoder (128 MiB).
 	DefaultDecoderMaxWindow uint64 = 128 * 1024 * 1024
 
+	// DefaultZstdDecoderOverhead estimates fixed Zstd decoder tables/buffers beyond sliding windows (4 MiB).
+	DefaultZstdDecoderOverhead uint64 = 4 * 1024 * 1024
+
 	// historySampleFractionDivisor is the portion of total sample bytes allocated for the dictionary history window.
 	historySampleFractionDivisor = 4
 
 	zstdDefaultNumericLevel = 2
+	zstdMaxSkippableFrames  = 8
 
 	// BuildDict encodes each training sample as one Zstandard block.
 	maxDictTrainingSampleSize = 128 * 1024
 )
+
+// ErrWindowSizeExceeded indicates a Zstd frame declares a window larger than DefaultDecoderMaxWindow.
+var ErrWindowSizeExceeded = errors.New("zstd frame window exceeds maximum allowed size")
 
 // ZstdCodec implements the Codec and DictCodec interfaces for Zstandard compression.
 type ZstdCodec struct{}
@@ -134,23 +142,94 @@ func (c *ZstdCodec) CompressWithDict(w io.Writer, src []byte, level string, dict
 	return nil
 }
 
+// InspectZstdFrameWindow reads the Zstd frame header at [offset, offset+compressedSize)
+// (skipping up to zstdMaxSkippableFrames leading skippable frames) and returns the declared window size.
+func InspectZstdFrameWindow(r io.ReaderAt, offset, compressedSize int64) (uint64, error) {
+	if r == nil || offset < 0 || compressedSize <= 0 || offset > math.MaxInt64-compressedSize {
+		return 0, fmt.Errorf("%w: invalid zstd header range [%d, +%d)", ErrDecompressionFailed, offset, compressedSize)
+	}
+
+	curOffset := offset
+	endOffset := offset + compressedSize
+	var headerBuf [zstd.HeaderMaxSize]byte
+
+	for range zstdMaxSkippableFrames + 1 {
+		remaining := endOffset - curOffset
+		if remaining <= 0 {
+			return 0, fmt.Errorf("%w: zstd stream truncated before frame header", ErrDecompressionFailed)
+		}
+		readLen := min(remaining, int64(zstd.HeaderMaxSize))
+		n, readErr := r.ReadAt(headerBuf[:readLen], curOffset)
+		if readErr != nil && (!errors.Is(readErr, io.EOF) || n == 0) {
+			return 0, fmt.Errorf("%w: reading zstd frame header: %w", ErrDecompressionFailed, readErr)
+		}
+
+		var hdr zstd.Header
+		if decErr := hdr.Decode(headerBuf[:n]); decErr != nil {
+			return 0, fmt.Errorf("%w: decoding zstd frame header: %w", ErrDecompressionFailed, decErr)
+		}
+
+		if hdr.Skippable {
+			skipTotal := int64(hdr.HeaderSize) + int64(hdr.SkippableSize)
+			if skipTotal <= 0 || skipTotal > remaining {
+				return 0, fmt.Errorf("%w: zstd skippable frame exceeds compressed bounds", ErrDecompressionFailed)
+			}
+			curOffset += skipTotal
+			continue
+		}
+
+		win := hdr.WindowSize
+		if hdr.SingleSegment {
+			win = max(hdr.FrameContentSize, zstd.MinWindowSize)
+		}
+		if win < zstd.MinWindowSize {
+			return 0, fmt.Errorf("%w: zstd frame window %d below minimum %d", ErrDecompressionFailed, win, zstd.MinWindowSize)
+		}
+		if win > DefaultDecoderMaxWindow {
+			return win, fmt.Errorf("%w: frame window %d exceeds limit %d", ErrWindowSizeExceeded, win, DefaultDecoderMaxWindow)
+		}
+		return win, nil
+	}
+
+	return 0, fmt.Errorf("%w: excessive consecutive skippable frames", ErrDecompressionFailed)
+}
+
 // Decompress decompresses a zstd stream from r into w.
 func (c *ZstdCodec) Decompress(w io.Writer, r io.Reader, uncompressedSize int64) error {
-	return c.DecompressWithDict(w, r, uncompressedSize, nil)
+	return c.DecompressWithDictAndWindow(w, r, uncompressedSize, nil, DefaultDecoderMaxWindow)
 }
 
 // DecompressWithDict decompresses a zstd stream from r into w using a shared dictionary.
 func (c *ZstdCodec) DecompressWithDict(w io.Writer, r io.Reader, uncompressedSize int64, dict []byte) error {
+	return c.DecompressWithDictAndWindow(w, r, uncompressedSize, dict, DefaultDecoderMaxWindow)
+}
+
+// DecompressWithDictAndWindow decompresses a zstd stream from r into w using an optional
+// shared dictionary and enforcing a per-frame maximum window size of maxWindow.
+func (c *ZstdCodec) DecompressWithDictAndWindow(
+	w io.Writer,
+	r io.Reader,
+	uncompressedSize int64,
+	dict []byte,
+	maxWindow uint64,
+) error {
 	if uncompressedSize < 0 {
 		return fmt.Errorf("%w: invalid negative uncompressed size %d", ErrSizeMismatch, uncompressedSize)
 	}
 	if uncompressedSize > DefaultMaxPayloadSize {
 		return fmt.Errorf("%w: uncompressed size %d exceeds safety limit %d", ErrSizeMismatch, uncompressedSize, DefaultMaxPayloadSize)
 	}
+	if maxWindow == 0 {
+		maxWindow = DefaultDecoderMaxWindow
+	}
+	if maxWindow > DefaultDecoderMaxWindow {
+		return fmt.Errorf("%w: requested window cap %d exceeds limit %d", ErrWindowSizeExceeded, maxWindow, DefaultDecoderMaxWindow)
+	}
+	effectiveWindow := max(maxWindow, zstd.MinWindowSize)
 
 	opts := []zstd.DOption{
 		zstd.WithDecoderMaxMemory(DefaultDecoderMaxMemory),
-		zstd.WithDecoderMaxWindow(DefaultDecoderMaxWindow),
+		zstd.WithDecoderMaxWindow(effectiveWindow),
 	}
 	if len(dict) > 0 {
 		opts = append(opts, zstd.WithDecoderDicts(dict))
@@ -167,6 +246,9 @@ func (c *ZstdCodec) DecompressWithDict(w io.Writer, r io.Reader, uncompressedSiz
 	if copyErr != nil {
 		if errors.Is(copyErr, ErrSizeMismatch) {
 			return copyErr
+		}
+		if errors.Is(copyErr, zstd.ErrWindowSizeExceeded) || errors.Is(copyErr, zstd.ErrDecoderSizeExceeded) {
+			return fmt.Errorf("%w: %w: %w", ErrDecompressionFailed, ErrWindowSizeExceeded, copyErr)
 		}
 		return fmt.Errorf("%w: %w", ErrDecompressionFailed, copyErr)
 	}

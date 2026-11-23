@@ -9,14 +9,17 @@ checks signed overflow in the executable operations.
 | --- | --- |
 | **Extraction estimate** | For every four `int64` operands, `ExtractionMemory` succeeds exactly when each operand is nonnegative and their mathematical sum fits in `int64`. Success returns that sum. Failure returns zero and `ErrMemoryBudget`. |
 | **Retained storage** | For every two `int64` operands, `RetainedMemoryLimit` returns `limit - retained` if `0 <= retained < limit`, and zero otherwise. Its subtraction cannot overflow. |
+| **Zstd decoder budget** | For every four `int64` operands `(window, maxWindow, overhead, maxDecoder)`, `ZstdDecoderMemory` succeeds iff `0 < window <= maxWindow`, `0 <= overhead`, `0 < maxDecoder`, `2*window + overhead <= math.MaxInt64`, and `2*window + overhead <= maxDecoder`. Success returns `2*window + overhead`; failure returns zero and `ErrMemoryBudget`. |
 
-The first law assumes `ErrMemoryBudget` is the nonnil, comparable sentinel
-initialized by `errors.New`, without external reassignment. The proof trusts
-the pinned verifier's `errors` model and the one `math.MaxInt64` declaration in
-[`verification/gobra/stubs`](../../verification/gobra/stubs/math/limits.gobra).
-It does not check cgroup discovery, how callers calculate the four operands, or
-whether the estimate predicts peak memory or prevents OOM. Neither law verifies
-the Go compiler, the kernel, or the rest of the package.
+The extraction and Zstd-decoder laws assume `ErrMemoryBudget` is the nonnil,
+comparable sentinel initialized by `errors.New`, without external reassignment.
+The proof trusts the pinned verifier's `errors` model and the one `math.MaxInt64`
+declaration in [`verification/gobra/stubs`](../../verification/gobra/stubs/math/limits.gobra).
+It does not check cgroup discovery, Zstd frame-header parsing (`InspectZstdFrameWindow`),
+how callers calculate the operands, or whether the estimate predicts peak memory or
+prevents OOM. Neither law verifies the Go compiler, the kernel, or the rest of the
+package. See [`format-bounds-verification.md`](format-bounds-verification.md) for the
+companion Gobra proof of Format v2 segment bounds.
 
 ## Reproduce
 
@@ -36,11 +39,10 @@ No verifier is included in Microfat binaries.
 Gobra v26.09's overflow pass aborts on the original inline slice literal in
 the range loop. The independently reviewable Go refactor names the four
 components as a fixed array. Native boundary tests pass on both forms.
-To check that the laws catch regressions, run the same Task in disposable
-copies: change the extraction guard from `>` to `>=` in one copy, and return
-`limit` instead of `limit - retained` in another. The first must reject the
-overly strict bound, the second must fail the retained-storage postcondition,
-and the unchanged source must pass.
+To check that the laws catch regressions, run the same verifier on disposable
+copies: change the extraction guard from `>` to `>=`, return `limit` instead
+of `limit - retained`, or change `total > maxDecoder` to `total >= maxDecoder` in
+`ZstdDecoderMemory`. Each mutant must be rejected while the unchanged source passes.
 
 ## Gate and rollback
 

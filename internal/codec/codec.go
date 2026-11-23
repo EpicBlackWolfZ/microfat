@@ -69,6 +69,22 @@ type DictCodec interface {
 // DecompressWithOptionalDict decompresses stream from r into w. If dict is non-empty and c implements DictCodec,
 // it uses DecompressWithDict; otherwise it calls Decompress.
 func DecompressWithOptionalDict(c Codec, w io.Writer, r io.Reader, uncompressedSize int64, dict []byte) error {
+	return DecompressWithOptionalDictAndWindow(c, w, r, uncompressedSize, dict, 0)
+}
+
+// DecompressWithOptionalDictAndWindow decompresses stream from r into w using an optional shared
+// dictionary and enforcing an inspected per-frame Zstd window cap when maxWindow > 0.
+func DecompressWithOptionalDictAndWindow(
+	c Codec,
+	w io.Writer,
+	r io.Reader,
+	uncompressedSize int64,
+	dict []byte,
+	maxWindow uint64,
+) error {
+	if zc, ok := c.(*ZstdCodec); ok && maxWindow > 0 {
+		return zc.DecompressWithDictAndWindow(w, r, uncompressedSize, dict, maxWindow)
+	}
 	if len(dict) > 0 {
 		if dc, ok := c.(DictCodec); ok {
 			return dc.DecompressWithDict(w, r, uncompressedSize, dict)

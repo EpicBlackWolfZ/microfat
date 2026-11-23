@@ -54,12 +54,6 @@ const (
 	// MaxIndexSize is the maximum allowable index table size (1 MB).
 	MaxIndexSize = 1024 * 1024
 
-	// MaxPayloadSize is the maximum allowable single payload uncompressed size (1 GB).
-	MaxPayloadSize = 1024 * 1024 * 1024
-
-	// MaxDictionarySize is the maximum allowable shared dictionary size (1 MB).
-	MaxDictionarySize = 1024 * 1024
-
 	// Environment variable names for telemetry and control.
 	EnvSelectedVariant           = "MICROFAT_SELECTED_VARIANT"
 	EnvHostArch                  = "MICROFAT_HOST_ARCH"
@@ -132,13 +126,9 @@ var (
 	ErrInvalidIndexOffset  = errors.New("invalid index offset in trailer")
 	ErrInvalidIndexSize    = errors.New("invalid index size in trailer")
 	ErrIndexCorrupted      = errors.New("index SHA-256 checksum mismatch")
-	ErrOutOfBounds         = errors.New("variant payload extends beyond binary boundary")
-	ErrPayloadTooLarge     = errors.New("variant payload size exceeds safety limit")
-	ErrOverlappingVariant  = errors.New("variant payloads overlap or are unsorted")
 	ErrTruncatedIndex      = errors.New("truncated index data")
 	ErrDictionaryCorrupted = errors.New("shared dictionary SHA-256 checksum mismatch")
 	ErrPayloadCorrupted    = errors.New("variant payload SHA-256 checksum mismatch")
-	ErrInvalidDictionary   = errors.New("invalid shared dictionary offset or size")
 	ErrInvalidChecksum     = errors.New("invalid sha256 checksum format")
 	ErrNoVariantsSpecified = errors.New("at least one microarchitecture variant must be specified")
 	ErrDuplicateVariant    = errors.New("duplicate or conflicting variant level in index")
@@ -504,31 +494,29 @@ func (idx *Index) ValidateBounds(indexOffset int64) error {
 }
 
 func (idx *Index) validateDictionaryBounds(indexOffset int64) (int64, error) {
-	if idx.DictionarySize < 0 || idx.DictionarySize > MaxDictionarySize {
-		return 0, fmt.Errorf("%w: invalid dictionary size %d (max allowed %d bytes)",
-			ErrInvalidDictionary, idx.DictionarySize, MaxDictionarySize)
-	}
-
 	if err := validateZeroSizeDictionaryMetadata(
 		idx.DictionaryOffset, idx.DictionarySize, idx.DictionaryID, idx.DictionarySHA256,
 	); err != nil {
 		return 0, err
 	}
-
-	if idx.DictionarySize == 0 {
-		return 0, nil
-	}
-
-	if idx.DictionaryOffset < 0 {
-		return 0, fmt.Errorf("%w: invalid dictionary offset %d", ErrInvalidDictionary, idx.DictionaryOffset)
-	}
-	if idx.DictionarySHA256 == "" || !ValidateChecksum(idx.DictionarySHA256) {
+	if idx.DictionarySize > 0 && idx.DictionarySize <= MaxDictionarySize &&
+		idx.DictionaryOffset >= 0 &&
+		(idx.DictionarySHA256 == "" || !ValidateChecksum(idx.DictionarySHA256)) {
 		return 0, fmt.Errorf("%w: dictionary missing or invalid sha256 checksum", ErrInvalidChecksum)
 	}
-	if idx.DictionaryOffset > indexOffset || idx.DictionarySize > indexOffset-idx.DictionaryOffset {
+
+	lastEnd, err := checkDictionarySegmentBounds(indexOffset, idx.DictionaryOffset, idx.DictionarySize)
+	if err != nil {
+		if errors.Is(err, ErrInvalidDictionary) {
+			if idx.DictionarySize < 0 || idx.DictionarySize > MaxDictionarySize {
+				return 0, fmt.Errorf("%w: invalid dictionary size %d (max allowed %d bytes)",
+					ErrInvalidDictionary, idx.DictionarySize, MaxDictionarySize)
+			}
+			return 0, fmt.Errorf("%w: invalid dictionary offset %d", ErrInvalidDictionary, idx.DictionaryOffset)
+		}
 		return 0, fmt.Errorf("%w: dictionary payload extends past index offset %d", ErrOutOfBounds, indexOffset)
 	}
-	return idx.DictionaryOffset + idx.DictionarySize, nil
+	return lastEnd, nil
 }
 
 func (idx *Index) validateVariantBounds(indexOffset int64, lastEnd int64) error {
@@ -546,20 +534,25 @@ func (idx *Index) validateVariantBounds(indexOffset int64, lastEnd int64) error 
 		}
 		seenLevels[normLevel] = struct{}{}
 
-		if v.Offset < 0 || v.CompressedSize <= 0 || v.UncompressedSize <= 0 {
-			return fmt.Errorf("%w: invalid dimensions for variant %s", ErrOutOfBounds, v.Level)
+		nextEnd, err := checkVariantSegmentBounds(
+			indexOffset, lastEnd, i > 0 || idx.DictionarySize > 0,
+			v.Offset, v.CompressedSize, v.UncompressedSize,
+		)
+		if err != nil {
+			switch {
+			case errors.Is(err, ErrPayloadTooLarge):
+				return fmt.Errorf("%w: variant %s exceeds 1GB limit (%d bytes)", ErrPayloadTooLarge, v.Level, v.UncompressedSize)
+			case errors.Is(err, ErrOverlappingVariant):
+				return fmt.Errorf("%w: variant %s offset %d overlaps with previous data ending at %d",
+					ErrOverlappingVariant, v.Level, v.Offset, lastEnd)
+			default:
+				if v.Offset < 0 || v.CompressedSize <= 0 || v.UncompressedSize <= 0 {
+					return fmt.Errorf("%w: invalid dimensions for variant %s", ErrOutOfBounds, v.Level)
+				}
+				return fmt.Errorf("%w: variant %s payload extends past index offset %d", ErrOutOfBounds, v.Level, indexOffset)
+			}
 		}
-		if v.UncompressedSize > MaxPayloadSize {
-			return fmt.Errorf("%w: variant %s exceeds 1GB limit (%d bytes)", ErrPayloadTooLarge, v.Level, v.UncompressedSize)
-		}
-		if v.Offset > indexOffset || v.CompressedSize > indexOffset-v.Offset {
-			return fmt.Errorf("%w: variant %s payload extends past index offset %d", ErrOutOfBounds, v.Level, indexOffset)
-		}
-		if (i > 0 || idx.DictionarySize > 0) && v.Offset < lastEnd {
-			return fmt.Errorf("%w: variant %s offset %d overlaps with previous data ending at %d",
-				ErrOverlappingVariant, v.Level, v.Offset, lastEnd)
-		}
-		lastEnd = v.Offset + v.CompressedSize
+		lastEnd = nextEnd
 
 		if v.SHA256 == "" || !ValidateChecksum(v.SHA256) {
 			return fmt.Errorf("%w: variant %s missing or invalid sha256 checksum", ErrInvalidChecksum, v.Level)
