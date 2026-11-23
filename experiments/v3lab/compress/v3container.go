@@ -24,26 +24,33 @@ const (
 	// V3TrailerMagic identifies the fixed 56-byte Format v3 trailer (exact 8 bytes).
 	V3TrailerMagic = "\x00\xFA\x7FM3T\x00\x01"
 
-	v3HeaderLen        = 8
-	v3TrailerSize      = 56
-	v3TrailerIdxOff    = 0
-	v3TrailerSizeOff   = 8
-	v3TrailerHashOff   = 16
-	v3TrailerMagicOff  = 48
-	v3MaxIndexSize     = 16 * 1024 * 1024
-	v3MaxVariantBytes  = 512 * 1024 * 1024
-	v3MinChunkFloor    = 16 * 1024
-	v3DefaultChunkSize = 128 * 1024
-	v3MaskShiftExtra   = 1
-	v3DefaultDictSize  = 112 * 1024
-	v3DictTrainSample  = 64 * 1024
-	cdcSizeDivisor     = 2
-	cdcSizeMult        = 2
-	minDictSamples     = 2
-	preallocHalfDiv    = 2
+	v3HeaderLen         = 8
+	v3TrailerSize       = 56
+	v3TrailerIdxOff     = 0
+	v3TrailerSizeOff    = 8
+	v3TrailerHashOff    = 16
+	v3TrailerMagicOff   = 48
+	v3MaxIndexSize      = 16 * 1024 * 1024
+	v3MaxVariantBytes   = 512 * 1024 * 1024
+	v3MinChunkFloor     = 16 * 1024
+	v3DefaultChunkSize  = 128 * 1024
+	v3MaskShiftExtra    = 1
+	v3DefaultDictSize   = 112 * 1024
+	dictHeaderReserve   = 4096
+	minDictHistoryBytes = 64
+	minRawDictHistBytes = 8
+	dictHistDivisor     = 4
+	maxDictSampleBytes  = 128 * 1024
+	cdcSizeDivisor      = 2
+	cdcSizeMult         = 2
+	minDictSamples      = 2
+	preallocHalfDiv     = 2
+	arm64AlignMask      = uint64(arm64InsnLen - 1)
+	arm64AlignRound     = uint64(arm64InsnLen - 1)
 
-	v3FlagFiltered byte = 1 << 0
-	v3FlagHasDict  byte = 1 << 1
+	v3FlagFiltered  byte = 1 << 0
+	v3FlagHasDict   byte = 1 << 1
+	extFlagFiltered byte = 1 << 0
 
 	u16Bytes  = 2
 	u32Bytes  = 4
@@ -84,6 +91,7 @@ type V3PackOptions struct {
 	AvgChunkSize   int
 	EnableBCJRIP   bool
 	EnableDict     bool
+	DictProfitable bool
 	DictSize       int
 	ZstdLevel      zstd.EncoderLevel
 	ParallelEncode int
@@ -97,11 +105,13 @@ type V3BlockMeta struct {
 	SHA256         [shaLen]byte
 }
 
-// V3Extent maps a unique block into a variant's reconstructed image.
+// V3Extent maps a unique block into a variant's reconstructed image and optional filter base offset.
 type V3Extent struct {
 	BlockIdx      uint32
 	VariantOffset uint64
 	Length        uint32
+	Filtered      bool
+	FilterBasePos uint32
 }
 
 // V3VariantMeta describes how to reconstruct, unfilter, and verify one variant.
@@ -282,54 +292,234 @@ func chunkVariantData(raw, img []byte, mode ChunkMode, avgSize int) []SectionRan
 	return out
 }
 
-func prepareVariantImage(raw []byte, enableFilter bool) ([]byte, []SectionRange, elf.Machine, error) {
-	origCopy := make([]byte, len(raw))
-	copy(origCopy, raw)
-	if !enableFilter {
-		return origCopy, nil, elf.EM_NONE, nil
+func snapARM64FilterCuts(sectionLen uint64, relCuts []uint64) []uint64 {
+	if sectionLen == 0 || len(relCuts) == 0 {
+		return nil
 	}
-	ranges, machine, err := ExecutableRangesELF(origCopy)
+	out := make([]uint64, 0, len(relCuts))
+	var prev uint64
+	for _, c := range relCuts {
+		if c == 0 || c >= sectionLen {
+			continue
+		}
+		snapped := (c + arm64AlignRound) &^ arm64AlignMask
+		if snapped > prev && snapped < sectionLen {
+			out = append(out, snapped)
+			prev = snapped
+		}
+	}
+	return out
+}
+
+func alignChunksToExecRanges(
+	rawChunks []SectionRange,
+	raw []byte,
+	execRanges []SectionRange,
+	machine elf.Machine,
+) []SectionRange {
+	if len(rawChunks) == 0 || len(execRanges) == 0 {
+		return rawChunks
+	}
+	totalLen := uint64(len(raw))
+	cuts := make([]uint64, 0, len(rawChunks)+1+len(execRanges)*preallocHalfDiv)
+	cuts = append(cuts, 0, totalLen)
+	for _, ch := range rawChunks {
+		cuts = append(cuts, ch.Start, ch.End)
+	}
+	for _, er := range execRanges {
+		cuts = append(cuts, er.Start, er.End)
+	}
+	sort.Slice(cuts, func(i, j int) bool { return cuts[i] < cuts[j] })
+
+	uniq := make([]uint64, 0, len(cuts))
+	for _, c := range cuts {
+		if len(uniq) == 0 || c > uniq[len(uniq)-1] {
+			uniq = append(uniq, c)
+		}
+	}
+
+	finalCuts := make([]uint64, 0, len(uniq))
+	finalCuts = append(finalCuts, 0)
+	appendCut := func(c uint64) {
+		if c > finalCuts[len(finalCuts)-1] {
+			finalCuts = append(finalCuts, c)
+		}
+	}
+
+	ci := 0
+	for ci < len(uniq) && uniq[ci] == 0 {
+		ci++
+	}
+	for _, er := range execRanges {
+		for ci < len(uniq) && uniq[ci] <= er.Start {
+			appendCut(uniq[ci])
+			ci++
+		}
+		appendCut(er.Start)
+		var relCuts []uint64
+		for ci < len(uniq) && uniq[ci] < er.End {
+			relCuts = append(relCuts, uniq[ci]-er.Start)
+			ci++
+		}
+		switch machine {
+		case elf.EM_X86_64:
+			relCuts = SnapX86FilterCuts(raw[er.Start:er.End], relCuts)
+		case elf.EM_AARCH64:
+			relCuts = snapARM64FilterCuts(er.End-er.Start, relCuts)
+		}
+		for _, rc := range relCuts {
+			appendCut(er.Start + rc)
+		}
+		appendCut(er.End)
+		for ci < len(uniq) && uniq[ci] == er.End {
+			ci++
+		}
+	}
+	for ci < len(uniq) {
+		appendCut(uniq[ci])
+		ci++
+	}
+
+	out := make([]SectionRange, 0, len(finalCuts)-1)
+	for i := 0; i+1 < len(finalCuts); i++ {
+		if finalCuts[i+1] > finalCuts[i] {
+			out = append(out, SectionRange{Start: finalCuts[i], End: finalCuts[i+1]})
+		}
+	}
+	return out
+}
+
+func execRangeForChunk(ch SectionRange, execRanges []SectionRange, idx *int) (SectionRange, bool) {
+	for *idx < len(execRanges) && execRanges[*idx].End <= ch.Start {
+		*idx++
+	}
+	if *idx < len(execRanges) {
+		er := execRanges[*idx]
+		if ch.Start >= er.Start && ch.End <= er.End {
+			return er, true
+		}
+	}
+	return SectionRange{}, false
+}
+
+func prepareVariantFilterProbe(raw []byte, enableFilter bool) ([]byte, []SectionRange, elf.Machine, error) {
+	if !enableFilter {
+		return raw, nil, elf.EM_NONE, nil
+	}
+	ranges, machine, err := ExecutableRangesELF(raw)
 	if err != nil {
 		return nil, nil, elf.EM_NONE, err
 	}
-	if len(ranges) > 0 {
-		if err := ApplyELFFilter(origCopy, ranges, machine, true); err != nil {
-			return nil, nil, machine, err
+	if len(ranges) == 0 {
+		return raw, nil, machine, nil
+	}
+	probeImg := make([]byte, len(raw))
+	copy(probeImg, raw)
+	if err := ApplyELFFilter(probeImg, ranges, machine, true); err != nil {
+		return nil, nil, machine, err
+	}
+	return probeImg, ranges, machine, nil
+}
+
+func buildStratifiedDictHistory(blocks []*pendingBlock, maxHist int) []byte {
+	var hist bytes.Buffer
+	hist.Grow(maxHist)
+	taken := make([]int, len(blocks))
+	perBlock := max(maxHist/len(blocks), minDictHistoryBytes)
+
+	for i, b := range blocks {
+		if hist.Len() >= maxHist {
+			break
+		}
+		want := min(perBlock, len(b.raw), maxHist-hist.Len())
+		if want > 0 {
+			hist.Write(b.raw[:want])
+			taken[i] = want
 		}
 	}
-	return origCopy, ranges, machine, nil
+	for i, b := range blocks {
+		if hist.Len() >= maxHist {
+			break
+		}
+		if taken[i] < len(b.raw) {
+			want := min(len(b.raw)-taken[i], maxHist-hist.Len())
+			hist.Write(b.raw[taken[i] : taken[i]+want])
+		}
+	}
+	return hist.Bytes()
+}
+
+func buildDictSamples(blocks []*pendingBlock) [][]byte {
+	samples := make([][]byte, 0, len(blocks))
+	for _, b := range blocks {
+		s := b.raw
+		for len(s) > maxDictSampleBytes {
+			samples = append(samples, s[:maxDictSampleBytes])
+			s = s[maxDictSampleBytes:]
+		}
+		if len(s) > 0 {
+			samples = append(samples, s)
+		}
+	}
+	return samples
 }
 
 func trainBlockDict(blocks []*pendingBlock, dictSize int) []byte {
 	if dictSize <= 0 {
 		dictSize = v3DefaultDictSize
 	}
-	samples := make([][]byte, 0, len(blocks))
-	for _, b := range blocks {
-		limit := min(len(b.raw), v3DictTrainSample)
-		samples = append(samples, b.raw[:limit])
+	if len(blocks) < minDictSamples || dictSize <= dictHeaderReserve {
+		return nil
 	}
+	totalRaw := 0
+	for _, b := range blocks {
+		totalRaw += len(b.raw)
+	}
+	if totalRaw < minRawDictHistBytes {
+		return nil
+	}
+	histCap := dictSize - dictHeaderReserve
+	maxHist := min(histCap, max(totalRaw/dictHistDivisor, minRawDictHistBytes))
+	if maxHist < minRawDictHistBytes {
+		return nil
+	}
+
+	samples := buildDictSamples(blocks)
 	if len(samples) < minDictSamples {
 		return nil
 	}
-	dict, err := zstd.BuildDict(zstd.BuildDictOptions{
-		ID:       1,
-		Contents: samples,
-		Level:    zstd.SpeedDefault,
-		DebugOut: nil,
-	})
-	if err != nil || len(dict) > dictSize {
-		if err == nil && len(dict) > dictSize {
-			return dict[:dictSize]
+
+	for attempt := 0; attempt < preallocHalfDiv && maxHist >= minRawDictHistBytes; attempt++ {
+		hist := buildStratifiedDictHistory(blocks, maxHist)
+		if len(hist) < minRawDictHistBytes {
+			return nil
 		}
-		return nil
+		dict, err := zstd.BuildDict(zstd.BuildDictOptions{
+			ID:       1,
+			History:  hist,
+			Contents: samples,
+			Level:    zstd.SpeedDefault,
+		})
+		if err != nil || len(dict) == 0 {
+			return nil
+		}
+		if len(dict) <= dictSize {
+			return dict
+		}
+		maxHist /= preallocHalfDiv
 	}
-	return dict
+	return nil
 }
 
-func compressBlocksParallel(blocks []*pendingBlock, level zstd.EncoderLevel, dict []byte, workers int) error {
+func compressBlocksMeasured(
+	blocks []*pendingBlock,
+	level zstd.EncoderLevel,
+	dict []byte,
+	workers int,
+) ([][]byte, int64, error) {
+	compressed := make([][]byte, len(blocks))
 	if len(blocks) == 0 {
-		return nil
+		return compressed, 0, nil
 	}
 	if workers <= 0 {
 		workers = runtime.NumCPU()
@@ -381,16 +571,132 @@ func compressBlocksParallel(blocks []*pendingBlock, level zstd.EncoderLevel, dic
 				if idx >= len(blocks) {
 					return
 				}
-				blk := blocks[idx]
-				blk.compressed = enc.EncodeAll(blk.raw, make([]byte, 0, len(blk.raw)/preallocHalfDiv))
+				raw := blocks[idx].raw
+				compressed[idx] = enc.EncodeAll(raw, make([]byte, 0, len(raw)/preallocHalfDiv))
 			}
 		}()
 	}
 	wg.Wait()
-	return firstEr
+	if firstEr != nil {
+		return nil, 0, firstEr
+	}
+	var totalBytes int64
+	for _, c := range compressed {
+		totalBytes += int64(len(c))
+	}
+	return compressed, totalBytes, nil
 }
 
-// PackV3 builds a deduplicated, optionally BCJ+RIP-filtered Format v3 archive on w and returns
+type v3PackBuildState struct {
+	blocks       []*pendingBlock
+	blockIdxByID map[[shaLen]byte]uint32
+	stats        *V3PackStats
+	machine      elf.Machine
+}
+
+func (s *v3PackBuildState) ingestVariant(
+	lvl string,
+	raw []byte,
+	mode ChunkMode,
+	avgSize int,
+	enableFilter bool,
+) (V3VariantMeta, error) {
+	if len(raw) == 0 || uint64(len(raw)) > v3MaxVariantBytes {
+		return V3VariantMeta{}, fmt.Errorf("%w: variant %s length %d invalid", ErrInvalidV3Container, lvl, len(raw))
+	}
+	probeImg, execRanges, vMachine, err := prepareVariantFilterProbe(raw, enableFilter)
+	if err != nil {
+		return V3VariantMeta{}, fmt.Errorf("prepare variant %s: %w", lvl, err)
+	}
+	if s.machine == elf.EM_NONE && vMachine != elf.EM_NONE {
+		s.machine = vMachine
+	} else if s.machine != elf.EM_NONE && vMachine != elf.EM_NONE && s.machine != vMachine {
+		return V3VariantMeta{}, fmt.Errorf("%w: variant %s machine %v mismatches %v",
+			ErrInvalidV3Container, lvl, vMachine, s.machine)
+	}
+
+	origSum := sha256.Sum256(raw)
+	chunks := alignChunksToExecRanges(chunkVariantData(raw, probeImg, mode, avgSize), raw, execRanges, vMachine)
+	extents := make([]V3Extent, 0, len(chunks))
+	erIdx := 0
+	for _, ch := range chunks {
+		chunkLen := ch.End - ch.Start
+		s.stats.LogicalRawBytes += int64(chunkLen) // #nosec G115 -- chunkLen bounded by variant size
+		s.stats.LogicalExtentCount++
+
+		chunkData := make([]byte, chunkLen)
+		copy(chunkData, raw[ch.Start:ch.End])
+
+		var (
+			filtered      bool
+			filterBasePos uint32
+		)
+		if er, inside := execRangeForChunk(ch, execRanges, &erIdx); inside {
+			filterBasePos = uint32(ch.Start - er.Start) // #nosec G115 -- mod-2^32 section offset matching Lean spec
+			if err := ApplyExtentFilterInPlace(chunkData, vMachine, filterBasePos, true); err != nil {
+				return V3VariantMeta{}, fmt.Errorf("filter variant %s extent [%d,%d): %w", lvl, ch.Start, ch.End, err)
+			}
+			filtered = true
+		}
+
+		sum := sha256.Sum256(chunkData)
+		blkIdx, exists := s.blockIdxByID[sum]
+		if !exists {
+			blkIdx = uint32(len(s.blocks)) // #nosec G115 -- bounded by max chunks
+			s.blockIdxByID[sum] = blkIdx
+			s.blocks = append(s.blocks, &pendingBlock{
+				key: sum,
+				raw: chunkData,
+			})
+			s.stats.UniqueRawBytes += int64(chunkLen) // #nosec G115 -- bounded by variant size
+		} else {
+			s.stats.DeduplicatedBytes += int64(chunkLen) // #nosec G115 -- bounded by variant size
+		}
+		extents = append(extents, V3Extent{
+			BlockIdx:      blkIdx,
+			VariantOffset: ch.Start,
+			Length:        uint32(chunkLen), // #nosec G115 -- chunkLen <= max chunk
+			Filtered:      filtered,
+			FilterBasePos: filterBasePos,
+		})
+	}
+
+	return V3VariantMeta{
+		Level:            lvl,
+		UncompressedSize: uint64(len(raw)),
+		Filtered:         enableFilter && len(execRanges) > 0,
+		OrigSHA256:       origSum,
+		ExecRanges:       execRanges,
+		Extents:          extents,
+	}, nil
+}
+
+func compressBlocksWithOptionalDict(blocks []*pendingBlock, opts V3PackOptions) ([]byte, error) {
+	var dict []byte
+	if opts.EnableDict {
+		dict = trainBlockDict(blocks, opts.DictSize)
+	}
+	compressedSlices, compBytes, err := compressBlocksMeasured(blocks, opts.ZstdLevel, dict, opts.ParallelEncode)
+	if err != nil {
+		return nil, fmt.Errorf("compress blocks: %w", err)
+	}
+	if len(dict) > 0 && opts.DictProfitable {
+		noDictSlices, noDictBytes, noDictErr := compressBlocksMeasured(blocks, opts.ZstdLevel, nil, opts.ParallelEncode)
+		if noDictErr != nil {
+			return nil, fmt.Errorf("compress blocks (no-dict comparison): %w", noDictErr)
+		}
+		if int64(len(dict))+compBytes >= noDictBytes {
+			dict = nil
+			compressedSlices = noDictSlices
+		}
+	}
+	for i, c := range compressedSlices {
+		blocks[i].compressed = c
+	}
+	return dict, nil
+}
+
+// PackV3 builds a deduplicated, optionally chunk-local filtered Format v3 archive on w and returns
 // both parsed metadata and detailed compression metrics.
 func PackV3(w io.Writer, opts V3PackOptions) (*V3Archive, *V3PackStats, error) {
 	if len(opts.Variants) == 0 {
@@ -411,76 +717,27 @@ func PackV3(w io.Writer, opts V3PackOptions) (*V3Archive, *V3PackStats, error) {
 	}
 	sort.Strings(levels)
 
-	var (
-		blocks       []*pendingBlock
-		blockIdxByID = make(map[[shaLen]byte]uint32)
-		variantMetas = make([]V3VariantMeta, 0, len(levels))
-		stats        = &V3PackStats{}
-		machine      elf.Machine
-	)
-
+	state := &v3PackBuildState{
+		blockIdxByID: make(map[[shaLen]byte]uint32),
+		stats:        &V3PackStats{},
+	}
+	variantMetas := make([]V3VariantMeta, 0, len(levels))
 	for _, lvl := range levels {
-		raw := opts.Variants[lvl]
-		if len(raw) == 0 || uint64(len(raw)) > v3MaxVariantBytes {
-			return nil, nil, fmt.Errorf("%w: variant %s length %d invalid", ErrInvalidV3Container, lvl, len(raw))
-		}
-		img, execRanges, vMachine, err := prepareVariantImage(raw, opts.EnableBCJRIP)
+		meta, err := state.ingestVariant(lvl, opts.Variants[lvl], mode, avgSize, opts.EnableBCJRIP)
 		if err != nil {
-			return nil, nil, fmt.Errorf("prepare variant %s: %w", lvl, err)
+			return nil, nil, err
 		}
-		if machine == elf.EM_NONE && vMachine != elf.EM_NONE {
-			machine = vMachine
-		}
-
-		origSum := sha256.Sum256(raw)
-		chunks := chunkVariantData(raw, img, mode, avgSize)
-		extents := make([]V3Extent, 0, len(chunks))
-		for _, ch := range chunks {
-			chunkLen := ch.End - ch.Start
-			stats.LogicalRawBytes += int64(chunkLen) // #nosec G115 -- chunkLen bounded by variant size
-			stats.LogicalExtentCount++
-
-			chunkData := make([]byte, chunkLen)
-			copy(chunkData, img[ch.Start:ch.End])
-			sum := sha256.Sum256(chunkData)
-
-			blkIdx, exists := blockIdxByID[sum]
-			if !exists {
-				blkIdx = uint32(len(blocks)) // #nosec G115 -- bounded by max chunks
-				blockIdxByID[sum] = blkIdx
-				blocks = append(blocks, &pendingBlock{
-					key: sum,
-					raw: chunkData,
-				})
-				stats.UniqueRawBytes += int64(chunkLen) // #nosec G115 -- bounded by variant size
-			} else {
-				stats.DeduplicatedBytes += int64(chunkLen) // #nosec G115 -- bounded by variant size
-			}
-			extents = append(extents, V3Extent{
-				BlockIdx:      blkIdx,
-				VariantOffset: ch.Start,
-				Length:        uint32(chunkLen), // #nosec G115 -- chunkLen <= max chunk
-			})
-		}
-
-		variantMetas = append(variantMetas, V3VariantMeta{
-			Level:            lvl,
-			UncompressedSize: uint64(len(raw)),
-			Filtered:         opts.EnableBCJRIP && len(execRanges) > 0,
-			OrigSHA256:       origSum,
-			ExecRanges:       execRanges,
-			Extents:          extents,
-		})
+		variantMetas = append(variantMetas, meta)
 	}
-	stats.UniqueBlockCount = len(blocks)
+	state.stats.UniqueBlockCount = len(state.blocks)
 
-	var dict []byte
-	if opts.EnableDict {
-		dict = trainBlockDict(blocks, opts.DictSize)
+	dict, err := compressBlocksWithOptionalDict(state.blocks, opts)
+	if err != nil {
+		return nil, nil, err
 	}
-	if err := compressBlocksParallel(blocks, opts.ZstdLevel, dict, opts.ParallelEncode); err != nil {
-		return nil, nil, fmt.Errorf("compress blocks: %w", err)
-	}
+	blocks := state.blocks
+	stats := state.stats
+	machine := state.machine
 
 	if _, err := w.Write([]byte(V3ContainerMagic)); err != nil {
 		return nil, nil, fmt.Errorf("write v3 magic: %w", err)
@@ -632,6 +889,15 @@ func MarshalV3Index(arch *V3Archive) ([]byte, error) {
 			buf.Write(tmp8[:])
 			binary.LittleEndian.PutUint32(tmp4[:], ex.Length)
 			buf.Write(tmp4[:])
+			var extFlags byte
+			if ex.Filtered {
+				extFlags |= extFlagFiltered
+			}
+			buf.WriteByte(extFlags)
+			if ex.Filtered {
+				binary.LittleEndian.PutUint32(tmp4[:], ex.FilterBasePos)
+				buf.Write(tmp4[:])
+			}
 		}
 	}
 
@@ -860,6 +1126,7 @@ func parseV3Extents(data []byte, off *int, arch *V3Archive, blockCount uint32, u
 	if err != nil {
 		return nil, err
 	}
+	machine := elf.Machine(arch.Machine)
 	extents := make([]V3Extent, extCount)
 	var expectedOff uint64
 	for ei := range int(extCount) {
@@ -875,11 +1142,35 @@ func parseV3Extents(data []byte, off *int, arch *V3Archive, blockCount uint32, u
 		if eErr != nil {
 			return nil, eErr
 		}
+		extFlags, eErr := readByteChecked(data, off)
+		if eErr != nil {
+			return nil, eErr
+		}
+		if (extFlags & ^extFlagFiltered) != 0 {
+			return nil, fmt.Errorf("%w: unsupported extent flags 0x%02x in %s", ErrInvalidV3Container, extFlags, level)
+		}
+		filtered := (extFlags & extFlagFiltered) != 0
+		var filterBasePos uint32
+		if filtered {
+			if machine != elf.EM_X86_64 && machine != elf.EM_AARCH64 {
+				return nil, fmt.Errorf("%w: filtered extent in %s with unsupported machine %v", ErrInvalidV3Container, level, machine)
+			}
+			filterBasePos, eErr = readU32Checked(data, off)
+			if eErr != nil {
+				return nil, eErr
+			}
+		}
 		if bIdx >= blockCount || vOff != expectedOff || uint64(eLen) != uint64(arch.Blocks[bIdx].RawSize) || uint64(eLen) > uSize-vOff {
 			return nil, fmt.Errorf("%w: invalid variant %s extent %d", ErrInvalidV3Container, level, ei)
 		}
 		expectedOff += uint64(eLen)
-		extents[ei] = V3Extent{BlockIdx: bIdx, VariantOffset: vOff, Length: eLen}
+		extents[ei] = V3Extent{
+			BlockIdx:      bIdx,
+			VariantOffset: vOff,
+			Length:        eLen,
+			Filtered:      filtered,
+			FilterBasePos: filterBasePos,
+		}
 	}
 	if uSize == 0 || uSize > v3MaxVariantBytes || expectedOff != uSize {
 		return nil, fmt.Errorf("%w: variant %s extent coverage mismatch", ErrInvalidV3Container, level)
@@ -946,6 +1237,51 @@ type uniqueBlockWork struct {
 	extents  []V3Extent
 }
 
+func readV3Dict(arch *V3Archive, r io.ReaderAt) ([]byte, error) {
+	if !arch.HasDict {
+		return nil, nil
+	}
+	dictBytes := make([]byte, arch.DictSize)
+	if _, err := r.ReadAt(dictBytes, int64(arch.DictOffset)); err != nil { // #nosec G115 -- validated < indexOff
+		return nil, fmt.Errorf("read v3 dict: %w", err)
+	}
+	if sha256.Sum256(dictBytes) != arch.DictSHA256 {
+		return nil, fmt.Errorf("%w: dict SHA-256 mismatch", ErrInvalidV3Container)
+	}
+	return dictBytes, nil
+}
+
+func emitDecodedJobExtents(
+	job uniqueBlockWork,
+	rawBuf []byte,
+	unfilterBuf *[]byte,
+	machine elf.Machine,
+	emit func(offset uint64, data []byte) error,
+) error {
+	singleUse := len(job.extents) == 1
+	for _, ex := range job.extents {
+		payload := rawBuf
+		if ex.Filtered {
+			if !singleUse {
+				if cap(*unfilterBuf) < len(rawBuf) {
+					*unfilterBuf = make([]byte, len(rawBuf))
+				} else {
+					*unfilterBuf = (*unfilterBuf)[:len(rawBuf)]
+				}
+				copy(*unfilterBuf, rawBuf)
+				payload = *unfilterBuf
+			}
+			if uErr := ApplyExtentFilterInPlace(payload, machine, ex.FilterBasePos, false); uErr != nil {
+				return uErr
+			}
+		}
+		if err := emit(ex.VariantOffset, payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // decodeBlocksParallel decompresses every needed unique block in parallel and invokes emit(offset, plain).
 func decodeBlocksParallel(
 	arch *V3Archive,
@@ -954,15 +1290,9 @@ func decodeBlocksParallel(
 	workers int,
 	emit func(offset uint64, data []byte) error,
 ) error {
-	var dictBytes []byte
-	if arch.HasDict {
-		dictBytes = make([]byte, arch.DictSize)
-		if _, err := r.ReadAt(dictBytes, int64(arch.DictOffset)); err != nil { // #nosec G115 -- validated < indexOff
-			return fmt.Errorf("read v3 dict: %w", err)
-		}
-		if sha256.Sum256(dictBytes) != arch.DictSHA256 {
-			return fmt.Errorf("%w: dict SHA-256 mismatch", ErrInvalidV3Container)
-		}
+	dictBytes, err := readV3Dict(arch, r)
+	if err != nil {
+		return err
 	}
 
 	workIdxByBlock := make(map[uint32]int, len(v.Extents))
@@ -1015,6 +1345,8 @@ func decodeBlocksParallel(
 
 			var compBuf []byte
 			var rawBuf []byte
+			var unfilterBuf []byte
+			machine := elf.Machine(arch.Machine)
 			for {
 				mu.Lock()
 				jIdx := nextJob
@@ -1050,11 +1382,9 @@ func decodeBlocksParallel(
 					setErr(fmt.Errorf("%w: block %d digest or length mismatch", ErrInvalidV3Container, job.blockIdx))
 					return
 				}
-				for _, ex := range job.extents {
-					if err := emit(ex.VariantOffset, rawBuf); err != nil {
-						setErr(err)
-						return
-					}
+				if err := emitDecodedJobExtents(job, rawBuf, &unfilterBuf, machine, emit); err != nil {
+					setErr(err)
+					return
 				}
 			}
 		}()
@@ -1063,7 +1393,7 @@ func decodeBlocksParallel(
 	return firstEr
 }
 
-// DecodeVariantBytes reconstructs, unfilters, and SHA-256 verifies a variant into a caller buffer.
+// DecodeVariantBytes reconstructs, unfilters per-extent, and SHA-256 verifies a variant into a caller buffer.
 func DecodeVariantBytes(arch *V3Archive, r io.ReaderAt, level string, workers int) ([]byte, error) {
 	if arch == nil {
 		return nil, ErrInvalidV3Container
@@ -1083,11 +1413,6 @@ func DecodeVariantBytes(arch *V3Archive, r io.ReaderAt, level string, workers in
 		return nil, err
 	}
 
-	if v.Filtered && len(v.ExecRanges) > 0 {
-		if err := ApplyELFFilter(out, v.ExecRanges, elf.Machine(arch.Machine), false); err != nil {
-			return nil, err
-		}
-	}
 	if sha256.Sum256(out) != v.OrigSHA256 {
 		return nil, fmt.Errorf("%w: reconstructed SHA-256 mismatch for %s", ErrInvalidV3Container, level)
 	}

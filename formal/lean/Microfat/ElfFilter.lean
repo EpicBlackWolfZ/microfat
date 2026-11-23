@@ -1004,4 +1004,103 @@ theorem x86_inverse_roundtrip (bs : List UInt8) (pos : UInt32) :
   have h := x86_roundtrip_aux bs.length false bs pos (Nat.le_refl _)
   simpa using h
 
+/-! ### Part 3: Chunk-Local Extent Filtering & Deduplication Soundness -/
+
+structure FilteredExtent where
+  data : List UInt8
+  filterBase : Option UInt32
+  deriving DecidableEq, Repr
+
+def applyExtentX86 (encode : Bool) (e : FilteredExtent) : FilteredExtent :=
+  match e.filterBase with
+  | some pos => { data := x86Transform encode e.data pos, filterBase := some pos }
+  | none => e
+
+def applyExtentArm64 (encode : Bool) (e : FilteredExtent) : FilteredExtent :=
+  match e.filterBase with
+  | some pos => { data := arm64Transform encode e.data pos, filterBase := some pos }
+  | none => e
+
+def reassembleExtents (es : List FilteredExtent) : List UInt8 :=
+  es.flatMap (·.data)
+
+private theorem applyExtentX86_roundtrip (e : FilteredExtent) :
+    applyExtentX86 false (applyExtentX86 true e) = e := by
+  cases e with
+  | mk d fb =>
+      cases fb with
+      | none => rfl
+      | some pos => simp [applyExtentX86, x86_roundtrip]
+
+private theorem applyExtentArm64_roundtrip (e : FilteredExtent) :
+    applyExtentArm64 false (applyExtentArm64 true e) = e := by
+  cases e with
+  | mk d fb =>
+      cases fb with
+      | none => rfl
+      | some pos => simp [applyExtentArm64, arm64_bytes_roundtrip]
+
+theorem x86_chunk_local_reassembly (es : List FilteredExtent) :
+    reassembleExtents ((es.map (applyExtentX86 true)).map (applyExtentX86 false)) =
+      reassembleExtents es := by
+  rw [List.map_map]
+  have hcomp : applyExtentX86 false ∘ applyExtentX86 true = id := by
+    funext e
+    exact applyExtentX86_roundtrip e
+  rw [hcomp, List.map_id]
+
+theorem arm64_chunk_local_reassembly (es : List FilteredExtent) :
+    reassembleExtents ((es.map (applyExtentArm64 true)).map (applyExtentArm64 false)) =
+      reassembleExtents es := by
+  rw [List.map_map]
+  have hcomp : applyExtentArm64 false ∘ applyExtentArm64 true = id := by
+    funext e
+    exact applyExtentArm64_roundtrip e
+  rw [hcomp, List.map_id]
+
+theorem x86_dedup_multi_offset_sound (orig1 orig2 blk : List UInt8) (pos1 pos2 : UInt32)
+    (h1 : x86Transform true orig1 pos1 = blk)
+    (h2 : x86Transform true orig2 pos2 = blk) :
+    x86Transform false blk pos1 = orig1 ∧ x86Transform false blk pos2 = orig2 := by
+  constructor
+  · rw [← h1, x86_roundtrip]
+  · rw [← h2, x86_roundtrip]
+
+theorem arm64_dedup_multi_offset_sound (orig1 orig2 blk : List UInt8) (pos1 pos2 : UInt32)
+    (h1 : arm64Transform true orig1 pos1 = blk)
+    (h2 : arm64Transform true orig2 pos2 = blk) :
+    arm64Transform false blk pos1 = orig1 ∧ arm64Transform false blk pos2 = orig2 := by
+  constructor
+  · rw [← h1, arm64_bytes_roundtrip]
+  · rw [← h2, arm64_bytes_roundtrip]
+
+private theorem pos_add_four_length (pos : UInt32) (n : Nat) :
+    (pos + (4 : UInt32)) + UInt32.ofNat n = pos + UInt32.ofNat (n + 4) := by
+  apply UInt32.toNat_inj.mp
+  simp only [UInt32.toNat_add, UInt32.toNat_ofNat']
+  have h4 : (4 : UInt32).toNat = 4 := by decide
+  rw [h4, Nat.add_mod_mod, Nat.mod_add_mod]
+  rw [Nat.add_mod pos.toNat ((n + 4) % 2 ^ 32) (2 ^ 32), Nat.mod_mod, ← Nat.add_mod]
+  rw [show pos.toNat + 4 + n = pos.toNat + (n + 4) by omega]
+
+theorem arm64_aligned_split_commutes (encode : Bool) :
+    ∀ (a b : List UInt8) (pos : UInt32),
+      a.length % 4 = 0 →
+      arm64Transform encode (a ++ b) pos =
+        arm64Transform encode a pos ++ arm64Transform encode b (pos + UInt32.ofNat a.length)
+  | [], b, pos, _ => by
+      simp [arm64Transform]
+  | [_], _, _, h => by simp at h
+  | [_, _], _, _, h => by simp at h
+  | [_, _, _], _, _, h => by simp at h
+  | b0 :: b1 :: b2 :: b3 :: rest, b, pos, h => by
+      have hrest : rest.length % 4 = 0 := by
+        simp only [List.length_cons] at h
+        omega
+      dsimp only [List.cons_append, arm64Transform]
+      have ih := arm64_aligned_split_commutes encode rest b (pos + 4) hrest
+      have hpos := pos_add_four_length pos rest.length
+      simp only [List.length_cons]
+      rw [← hpos, ih]
+
 end Microfat.ElfFilter

@@ -37,3 +37,8 @@ axiom cleanliness across every headline theorem.
 #print axioms Microfat.ElfFilter.x86_length_preserved
 #print axioms Microfat.ElfFilter.x86_roundtrip
 #print axioms Microfat.ElfFilter.x86_inverse_roundtrip
+#print axioms Microfat.ElfFilter.x86_chunk_local_reassembly
+#print axioms Microfat.ElfFilter.arm64_chunk_local_reassembly
+#print axioms Microfat.ElfFilter.x86_dedup_multi_offset_sound
+#print axioms Microfat.ElfFilter.arm64_dedup_multi_offset_sound
+#print axioms Microfat.ElfFilter.arm64_aligned_split_commutes

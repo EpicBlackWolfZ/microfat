@@ -1,10 +1,10 @@
 # Post-`v0.4.1` Formal Verification & Compression Research Results (`v3lab`)
 
-- **Topic Branches**: Phase 1 (`#502`) merged onto `origin/main` (`d6f6ff6`); Phase 2 Track 1 (`perf/rust-stub-shani-musl`) advances [`microfat-stub-rs`](rust-stub/) on top of `d6f6ff6`
+- **Topic Branches**: Phase 1 (`#502`) & Phase 2 Track 1 (`#504`) merged onto `origin/main` (`f7660bb`); Phase 2 Track 2 (`perf/v3-parallel-unfilter-dict-arm64`) advances Format v3 + `#500` on top of `f7660bb`
 - **Design Decision & Promotion Gates**: [ADR-0001](../../docs/design/adr-0001-formal-verification-and-v3-lab.md)
 - **Related Issues**: [#378](https://github.com/EpicBlackWolfZ/microfat/issues/378), [#497](https://github.com/EpicBlackWolfZ/microfat/issues/497), [#498](https://github.com/EpicBlackWolfZ/microfat/issues/498), [#499](https://github.com/EpicBlackWolfZ/microfat/issues/499), [#500](https://github.com/EpicBlackWolfZ/microfat/issues/500), [#501](https://github.com/EpicBlackWolfZ/microfat/issues/501)
 
-This document summarizes all observed verification results, benchmarks, and promotion-gate assessments from the post-`v0.4.1` research tracks. Every figure below comes directly from artifacts and command runs on this machine; unverified production claims or absent/emulated hardware backends (no CUDA Toolkit / `nvrtc.h` for Bend GPU codegen; QEMU user-mode emulation rather than native ARM64 hardware) are explicitly noted.
+This document summarizes all observed verification results, benchmarks, and promotion-gate assessments from the post-`v0.4.1` research tracks. Every figure below comes directly from artifacts and command runs on this machine; unverified production claims or absent/emulated hardware backends (no CUDA Toolkit / `nvrtc.h` for Bend GPU codegen; QEMU user-mode emulation and x86-64 host decoding rather than native ARM64 hardware timing) are explicitly noted.
 
 ---
 
@@ -12,17 +12,17 @@ This document summarizes all observed verification results, benchmarks, and prom
 
 | Toolchain | Version & Target Scope | Status | Verified Targets / Properties | Claim Boundaries & Assumptions |
 | :--- | :--- | :--- | :--- | :--- |
-| **Lean 4** | `v4.34.0` on mathematical specs & filter algebra ([`formal/lean/Microfat.lean`](../../formal/lean/Microfat.lean)) | **PASS** (`lake build`, 7 jobs, 0 warnings) | **26 theorems** across `FormatV2` (marshal/unmarshal round-trip, exact consumption, trailing-byte rejection, segment bounds/disjointness), `Microarch` (AMD64 rank iff, monotonicity, ARM64 DAG acyclicity, SIGILL freedom, unforced optimality), `CgroupMath` (overflow guard, retained limit, `GOMEMLIMIT` ceiling & monotonicity, worker admission sum), and `ElfFilter` (word & byte-stream bijections for ARM64 BL/B/ADRP and x86-64 BCJ+RIP). Uses **only** `{propext, Classical.choice, Quot.sound}`; zero `sorry`, `sorryAx`, `native_decide`, or custom axioms. | Proves properties of the Lean model rather than directly compiling Go/Rust binaries; linked to shipped Go (`experiments/v3lab/compress/elffilter_test.go`) and Rust (`experiments/v3lab/rust-stub/src/elffilter.rs`) via shared `#eval` conformance vectors and `cargo test` / `go test -race`. |
+| **Lean 4** | `v4.34.0` on mathematical specs & filter algebra ([`formal/lean/Microfat.lean`](../../formal/lean/Microfat.lean)) | **PASS** (`lake build`, 7 jobs, 0 warnings) | **31 theorems** across `FormatV2` (marshal/unmarshal round-trip, exact consumption, trailing-byte rejection, segment bounds/disjointness), `Microarch` (AMD64 rank iff, monotonicity, ARM64 DAG acyclicity, SIGILL freedom, unforced optimality), `CgroupMath` (overflow guard, retained limit, `GOMEMLIMIT` ceiling & monotonicity, worker admission sum), and `ElfFilter` (ARM64 BL/B/ADRP and x86-64 BCJ+RIP word/byte bijections plus `x86_chunk_local_reassembly`, `arm64_chunk_local_reassembly`, `x86_dedup_multi_offset_sound`, `arm64_dedup_multi_offset_sound`, `arm64_aligned_split_commutes`). Uses **only** `{propext, Classical.choice, Quot.sound}`; zero `sorry`, `sorryAx`, `native_decide`, or custom axioms. | Proves properties of the Lean model rather than directly compiling Go/Rust binaries; linked to shipped Go (`experiments/v3lab/compress/elffilter_test.go`) and Rust (`experiments/v3lab/rust-stub/src/elffilter.rs`) via shared `#eval` conformance vectors and `cargo test` / `go test -race`. |
 | **Z3 (`QF_BV`)** | `v5.3.3` on 64-bit bitvector SMT-LIB2 ([`formal/smt/`](../../formal/smt/README.md)) | **PASS** | `format_v2_bounds.smt2`: `sat` (premise satisfiability) + 3× `unsat` (negated overflow, bounds, and overlap checks). `cgroup_memory.smt2`: 3× `sat` + 3× `unsat` (overflow guard, `RetainedMemoryLimit`, `GOMEMLIMIT` headroom/ceiling bounds across all `2^64` words). | Models exact two's-complement 64-bit signed/unsigned arithmetic of the guards; independent of allocator/sysfs I/O. |
 | **Gobra** | `0.1.0-SNAPSHOT` (`viperproject/gobra-ide v3.1.2` local `--overflow`) + canonical CI gate (`v26.09`, [#479](https://github.com/EpicBlackWolfZ/microfat/pull/479)) directly on **production Go** [`internal/cgroup/memory.go`](../../internal/cgroup/memory.go) | **PASS** (`--overflow`, `Gobra found 0 errors.`) | Directly proves signed 64-bit overflow freedom and exact functional pre/postconditions on production `ExtractionMemory` and `RetainedMemoryLimit`, matching the canonical `scripts/verify-cgroup-memory.sh` / [`cgroup-memory-verification.md`](../../docs/design/cgroup-memory-verification.md) contract. | Scoped via `-i internal/cgroup/memory.go` with [`verification/gobra/stubs/math/limits.gobra`](../../verification/gobra/stubs/math/limits.gobra) (`MaxInt64`); remaining sysfs/float helpers and Format v2 bounds (`#501`) remain covered by Go tests, Lean 4, and Z3. |
 | **Bend 2** | `v2.0.40` (`--verdict`) on [`experiments/v3lab/bend/filter_proof.bend`](bend/filter_proof.bend) | **PASS** (`ALL PROOFS CHECK`, zero `@unsafe`) | Machine-checks pure bidirectional step & wraparound round-trip properties for normalized x86/ARM64 offset transforms inside pure Bend code. | Model-level check in Bend (`filter_proof.bend`); does not directly inspect Go ELF parsing. |
-| **Kani** | `v0.68.0` standalone (`CBMC 6.11.0`, `nightly-2026-08-21`) directly on **Rust stub core** [`experiments/v3lab/rust-stub/src/lib.rs`](rust-stub/src/lib.rs) | **PASS** (`9/9 harnesses`, 0 failures) | Verifies compiled `#![no_std]` `#![forbid(unsafe_code)]` Rust code directly: `verify_arm64_step_word_bijection` (`0.16s`), `verify_x86_step_bijection` (`1.38s`), `verify_x86_transform_roundtrip_8` (`27.33s`), `verify_evaluate_amd64_exhaustive` over all `2^21` x86 feature masks (`0.09s`), `verify_evaluate_arm64_dag_exhaustive` over all `2^24` ARM64 capability masks (`0.23s`), `verify_trailer_never_panics_and_enforces_exact_layout` (`0.70s`), `verify_cursor_primitives_safe` (`1.88s`), `verify_decode_hex_digest_no_panic` (`3.64s`), `verify_segment_bounds_disjointness_and_selection` for `1..=4` symbolic variants across AMD64 + ARM64 DAG (`34.59s`). | Checks Rust core under explicit symbolic bounds (`len <= 8` for multi-step x86 filter, `1..=4` variants for segment layout, `<= 64B` cursor slice); full arbitrarily-long x86 stream bijection is proven unbounded in Lean 4. Hardware SHA-NI intrinsics ([`sha256_hw.rs`](rust-stub/src/sha256_hw.rs)), host probes ([`cpuid.rs`](rust-stub/src/cpuid.rs)), and Linux syscalls ([`main.rs`](rust-stub/src/main.rs)) are verified via unit/differential tests and E2E/QEMU checks rather than Kani models. |
+| **Kani** | `v0.68.0` standalone (`CBMC 6.11.0`, `nightly-2026-08-21`) directly on **Rust stub core** [`experiments/v3lab/rust-stub/src/lib.rs`](rust-stub/src/lib.rs) | **PASS** (`11/11 harnesses`, 0 failures) | Verifies compiled `#![no_std]` `#![forbid(unsafe_code)]` Rust code directly: `verify_arm64_step_word_bijection`, `verify_x86_step_bijection`, `verify_x86_transform_roundtrip_8`, `verify_x86_chunk_local_split_roundtrip` (`144.94s`), `verify_arm64_chunk_local_split_roundtrip` (`1.24s`), `verify_evaluate_amd64_exhaustive` (`2^21` masks), `verify_evaluate_arm64_dag_exhaustive` (`2^24` masks), `verify_trailer_never_panics_and_enforces_exact_layout`, `verify_cursor_primitives_safe`, `verify_decode_hex_digest_no_panic`, and `verify_segment_bounds_disjointness_and_selection` (`1..=4` variants across AMD64 + ARM64 DAG). | Checks Rust core under explicit symbolic bounds (`len <= 8` for multi-step x86 filter, `1..=4` variants for segment layout, `<= 64B` cursor slice); full arbitrarily-long x86 stream & chunk-local bijections are proven unbounded in Lean 4. Hardware SHA-NI intrinsics ([`sha256_hw.rs`](rust-stub/src/sha256_hw.rs)), host probes ([`cpuid.rs`](rust-stub/src/cpuid.rs)), and Linux syscalls ([`main.rs`](rust-stub/src/main.rs)) are verified via unit/differential tests and E2E/QEMU checks rather than Kani models. |
 
-### Alignment with `origin/main` Hardening (`#479`, `#502`, & `v0.4.1`)
+### Alignment with `origin/main` Hardening (`#479`, `#502`, `#504`)
 
-`origin/main` already hardened [`internal/format/format.go`](../../internal/format/format.go) (rejecting trailing index bytes, negative dictionary/variant dimensions, and non-zero offsets/IDs on zero-size dictionaries while allowing negative `CreatedUnix`) and merged direct production Gobra verification of [`internal/cgroup/memory.go`](../../internal/cgroup/memory.go) via [#479](https://github.com/EpicBlackWolfZ/microfat/pull/479). Accordingly, `perf/rust-stub-shani-musl` introduces no production Format v2 or Go stub behavior edits; all work stays isolated under `experiments/v3lab/`.
+`origin/main` already hardened [`internal/format/format.go`](../../internal/format/format.go) and merged direct production Gobra verification of [`internal/cgroup/memory.go`](../../internal/cgroup/memory.go) via [#479](https://github.com/EpicBlackWolfZ/microfat/pull/479). Accordingly, `perf/v3-parallel-unfilter-dict-arm64` introduces zero edits to production Format v2 or Go stub behavior; all code stays isolated under `formal/` and `experiments/v3lab/`.
 
-Follow-up issues track the research roadmap: [#499](https://github.com/EpicBlackWolfZ/microfat/issues/499) (Rust stub SHA-NI, `opt-level=3` hot paths, static `musl`, ARM64 DAG, warm cache, chaos parity), [#500](https://github.com/EpicBlackWolfZ/microfat/issues/500) (Format v3 fused per-extent parallel unfilter, seeded Zstd block dictionary, ARM64 corpus), and [#501](https://github.com/EpicBlackWolfZ/microfat/issues/501) (window-accurate Zstd extraction budget in production + expanded Gobra/CI checks).
+Follow-up issues track the research roadmap: [#499](https://github.com/EpicBlackWolfZ/microfat/issues/499) (Rust stub SHA-NI, `opt-level=3`, static `musl`, warm cache, chaos parity — advanced in `#504`), [#500](https://github.com/EpicBlackWolfZ/microfat/issues/500) (Format v3 fused per-extent parallel unfilter, seeded Zstd block dictionary, ARM64 corpus), and [#501](https://github.com/EpicBlackWolfZ/microfat/issues/501) (window-accurate Zstd extraction budget in production + expanded Gobra/CI checks).
 
 ---
 
@@ -43,55 +43,66 @@ Even strictly on CPU threads (`32` cores), Bend's compiled C thread-pool kernel 
 
 ---
 
-## 3. Track B2 — Format v2 vs Format v3 Lab Corpus Benchmark
+## 3. Track B2 — Format v2 vs Format v3 Lab Corpus Benchmark (`#500`)
 
-Built from real `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1|v2|v3` Go binaries (`./examples/demo` and `./cmd/microfat`, both stripped `-s -w` and unstripped). Format v2 baseline controls use `internal/pack.Pack` at `balanced` and `size` (`zstd:best`) with `net` excluding stub bytes for apples-to-apples archive payload+dict+index+trailer comparison; Format v3 prototypes use [`experiments/v3lab/compress/`](compress/) (`ChunkFixed` and `ChunkSectionCDC`, optional `x86-64 BCJ+RIP` executable-section filter, parallel `zstd.SpeedBestCompression` block encoding, parallel `unix.Pwrite` decode into 4-seal `memfd` with end-to-end SHA-256 verification).
+Built from real `CGO_ENABLED=0` Go binaries (`./examples/demo` and `./cmd/microfat`, stripped `-s -w` and unstripped) across **AMD64 (`GOAMD64=v1|v2|v3`)** and **ARM64 (`GOARM64=v8.0|v8.1|v8.2`)**. Format v2 controls use `internal/pack.Pack` at `balanced` and `size` (`zstd:best`) with `net` excluding stub bytes; Format v3 prototypes use [`experiments/v3lab/compress/`](compress/) (`ChunkFixed` and `ChunkSectionCDC` aligned to instruction-step boundaries via `SnapX86FilterCuts` / 4-byte ARM64 alignment, per-extent parallel Zstd decode + L1-cache unfilter fused directly before `unix.Pwrite` into 4-seal `memfd`, stratified `zstd.BuildDict` history seeding with optional `DictProfitable` gating, and full-image SHA-256 verification).
 
-### Summary Across All 4 Targets
+> **Architecture Measurement Scope**: All AMD64 and ARM64 archive sizes, ratios, dedup savings, and pack times come from real cross-compiled Go ELF binaries. In-memory `memfd` decode timings for both corpora ran on the 32-CPU x86-64 host; native ARM64 decode latency still requires an ARM64 runner.
 
-| Corpus Target (`v1+v2+v3` Raw Sum) | Best v2 (`size-dictprof`) Net Bytes (Ratio) | Best v3 Config | v3 Total Archive Bytes (Ratio) | v3 Size Delta vs Best v2 | v2 Pack / Cold Decode (`1w`) | Best v3 Pack / Decode (`4w`) |
+### Summary Across All 8 Targets (Track 2 Updated Matrix)
+
+| Corpus Target (Raw Variant Sum) | Best v2 (`size-dictprof`) Net Bytes (Ratio) | Best v3 Config | v3 Total Archive Bytes (Ratio) | v3 Size Delta vs Best v2 | Best v2 Cold Decode (`1w`) | Best v3 Decode (`4w` fast / smallest) |
 | :--- | :---: | :--- | :---: | :---: | :---: | :---: |
-| **`demo-stripped`** (`12,997,088 B`) | `5,294,442 B` (`40.74%`) | `v3-cdc-64k-bcj` | `5,098,961 B` (`39.23%`) | **`-3.69%`** | `418.3 ms` / `12.27 ms` | `188.4 ms` / `9.39 ms` (`4.91 ms` no-BCJ) |
-| **`demo-unstripped`** (`19,251,685 B`) | `10,719,553 B` (`55.68%`) | `v3-cdc-64k-bcj` | `10,559,847 B` (`54.85%`) | **`-1.49%`** | `480.2 ms` / `10.09 ms` | `205.2 ms` / `11.25 ms` (`6.90 ms` fixed-no-BCJ) |
-| **`microfat-stripped`** (`34,767,328 B`) | `13,445,848 B` (`38.67%`) | `v3-cdc-128k-bcj` | **`12,187,709 B`** (`35.06%`) | **`-9.36%`** | `1118.4 ms` / `28.66 ms` | `328.9 ms` / `24.98 ms` (`12.46 ms` no-BCJ) |
-| **`microfat-unstripped`** (`50,803,762 B`) | `27,323,023 B` (`53.78%`) | `v3-cdc-128k-bcj` | `25,938,745 B` (`51.06%`) | **`-5.07%`** | `1289.7 ms` / `31.30 ms` | `354.9 ms` / `29.90 ms` (`17.48 ms` fixed-no-BCJ) |
+| **`demo-stripped` (amd64)** (`12,997,088 B`) | `5,294,443 B` (`40.74%`) | `v3-cdc-64k-bcj-dict` | **`5,079,972 B`** (`39.09%`) | **`-4.05%`** | `6.83 ms` (`balanced`) / `10.85 ms` (`size-nodict`) | **`6.48 ms`** (`128k-bcj`) / `7.91 ms` (`64k-dict`) |
+| **`demo-unstripped` (amd64)** (`19,251,685 B`) | `10,719,551 B` (`55.68%`) | `v3-cdc-64k-bcj-nodict` | **`10,560,409 B`** (`54.85%`) | **`-1.48%`** | `8.77 ms` (`size-dict`) | **`8.47 ms`** (`128k-bcj`) / `8.64 ms` (`64k-bcj`) |
+| **`microfat-stripped` (amd64)** (`34,775,520 B`) | `13,447,225 B` (`38.67%`) | `v3-cdc-128k-bcj-dict` | **`12,122,493 B`** (`34.86%`) | **`-9.85%`** | `24.96 ms` (`balanced`) / `28.08 ms` (`size`) | **`17.35 ms`** (`128k-bcj`) / `20.21 ms` (`dictprof`) |
+| **`microfat-unstripped` (amd64)** (`50,822,481 B`) | `27,335,076 B` (`53.79%`) | `v3-cdc-128k-bcj-dict` | **`25,925,597 B`** (`51.01%`) | **`-5.16%`** | `21.20 ms` (`size-dict`) | `22.17 ms` (`128k-bcj`) / `25.40 ms` (`dict`) |
+| **`arm64-demo-stripped`** (`12,190,176 B`) | `4,681,369 B` (`38.40%`) | `v3-cdc-128k-bcj-nodict` | **`3,115,389 B`** (`25.56%`) | **`-33.45%`** | `6.30 ms` (`balanced`) / `7.76 ms` (`size`) | **`4.87 ms`** (`128k-bcj`, x86-64 host) |
+| **`arm64-demo-unstripped`** (`17,994,814 B`) | `9,688,561 B` (`53.84%`) | `v3-cdc-128k-bcj-nodict` | **`6,485,494 B`** (`36.04%`) | **`-33.06%`** | `7.73 ms` (`balanced`) / `14.64 ms` (`size-dict`) | **`6.59 ms`** (`128k-bcj`, x86-64 host) |
+| **`arm64-microfat-stripped`** (`31,654,368 B`) | `11,914,962 B` (`37.64%`) | `v3-cdc-128k-bcj-dict` | **`7,733,413 B`** (`24.43%`) | **`-35.09%`** | `15.98 ms` (`balanced`) / `20.24 ms` (`size-dict`) | `12.07 ms` (`nodict`) / `15.07 ms` (`dict`, x86-64 host) |
+| **`arm64-microfat-unstripped`** (`46,557,082 B`) | `24,688,891 B` (`53.03%`) | `v3-cdc-128k-bcj-dict` | **`16,239,979 B`** (`34.88%`) | **`-34.22%`** | `21.84 ms` (`size-dict`) / `24.88 ms` (`balanced`) | `16.65 ms` (`nodict`) / `19.56 ms` (`dict`, x86-64 host) |
 
-### Full Variant Matrix (`demo-stripped` and `microfat-stripped`)
+### Full Stripped Matrix (`microfat-stripped` AMD64 & ARM64)
 
-#### `demo-stripped` (`v1=4,337,824 B`, `v2=4,333,728 B`, `v3=4,325,536 B`, `raw_sum=12,997,088 B`)
-
-| Variant | Archive Bytes | Dict / Index Bytes | Unique / Total Blocks | Dedup Raw Saved | Delta vs `v2-size-nodict` | Pack (`ms`) | Cold `memfd` `1w` / `4w` (`ms`) |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `v2-balanced` (net) | `5,599,468 B` | `-` | mono | `0 B` | `+5.76%` | `51.3` | `8.05` / `-` |
-| `v2-size-nodict` (net) | `5,294,442 B` | `-` | mono | `0 B` | baseline | `224.1` | `15.50` / `-` |
-| `v2-size-dictprof` (net) | `5,294,442 B` | `-` (rejected) | mono | `0 B` | `0.00%` | `418.3` | `12.27` / `-` |
-| `v3-fixed-128k-nobcj-nodict` | `5,513,508 B` | `0` / `6,705` | `102 / 102` | `0 B` | `+4.14%` | `150.7` | `9.96` / **`4.83`** |
-| `v3-fixed-128k-bcj-nodict` | `5,252,887 B` | `0` / `6,753` | `102 / 102` | `0 B` | `-0.78%` | `178.9` | `14.19` / `9.20` |
-| `v3-fixed-512k-bcj-dict` | `5,106,979 B` | `0` / `1,953` | `27 / 27` | `0 B` | `-3.54%` | `171.8` | `13.97` / `9.25` |
-| `v3-cdc-64k-bcj-dict` | **`5,098,961 B`** | `0` / `11,249` | `167 / 188` | `299,524 B` | **`-3.69%`** | `188.4` | `14.46` / `9.39` |
-| `v3-cdc-128k-nobcj-nodict` | `5,402,833 B` | `0` / `7,457` | `110 / 125` | `181,718 B` | `+2.05%` | `177.0` | `9.97` / **`4.91`** |
-| `v3-cdc-128k-bcj-nodict` | `5,118,333 B` | `0` / `7,313` | `107 / 122` | `181,718 B` | **`-3.33%`** | `185.8` | `14.33` / `9.30` |
-
-#### `microfat-stripped` (`v1=11,591,840 B`, `v2=11,591,840 B`, `v3=11,583,648 B`, `raw_sum=34,767,328 B`)
+#### AMD64 `microfat-stripped` (`v1=11,600,032 B`, `v2=11,591,840 B`, `v3=11,583,648 B`, `raw_sum=34,775,520 B`)
 
 | Variant | Archive Bytes | Dict / Index Bytes | Unique / Total Blocks | Dedup Raw Saved | Delta vs `v2-size` | Pack (`ms`) | Cold `memfd` `1w` / `4w` (`ms`) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `v2-balanced` (net) | `14,215,839 B` | `-` | mono | `0 B` | `+5.73%` | `163.8` | `13.28` / `-` |
-| `v2-size-nodict` (net) | `13,445,848 B` | `-` | mono | `0 B` | baseline | `608.4` | `23.01` / `-` |
-| `v2-size-dictprof` (net) | `13,445,848 B` | `-` (rejected) | mono | `0 B` | `0.00%` | `1118.4` | `28.66` / `-` |
-| `v3-fixed-128k-nobcj-nodict` | `14,120,761 B` | `0` / `17,169` | `265 / 267` | `262,144 B` | `+5.02%` | `273.8` | `26.86` / **`12.58`** |
-| `v3-fixed-128k-bcj-nodict` | `13,352,257 B` | `0` / `17,217` | `265 / 267` | `262,144 B` | `-0.70%` | `297.6` | `38.28` / `24.88` |
-| `v3-fixed-512k-bcj-dict` | `13,038,554 B` | `0` / `4,641` | `69 / 69` | `0 B` | `-3.03%` | `322.0` | `37.90` / `25.09` |
-| `v3-cdc-64k-bcj-dict` | `12,292,140 B` | `0` / `24,177` | `361 / 414` | `2,966,864 B` | **`-8.58%`** | `314.8` | `39.46` / `25.10` |
-| `v3-cdc-128k-nobcj-nodict` | `13,006,293 B` | `0` / `14,097` | `209 / 243` | `2,643,931 B` | **`-3.27%`** | `291.1` | `26.10` / **`12.46`** |
-| `v3-cdc-128k-bcj-nodict` | **`12,187,709 B`** | `0` / `14,081` | `208 / 242` | `2,643,931 B` | **`-9.36%`** | `328.9` | `38.51` / `24.98` |
+| `v2-balanced` (net) | `14,217,421 B` | `-` | mono | `0 B` | `+5.73%` | `152.1` | `24.96` / `-` |
+| `v2-size-nodict` (net) | `13,447,225 B` | `-` | mono | `0 B` | baseline | `575.7` | `28.08` / `-` |
+| `v2-size-dictprof` (net) | `13,447,225 B` | `-` (rejected) | mono | `0 B` | `0.00%` | `1086.5` | `28.45` / `-` |
+| `v3-fixed-128k-nobcj-nodict` | `14,245,958 B` | `0` / `17,532` | `267 / 267` | `0 B` | `+5.94%` | `253.8` | `26.17` / **`12.42`** |
+| `v3-fixed-128k-bcj-nodict` | `13,473,979 B` | `0` / `18,498` | `273 / 273` | `0 B` | `+0.20%` | `456.0` | `45.18` / `17.04` |
+| `v3-fixed-128k-bcj-dict` | `13,295,291 B` | `110,749` / `18,542` | `273 / 273` | `0 B` | `-1.13%` | `1224.7` | `57.77` / `20.38` |
+| `v3-fixed-512k-bcj-dictprof` | `12,991,972 B` | `110,750` / `5,276` | `75 / 75` | `0 B` | `-3.39%` | `1128.4` | `56.67` / `20.94` |
+| `v3-cdc-64k-bcj-nodict` | `12,335,926 B` | `0` / `25,245` | `361 / 412` | `2,883,217 B` | `-8.26%` | `458.4` | `47.90` / `17.63` |
+| `v3-cdc-64k-bcj-dict` | `12,201,712 B` | `110,750` / `25,289` | `361 / 412` | `2,883,217 B` | `-9.26%` | `1379.8` | `58.10` / `20.46` |
+| `v3-cdc-128k-nobcj-nodict` | `13,014,997 B` | `0` / `14,518` | `212 / 245` | `2,641,380 B` | `-3.21%` | `268.1` | `26.12` / **`12.52`** |
+| `v3-cdc-128k-bcj-nodict` | `12,185,415 B` | `0` / `14,642` | `208 / 241` | `2,641,380 B` | `-9.38%` | `465.5` | `45.57` / **`17.35`** |
+| `v3-cdc-128k-bcj-dict` | **`12,122,493 B`** | `110,751` / `14,686` | `208 / 241` | `2,641,380 B` | **`-9.85%`** | `1104.9` | `58.40` / `20.51` |
+| `v3-cdc-128k-bcj-dictprof` | **`12,122,493 B`** | `110,751` / `14,686` | `208 / 241` | `2,641,380 B` | **`-9.85%`** | `1295.8` | `57.20` / `20.21` |
 
-### Key Technical Observations from Track B2
+#### ARM64 `arm64-microfat-stripped` (`v8.0=v8.1=v8.2=10,551,456 B`, `raw_sum=31,654,368 B`)
 
-1. **Both techniques are essential together**: Fixed-block CDC without BCJ (`+4.14%` to `+5.02%`) actually *regresses* size compared to monolithic Zstd because block splits lose LZ77 long-range history across 128 KiB boundaries; adding `BCJ+RIP` + section-aligned FastCDC flips that into a **`-3.33%` to `-9.36%`** net win AND cuts packing wall time by ~2–3× via block-level concurrency.
-2. **Decoder speedup without sequential post-pass**: Parallel `4w` Zstd block decode directly into `memfd` without BCJ unfiltering runs **1.9×–2.5× faster** (`4.91 ms` vs `12.27–15.50 ms` on `demo-stripped`; `12.46 ms` vs `23.01–28.66 ms` on `microfat-stripped`).
-3. **Identified Lab Bottleneck — Sequential BCJ Unfilter**: Our prototype currently runs `ApplyELFFilter(..., false)` sequentially on an in-memory buffer *after* assembling blocks. On `microfat-stripped` (`11.6 MiB`), that adds `~12.5 ms` (`24.98 ms` vs `12.46 ms`). Fixing this is straightforward: push per-extent `(ExecRange intersection, section_base_offset)` into worker decode buffers before `unix.Pwrite` (tracked as open lab follow-up).
-4. **Shared Zstd Dict (`dict=0` in `v3bench`)**: In `trainBlockDict`, `zstd.BuildDict` with empty `History` returned `nil` on block inputs, so all reported v3 wins come strictly from BCJ+RIP and section-aligned CDC dedup, leaving block-shared dictionary training as additional future headroom.
+| Variant | Archive Bytes | Dict / Index Bytes | Unique / Total Blocks | Dedup Raw Saved | Delta vs `v2-size` | Pack (`ms`) | Host `memfd` `1w` / `4w` (`ms`) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| `v2-balanced` (net) | `12,696,979 B` | `-` | mono | `0 B` | `+6.56%` | `142.9` | `15.98` / `-` |
+| `v2-size-nodict` (net) | `11,914,962 B` | `-` | mono | `0 B` | baseline | `549.5` | `27.10` / `-` |
+| `v2-size-dictprof` (net) | `11,914,962 B` | `-` (rejected) | mono | `0 B` | `0.00%` | `1012.2` | `20.24` / `-` |
+| `v3-fixed-128k-nobcj-nodict` | `8,439,800 B` | `0` / `12,042` | `161 / 243` | `10,617,152 B` | `-29.17%` | `197.5` | `24.18` / `11.33` |
+| `v3-fixed-128k-bcj-nodict` | `8,020,751 B` | `0` / `12,828` | `165 / 249` | `10,744,128 B` | `-32.68%` | `239.0` | `27.12` / `12.02` |
+| `v3-fixed-512k-bcj-dictprof` | `8,189,795 B` | `0` (rejected) / `3,828` | `48 / 69` | `9,579,268 B` | `-31.26%` | `691.5` | `26.88` / `12.42` |
+| `v3-cdc-64k-bcj-dict` | `7,781,406 B` | `110,755` / `19,827` | `252 / 400` | `11,432,312 B` | `-34.69%` | `899.4` | `39.00` / `15.36` |
+| `v3-cdc-128k-nobcj-nodict` | `8,144,555 B` | `0` / `11,183` | `147 / 232` | `11,117,093 B` | `-31.64%` | `230.4` | `23.94` / **`11.55`** |
+| `v3-cdc-128k-bcj-nodict` | `7,769,620 B` | `0` / `11,348` | `144 / 229` | `11,117,093 B` | `-34.79%` | `250.5` | `27.16` / **`12.07`** |
+| `v3-cdc-128k-bcj-dict` | **`7,733,413 B`** | `110,754` / `11,392` | `144 / 229` | `11,117,093 B` | **`-35.09%`** | `712.0` | `38.51` / `15.07` |
+| `v3-cdc-128k-bcj-dictprof` | **`7,733,413 B`** | `110,754` / `11,392` | `144 / 229` | `11,117,093 B` | **`-35.09%`** | `855.0` | `38.62` / `15.44` |
+
+### Key Technical Observations from Track B2 (`#500`)
+
+1. **Fused Per-Extent Unfiltering Cuts BCJ+RIP Decode Latency by ~30%**: Moving unfiltering from a sequential post-assembly `pread`/`pwrite` pass directly into L1-resident worker buffers cut `microfat-stripped` `v3-cdc-128k-bcj-nodict` `decode4w` from **`24.98 ms`** (Phase 1) down to **`17.35 ms`** (`demo-stripped` dropped from `9.30 ms` to **`6.48 ms`**) — beating every single Format v2 control (`24.96–28.45 ms` and `6.83–14.31 ms`).
+2. **Stratified `zstd.BuildDict` Seeding & `DictProfitable` Tradeoff**: Passing stratified history samples (`64 B..108 KiB` bounded before `zstd.BuildDict`, with 128 KiB sample splitting) reliably builds ~`110.7 KiB` dictionaries (`demo-stripped cdc-64k`: `-4.05%`; `microfat-stripped cdc-128k`: **`-9.85%`**, `12,122,493 B`), while `DictProfitable` rejects non-profitable dicts cleanly (`demo-stripped cdc-128k`, `arm64-demo-stripped cdc-128k`, `fixed-512k`). Note that attaching a shared Zstd dictionary adds ~`1.3–3.3 ms` decode time per invocation, keeping `-bcj-nodict` as the latency-optimal preset and `-bcj-dictprof` as the size-optimal preset.
+3. **ARM64 Dedup + `BL`/`B`/`ADRP` Filter**: Across `GOARM64=v8.0/v8.1/v8.2`, section-aligned FastCDC deduplication plus 4-byte-aligned ARM64 `BL`/`B`/`ADRP` normalization cuts archive payload by **`-33.06%` to `-35.09%`** vs best Format v2, with the ARM64 filter itself saving `374,935 B` (`-4.6%`) on `arm64-microfat-stripped` (`7,769,620 B` vs `8,144,555 B` `nobcj`) at ~`0.5 ms` additional decode cost (`12.07 ms` vs `11.55 ms` on host).
 
 ---
 
@@ -167,8 +178,8 @@ Per [ADR-0001 §3](../../docs/design/adr-0001-formal-verification-and-v3-lab.md#
 
 | Promotion Criterion | Format v3 Status | Rust Stub (`#497` / `#499`) Status | Open Work to Promote |
 | :--- | :---: | :---: | :--- |
-| Complete-cost archive size win | **PASS** (`-3.33%` to `-9.36%` stripped vs best v2) | **PASS** (`540.9 KiB` x86_64 static, `478.5 KiB` ARM64 static; `-28.0%` vs `gom`, `-35.7%` vs `gof`) | Fix `zstd.BuildDict` history seeding in `v3container`; trim x86_64 musl below `500 KiB` (`512,000 B`) without sacrificing decompression speed |
-| Cold `memfd` & warm-cache latency | **Partial** (`2×` faster without BCJ; sequential post-BCJ slower) | **Partial** (`warm-auto` **`4.02 ms`** and `none` **`5.30 ms`** beat Go `stub-minimal`; `zstd` `26.36 ms` vs Go `9.36 ms`, `lz4` `15.52 ms` vs Go `9.19 ms`) | Fuse per-extent BCJ unfilter into `Pwrite` workers (v3); replace `ruzstd` with a zero-C-cross-tool `< 500 KiB` fast Zstd decoder or upstream fix to `libzstd-rs-sys` `build.rs` (`#498`) |
-| Cross-arch & static ABI parity | **Partial** (x86-64 + ARM64 ELF filters implemented/tested; native bench x86-64 only) | **Partial** (Static `x86_64-unknown-linux-musl` + `aarch64-unknown-linux-musl` builds; ARM64 DAG + `getauxval` verified via Kani 9/9 & QEMU) | Native ARM64 hardware benchmark (beyond QEMU user-mode emulation); cgroup runtime tuning (`GOMEMLIMIT`/`GOMAXPROCS`) |
+| Complete-cost archive size win | **PASS** (`-4.05%` to `-9.85%` AMD64; `-33.06%` to `-35.09%` ARM64 vs best v2) | **PASS** (`540.9 KiB` x86_64 static, `478.5 KiB` ARM64 static; `-28.0%` vs `gom`, `-35.7%` vs `gof`) | Trim x86_64 musl below `500 KiB` (`512,000 B`) without sacrificing decompression speed |
+| Cold `memfd` & warm-cache latency | **PASS** (Fused parallel unfiltering beats all v2 controls: `6.48 ms` `demo-stripped`, `17.35 ms` `microfat-stripped`) | **Partial** (`warm-auto` **`4.02 ms`** and `none` **`5.30 ms`** beat Go `stub-minimal`; `zstd` `26.36 ms` vs Go `9.36 ms`, `lz4` `15.52 ms` vs Go `9.19 ms`) | Measure native ARM64 v3 decode latency; replace `ruzstd` with a zero-C-cross-tool `< 500 KiB` fast Zstd decoder or upstream fix to `libzstd-rs-sys` `build.rs` (`#498`) |
+| Cross-arch & static ABI parity | **Partial** (AMD64 + ARM64 ELF corpora packed/verified; ARM64 decode timed on x86-64 host only) | **Partial** (Static `x86_64-unknown-linux-musl` + `aarch64-unknown-linux-musl` builds; ARM64 DAG + `getauxval` verified via Kani 11/11 & QEMU) | Native ARM64 hardware benchmark for both Format v3 decode and Rust stub; cgroup runtime tuning (`GOMEMLIMIT`/`GOMAXPROCS`) |
 | Security & chaos parity | **PASS in prototype** (SHA-256 index/block/full-image checks + 4-seal `memfd`) | **Partial** (`AT_SECURE`/uid/gid + SHA-NI + 4-seal `memfd` + read-only `O_NOFOLLOW`/uid/mode/SHA-256 warm cache verified) | Read-write cache materialization (`MICROFAT_EXEC_MODE=cache` cold path) & full `tests/e2e` chaos port |
 | Repository CI gate (`NO_COLOR=1 task all`) | **PASS** | **PASS** (Rust crate isolated under `experiments/v3lab/`) | Wire Rust/Kani/Lean/Gobra checks into optional/CI lab workflows if promoted |

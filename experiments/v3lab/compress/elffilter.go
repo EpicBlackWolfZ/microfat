@@ -96,31 +96,74 @@ func TransformX86_64(data []byte, basePos uint32, encode bool) []byte {
 	return out
 }
 
+func x86StepImm(buf []byte, i int) (step, immOff int) {
+	n := len(buf)
+	b0 := buf[i]
+	if isX86Rel8Opcode(b0) && i+x86Rel8InsnLen <= n {
+		return x86Rel8InsnLen, x86ImmOffset1
+	}
+	if b0 == x86OpEsc0F && i+x86JccInsnLen <= n && (buf[i+x86ImmOffset1]&x86JccMask) == x86JccTag {
+		return x86JccInsnLen, x86ImmOffset2
+	}
+	if isX86RexPrefix(b0) && i+x86RipInsnLen <= n &&
+		isX86RipOpCode(buf[i+x86ImmOffset1]) &&
+		(buf[i+x86ModRMOffset]&x86ModRMNoIndex) == x86ModRMRIPRelTag {
+		return x86RipInsnLen, x86ImmOffset3
+	}
+	return 1, 0
+}
+
 // TransformX86_64InPlace transforms an x86-64 code buffer in place using BCJ+RIP address normalization.
 func TransformX86_64InPlace(buf []byte, basePos uint32, encode bool) {
 	n := len(buf)
 	for i := 0; i < n; {
-		b0 := buf[i]
-		pos := basePos + uint32(i) // #nosec G115 -- deliberate mod-2^32 PC arithmetic matching Lean spec
-		if isX86Rel8Opcode(b0) && i+x86Rel8InsnLen <= n {
-			shiftImm32LE(buf[i+x86ImmOffset1:i+x86Rel8InsnLen], pos+x86Rel8InsnLen, encode)
-			i += x86Rel8InsnLen
-			continue
+		step, immOff := x86StepImm(buf, i)
+		if immOff > 0 {
+			pos := basePos + uint32(i+step) // #nosec G115 -- deliberate mod-2^32 PC arithmetic matching Lean spec
+			shiftImm32LE(buf[i+immOff:i+step], pos, encode)
 		}
-		if b0 == x86OpEsc0F && i+x86JccInsnLen <= n && (buf[i+x86ImmOffset1]&x86JccMask) == x86JccTag {
-			shiftImm32LE(buf[i+x86ImmOffset2:i+x86JccInsnLen], pos+x86JccInsnLen, encode)
-			i += x86JccInsnLen
-			continue
-		}
-		if isX86RexPrefix(b0) && i+x86RipInsnLen <= n &&
-			isX86RipOpCode(buf[i+x86ImmOffset1]) &&
-			(buf[i+x86ModRMOffset]&x86ModRMNoIndex) == x86ModRMRIPRelTag {
-			shiftImm32LE(buf[i+x86ImmOffset3:i+x86RipInsnLen], pos+x86RipInsnLen, encode)
-			i += x86RipInsnLen
-			continue
-		}
-		i++
+		i += step
 	}
+}
+
+// SnapX86FilterCuts advances interior cut offsets within section onto exact x86-64 BCJ+RIP instruction-step boundaries.
+func SnapX86FilterCuts(section []byte, relCuts []uint64) []uint64 {
+	n := uint64(len(section))
+	if n == 0 || len(relCuts) == 0 {
+		return nil
+	}
+	sorted := make([]uint64, 0, len(relCuts))
+	for _, c := range relCuts {
+		if c > 0 && c < n {
+			sorted = append(sorted, c)
+		}
+	}
+	if len(sorted) == 0 {
+		return nil
+	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+
+	out := make([]uint64, 0, len(sorted))
+	bufLen := len(section)
+	k := 0
+	for i := 0; i < bufLen && k < len(sorted); {
+		step, _ := x86StepImm(section, i)
+		start := uint64(i)      // #nosec G115 -- non-negative slice index
+		end := uint64(i + step) // #nosec G115 -- non-negative slice index
+		for k < len(sorted) && sorted[k] <= start {
+			k++
+		}
+		emitted := false
+		for k < len(sorted) && sorted[k] <= end {
+			if !emitted && end < n {
+				out = append(out, end)
+				emitted = true
+			}
+			k++
+		}
+		i += step
+	}
+	return out
 }
 
 // FilterX86_64 encodes x86-64 PC-relative instructions into section-relative constants.
@@ -247,6 +290,20 @@ func ExecutableRangesELF(elfBytes []byte) ([]SectionRange, elf.Machine, error) {
 	return merged, ef.Machine, nil
 }
 
+// ApplyExtentFilterInPlace transforms one contiguous code extent at section-relative basePos in place.
+func ApplyExtentFilterInPlace(buf []byte, machine elf.Machine, basePos uint32, encode bool) error {
+	switch machine {
+	case elf.EM_X86_64:
+		TransformX86_64InPlace(buf, basePos, encode)
+		return nil
+	case elf.EM_AARCH64:
+		TransformARM64InPlace(buf, basePos, encode)
+		return nil
+	default:
+		return fmt.Errorf("%w: unsupported ELF machine %v", ErrInvalidELFRange, machine)
+	}
+}
+
 // ApplyELFFilter transforms executable section ranges in place according to target machine ISA.
 func ApplyELFFilter(buf []byte, ranges []SectionRange, machine elf.Machine, encode bool) error {
 	totalLen := uint64(len(buf))
@@ -254,14 +311,8 @@ func ApplyELFFilter(buf []byte, ranges []SectionRange, machine elf.Machine, enco
 		if r.End <= r.Start || r.End > totalLen {
 			return fmt.Errorf("%w: range [%d,%d) exceeds buffer %d", ErrInvalidELFRange, r.Start, r.End, totalLen)
 		}
-		slice := buf[r.Start:r.End]
-		switch machine {
-		case elf.EM_X86_64:
-			TransformX86_64InPlace(slice, 0, encode)
-		case elf.EM_AARCH64:
-			TransformARM64InPlace(slice, 0, encode)
-		default:
-			return fmt.Errorf("%w: unsupported ELF machine %v", ErrInvalidELFRange, machine)
+		if err := ApplyExtentFilterInPlace(buf[r.Start:r.End], machine, 0, encode); err != nil {
+			return err
 		}
 	}
 	return nil
