@@ -4,7 +4,6 @@ package compress
 
 import (
 	"crypto/sha256"
-	"debug/elf"
 	"fmt"
 	"io"
 
@@ -84,24 +83,6 @@ func DecodeVariantToSealedMemfd(
 	})
 	if err != nil {
 		return -1, err
-	}
-
-	if v.Filtered && len(v.ExecRanges) > 0 {
-		for _, er := range v.ExecRanges {
-			secLen := er.End - er.Start
-			buf := make([]byte, secLen)
-			secOff := int64(er.Start) // #nosec G115 -- validated < UncompressedSize
-			if err := preadAll(fd, buf, secOff); err != nil {
-				return -1, fmt.Errorf("pread exec range [%d,%d): %w", er.Start, er.End, err)
-			}
-			ranges := []SectionRange{{Start: 0, End: secLen}}
-			if err := ApplyELFFilter(buf, ranges, elf.Machine(arch.Machine), false); err != nil {
-				return -1, err
-			}
-			if err := pwriteAll(fd, buf, secOff); err != nil {
-				return -1, fmt.Errorf("pwrite exec range [%d,%d): %w", er.Start, er.End, err)
-			}
-		}
 	}
 
 	if verifyFullImageSHA256 {

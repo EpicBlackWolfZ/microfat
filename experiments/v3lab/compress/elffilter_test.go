@@ -139,3 +139,65 @@ func TestCurrentExecutableELFFilterRoundTrip(t *testing.T) {
 	require.NoError(t, ApplyELFFilter(buf, ranges, machine, false))
 	require.Equal(t, raw, buf)
 }
+
+func TestSnapX86FilterCutsAndChunkLocalEquivalence(t *testing.T) {
+	t.Parallel()
+
+	// Layout: NOP(0), CALL rel32(1..6), RIP LEA(6..13), Jcc rel32(13..19), NOP(19), REX non-RIP(20..22), JMP rel32(22..27).
+	section := []byte{
+		0x90,
+		0xE8, 0x10, 0x00, 0x00, 0x00,
+		0x48, 0x8D, 0x05, 0x20, 0x01, 0x00, 0x00,
+		0x0F, 0x84, 0x08, 0x00, 0x00, 0x00,
+		0x90,
+		0x48, 0x8D,
+		0xE9, 0xAA, 0xBB, 0xCC, 0xDD,
+	}
+	// Candidate cuts hitting inside CALL(3), inside CALL(5), inside LEA(9), inside Jcc(16), at boundary(19), and OOB(99).
+	snapped := SnapX86FilterCuts(section, []uint64{0, 3, 5, 9, 16, 19, 99})
+	require.Equal(t, []uint64{6, 13, 19}, snapped)
+
+	mono := FilterX86_64(section, 0)
+	bounds := append(append([]uint64{0}, snapped...), uint64(len(section)))
+	rebuilt := make([]byte, len(section))
+	for i := 0; i+1 < len(bounds); i++ {
+		s, e := bounds[i], bounds[i+1]
+		chunk := append([]byte(nil), section[s:e]...)
+		require.NoError(t, ApplyExtentFilterInPlace(chunk, elf.EM_X86_64, uint32(s), true)) // #nosec G115 -- test offset
+		copy(rebuilt[s:e], chunk)
+	}
+	require.Equal(t, mono, rebuilt, "snapped chunk-local filtering must match monolithic section filtering")
+
+	unfiltered := make([]byte, len(section))
+	for i := 0; i+1 < len(bounds); i++ {
+		s, e := bounds[i], bounds[i+1]
+		chunk := append([]byte(nil), rebuilt[s:e]...)
+		require.NoError(t, ApplyExtentFilterInPlace(chunk, elf.EM_X86_64, uint32(s), false)) // #nosec G115 -- test offset
+		copy(unfiltered[s:e], chunk)
+	}
+	require.Equal(t, section, unfiltered)
+}
+
+func TestARM64ChunkLocalAlignedEquivalence(t *testing.T) {
+	t.Parallel()
+
+	section := []byte{
+		0x01, 0x00, 0x00, 0x94,
+		0xFE, 0xFF, 0xFF, 0x17,
+		0x00, 0x00, 0x00, 0x90,
+		0x1F, 0x20, 0x03, 0xD5,
+		0xAA, 0xBB,
+	}
+	const split = uint64(8)
+	mono := FilterARM64(section, 0)
+
+	partA := append([]byte(nil), section[:split]...)
+	partB := append([]byte(nil), section[split:]...)
+	require.NoError(t, ApplyExtentFilterInPlace(partA, elf.EM_AARCH64, 0, true))
+	require.NoError(t, ApplyExtentFilterInPlace(partB, elf.EM_AARCH64, uint32(split), true)) // #nosec G115 -- small test split
+	require.Equal(t, mono, append(partA, partB...))
+
+	require.NoError(t, ApplyExtentFilterInPlace(partA, elf.EM_AARCH64, 0, false))
+	require.NoError(t, ApplyExtentFilterInPlace(partB, elf.EM_AARCH64, uint32(split), false)) // #nosec G115 -- small test split
+	require.Equal(t, section, append(partA, partB...))
+}

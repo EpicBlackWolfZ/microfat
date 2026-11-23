@@ -183,4 +183,49 @@ mod kani_proofs {
         transform_x86_64(&mut work[..len], pos, false);
         assert_eq!(work, orig);
     }
+
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn verify_x86_chunk_local_split_roundtrip() {
+        let orig: [u8; 8] = kani::any();
+        let len: usize = kani::any();
+        let split: usize = kani::any();
+        let base_pos: u32 = kani::any();
+        kani::assume(len <= 8);
+        kani::assume(split <= len);
+
+        let mut work = orig;
+        transform_x86_64(&mut work[..split], base_pos, true);
+        transform_x86_64(
+            &mut work[split..len],
+            base_pos.wrapping_add(split as u32),
+            true,
+        );
+        transform_x86_64(&mut work[..split], base_pos, false);
+        transform_x86_64(
+            &mut work[split..len],
+            base_pos.wrapping_add(split as u32),
+            false,
+        );
+        assert_eq!(work, orig);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn verify_arm64_chunk_local_split_roundtrip() {
+        let orig: [u8; 8] = kani::any();
+        let base_pos: u32 = kani::any();
+
+        let mut mono = orig;
+        transform_arm64(&mut mono, base_pos, true);
+
+        let mut split_buf = orig;
+        transform_arm64(&mut split_buf[..4], base_pos, true);
+        transform_arm64(&mut split_buf[4..8], base_pos.wrapping_add(4), true);
+        assert_eq!(split_buf, mono);
+
+        transform_arm64(&mut split_buf[..4], base_pos, false);
+        transform_arm64(&mut split_buf[4..8], base_pos.wrapping_add(4), false);
+        assert_eq!(split_buf, orig);
+    }
 }
