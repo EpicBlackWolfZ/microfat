@@ -1,8 +1,8 @@
 ; SMT-LIB2 64-bit signed bitvector proof for:
-; - internal/cgroup/memory.go: ExtractionMemory, RetainedMemoryLimit
+; - internal/cgroup/memory.go: ExtractionMemory, RetainedMemoryLimit, ZstdDecoderMemory
 ; - internal/cgroup/cgroup.go: CalculateGOMEMLIMIT integer headroom calculation
 ;
-; Expected output: sat (premises satisfiable), followed by unsat x 3 (negated safety properties).
+; Expected output: sat / unsat x 4 pairs (8 lines total).
 
 (set-logic QF_BV)
 
@@ -103,5 +103,44 @@
   (bvsge cg_headroom_budget cg_half)
   (bvsle cg_headroom_budget cgLim)
   (=> (bvsge cgLim TWO64) (bvsge cg_headroom_budget ONE64)))))
+(check-sat)
+(pop 1)
+
+; --- 4. ZstdDecoderMemory(window, maxWindow, overhead, maxDecoder) ---
+(declare-const zWin (_ BitVec 64))
+(declare-const zMaxWin (_ BitVec 64))
+(declare-const zOvh (_ BitVec 64))
+(declare-const zMaxDec (_ BitVec 64))
+(define-fun z_doubled () (_ BitVec 64) (bvadd zWin zWin))
+(define-fun z_total () (_ BitVec 64) (bvadd z_doubled zOvh))
+
+(define-fun z_guards () Bool
+  (and
+    (bvsgt zWin ZERO64)
+    (bvsgt zMaxWin ZERO64)
+    (bvsge zOvh ZERO64)
+    (bvsgt zMaxDec ZERO64)
+    (bvsle zWin zMaxWin)
+    (bvsle zWin (bvsub MAX_INT64 zWin))
+    (bvsle zOvh (bvsub MAX_INT64 z_doubled))
+    (bvsle z_total zMaxDec)))
+
+(push 1)
+(assert z_guards)
+(check-sat)
+(pop 1)
+
+(push 1)
+(assert z_guards)
+(define-fun z_expected66 () (_ BitVec 66)
+  (bvadd
+    (bvadd ((_ zero_extend 2) zWin) ((_ zero_extend 2) zWin))
+    ((_ zero_extend 2) zOvh)))
+(assert (not (and
+  (bvsgt z_doubled ZERO64)
+  (bvsgt z_total ZERO64)
+  (bvsle z_total MAX_INT64)
+  (bvsle z_total zMaxDec)
+  (= z_expected66 ((_ zero_extend 2) z_total)))))
 (check-sat)
 (pop 1)

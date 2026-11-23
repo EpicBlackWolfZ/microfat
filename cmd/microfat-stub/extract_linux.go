@@ -22,6 +22,16 @@ var extractHashStartedFunc func()
 // w in an extra SHA-256 pass. Callers MUST either wrap w in a streaming SHA-256 check (memfd via
 // extractVariantToWriter) or delegate to cache.MaterializeAndOpenVariantAtFDWithOpener (cold cache).
 func decompressVariantToWriter(selfFile *os.File, entry *format.VariantEntry, idx *format.Index, w io.Writer) error {
+	return decompressVariantToWriterWithWindow(selfFile, entry, idx, w, 0)
+}
+
+func decompressVariantToWriterWithWindow(
+	selfFile *os.File,
+	entry *format.VariantEntry,
+	idx *format.Index,
+	w io.Writer,
+	zstdMaxWindow uint64,
+) error {
 	var dictBytes []byte
 	if idx != nil && idx.DictionarySize > 0 {
 		if idx.DictionarySize > format.MaxDictionarySize || idx.DictionaryOffset < 0 {
@@ -56,7 +66,7 @@ func decompressVariantToWriter(selfFile *os.File, entry *format.VariantEntry, id
 	}
 
 	secReader := io.NewSectionReader(selfFile, entry.Offset, entry.CompressedSize)
-	if err := codec.DecompressWithOptionalDict(c, w, secReader, entry.UncompressedSize, dictBytes); err != nil {
+	if err := codec.DecompressWithOptionalDictAndWindow(c, w, secReader, entry.UncompressedSize, dictBytes, zstdMaxWindow); err != nil {
 		return fmt.Errorf("decompressing variant payload: %w", err)
 	}
 
@@ -66,12 +76,22 @@ func decompressVariantToWriter(selfFile *os.File, entry *format.VariantEntry, id
 // extractVariantToWriter seeks to the variant offset and streams decompressed bytes to w,
 // verifying the payload SHA-256 digest concurrently during decompression.
 func extractVariantToWriter(selfFile *os.File, entry *format.VariantEntry, idx *format.Index, w io.Writer) error {
+	return extractVariantToWriterWithWindow(selfFile, entry, idx, w, 0)
+}
+
+func extractVariantToWriterWithWindow(
+	selfFile *os.File,
+	entry *format.VariantEntry,
+	idx *format.Index,
+	w io.Writer,
+	zstdMaxWindow uint64,
+) error {
 	hasher := sha256.New()
 	if extractHashStartedFunc != nil {
 		extractHashStartedFunc()
 	}
 	mw := io.MultiWriter(w, hasher)
-	if err := decompressVariantToWriter(selfFile, entry, idx, mw); err != nil {
+	if err := decompressVariantToWriterWithWindow(selfFile, entry, idx, mw, zstdMaxWindow); err != nil {
 		return err
 	}
 

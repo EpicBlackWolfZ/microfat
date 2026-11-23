@@ -91,6 +91,12 @@ jobs:
         timeout-minutes: 5
         run: task verify-cgroup-memory
 
+      - name: Verify Format v2 bounds arithmetic
+        id: format-bounds-proof
+        if: steps.changes.outputs.run-code-checks == 'true'
+        timeout-minutes: 5
+        run: task verify-format-bounds
+
       - name: Compile and exercise isolated runtime metadata recipes
         if: steps.changes.outputs.run-code-checks == 'true'
         run: task test-runtimeinfo-examples

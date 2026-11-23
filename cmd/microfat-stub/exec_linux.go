@@ -67,6 +67,7 @@ func isPayloadCorruptionOrDecompressionError(err error) bool {
 		errors.Is(err, format.ErrInvalidChecksum) ||
 		errors.Is(err, format.ErrPayloadTooLarge) ||
 		errors.Is(err, codec.ErrDecompressionFailed) ||
+		errors.Is(err, codec.ErrWindowSizeExceeded) ||
 		errors.Is(err, codec.ErrSizeMismatch) ||
 		errors.Is(err, codec.ErrUnsupportedCodec)
 }
@@ -584,7 +585,12 @@ func executeViaMemfd(
 		requestedMode = format.ExecModeAuto
 	}
 
-	if err := checkExtractionBudget(entry, idx); err != nil {
+	var selfReader io.ReaderAt
+	if selfFile != nil {
+		selfReader = selfFile
+	}
+	zstdMaxWindow, err := checkExtractionBudgetForReader(selfReader, entry, idx)
+	if err != nil {
 		return err
 	}
 
@@ -610,11 +616,11 @@ func executeViaMemfd(
 	defer func() { _ = memFile.Close() }()
 
 	// Best-effort pre-sizing avoids incremental shmem inode extension on multi-MiB writes;
-	// extractVariantToWriter still strictly verifies exact uncompressed byte count and SHA-256 before sealing.
+	// extractVariantToWriterWithWindow still strictly verifies exact uncompressed byte count and SHA-256 before sealing.
 	_ = memfdPreallocateFunc(fd, entry.UncompressedSize)
 
 	decompStart := time.Now()
-	if err := extractVariantToWriter(selfFile, entry, idx, memFile); err != nil {
+	if err := extractVariantToWriterWithWindow(selfFile, entry, idx, memFile, zstdMaxWindow); err != nil {
 		logErrorDiagnostics(format.StageMemfdExtract, err, hostInfo, entry, policyRes, "decompressing payload failed")
 		return fmt.Errorf("%w: decompressing into memfd: %w", format.ErrMemfdExtract, err)
 	}
@@ -724,12 +730,17 @@ func executeViaCache(
 	}
 
 	if openErr != nil {
-		if err := checkExtractionBudget(entry, idx); err != nil {
+		var selfReader io.ReaderAt
+		if selfFile != nil {
+			selfReader = selfFile
+		}
+		zstdMaxWindow, err := checkExtractionBudgetForReader(selfReader, entry, idx)
+		if err != nil {
 			return fmt.Errorf("%w: %w", format.ErrCacheExtract, err)
 		}
 		decompStart := time.Now()
 		_, materializedFD, matErr := cache.MaterializeAndOpenVariantAtFDWithOpener(dirFD, cacheDir, entry, func(w io.Writer) error {
-			return decompressVariantToWriter(selfFile, entry, idx, w)
+			return decompressVariantToWriterWithWindow(selfFile, entry, idx, w, zstdMaxWindow)
 		}, openCachedBinaryAtFunc)
 		if matErr != nil {
 			stage := format.StageCacheCreateTemp

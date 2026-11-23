@@ -298,6 +298,10 @@ tasks:
     desc: Check the production memory arithmetic laws with pinned Gobra (GOBRA_ENGINE=docker|podman)
     cmds:
     - GOBRA_ENGINE={{.GOBRA_ENGINE | shellQuote}} bash scripts/verify-cgroup-memory.sh
+  verify-format-bounds:
+    desc: Check the production Format v2 segment bounds laws with pinned Gobra (GOBRA_ENGINE=docker|podman)
+    cmds:
+    - GOBRA_ENGINE={{.GOBRA_ENGINE | shellQuote}} bash scripts/verify-format-bounds.sh
   e2e:
     desc: Build and run black-box tests with race detection (exercises full and minimal stubs)
     cmds:
