@@ -41,6 +41,7 @@ const (
 	bendBenchRuns      = 3
 	memfdDecodeRuns    = 5
 	stubE2ERuns        = 15
+	halfDivisor        = 2
 	shortHashPrefixLen = 16
 	v3DefaultDictSize  = 112 * 1024
 	kib                = 1024
@@ -53,10 +54,13 @@ const (
 	workerCount16      = 16
 	workerCount32      = 32
 	dirPerm            = 0o755
+	cacheDirPerm       = 0o700
 	filePerm           = 0o755
 	pctScale           = 100.0
 	usPerMs            = 1000.0
 	corpusBaseDir      = ".work/v3lab/corpus"
+	defaultE2EDir      = ".work/v3lab/e2e"
+	defaultRustStub    = "experiments/v3lab/rust-stub/target/x86_64-unknown-linux-musl/release/microfat-stub-rs"
 )
 
 type corpusTarget struct {
@@ -469,8 +473,46 @@ func runCorpusSuite() error {
 	return nil
 }
 
-func runStubE2ESuite() error {
-	const e2eDir = ".work/v3lab/e2e"
+type stubRunStats struct {
+	med time.Duration
+	min time.Duration
+	max time.Duration
+}
+
+func measureStubExecRuns(binPath, mode, cacheDir, wantDigest string) (stubRunStats, string, error) {
+	durations := make([]time.Duration, stubE2ERuns)
+	for run := range stubE2ERuns {
+		cmd := exec.Command(binPath, "--help") // #nosec G204 -- controlled e2e artifact path
+		env := append(os.Environ(), format.EnvExecMode+"="+mode)
+		if cacheDir != "" {
+			env = append(env, format.EnvCacheDir+"="+cacheDir)
+		}
+		cmd.Env = env
+		t0 := time.Now()
+		out, err := cmd.Output()
+		elapsed := time.Since(t0)
+		if err != nil {
+			return stubRunStats{}, wantDigest, fmt.Errorf("exec %s --help (mode=%s): %w", binPath, mode, err)
+		}
+		sum := sha256.Sum256(out)
+		hexSum := hex.EncodeToString(sum[:])
+		if wantDigest == "" {
+			wantDigest = hexSum
+		} else if hexSum != wantDigest {
+			return stubRunStats{}, wantDigest, fmt.Errorf("stdout SHA-256 mismatch on %s: got %s, want %s",
+				binPath, hexSum, wantDigest)
+		}
+		durations[run] = elapsed
+	}
+	slices.Sort(durations)
+	return stubRunStats{
+		med: durations[len(durations)/halfDivisor],
+		min: durations[0],
+		max: durations[len(durations)-1],
+	}, wantDigest, nil
+}
+
+func runStubE2ESuite(e2eDir, rustStubPath string) error {
 	codecs := []string{"none", "lz4", "zstd", "zstd-dict"}
 	stubs := []struct {
 		prefix   string
@@ -478,7 +520,7 @@ func runStubE2ESuite() error {
 	}{
 		{prefix: "gof", stubPath: "bin/microfat-stub"},
 		{prefix: "gom", stubPath: "bin/microfat-stub-minimal"},
-		{prefix: "rs", stubPath: "experiments/v3lab/rust-stub/target/release/microfat-stub-rs"},
+		{prefix: "rs", stubPath: rustStubPath},
 	}
 
 	fmt.Println("=== Part 3: End-to-End Stub Compatibility & Cold memfd Latency (15 runs, --help) ===")
@@ -495,36 +537,55 @@ func runStubE2ESuite() error {
 			if err != nil {
 				return fmt.Errorf("stat fat binary %s: %w", binPath, err)
 			}
-			durations := make([]time.Duration, stubE2ERuns)
-			for run := range stubE2ERuns {
-				cmd := exec.Command(binPath, "--help") // #nosec G204 -- controlled e2e artifact path
-				cmd.Env = append(os.Environ(), "MICROFAT_EXEC_MODE=memfd")
-				t0 := time.Now()
-				out, err := cmd.Output()
-				elapsed := time.Since(t0)
-				if err != nil {
-					return fmt.Errorf("exec %s --help: %w", binPath, err)
-				}
-				sum := sha256.Sum256(out)
-				hexSum := hex.EncodeToString(sum[:])
-				if wantDigest == "" {
-					wantDigest = hexSum
-				} else if hexSum != wantDigest {
-					return fmt.Errorf("stdout SHA-256 mismatch on %s: got %s, want %s", binPath, hexSum, wantDigest)
-				}
-				durations[run] = elapsed
+			var stats stubRunStats
+			stats, wantDigest, err = measureStubExecRuns(binPath, format.ExecModeMemfd, "", wantDigest)
+			if err != nil {
+				return err
 			}
-			slices.Sort(durations)
-			med := durations[len(durations)/2]
-			minD := durations[0]
-			maxD := durations[len(durations)-1]
 			fmt.Printf("  %-12s fat=%9d B stub=%7d B med=%6.2f ms (min=%.2f max=%.2f) sha256=%s\n",
 				c,
 				binInfo.Size(),
 				stInfo.Size(),
-				float64(med.Microseconds())/usPerMs,
-				float64(minD.Microseconds())/usPerMs,
-				float64(maxD.Microseconds())/usPerMs,
+				float64(stats.med.Microseconds())/usPerMs,
+				float64(stats.min.Microseconds())/usPerMs,
+				float64(stats.max.Microseconds())/usPerMs,
+				wantDigest[:shortHashPrefixLen],
+			)
+		}
+	}
+
+	warmDir, err := os.MkdirTemp("", "microfat-v3bench-warm-*")
+	if err != nil {
+		return fmt.Errorf("create warm cache dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(warmDir) }()
+	if err := os.Chmod(warmDir, cacheDirPerm); err != nil {
+		return fmt.Errorf("chmod warm cache dir: %w", err)
+	}
+
+	// Pre-populate the shared cache entry once via Go stub-minimal, then benchmark auto warm hits across all stubs.
+	warmPrimer := filepath.Join(e2eDir, "gom-zstd")
+	if _, err := os.Stat(warmPrimer); err == nil {
+		if _, wantDigest, err = measureStubExecRuns(warmPrimer, format.ExecModeCache, warmDir, wantDigest); err != nil {
+			return fmt.Errorf("prime warm cache: %w", err)
+		}
+		entries, err := os.ReadDir(warmDir)
+		if err != nil {
+			return fmt.Errorf("read warm cache dir: %w", err)
+		}
+		fmt.Printf("\n=== Part 3b: Warm Cache Hit Latency (15 runs, mode=auto, entries=%d) ===\n", len(entries))
+		for _, st := range stubs {
+			binPath := filepath.Join(e2eDir, st.prefix+"-zstd")
+			var stats stubRunStats
+			stats, wantDigest, err = measureStubExecRuns(binPath, format.ExecModeAuto, warmDir, wantDigest)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("  %-12s warm-auto zstd med=%6.2f ms (min=%.2f max=%.2f) sha256=%s\n",
+				st.prefix,
+				float64(stats.med.Microseconds())/usPerMs,
+				float64(stats.min.Microseconds())/usPerMs,
+				float64(stats.max.Microseconds())/usPerMs,
 				wantDigest[:shortHashPrefixLen],
 			)
 		}
@@ -534,10 +595,12 @@ func runStubE2ESuite() error {
 
 func main() {
 	stubE2EOnly := flag.Bool("stub-e2e", false, "Run only Part 3 end-to-end stub compatibility & latency benchmarks")
+	e2eDir := flag.String("e2e-dir", defaultE2EDir, "Directory containing packed E2E fat binaries")
+	rustStubPath := flag.String("rust-stub", defaultRustStub, "Path to experimental Rust stub binary")
 	flag.Parse()
 
 	if *stubE2EOnly {
-		if err := runStubE2ESuite(); err != nil {
+		if err := runStubE2ESuite(*e2eDir, *rustStubPath); err != nil {
 			fmt.Fprintf(os.Stderr, "v3bench stub-e2e failed: %v\n", err)
 			os.Exit(1)
 		}
