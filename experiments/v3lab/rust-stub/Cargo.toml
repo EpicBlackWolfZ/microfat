@@ -1,0 +1,28 @@
+[package]
+name = "microfat-stub-rs"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "microfat_stub_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "microfat-stub-rs"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+ruzstd = { version = "0.9.1", default-features = false, features = ["std", "hash"] }
+lz4_flex = { version = "0.14.2", default-features = false, features = ["std", "safe-decode", "checked-decode", "frame"] }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }

@@ -1,0 +1,6 @@
+name = "microfat"
+version = "0.1.0"
+defaultTargets = ["Microfat"]
+
+[[lean_lib]]
+name = "Microfat"
