@@ -256,5 +256,38 @@ func TestWindowAccurateZstdExtractionBudget(t *testing.T) {
 		extErr := extractVariantToWriterWithWindow(f, entry, nil, &out, win)
 		require.ErrorIs(t, extErr, codec.ErrDecompressionFailed)
 		require.ErrorIs(t, extErr, codec.ErrWindowSizeExceeded)
+		assert.False(t, isPayloadCorruptionOrDecompressionError(nil))
+		assert.True(t, isPayloadCorruptionOrDecompressionError(codec.ErrWindowSizeExceeded))
+	})
+
+	t.Run("propagates_zstd_decoder_and_extraction_budget_errors", func(t *testing.T) {
+		oldZstd := zstdDecoderMemoryFunc
+		oldExt := extractionMemoryFunc
+		t.Cleanup(func() {
+			zstdDecoderMemoryFunc = oldZstd
+			extractionMemoryFunc = oldExt
+		})
+
+		entry := &format.VariantEntry{
+			Level:            "v1",
+			Offset:           0,
+			CompressedSize:   int64(compressed.Len()),
+			UncompressedSize: int64(len(raw)),
+			Compression:      codec.AlgorithmZstd,
+		}
+		setFiniteLimit(container2GiB)
+
+		zstdDecoderMemoryFunc = func(_, _, _, _ int64) (int64, error) {
+			return 0, cgroup.ErrMemoryBudget
+		}
+		_, budgetErr := checkExtractionBudgetForReader(bytes.NewReader(compressed.Bytes()), entry, nil)
+		require.ErrorIs(t, budgetErr, cgroup.ErrMemoryBudget)
+
+		zstdDecoderMemoryFunc = oldZstd
+		extractionMemoryFunc = func(_, _, _, _ int64) (int64, error) {
+			return 0, cgroup.ErrMemoryBudget
+		}
+		_, budgetErr = checkExtractionBudgetForReader(bytes.NewReader(compressed.Bytes()), entry, nil)
+		require.ErrorIs(t, budgetErr, cgroup.ErrMemoryBudget)
 	})
 }

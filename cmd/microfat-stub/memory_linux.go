@@ -12,6 +12,11 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 )
 
+var (
+	zstdDecoderMemoryFunc = cgroup.ZstdDecoderMemory
+	extractionMemoryFunc  = cgroup.ExtractionMemory
+)
+
 func checkExtractionBudget(entry *format.VariantEntry, idx *format.Index) error {
 	_, err := checkExtractionBudgetForReader(nil, entry, idx)
 	return err
@@ -60,7 +65,7 @@ func checkExtractionBudgetForReader(selfReader io.ReaderAt, entry *format.Varian
 	case codec.AlgorithmNone:
 		decoder = int64(codec.NoneCopyBufferSize)
 	case codec.AlgorithmZstd:
-		zstdMem, zErr := cgroup.ZstdDecoderMemory(
+		zstdMem, zErr := zstdDecoderMemoryFunc(
 			int64(zstdWindow),
 			int64(codec.DefaultDecoderMaxWindow),
 			int64(codec.DefaultZstdDecoderOverhead),
@@ -73,7 +78,7 @@ func checkExtractionBudgetForReader(selfReader io.ReaderAt, entry *format.Varian
 	case codec.AlgorithmLZ4:
 		decoder += lz4Buffers
 	}
-	estimate, err := cgroup.ExtractionMemory(entry.UncompressedSize, dictionary, decoder, cgroup.DefaultMinHeadroomBytes)
+	estimate, err := extractionMemoryFunc(entry.UncompressedSize, dictionary, decoder, cgroup.DefaultMinHeadroomBytes)
 	if err != nil {
 		return 0, err
 	}
