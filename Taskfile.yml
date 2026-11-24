@@ -309,6 +309,20 @@ tasks:
     - |-
       {{.TASK_ENV}}
       "$GO" test -race -v ./tests/e2e/...
+  test-rust-stub-e2e:
+    desc: Build static musl microfat-stub-rs and run full black-box Go E2E parity suite against it
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      host_musl="x86_64-unknown-linux-musl"
+      if [ "$("$GO" env GOARCH)" = "arm64" ]; then
+        host_musl="aarch64-unknown-linux-musl"
+      fi
+      (cd experiments/v3lab/rust-stub && cargo build --release --target "$host_musl")
+      MICROFAT_TEST_LEAKS=1 \
+      MICROFAT_RUST_STUB_TESTS=required \
+      MICROFAT_RUST_STUB_PATH="$PWD/experiments/v3lab/rust-stub/target/${host_musl}/release/microfat-stub-rs" \
+      "$GO" test -race -v ./tests/e2e -run '^TestRustStub' -count=1
   qualify-mounts:
     desc: Qualify native mount layouts (MOUNT_TESTS=auto|required, MOUNT_BACKEND=userns|sudo)
     cmds:

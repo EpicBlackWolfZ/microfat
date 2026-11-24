@@ -4,6 +4,18 @@
 /// Minimum memory headroom reserved for non-heap allocations (64 MiB).
 pub const DEFAULT_MIN_HEADROOM_BYTES: i64 = 64 * 1024 * 1024;
 
+/// Maximum sliding window size allowed for the Zstd decoder (128 MiB).
+pub const DEFAULT_ZSTD_MAX_WINDOW: i64 = 128 * 1024 * 1024;
+
+/// Fixed Zstd decoder tables/buffers overhead (4 MiB).
+pub const DEFAULT_ZSTD_OVERHEAD_BYTES: i64 = 4 * 1024 * 1024;
+
+/// Upper bound on total Zstd decoder memory budget (512 MiB).
+pub const DEFAULT_ZSTD_MAX_DECODER_MEMORY: i64 = 512 * 1024 * 1024;
+
+/// Default container memory ratio for `memory_constrained` GC profile (80%).
+pub const MEMORY_CONSTRAINED_RATIO_BPS: u64 = 8000;
+
 /// Cgroup v1 sentinel threshold (>= 1 PiB treated as unlimited).
 pub const UNLIMITED_CGROUP_V1_THRESHOLD: i64 = 1024 * 1024 * 1024 * 1024 * 1024;
 
@@ -27,6 +39,241 @@ pub fn extraction_memory(
     let s1 = payload.checked_add(dictionary)?;
     let s2 = s1.checked_add(decoder)?;
     s2.checked_add(reserve)
+}
+
+/// Overflow-safe Zstd decoder memory allowance matching `internal/cgroup.ZstdDecoderMemory`
+/// and `formal/lean/Microfat/CgroupMath.lean` (`zstdDecoderMemory`).
+/// Computes `2*window + overhead` when `0 <= window <= max_window`, `overhead >= 0`,
+/// `max_decoder > 0`, and `2*window + overhead <= max_decoder`.
+pub fn zstd_decoder_memory(
+    window: i64,
+    max_window: i64,
+    overhead: i64,
+    max_decoder: i64,
+) -> Option<i64> {
+    if window < 0
+        || max_window < 0
+        || overhead < 0
+        || max_decoder <= 0
+        || window > max_window
+    {
+        return None;
+    }
+    if window > max_decoder - window {
+        return None;
+    }
+    let doubled = window + window;
+    if overhead > max_decoder - doubled {
+        return None;
+    }
+    Some(doubled + overhead)
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum CpuPolicy {
+    Static,
+    Native,
+}
+
+pub fn resolve_cpu_policy(raw: Option<&[u8]>) -> CpuPolicy {
+    match raw.map(trim_ascii_ws) {
+        Some(v) if v.eq_ignore_ascii_case(b"native") => CpuPolicy::Native,
+        _ => CpuPolicy::Static,
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum GcProfile {
+    Default,
+    LatencyCritical,
+    MemoryConstrained,
+    BatchEtl,
+    Adaptive,
+}
+
+impl GcProfile {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::LatencyCritical => "latency_critical",
+            Self::MemoryConstrained => "memory_constrained",
+            Self::BatchEtl => "batch_etl",
+            Self::Adaptive => "adaptive",
+        }
+    }
+}
+
+fn eq_norm_gc_token(s: &[u8], target: &[u8]) -> bool {
+    if s.len() != target.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < s.len() {
+        let a = if s[i] == b'-' {
+            b'_'
+        } else {
+            s[i].to_ascii_lowercase()
+        };
+        if a != target[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+pub fn parse_gc_profile(raw: Option<&[u8]>) -> GcProfile {
+    let Some(s) = raw.map(trim_ascii_ws) else {
+        return GcProfile::Default;
+    };
+    if s.is_empty() || eq_norm_gc_token(s, b"default") {
+        GcProfile::Default
+    } else if eq_norm_gc_token(s, b"latency_critical") || eq_norm_gc_token(s, b"latency") {
+        GcProfile::LatencyCritical
+    } else if eq_norm_gc_token(s, b"memory_constrained") || eq_norm_gc_token(s, b"memory") {
+        GcProfile::MemoryConstrained
+    } else if eq_norm_gc_token(s, b"batch_etl")
+        || eq_norm_gc_token(s, b"batch")
+        || eq_norm_gc_token(s, b"etl")
+    {
+        GcProfile::BatchEtl
+    } else if eq_norm_gc_token(s, b"adaptive") || eq_norm_gc_token(s, b"dynamic") {
+        GcProfile::Adaptive
+    } else {
+        GcProfile::Default
+    }
+}
+
+pub const fn profile_default_ratio_bps(profile: GcProfile) -> u64 {
+    match profile {
+        GcProfile::MemoryConstrained => MEMORY_CONSTRAINED_RATIO_BPS,
+        _ => DEFAULT_MEMORY_RATIO_BPS,
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum GogcOutcome {
+    Value(i64),
+    Off,
+    SkippedBatchNoLimit,
+    Unset,
+}
+
+pub fn parse_byte_size_i64(raw: &[u8]) -> Option<i64> {
+    let s = trim_ascii_ws(raw);
+    if s.is_empty() {
+        return None;
+    }
+    let mut i = 0usize;
+    let mut digits = 0usize;
+    let mut whole: u64 = 0;
+    let mut seen_dot = false;
+    while i < s.len() {
+        let b = s[i];
+        if b.is_ascii_digit() {
+            digits += 1;
+            if !seen_dot {
+                whole = whole.checked_mul(10)?.checked_add((b - b'0') as u64)?;
+            }
+            i += 1;
+        } else if b == b'.' && !seen_dot {
+            seen_dot = true;
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    if digits == 0 {
+        return None;
+    }
+    let unit = trim_ascii_ws(&s[i..]);
+    let mult: u64 = if unit.is_empty()
+        || unit.eq_ignore_ascii_case(b"b")
+        || unit.eq_ignore_ascii_case(b"byte")
+        || unit.eq_ignore_ascii_case(b"bytes")
+    {
+        1
+    } else if unit.eq_ignore_ascii_case(b"k")
+        || unit.eq_ignore_ascii_case(b"kb")
+        || unit.eq_ignore_ascii_case(b"kib")
+    {
+        1024
+    } else if unit.eq_ignore_ascii_case(b"m")
+        || unit.eq_ignore_ascii_case(b"mb")
+        || unit.eq_ignore_ascii_case(b"mib")
+    {
+        1024 * 1024
+    } else if unit.eq_ignore_ascii_case(b"g")
+        || unit.eq_ignore_ascii_case(b"gb")
+        || unit.eq_ignore_ascii_case(b"gib")
+    {
+        1024 * 1024 * 1024
+    } else if unit.eq_ignore_ascii_case(b"t")
+        || unit.eq_ignore_ascii_case(b"tb")
+        || unit.eq_ignore_ascii_case(b"tib")
+    {
+        1024 * 1024 * 1024 * 1024
+    } else {
+        return None;
+    };
+    let bytes = whole.checked_mul(mult)?;
+    u64_to_i64(bytes)
+}
+
+pub fn parse_runtime_memory_limit(raw: &[u8]) -> Option<i64> {
+    let s = trim_ascii_ws(raw);
+    if s.is_empty() {
+        return None;
+    }
+    let (digits, mult): (&[u8], u64) = if let Some(prefix) = s.strip_suffix(b"TiB") {
+        (prefix, 1024 * 1024 * 1024 * 1024)
+    } else if let Some(prefix) = s.strip_suffix(b"GiB") {
+        (prefix, 1024 * 1024 * 1024)
+    } else if let Some(prefix) = s.strip_suffix(b"MiB") {
+        (prefix, 1024 * 1024)
+    } else if let Some(prefix) = s.strip_suffix(b"KiB") {
+        (prefix, 1024)
+    } else if let Some(prefix) = s.strip_suffix(b"B") {
+        if s.ends_with(b"iB") {
+            return None;
+        }
+        (prefix, 1)
+    } else {
+        (s, 1)
+    };
+    if digits.is_empty() || digits.iter().any(|b| !b.is_ascii_digit()) {
+        return None;
+    }
+    let val = parse_u64_ascii(digits)?;
+    let prod = val.checked_mul(mult)?;
+    if prod == 0 || prod >= i64::MAX as u64 {
+        return None;
+    }
+    Some(prod as i64)
+}
+
+pub fn resolve_profile_gogc(
+    profile: GcProfile,
+    computed_gomemlimit: Option<i64>,
+    effective_mem_limit_for_batch: Option<i64>,
+    live_heap_bytes: Option<i64>,
+) -> GogcOutcome {
+    match profile {
+        GcProfile::LatencyCritical => GogcOutcome::Value(75),
+        GcProfile::MemoryConstrained => GogcOutcome::Value(40),
+        GcProfile::BatchEtl => match effective_mem_limit_for_batch {
+            Some(lim) if lim > 0 && lim < i64::MAX => GogcOutcome::Off,
+            _ => GogcOutcome::SkippedBatchNoLimit,
+        },
+        GcProfile::Adaptive => match (computed_gomemlimit, live_heap_bytes) {
+            (Some(avail), Some(live)) if avail > 0 && live > 0 => {
+                let gogc = (avail - live).saturating_mul(100) / live;
+                GogcOutcome::Value(gogc.clamp(10, 100))
+            }
+            _ => GogcOutcome::Unset,
+        },
+        GcProfile::Default => GogcOutcome::Unset,
+    }
 }
 
 /// Deducts kernel-backed executable storage once from a raw ceiling without underflow.
@@ -374,11 +621,86 @@ mod tests {
         assert_eq!(parse_ratio_bps(b"0"), None);
         assert_eq!(parse_ratio_bps(b"1.01"), None);
     }
+
+    #[test]
+    fn zstd_decoder_memory_and_profiles_match_go() {
+        assert_eq!(
+            zstd_decoder_memory(
+                8 * 1024 * 1024,
+                DEFAULT_ZSTD_MAX_WINDOW,
+                DEFAULT_ZSTD_OVERHEAD_BYTES,
+                DEFAULT_ZSTD_MAX_DECODER_MEMORY
+            ),
+            Some(20 * 1024 * 1024)
+        );
+        assert_eq!(
+            zstd_decoder_memory(
+                DEFAULT_ZSTD_MAX_WINDOW + 1,
+                DEFAULT_ZSTD_MAX_WINDOW,
+                DEFAULT_ZSTD_OVERHEAD_BYTES,
+                DEFAULT_ZSTD_MAX_DECODER_MEMORY
+            ),
+            None
+        );
+        assert_eq!(
+            zstd_decoder_memory(256, 256, 0, 512),
+            Some(512)
+        );
+        assert_eq!(zstd_decoder_memory(256, 256, 1, 512), None);
+
+        assert_eq!(resolve_cpu_policy(None), CpuPolicy::Static);
+        assert_eq!(resolve_cpu_policy(Some(b" NATIVE ")), CpuPolicy::Native);
+        assert_eq!(parse_gc_profile(Some(b"latency-critical")), GcProfile::LatencyCritical);
+        assert_eq!(parse_gc_profile(Some(b"memory")), GcProfile::MemoryConstrained);
+        assert_eq!(parse_gc_profile(Some(b"ETL")), GcProfile::BatchEtl);
+        assert_eq!(parse_gc_profile(Some(b"dynamic")), GcProfile::Adaptive);
+        assert_eq!(profile_default_ratio_bps(GcProfile::MemoryConstrained), 8000);
+        assert_eq!(parse_byte_size_i64(b"64MiB"), Some(64 * 1024 * 1024));
+        assert_eq!(parse_runtime_memory_limit(b"384MiB"), Some(384 * 1024 * 1024));
+        assert_eq!(
+            resolve_profile_gogc(GcProfile::LatencyCritical, None, None, None),
+            GogcOutcome::Value(75)
+        );
+        assert_eq!(
+            resolve_profile_gogc(GcProfile::BatchEtl, None, None, None),
+            GogcOutcome::SkippedBatchNoLimit
+        );
+        assert_eq!(
+            resolve_profile_gogc(GcProfile::BatchEtl, None, Some(384 * 1024 * 1024), None),
+            GogcOutcome::Off
+        );
+        assert_eq!(
+            resolve_profile_gogc(GcProfile::Adaptive, Some(300), Some(300), Some(100)),
+            GogcOutcome::Value(100)
+        );
+    }
 }
 
 #[cfg(kani)]
 mod kani_proofs {
     use super::*;
+
+    #[kani::proof]
+    fn verify_zstd_decoder_memory_matches_math_spec() {
+        let win: i64 = kani::any();
+        let max_win: i64 = kani::any();
+        let overhead: i64 = kani::any();
+        let max_dec: i64 = kani::any();
+
+        let got = zstd_decoder_memory(win, max_win, overhead, max_dec);
+        let exact = (win as i128) + (win as i128) + (overhead as i128);
+        let fits = win >= 0
+            && max_win >= 0
+            && overhead >= 0
+            && max_dec > 0
+            && win <= max_win
+            && exact <= (max_dec as i128);
+        assert_eq!(got.is_some(), fits);
+        if let Some(v) = got {
+            assert_eq!(v as i128, exact);
+            assert!(v >= 0 && v <= max_dec);
+        }
+    }
 
     #[kani::proof]
     fn verify_extraction_memory_matches_math_spec() {
