@@ -27,6 +27,9 @@ axiom cleanliness across every headline theorem.
 #print axioms Microfat.CgroupMath.gomemlimit_headroom_le_half
 #print axioms Microfat.CgroupMath.gomemlimit_monotone
 #print axioms Microfat.CgroupMath.admitWorkers_sum_le_budget
+#print axioms Microfat.CgroupMath.zstdDecoderMemory_iff
+#print axioms Microfat.CgroupMath.zstdDecoderMemory_le_maxDecoder
+#print axioms Microfat.CgroupMath.zstdDecoderMemory_monotone
 
 #print axioms Microfat.ElfFilter.decode_encodeU32LEBytes
 #print axioms Microfat.ElfFilter.encode_decodeU32LEBytes
@@ -37,3 +40,8 @@ axiom cleanliness across every headline theorem.
 #print axioms Microfat.ElfFilter.x86_length_preserved
 #print axioms Microfat.ElfFilter.x86_roundtrip
 #print axioms Microfat.ElfFilter.x86_inverse_roundtrip
+#print axioms Microfat.ElfFilter.x86_chunk_local_reassembly
+#print axioms Microfat.ElfFilter.arm64_chunk_local_reassembly
+#print axioms Microfat.ElfFilter.x86_dedup_multi_offset_sound
+#print axioms Microfat.ElfFilter.arm64_dedup_multi_offset_sound
+#print axioms Microfat.ElfFilter.arm64_aligned_split_commutes

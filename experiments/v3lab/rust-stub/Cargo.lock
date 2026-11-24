@@ -13,9 +13,6 @@ name = "lz4_flex"
 version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f56455fff36934a9500d69062aec1c77037179b6f0669e4d5d6b72b84722d6a3"
-dependencies = [
- "twox-hash",
-]
 
 [[package]]
 name = "microfat-stub-rs"
@@ -23,16 +20,9 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "lz4_flex",
- "ruzstd",
-]
-
-[[package]]
-name = "ruzstd"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69e4ce4a039f42bf25920b95667e4d789e98749ab11bbb8d2c2936f788421bb5"
-dependencies = [
  "twox-hash",
+ "zrip-core",
+ "zrip-decode",
 ]
 
 [[package]]
@@ -40,3 +30,18 @@ name = "twox-hash"
 version = "2.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86a801b3cea342a06d468c8710662aa29e5e05e4f5c0d62f00bbb7f2ad7941c2"
+
+[[package]]
+name = "zrip-core"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db06410c7e9e46ee4d19659df21cda5fb815684f41c78fcffa7e29768a132434"
+
+[[package]]
+name = "zrip-decode"
+version = "0.8.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eea49d58814bb6cdc323bb328c3d8a67b7e39f848490610735d0ced28dd48e5b"
+dependencies = [
+ "zrip-core",
+]

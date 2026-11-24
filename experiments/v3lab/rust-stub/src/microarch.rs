@@ -219,7 +219,7 @@ pub const fn evaluate_arm64_mask(f: Arm64Features) -> u16 {
     m
 }
 
-/// Converts numeric rank to canonical Go variant label.
+/// Converts numeric AMD64 rank to canonical Go variant label.
 pub const fn amd64_level_str(rank: u8) -> Option<&'static str> {
     match rank {
         1 => Some("v1"),
@@ -227,6 +227,43 @@ pub const fn amd64_level_str(rank: u8) -> Option<&'static str> {
         3 => Some("v3"),
         4 => Some("v4"),
         _ => None,
+    }
+}
+
+/// Returns the highest supported ARM64 architecture level string (`"v9.5"`..`"v8.0"`).
+pub const fn highest_arm64_level_str(mask: u16) -> &'static str {
+    if (mask & ARM_LVL_V9_5) != 0 {
+        "v9.5"
+    } else if (mask & ARM_LVL_V9_4) != 0 {
+        "v9.4"
+    } else if (mask & ARM_LVL_V9_3) != 0 {
+        "v9.3"
+    } else if (mask & ARM_LVL_V9_2) != 0 {
+        "v9.2"
+    } else if (mask & ARM_LVL_V9_1) != 0 {
+        "v9.1"
+    } else if (mask & ARM_LVL_V9_0) != 0 {
+        "v9.0"
+    } else if (mask & ARM_LVL_V8_9) != 0 {
+        "v8.9"
+    } else if (mask & ARM_LVL_V8_8) != 0 {
+        "v8.8"
+    } else if (mask & ARM_LVL_V8_7) != 0 {
+        "v8.7"
+    } else if (mask & ARM_LVL_V8_6) != 0 {
+        "v8.6"
+    } else if (mask & ARM_LVL_V8_5) != 0 {
+        "v8.5"
+    } else if (mask & ARM_LVL_V8_4) != 0 {
+        "v8.4"
+    } else if (mask & ARM_LVL_V8_3) != 0 {
+        "v8.3"
+    } else if (mask & ARM_LVL_V8_2) != 0 {
+        "v8.2"
+    } else if (mask & ARM_LVL_V8_1) != 0 {
+        "v8.1"
+    } else {
+        "v8.0"
     }
 }
 
@@ -269,6 +306,151 @@ pub const fn parse_level_rank(arch: TargetArch, level: &[u8]) -> u8 {
     match arch {
         TargetArch::Amd64 => parse_amd64_rank(level),
         TargetArch::Arm64 => parse_arm64_rank(level),
+    }
+}
+
+fn strip_prefix_ci<'a>(s: &'a [u8], prefix: &[u8]) -> &'a [u8] {
+    if s.len() >= prefix.len() && s[..prefix.len()].eq_ignore_ascii_case(prefix) {
+        &s[prefix.len()..]
+    } else {
+        s
+    }
+}
+
+/// Normalizes a user-supplied level override (e.g. `"linux_amd64_v3"`, `"V2"`, `"3"`, `"arm64_v8.2"`)
+/// into canonical rank (`1..=4` for AMD64, `80..=95` for ARM64, `0` if invalid), matching `internal/microarch.Normalize`.
+pub fn parse_normalized_level_rank(arch: TargetArch, raw: &[u8]) -> u8 {
+    let mut s = raw;
+    while let [first, rest @ ..] = s {
+        if first.is_ascii_whitespace() {
+            s = rest;
+        } else {
+            break;
+        }
+    }
+    while let [rest @ .., last] = s {
+        if last.is_ascii_whitespace() {
+            s = rest;
+        } else {
+            break;
+        }
+    }
+    for prefix in [
+        b"linux_".as_slice(),
+        b"darwin_",
+        b"windows_",
+        b"amd64_",
+        b"amd64-",
+        b"arm64_",
+        b"arm64-",
+        b"x86_64_",
+        b"x86_64-",
+        b"x86-64_",
+        b"x86-64-",
+        b"aarch64_",
+        b"aarch64-",
+    ] {
+        s = strip_prefix_ci(s, prefix);
+    }
+    if s.is_empty() {
+        return match arch {
+            TargetArch::Amd64 => 1,
+            TargetArch::Arm64 => 0,
+        };
+    }
+    let mut buf = [0u8; 8];
+    let len = if s[0].eq_ignore_ascii_case(&b'v') {
+        if s.len() > buf.len() {
+            return 0;
+        }
+        for (i, &b) in s.iter().enumerate() {
+            buf[i] = b.to_ascii_lowercase();
+        }
+        s.len()
+    } else {
+        if s.len() + 1 > buf.len() {
+            return 0;
+        }
+        buf[0] = b'v';
+        for (i, &b) in s.iter().enumerate() {
+            buf[i + 1] = b.to_ascii_lowercase();
+        }
+        s.len() + 1
+    };
+    parse_level_rank(arch, &buf[..len])
+}
+
+/// Variant selection policy mirroring `MICROFAT_FORCE_LEVEL`, `MICROFAT_MAX_LEVEL`,
+/// and `MICROFAT_DISABLE_VARIANTS` without allocation.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct SelectionPolicy {
+    pub force_rank: Option<u8>,
+    pub max_rank: Option<u8>,
+    pub disabled_ranks: [u8; 8],
+    pub disabled_len: usize,
+}
+
+impl SelectionPolicy {
+    pub const fn default_none() -> Self {
+        Self {
+            force_rank: None,
+            max_rank: None,
+            disabled_ranks: [0; 8],
+            disabled_len: 0,
+        }
+    }
+
+    pub fn is_disabled(&self, rank: u8) -> bool {
+        let len = if self.disabled_len < self.disabled_ranks.len() {
+            self.disabled_len
+        } else {
+            self.disabled_ranks.len()
+        };
+        let mut i = 0usize;
+        while i < len {
+            if self.disabled_ranks[i] == rank {
+                return true;
+            }
+            i += 1;
+        }
+        false
+    }
+
+    pub fn push_disabled(&mut self, rank: u8) {
+        if rank != 0 && self.disabled_len < self.disabled_ranks.len() && !self.is_disabled(rank) {
+            self.disabled_ranks[self.disabled_len] = rank;
+            self.disabled_len += 1;
+        }
+    }
+}
+
+/// Policy-aware compatibility and preference check preserving host SIGILL safety.
+pub fn should_replace_variant_with_policy(
+    current_best: Option<u8>,
+    candidate_rank: u8,
+    host: HostCaps,
+    policy: &SelectionPolicy,
+) -> bool {
+    if let Some(forced) = policy.force_rank {
+        if !is_compatible_level(host, forced) || candidate_rank != forced {
+            return false;
+        }
+        return current_best != Some(forced);
+    }
+    if !is_compatible_level(host, candidate_rank) {
+        return false;
+    }
+    if policy.is_disabled(candidate_rank) {
+        return false;
+    }
+    if let Some(max_r) = policy.max_rank {
+        if candidate_rank > max_r {
+            return false;
+        }
+    }
+    match current_best {
+        None => true,
+        Some(b) => candidate_rank > b,
     }
 }
 
@@ -343,6 +525,8 @@ mod tests {
         assert!(is_compatible_level(caps, parse_arm64_rank(b"v9.0")));
         assert!(is_compatible_level(caps, parse_arm64_rank(b"v8.5")));
         assert!(!is_compatible_level(caps, parse_arm64_rank(b"v8.6")));
+        assert_eq!(highest_arm64_level_str(m90), "v9.0");
+        assert_eq!(highest_arm64_level_str(0), "v8.0");
 
         // Without NMI/THE, v8.8/v8.9 remain unreachable while v9.5 succeeds when v9 branch holds.
         let userspace_all = ALL_ARM64_FEATURE_MASK & !(ARM_BIT_NMI | ARM_BIT_THE);
@@ -351,6 +535,42 @@ mod tests {
         assert_eq!(mall & ARM_LVL_V8_8, 0);
         assert_eq!(mall & ARM_LVL_V8_9, 0);
         assert_ne!(mall & ARM_LVL_V9_5, 0);
+    }
+
+    #[test]
+    fn policy_enforces_force_max_disabled_and_sigill_safety() {
+        assert_eq!(parse_normalized_level_rank(TargetArch::Amd64, b" linux_amd64_V3 "), 3);
+        assert_eq!(parse_normalized_level_rank(TargetArch::Amd64, b"2"), 2);
+        assert_eq!(parse_normalized_level_rank(TargetArch::Arm64, b"arm64-v8.2"), 82);
+        assert_eq!(parse_normalized_level_rank(TargetArch::Amd64, b"invalid"), 0);
+
+        let host = HostCaps::Amd64(3);
+        let mut p = SelectionPolicy::default_none();
+        p.max_rank = Some(2);
+        assert!(should_replace_variant_with_policy(None, 2, host, &p));
+        assert!(!should_replace_variant_with_policy(Some(2), 3, host, &p));
+
+        p.max_rank = None;
+        p.push_disabled(3);
+        assert!(!should_replace_variant_with_policy(None, 3, host, &p));
+        assert!(should_replace_variant_with_policy(None, 2, host, &p));
+
+        // Incompatible force_level=v4 on v3 host refuses everything (SIGILL safe).
+        let force_v4 = SelectionPolicy {
+            force_rank: Some(4),
+            ..SelectionPolicy::default_none()
+        };
+        for cand in [1, 2, 3, 4] {
+            assert!(!should_replace_variant_with_policy(None, cand, host, &force_v4));
+        }
+
+        // Compatible force_level=v1 selects only v1 even if v3 is present.
+        let force_v1 = SelectionPolicy {
+            force_rank: Some(1),
+            ..SelectionPolicy::default_none()
+        };
+        assert!(should_replace_variant_with_policy(None, 1, host, &force_v1));
+        assert!(!should_replace_variant_with_policy(Some(1), 3, host, &force_v1));
     }
 }
 
@@ -475,6 +695,45 @@ mod kani_proofs {
         if (f1.0 & !b2) == 0 {
             let m2 = evaluate_arm64_mask(Arm64Features::new(b2));
             assert_eq!(m1 & !m2, 0);
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn verify_policy_selection_sigill_free() {
+        let is_arm64: bool = kani::any();
+        let host = if is_arm64 {
+            HostCaps::Arm64(kani::any())
+        } else {
+            let r: u8 = kani::any();
+            kani::assume((1..=4).contains(&r));
+            HostCaps::Amd64(r)
+        };
+        let policy = SelectionPolicy {
+            force_rank: kani::any(),
+            max_rank: kani::any(),
+            disabled_ranks: kani::any(),
+            disabled_len: kani::any(),
+        };
+
+        let mut best: Option<u8> = None;
+        for _ in 0..4 {
+            let cand: u8 = kani::any();
+            if should_replace_variant_with_policy(best, cand, host, &policy) {
+                best = Some(cand);
+            }
+        }
+
+        if let Some(chosen) = best {
+            assert!(is_compatible_level(host, chosen));
+            if let Some(forced) = policy.force_rank {
+                assert_eq!(chosen, forced);
+            } else {
+                assert!(!policy.is_disabled(chosen));
+                if let Some(max_r) = policy.max_rank {
+                    assert!(chosen <= max_r);
+                }
+            }
         }
     }
 }

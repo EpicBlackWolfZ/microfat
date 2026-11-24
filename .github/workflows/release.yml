@@ -66,6 +66,11 @@ jobs:
         timeout-minutes: 5
         run: task verify-cgroup-memory
 
+      - name: Verify Format v2 bounds arithmetic
+        id: format-bounds-proof
+        timeout-minutes: 5
+        run: task verify-format-bounds
+
       - name: Select native runtime release policy
         id: runtime-policy
         env:

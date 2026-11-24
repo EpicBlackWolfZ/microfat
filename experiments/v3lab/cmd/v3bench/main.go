@@ -61,6 +61,7 @@ const (
 	corpusBaseDir      = ".work/v3lab/corpus"
 	defaultE2EDir      = ".work/v3lab/e2e"
 	defaultRustStub    = "experiments/v3lab/rust-stub/target/x86_64-unknown-linux-musl/release/microfat-stub-rs"
+	archFilterAll      = "all"
 )
 
 type corpusTarget struct {
@@ -69,12 +70,22 @@ type corpusTarget struct {
 	ldflags string
 }
 
+type archSpec struct {
+	arch        string
+	goarch      string
+	levelEnvKey string
+	levels      []string
+	decodeLevel string
+	dirPrefix   string
+}
+
 type v3BenchConfig struct {
-	name       string
-	chunkMode  compress.ChunkMode
-	chunkSize  int
-	bcjRIP     bool
-	enableDict bool
+	name           string
+	chunkMode      compress.ChunkMode
+	chunkSize      int
+	bcjRIP         bool
+	enableDict     bool
+	dictProfitable bool
 }
 
 func runBendParityWorkers(workers int) (uint64, time.Duration) {
@@ -139,7 +150,7 @@ func runBendParitySuite() error {
 	return nil
 }
 
-func buildCorpusVariant(pkg, ldflags, level, outPath string) ([]byte, error) {
+func buildCorpusVariant(spec archSpec, pkg, ldflags, level, outPath string) ([]byte, error) {
 	args := []string{"build", "-trimpath"}
 	if ldflags != "" {
 		args = append(args, "-ldflags="+ldflags)
@@ -147,10 +158,10 @@ func buildCorpusVariant(pkg, ldflags, level, outPath string) ([]byte, error) {
 	args = append(args, "-o", outPath, pkg)
 
 	cmd := exec.Command("go", args...) // #nosec G204 -- fixed internal package build arguments
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64", "GOAMD64="+level)
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+spec.goarch, spec.levelEnvKey+"="+level)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("go build %s (%s): %w\n%s", pkg, level, err, string(out))
+		return nil, fmt.Errorf("go build %s (%s/%s): %w\n%s", pkg, spec.arch, level, err, string(out))
 	}
 	data, err := os.ReadFile(outPath) // #nosec G304 -- reading newly built corpus binary path
 	if err != nil {
@@ -160,6 +171,7 @@ func buildCorpusVariant(pkg, ldflags, level, outPath string) ([]byte, error) {
 }
 
 func benchV2Control(
+	spec archSpec,
 	name string,
 	stubPath string,
 	stubSize int64,
@@ -177,7 +189,7 @@ func benchV2Control(
 		OutputPath:     outPath,
 		AppName:        "v3bench-ctrl",
 		TargetOS:       "linux",
-		TargetArch:     microarch.ArchAMD64,
+		TargetArch:     spec.arch,
 		Variants:       variantPaths,
 		Profile:        profile,
 		Compression:    compression,
@@ -199,8 +211,8 @@ func benchV2Control(
 	fmt.Printf("  %-30s net=%9d B (full=%9d B) ratio=%.2f%% pack=%7.1f ms\n",
 		name, netBytes, st.Size(), ratioPct, float64(packDur.Microseconds())/usPerMs)
 
-	// Measure cold Format v2 Zstd memfd extract time on v3 for direct decode baseline.
-	med1, err := measureV2MemfdCold(outPath, microarch.AMD64v3)
+	// Measure cold Format v2 Zstd memfd extract time on top tier for direct decode baseline.
+	med1, err := measureV2MemfdCold(outPath, spec.decodeLevel)
 	if err != nil {
 		return 0, fmt.Errorf("decode v2 %s: %w", name, err)
 	}
@@ -315,6 +327,7 @@ func measureV3MemfdCold(path, level string, workers int) (time.Duration, error) 
 }
 
 func benchV3Config(
+	spec archSpec,
 	cfg v3BenchConfig,
 	variants map[string][]byte,
 	outPath string,
@@ -328,12 +341,13 @@ func benchV3Config(
 		return fmt.Errorf("create %s: %w", outPath, err)
 	}
 	_, stats, packErr := compress.PackV3(outFile, compress.V3PackOptions{
-		TargetArch:     microarch.ArchAMD64,
+		TargetArch:     spec.arch,
 		Variants:       variants,
 		ChunkMode:      cfg.chunkMode,
 		AvgChunkSize:   cfg.chunkSize,
 		EnableBCJRIP:   cfg.bcjRIP,
 		EnableDict:     cfg.enableDict,
+		DictProfitable: cfg.dictProfitable,
 		DictSize:       v3DefaultDictSize,
 		ZstdLevel:      zstd.SpeedBestCompression,
 		ParallelEncode: runtime.NumCPU(),
@@ -347,11 +361,11 @@ func benchV3Config(
 		return fmt.Errorf("close %s: %w", outPath, closeErr)
 	}
 
-	medW1, err := measureV3MemfdCold(outPath, microarch.AMD64v3, workerCount1)
+	medW1, err := measureV3MemfdCold(outPath, spec.decodeLevel, workerCount1)
 	if err != nil {
 		return fmt.Errorf("decode v3 %s (1w): %w", cfg.name, err)
 	}
-	medW4, err := measureV3MemfdCold(outPath, microarch.AMD64v3, workerCount4)
+	medW4, err := measureV3MemfdCold(outPath, spec.decodeLevel, workerCount4)
 	if err != nil {
 		return fmt.Errorf("decode v3 %s (4w): %w", cfg.name, err)
 	}
@@ -380,7 +394,113 @@ func benchV3Config(
 	return nil
 }
 
-func runCorpusSuite() error {
+func benchCorpusTarget(spec archSpec, target corpusTarget, v3Configs []v3BenchConfig) error {
+	targetDir := filepath.Join(corpusBaseDir, spec.dirPrefix+target.name)
+	if err := os.MkdirAll(targetDir, dirPerm); err != nil {
+		return fmt.Errorf("mkdir %s: %w", targetDir, err)
+	}
+	variantPaths := make(map[string]string, len(spec.levels))
+	variantBytes := make(map[string][]byte, len(spec.levels))
+	var rawSum int64
+	for _, lvl := range spec.levels {
+		outBin := filepath.Join(targetDir, spec.arch+"_"+lvl)
+		b, err := buildCorpusVariant(spec, target.pkg, target.ldflags, lvl, outBin)
+		if err != nil {
+			return err
+		}
+		variantPaths[lvl] = outBin
+		variantBytes[lvl] = b
+		rawSum += int64(len(b))
+	}
+	fmt.Printf("\n[%s%s] %s=%d B %s=%d B %s=%d B raw_sum=%d B\n",
+		spec.dirPrefix, target.name,
+		spec.levels[0], len(variantBytes[spec.levels[0]]),
+		spec.levels[1], len(variantBytes[spec.levels[1]]),
+		spec.levels[2], len(variantBytes[spec.levels[2]]),
+		rawSum)
+
+	ctrlStubPath := variantPaths[spec.levels[0]]
+	ctrlStubSize := int64(len(variantBytes[spec.levels[0]]))
+	if _, err := benchV2Control(
+		spec,
+		"v2-balanced",
+		ctrlStubPath, ctrlStubSize, variantPaths,
+		filepath.Join(targetDir, "v2_balanced.bin"),
+		codec.ProfileBalanced, "", false, rawSum,
+	); err != nil {
+		return err
+	}
+	v2NoDict, err := benchV2Control(
+		spec,
+		"v2-size-nodict",
+		ctrlStubPath, ctrlStubSize, variantPaths,
+		filepath.Join(targetDir, "v2_size_nodict.bin"),
+		codec.ProfileSize, "zstd:best", false, rawSum,
+	)
+	if err != nil {
+		return err
+	}
+	v2DictProf, err := benchV2Control(
+		spec,
+		"v2-size-dictprof",
+		ctrlStubPath, ctrlStubSize, variantPaths,
+		filepath.Join(targetDir, "v2_size_dictprof.bin"),
+		codec.ProfileSize, "zstd:best", true, rawSum,
+	)
+	if err != nil {
+		return err
+	}
+
+	for _, cfg := range v3Configs {
+		if err := benchV3Config(
+			spec,
+			cfg,
+			variantBytes,
+			filepath.Join(targetDir, cfg.name+".v3"),
+			rawSum,
+			v2NoDict,
+			v2DictProf,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func selectArchSpecs(archFilter string) ([]archSpec, error) {
+	amd64Spec := archSpec{
+		arch:        microarch.ArchAMD64,
+		goarch:      "amd64",
+		levelEnvKey: "GOAMD64",
+		levels:      []string{microarch.AMD64v1, microarch.AMD64v2, microarch.AMD64v3},
+		decodeLevel: microarch.AMD64v3,
+		dirPrefix:   "",
+	}
+	arm64Spec := archSpec{
+		arch:        microarch.ArchARM64,
+		goarch:      "arm64",
+		levelEnvKey: "GOARM64",
+		levels:      []string{microarch.ARM64v8_0, microarch.ARM64v8_1, microarch.ARM64v8_2},
+		decodeLevel: microarch.ARM64v8_2,
+		dirPrefix:   "arm64-",
+	}
+	switch archFilter {
+	case "", archFilterAll:
+		return []archSpec{amd64Spec, arm64Spec}, nil
+	case microarch.ArchAMD64:
+		return []archSpec{amd64Spec}, nil
+	case microarch.ArchARM64:
+		return []archSpec{arm64Spec}, nil
+	default:
+		return nil, fmt.Errorf("unsupported -arch %q (want amd64, arm64, or all)", archFilter)
+	}
+}
+
+func runCorpusSuite(archFilter string) error {
+	specs, err := selectArchSpecs(archFilter)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(corpusBaseDir, dirPerm); err != nil {
 		return fmt.Errorf("mkdir %s: %w", corpusBaseDir, err)
 	}
@@ -395,77 +515,21 @@ func runCorpusSuite() error {
 		{name: "v3-fixed-128k-nobcj-nodict", chunkMode: compress.ChunkFixed, chunkSize: chunk128K, bcjRIP: false, enableDict: false},
 		{name: "v3-fixed-128k-bcj-nodict", chunkMode: compress.ChunkFixed, chunkSize: chunk128K, bcjRIP: true, enableDict: false},
 		{name: "v3-fixed-128k-bcj-dict", chunkMode: compress.ChunkFixed, chunkSize: chunk128K, bcjRIP: true, enableDict: true},
-		{name: "v3-fixed-256k-bcj-dict", chunkMode: compress.ChunkFixed, chunkSize: chunk256K, bcjRIP: true, enableDict: true},
-		{name: "v3-fixed-512k-bcj-dict", chunkMode: compress.ChunkFixed, chunkSize: chunk512K, bcjRIP: true, enableDict: true},
+		{name: "v3-fixed-512k-bcj-dictprof", chunkMode: compress.ChunkFixed, chunkSize: chunk512K,
+			bcjRIP: true, enableDict: true, dictProfitable: true},
+		{name: "v3-cdc-64k-bcj-nodict", chunkMode: compress.ChunkSectionCDC, chunkSize: chunk64K, bcjRIP: true, enableDict: false},
 		{name: "v3-cdc-64k-bcj-dict", chunkMode: compress.ChunkSectionCDC, chunkSize: chunk64K, bcjRIP: true, enableDict: true},
 		{name: "v3-cdc-128k-nobcj-nodict", chunkMode: compress.ChunkSectionCDC, chunkSize: chunk128K, bcjRIP: false, enableDict: false},
 		{name: "v3-cdc-128k-bcj-nodict", chunkMode: compress.ChunkSectionCDC, chunkSize: chunk128K, bcjRIP: true, enableDict: false},
 		{name: "v3-cdc-128k-bcj-dict", chunkMode: compress.ChunkSectionCDC, chunkSize: chunk128K, bcjRIP: true, enableDict: true},
+		{name: "v3-cdc-128k-bcj-dictprof", chunkMode: compress.ChunkSectionCDC, chunkSize: chunk128K,
+			bcjRIP: true, enableDict: true, dictProfitable: true},
 	}
 
-	levels := []string{microarch.AMD64v1, microarch.AMD64v2, microarch.AMD64v3}
-	fmt.Printf("\n=== Part 2: Format v2 vs Format v3 ELF Corpus (Host CPUs=%d) ===\n", runtime.NumCPU())
-
-	for _, target := range targets {
-		targetDir := filepath.Join(corpusBaseDir, target.name)
-		if err := os.MkdirAll(targetDir, dirPerm); err != nil {
-			return fmt.Errorf("mkdir %s: %w", targetDir, err)
-		}
-		variantPaths := make(map[string]string, len(levels))
-		variantBytes := make(map[string][]byte, len(levels))
-		var rawSum int64
-		for _, lvl := range levels {
-			outBin := filepath.Join(targetDir, "amd64_"+lvl)
-			b, err := buildCorpusVariant(target.pkg, target.ldflags, lvl, outBin)
-			if err != nil {
-				return err
-			}
-			variantPaths[lvl] = outBin
-			variantBytes[lvl] = b
-			rawSum += int64(len(b))
-		}
-		fmt.Printf("\n[%s] v1=%d B v2=%d B v3=%d B raw_sum=%d B\n",
-			target.name, len(variantBytes[microarch.AMD64v1]), len(variantBytes[microarch.AMD64v2]),
-			len(variantBytes[microarch.AMD64v3]), rawSum)
-
-		ctrlStubPath := variantPaths[microarch.AMD64v1]
-		ctrlStubSize := int64(len(variantBytes[microarch.AMD64v1]))
-		if _, err := benchV2Control(
-			"v2-balanced",
-			ctrlStubPath, ctrlStubSize, variantPaths,
-			filepath.Join(targetDir, "v2_balanced.bin"),
-			codec.ProfileBalanced, "", false, rawSum,
-		); err != nil {
-			return err
-		}
-		v2NoDict, err := benchV2Control(
-			"v2-size-nodict",
-			ctrlStubPath, ctrlStubSize, variantPaths,
-			filepath.Join(targetDir, "v2_size_nodict.bin"),
-			codec.ProfileSize, "zstd:best", false, rawSum,
-		)
-		if err != nil {
-			return err
-		}
-		v2DictProf, err := benchV2Control(
-			"v2-size-dictprof",
-			ctrlStubPath, ctrlStubSize, variantPaths,
-			filepath.Join(targetDir, "v2_size_dictprof.bin"),
-			codec.ProfileSize, "zstd:best", true, rawSum,
-		)
-		if err != nil {
-			return err
-		}
-
-		for _, cfg := range v3Configs {
-			if err := benchV3Config(
-				cfg,
-				variantBytes,
-				filepath.Join(targetDir, cfg.name+".v3"),
-				rawSum,
-				v2NoDict,
-				v2DictProf,
-			); err != nil {
+	for _, spec := range specs {
+		fmt.Printf("\n=== Part 2 (%s): Format v2 vs Format v3 ELF Corpus (Host CPUs=%d) ===\n", spec.arch, runtime.NumCPU())
+		for _, target := range targets {
+			if err := benchCorpusTarget(spec, target, v3Configs); err != nil {
 				return err
 			}
 		}
@@ -597,6 +661,8 @@ func main() {
 	stubE2EOnly := flag.Bool("stub-e2e", false, "Run only Part 3 end-to-end stub compatibility & latency benchmarks")
 	e2eDir := flag.String("e2e-dir", defaultE2EDir, "Directory containing packed E2E fat binaries")
 	rustStubPath := flag.String("rust-stub", defaultRustStub, "Path to experimental Rust stub binary")
+	archFilter := flag.String("arch", archFilterAll, "Target architecture corpus to benchmark (amd64, arm64, or all)")
+	skipBend := flag.Bool("skip-bend", false, "Skip Part 1 Go-vs-Bend CPU worker parity benchmark")
 	flag.Parse()
 
 	if *stubE2EOnly {
@@ -606,11 +672,13 @@ func main() {
 		}
 		return
 	}
-	if err := runBendParitySuite(); err != nil {
-		fmt.Fprintf(os.Stderr, "v3bench parity failed: %v\n", err)
-		os.Exit(1)
+	if !*skipBend {
+		if err := runBendParitySuite(); err != nil {
+			fmt.Fprintf(os.Stderr, "v3bench parity failed: %v\n", err)
+			os.Exit(1)
+		}
 	}
-	if err := runCorpusSuite(); err != nil {
+	if err := runCorpusSuite(*archFilter); err != nil {
 		fmt.Fprintf(os.Stderr, "v3bench corpus failed: %v\n", err)
 		os.Exit(1)
 	}

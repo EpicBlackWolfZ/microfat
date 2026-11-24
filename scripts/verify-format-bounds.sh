@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Check the Format v2 bounds laws against the same source file built by Go.
+set -euo pipefail
+IFS=$'\n\t'
+
+script_dir="$(dirname -- "${BASH_SOURCE[0]}")"
+exec bash "${script_dir}/verify-gobra.sh" 'format bounds' internal/format/bounds.go
