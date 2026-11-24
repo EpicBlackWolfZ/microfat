@@ -142,6 +142,43 @@ pub fn probe_x86_features() -> X86Features {
     X86Features::new(bits)
 }
 
+/// Reports whether the host x86-64 processor is an Intel Skylake-X / Cascade Lake / Cooper Lake Xeon
+/// (Family 6, Model 85) subject to AVX-512 frequency downclocking.
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(test, allow(dead_code))]
+pub fn is_skylake_x_or_cascade_lake() -> bool {
+    let (max_basic, ebx, ecx, edx) = cpuid_count(0, 0);
+    if max_basic < 1 {
+        return false;
+    }
+    // "GenuineIntel": EBX="Genu", EDX="ineI", ECX="ntel"
+    if ebx != 0x756e_6547 || edx != 0x4965_6e69 || ecx != 0x6c65_746e {
+        return false;
+    }
+    let (eax, _, _, _) = cpuid_count(1, 0);
+    let base_family = (eax >> 8) & 0x0f;
+    let ext_family = (eax >> 20) & 0xff;
+    let family = if base_family == 0x0f {
+        base_family + ext_family
+    } else {
+        base_family
+    };
+    let base_model = (eax >> 4) & 0x0f;
+    let ext_model = (eax >> 16) & 0x0f;
+    let model = if base_family == 6 || base_family == 0x0f {
+        base_model | (ext_model << 4)
+    } else {
+        base_model
+    };
+    family == 6 && model == 85
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+#[cfg_attr(test, allow(dead_code))]
+pub fn is_skylake_x_or_cascade_lake() -> bool {
+    false
+}
+
 #[cfg(any(target_arch = "aarch64", test))]
 pub fn arm64_features_from_hwcap(hwcap: u64, hwcap2: u64) -> Arm64Features {
     let mut bits = 0u32;

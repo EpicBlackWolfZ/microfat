@@ -7,6 +7,7 @@ on:
       - 'formal/lean/**'
       - 'formal/smt/**'
       - 'experiments/v3lab/rust-stub/**'
+      - 'tests/e2e/rust_stub_parity_test.go'
       - '.config/tool-versions.env'
       - '.github/workflows/formal-lab.yml'
   workflow_dispatch:
@@ -109,6 +110,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Verify microfat-stub-rs on x86_64 and aarch64 musl targets
         shell: bash
         run: |
@@ -118,12 +124,18 @@ jobs:
           rustup toolchain install "${RUST_VERSION}" --profile minimal --component clippy \
             --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
           export RUSTUP_TOOLCHAIN="${RUST_VERSION}"
-          cd experiments/v3lab/rust-stub
-          cargo clippy --all-targets -- -D warnings
-          cargo clippy --target aarch64-unknown-linux-musl -- -D warnings
-          cargo test
-          cargo build --release --target x86_64-unknown-linux-musl
-          cargo build --release --target aarch64-unknown-linux-musl
+          (
+            cd experiments/v3lab/rust-stub
+            cargo clippy --all-targets -- -D warnings
+            cargo clippy --target aarch64-unknown-linux-musl -- -D warnings
+            cargo test
+            cargo build --release --target x86_64-unknown-linux-musl
+            cargo build --release --target aarch64-unknown-linux-musl
+          )
+          MICROFAT_TEST_LEAKS=1 \
+          MICROFAT_RUST_STUB_TESTS=required \
+          MICROFAT_RUST_STUB_PATH="${PWD}/experiments/v3lab/rust-stub/target/x86_64-unknown-linux-musl/release/microfat-stub-rs" \
+          go test -race -v ./tests/e2e -run '^TestRustStub' -count=1
 
   kani:
     name: Kani Rust Core Verification
@@ -157,4 +169,4 @@ jobs:
           export PATH="${toolchain_root}/bin:${kani_dir}/bin:${PATH}"
           kani_out="$(kani-driver experiments/v3lab/rust-stub/src/lib.rs --jobs 4 --output-format=terse)"
           printf '%s\n' "${kani_out}"
-          grep -Fq 'Complete - 16 successfully verified harnesses, 0 failures, 16 total.' <<< "${kani_out}"
+          grep -Fq 'Complete - 17 successfully verified harnesses, 0 failures, 17 total.' <<< "${kani_out}"

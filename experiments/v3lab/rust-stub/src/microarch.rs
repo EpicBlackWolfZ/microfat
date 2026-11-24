@@ -219,7 +219,7 @@ pub const fn evaluate_arm64_mask(f: Arm64Features) -> u16 {
     m
 }
 
-/// Converts numeric rank to canonical Go variant label.
+/// Converts numeric AMD64 rank to canonical Go variant label.
 pub const fn amd64_level_str(rank: u8) -> Option<&'static str> {
     match rank {
         1 => Some("v1"),
@@ -227,6 +227,43 @@ pub const fn amd64_level_str(rank: u8) -> Option<&'static str> {
         3 => Some("v3"),
         4 => Some("v4"),
         _ => None,
+    }
+}
+
+/// Returns the highest supported ARM64 architecture level string (`"v9.5"`..`"v8.0"`).
+pub const fn highest_arm64_level_str(mask: u16) -> &'static str {
+    if (mask & ARM_LVL_V9_5) != 0 {
+        "v9.5"
+    } else if (mask & ARM_LVL_V9_4) != 0 {
+        "v9.4"
+    } else if (mask & ARM_LVL_V9_3) != 0 {
+        "v9.3"
+    } else if (mask & ARM_LVL_V9_2) != 0 {
+        "v9.2"
+    } else if (mask & ARM_LVL_V9_1) != 0 {
+        "v9.1"
+    } else if (mask & ARM_LVL_V9_0) != 0 {
+        "v9.0"
+    } else if (mask & ARM_LVL_V8_9) != 0 {
+        "v8.9"
+    } else if (mask & ARM_LVL_V8_8) != 0 {
+        "v8.8"
+    } else if (mask & ARM_LVL_V8_7) != 0 {
+        "v8.7"
+    } else if (mask & ARM_LVL_V8_6) != 0 {
+        "v8.6"
+    } else if (mask & ARM_LVL_V8_5) != 0 {
+        "v8.5"
+    } else if (mask & ARM_LVL_V8_4) != 0 {
+        "v8.4"
+    } else if (mask & ARM_LVL_V8_3) != 0 {
+        "v8.3"
+    } else if (mask & ARM_LVL_V8_2) != 0 {
+        "v8.2"
+    } else if (mask & ARM_LVL_V8_1) != 0 {
+        "v8.1"
+    } else {
+        "v8.0"
     }
 }
 
@@ -488,6 +525,8 @@ mod tests {
         assert!(is_compatible_level(caps, parse_arm64_rank(b"v9.0")));
         assert!(is_compatible_level(caps, parse_arm64_rank(b"v8.5")));
         assert!(!is_compatible_level(caps, parse_arm64_rank(b"v8.6")));
+        assert_eq!(highest_arm64_level_str(m90), "v9.0");
+        assert_eq!(highest_arm64_level_str(0), "v8.0");
 
         // Without NMI/THE, v8.8/v8.9 remain unreachable while v9.5 succeeds when v9 branch holds.
         let userspace_all = ALL_ARM64_FEATURE_MASK & !(ARM_BIT_NMI | ARM_BIT_THE);
