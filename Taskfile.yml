@@ -404,10 +404,17 @@ tasks:
       {{.TASK_ENV}}
       "$GO" run ./internal/cmd/ci-gate "$CI_EVENT" <<< "$CI_NEEDS"
   lint:
-    desc: Run mandatory Go and shell linters
+    desc: Run mandatory Go, shell, and documentation linters
     cmds:
     - task: lint-go
     - task: lint-shell
+    - task: lint-docs
+  lint-docs:
+    desc: Validate Markdown links, ADRs, SPECs, verification ledger, and code-to-doc drift
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      "$GO" run ./internal/cmd/doc-gate --root .
   lint-go:
     desc: Run golangci-lint without weaker fallback checks
     preconditions:

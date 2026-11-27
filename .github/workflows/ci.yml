@@ -62,7 +62,6 @@ jobs:
         uses: ./.github/actions/toolchain-config
 
       - name: Set up Go
-        if: steps.changes.outputs.run-code-checks != 'false'
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
@@ -76,10 +75,14 @@ jobs:
           echo "$RUNNER_TEMP/microfat-tools" >> "$GITHUB_PATH"
 
       - name: Install pinned Task
-        if: steps.changes.outputs.run-code-checks == 'true'
         uses: ./.github/actions/setup-task
         with:
           version: ${{ steps.toolchain.outputs.task }}
+
+      - name: Validate documentation, ADRs, SPECs, and verification ledger
+        id: docs-gate
+        timeout-minutes: 5
+        run: task lint-docs
 
       - name: Check formatting and module definitions
         if: steps.changes.outputs.run-code-checks == 'true'
