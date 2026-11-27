@@ -34,6 +34,30 @@
     },
     {
       customType: 'regex',
+      description: 'Verus release assets: track release/0.YYYY.MM.DD.<sha> tags with SHA-256 digests',
+      managerFilePatterns: ['/^\\.config/tool-versions\\.env$/'],
+      matchStrings: [
+        '# renovate: datasource=github-release-attachments depName=verus-lang/verus release=verus\\r?\\nVERUS_LINUX_(?:AMD64|ARM64)=v(?<currentValue>0\\.\\d{4}\\.\\d{2}\\.\\d{2}\\.[0-9a-f]+)@(?<currentDigest>[a-f0-9]{64})(?:\\r?\\n|$)',
+      ],
+      depNameTemplate: 'verus-lang/verus',
+      datasourceTemplate: 'github-release-attachments',
+      versioningTemplate: 'loose',
+      extractVersionTemplate: '^release/(?<version>0\\.\\d{4}\\.\\d{2}\\.\\d{2}\\.[0-9a-f]+)$',
+    },
+    {
+      customType: 'regex',
+      description: 'cargo-audit release assets: track cargo-audit/vX.Y.Z tags with SHA-256 digests',
+      managerFilePatterns: ['/^\\.config/tool-versions\\.env$/'],
+      matchStrings: [
+        '# renovate: datasource=github-release-attachments depName=rustsec/rustsec release=cargo-audit\\r?\\nCARGO_AUDIT_LINUX_(?:AMD64|ARM64)=(?<currentValue>v\\d+\\.\\d+\\.\\d+)@(?<currentDigest>[a-f0-9]{64})(?:\\r?\\n|$)',
+      ],
+      depNameTemplate: 'rustsec/rustsec',
+      datasourceTemplate: 'github-release-attachments',
+      versioningTemplate: 'semver',
+      extractVersionTemplate: '^cargo-audit/(?<version>v\\d+\\.\\d+\\.\\d+)$',
+    },
+    {
+      customType: 'regex',
       description: 'Homebrew source: keep the release tag and exact source commit together',
       managerFilePatterns: ['/^\\.config/tool-versions\\.env$/'],
       matchStrings: [

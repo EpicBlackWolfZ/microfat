@@ -140,6 +140,9 @@ mod tests {
         assert_eq!(work, want_encoded);
         transform_arm64(&mut work, 0x1000, false);
         assert_eq!(work, input);
+
+        let mut tiny = [0xE8u8, 1, 2, 3, 4];
+        assert_eq!(x86_step_at(&mut tiny, 99, 0, true), 0);
     }
 }
 
@@ -151,8 +154,14 @@ mod kani_proofs {
     fn verify_arm64_step_word_bijection() {
         let pos: u32 = kani::any();
         let insn: u32 = kani::any();
-        assert_eq!(arm64_step_word(false, pos, arm64_step_word(true, pos, insn)), insn);
-        assert_eq!(arm64_step_word(true, pos, arm64_step_word(false, pos, insn)), insn);
+        assert_eq!(
+            arm64_step_word(false, pos, arm64_step_word(true, pos, insn)),
+            insn
+        );
+        assert_eq!(
+            arm64_step_word(true, pos, arm64_step_word(false, pos, insn)),
+            insn
+        );
     }
 
     #[kani::proof]

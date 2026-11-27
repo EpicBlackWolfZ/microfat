@@ -35,12 +35,12 @@ use microfat_stub_core::format::{
     parse_and_select_v2_index_with_policy, parse_trailer, Compression, DictMeta, FormatError,
     SelectedVariant, TRAILER_SIZE,
 };
+#[cfg(test)]
+use microfat_stub_core::microarch::TargetArch;
 use microfat_stub_core::microarch::{
     highest_arm64_level_str, is_compatible_level, parse_normalized_level_rank, HostCaps,
     SelectionPolicy,
 };
-#[cfg(test)]
-use microfat_stub_core::microarch::TargetArch;
 use sha256_hw::FastSha256;
 use twox_hash::XxHash32;
 use zrip_core::dict::Dictionary as ZstdDictionary;
@@ -157,10 +157,7 @@ fn panic_handler(_info: &core::panic::PanicInfo<'_>) -> ! {
 /// Caller (`libc` C runtime) must pass a valid `argc` and NULL-terminated `argv` array.
 #[cfg(not(test))]
 #[no_mangle]
-pub unsafe extern "C" fn main(
-    argc: libc::c_int,
-    argv: *const *const libc::c_char,
-) -> libc::c_int {
+pub unsafe extern "C" fn main(argc: libc::c_int, argv: *const *const libc::c_char) -> libc::c_int {
     run_launcher(argc, argv);
     0
 }
@@ -901,13 +898,8 @@ fn random_bytes_8() -> [u8; 8] {
     let mut filled = 0usize;
     while filled < buf.len() {
         // SAFETY: `buf[filled..]` is valid writable stack storage.
-        let n = unsafe {
-            libc::getrandom(
-                buf[filled..].as_mut_ptr().cast(),
-                buf.len() - filled,
-                0,
-            )
-        };
+        let n =
+            unsafe { libc::getrandom(buf[filled..].as_mut_ptr().cast(), buf.len() - filled, 0) };
         if n > 0 {
             filled += n as usize;
             continue;
@@ -926,7 +918,13 @@ fn random_bytes_8() -> [u8; 8] {
     };
     while filled < buf.len() {
         // SAFETY: `fd` is open and `buf[filled..]` is valid writable memory.
-        let n = unsafe { libc::read(fd.as_raw_fd(), buf[filled..].as_mut_ptr().cast(), buf.len() - filled) };
+        let n = unsafe {
+            libc::read(
+                fd.as_raw_fd(),
+                buf[filled..].as_mut_ptr().cast(),
+                buf.len() - filled,
+            )
+        };
         if n > 0 {
             filled += n as usize;
             continue;
@@ -1117,8 +1115,8 @@ fn decompress_lz4_slice(
             if src.len() - pos < 4 {
                 return Err("truncated lz4 skippable frame size");
             }
-            let skip_len = u32::from_le_bytes([src[pos], src[pos + 1], src[pos + 2], src[pos + 3]])
-                as usize;
+            let skip_len =
+                u32::from_le_bytes([src[pos], src[pos + 1], src[pos + 2], src[pos + 3]]) as usize;
             pos += 4;
             if src.len() - pos < skip_len {
                 return Err("truncated lz4 skippable frame payload");
@@ -1289,7 +1287,10 @@ fn decompress_lz4_slice(
     Ok(out_pos)
 }
 
-fn read_variant_bytes(fd: libc::c_int, variant: &SelectedVariant<'_>) -> Result<Vec<u8>, &'static str> {
+fn read_variant_bytes(
+    fd: libc::c_int,
+    variant: &SelectedVariant<'_>,
+) -> Result<Vec<u8>, &'static str> {
     let comp_len = usize::try_from(variant.compressed_size)
         .map_err(|_| "compressed variant size overflows usize")?;
     let mut buf = vec![0u8; comp_len];
@@ -1404,7 +1405,8 @@ fn extract_variant_to_fd(
     let mapped_slice = mapped_variant_slice(mapped, variant);
 
     // Zero-copy mmap fast path: decode & hash in L1/L2 cache with zero write() syscalls.
-    if let Some(mut dst_map) = MappedWritableFile::try_map_fd(target_fd, variant.uncompressed_size) {
+    if let Some(mut dst_map) = MappedWritableFile::try_map_fd(target_fd, variant.uncompressed_size)
+    {
         let mut sha_hasher = FastSha256::new();
         let dst = dst_map.as_mut_slice();
         let written = match (variant.compression, mapped_slice) {
@@ -1428,9 +1430,7 @@ fn extract_variant_to_fd(
                 }
                 dst.len()
             }
-            (Compression::Lz4, Some(src)) => {
-                decompress_lz4_slice(src, dst, &mut sha_hasher)?
-            }
+            (Compression::Lz4, Some(src)) => decompress_lz4_slice(src, dst, &mut sha_hasher)?,
             (Compression::Lz4, None) => {
                 let raw = read_variant_bytes(src_fd, variant)?;
                 decompress_lz4_slice(&raw, dst, &mut sha_hasher)?
@@ -1922,10 +1922,7 @@ fn check_extraction_budget(
     Ok(zstd_max_window)
 }
 
-fn runtime_autotune_enabled(
-    autotune_raw: Option<&[u8]>,
-    dry_run_raw: Option<&[u8]>,
-) -> bool {
+fn runtime_autotune_enabled(autotune_raw: Option<&[u8]>, dry_run_raw: Option<&[u8]>) -> bool {
     if let Some(a) = autotune_raw.map(trim_ascii_bytes) {
         if a == b"0" || a.eq_ignore_ascii_case(b"false") {
             return false;
@@ -1946,10 +1943,7 @@ fn page_aligned_retained_bytes(uncompressed_size: u64, is_memfd: bool) -> i64 {
     // SAFETY: `libc::sysconf(libc::_SC_PAGESIZE)` is safe and requires no pointers.
     let ps = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
     let page = if ps > 0 { ps as u64 } else { 4096 }.max(4096);
-    let rounded = uncompressed_size
-        .saturating_add(page - 1)
-        / page
-        * page;
+    let rounded = uncompressed_size.saturating_add(page - 1) / page * page;
     i64::try_from(rounded).unwrap_or(0)
 }
 
@@ -1986,10 +1980,7 @@ fn is_microfat_internal_env(k: &[u8]) -> bool {
     )
 }
 
-fn build_exec_env_from(
-    base_env: &[&[u8]],
-    updates: &[(&[u8], &[u8])],
-) -> Vec<Vec<u8>> {
+fn build_exec_env_from(base_env: &[&[u8]], updates: &[(&[u8], &[u8])]) -> Vec<Vec<u8>> {
     let mut entries: Vec<Vec<u8>> = Vec::with_capacity(base_env.len() + updates.len());
     for &raw in base_env {
         let key = env_key_of(raw);
@@ -2057,7 +2048,13 @@ fn collect_ambient_env() -> Vec<&'static [u8]> {
 fn readlink_proc_self_exe(argv0_fallback: &[u8]) -> Vec<u8> {
     let mut buf = [0u8; 4096];
     // SAFETY: static path & writable stack buffer.
-    let n = unsafe { libc::readlink(c"/proc/self/exe".as_ptr(), buf.as_mut_ptr().cast(), buf.len()) };
+    let n = unsafe {
+        libc::readlink(
+            c"/proc/self/exe".as_ptr(),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+        )
+    };
     if n > 0 && (n as usize) <= buf.len() {
         return buf[..n as usize].to_vec();
     }
@@ -2157,10 +2154,8 @@ fn build_runtime_exec_env(
                 owned_vals.push((b"MICROFAT_CGROUP_LIMIT_BYTES", ce_bytes.clone()));
                 owned_vals.push((b"MICROFAT_CGROUP_EFFECTIVE_LIMIT_BYTES", ce_bytes));
             }
-            let retained = page_aligned_retained_bytes(
-                variant.uncompressed_size,
-                exec_mode_str == b"memfd",
-            );
+            let retained =
+                page_aligned_retained_bytes(variant.uncompressed_size, exec_mode_str == b"memfd");
             let adj_limit = retained_memory_limit(ceiling, retained);
             if let Some(budget) =
                 compute_gomemlimit(adj_limit, ratio_bps, DEFAULT_MIN_HEADROOM_BYTES)
@@ -2199,7 +2194,8 @@ fn build_runtime_exec_env(
         let eff_batch_limit = ambient_gomemlimit
             .and_then(parse_runtime_memory_limit)
             .or(computed_gomemlimit);
-        let live_heap = getenv_bytes(b"MICROFAT_LIVE_HEAP_ESTIMATE\0").and_then(parse_byte_size_i64);
+        let live_heap =
+            getenv_bytes(b"MICROFAT_LIVE_HEAP_ESTIMATE\0").and_then(parse_byte_size_i64);
         match resolve_profile_gogc(gc_profile, computed_gomemlimit, eff_batch_limit, live_heap) {
             GogcOutcome::Value(g) => {
                 let mut g_buf = [0u8; 24];
@@ -2228,10 +2224,7 @@ fn build_runtime_exec_env(
         }
     }
 
-    let pairs: Vec<(&[u8], &[u8])> = owned_vals
-        .iter()
-        .map(|(k, v)| (*k, v.as_slice()))
-        .collect();
+    let pairs: Vec<(&[u8], &[u8])> = owned_vals.iter().map(|(k, v)| (*k, v.as_slice())).collect();
     build_exec_env_from(&ambient, &pairs)
 }
 
@@ -2435,12 +2428,15 @@ fn open_secure_cache_dir(
         return match last_errno() {
             libc::ENOENT => Ok(None),
             libc::ELOOP => Err(CacheError::Unsafe("unsafe cache directory symlink")),
-            libc::ENOTDIR => Err(CacheError::Unsafe("cache directory path is not a directory")),
+            libc::ENOTDIR => Err(CacheError::Unsafe(
+                "cache directory path is not a directory",
+            )),
             _ => Ok(None),
         };
     }
     let fd = OwnedFd::from_raw(raw_fd);
-    let st = fstat_fd(fd.as_raw_fd()).ok_or(CacheError::Unsafe("unable to fstat cache directory"))?;
+    let st =
+        fstat_fd(fd.as_raw_fd()).ok_or(CacheError::Unsafe("unable to fstat cache directory"))?;
     match validate_stat_metadata(&st, euid, true) {
         Ok(()) => Ok(Some(fd)),
         Err(_) if tighten && (st.st_mode & libc::S_IFMT) == libc::S_IFDIR && st.st_uid == euid => {
@@ -2500,14 +2496,18 @@ fn validate_cache_entry_at_fd(
             return Ok(None);
         }
         if errno == libc::ELOOP {
-            return Err(CacheError::Unsafe("refusal to execute symlink at cache entry"));
+            return Err(CacheError::Unsafe(
+                "refusal to execute symlink at cache entry",
+            ));
         }
         // SAFETY: `libc::stat` is POD populated on success by `libc::fstatat`.
         let mut st_link: libc::stat = unsafe { core::mem::zeroed() };
         // SAFETY: `dir_fd` is valid and `name_ptr` is NUL-terminated.
         if unsafe { libc::fstatat(dir_fd, name_ptr, &mut st_link, libc::AT_SYMLINK_NOFOLLOW) } != 0
         {
-            return Err(CacheError::Unsafe("cannot inspect cache entry after open failure"));
+            return Err(CacheError::Unsafe(
+                "cannot inspect cache entry after open failure",
+            ));
         }
         validate_stat_metadata(&st_link, euid, false)?;
         return Ok(None);
@@ -2550,7 +2550,9 @@ fn validate_cache_replacement_at(
         if last_errno() == libc::ENOENT {
             return Ok(());
         }
-        return Err(CacheError::Unsafe("cannot inspect cache replacement target"));
+        return Err(CacheError::Unsafe(
+            "cannot inspect cache replacement target",
+        ));
     }
     validate_stat_metadata(&st, euid, false)
 }
@@ -2641,7 +2643,9 @@ fn ensure_secure_cache_dir(euid: libc::uid_t) -> Result<OwnedFd, CacheError> {
         mkdir_p_0700(dir);
         return match open_secure_cache_dir(dir, euid, false)? {
             Some(fd) => Ok(fd),
-            None => Err(CacheError::Unsafe("cannot open or create MICROFAT_CACHE_DIR")),
+            None => Err(CacheError::Unsafe(
+                "cannot open or create MICROFAT_CACHE_DIR",
+            )),
         };
     }
     for dir in &candidates {
@@ -2650,7 +2654,9 @@ fn ensure_secure_cache_dir(euid: libc::uid_t) -> Result<OwnedFd, CacheError> {
             return Ok(fd);
         }
     }
-    Err(CacheError::Unsafe("unable to resolve secure cache directory"))
+    Err(CacheError::Unsafe(
+        "unable to resolve secure cache directory",
+    ))
 }
 
 struct TempUnlinkGuard<'a> {
@@ -2815,7 +2821,9 @@ fn format_err_msg(err: FormatError) -> &'static str {
         FormatError::UnsupportedCompression => "unsupported compression codec",
         FormatError::ZeroVariants => "index contains zero variants",
         FormatError::ArchMismatch => "target architecture mismatch",
-        FormatError::NoCompatibleVariant => "no compatible microarchitecture variant found for host CPU",
+        FormatError::NoCompatibleVariant => {
+            "no compatible microarchitecture variant found for host CPU"
+        }
     }
 }
 
@@ -2826,7 +2834,13 @@ fn load_verified_dict<'a>(
 ) -> Option<ByteCow<'a>> {
     let d = dict?;
     let dict_len = usize::try_from(d.size).unwrap_or_else(|_| fatal("dictionary size overflow"));
-    let data = read_range(fd, mapped, d.offset, dict_len, "failed reading shared dictionary");
+    let data = read_range(
+        fd,
+        mapped,
+        d.offset,
+        dict_len,
+        "failed reading shared dictionary",
+    );
     if FastSha256::digest(data.as_slice()) != d.sha256 {
         fatal("shared dictionary SHA-256 checksum mismatch");
     }
@@ -2879,7 +2893,11 @@ fn exec_verified_fd(
     err
 }
 
-fn argv_bytes(argc: libc::c_int, argv: *const *const libc::c_char, idx: usize) -> Option<&'static [u8]> {
+fn argv_bytes(
+    argc: libc::c_int,
+    argv: *const *const libc::c_char,
+    idx: usize,
+) -> Option<&'static [u8]> {
     if argv.is_null() || argc <= 0 || (idx as libc::c_int) >= argc {
         return None;
     }
@@ -2930,7 +2948,8 @@ fn run_launcher(argc: libc::c_int, argv: *const *const libc::c_char) {
         .as_slice()
         .try_into()
         .unwrap_or_else(|_| fatal("cannot read trailer"));
-    let trailer = parse_trailer(file_size, trailer_arr).unwrap_or_else(|e| fatal(format_err_msg(e)));
+    let trailer =
+        parse_trailer(file_size, trailer_arr).unwrap_or_else(|e| fatal(format_err_msg(e)));
 
     let index_cow = read_range(
         exe_fd.as_raw_fd(),
@@ -3205,8 +3224,9 @@ fn run_launcher(argc: libc::c_int, argv: *const *const libc::c_char) {
         }
         // SAFETY: `libc::geteuid` takes no arguments and cannot fail.
         let euid = unsafe { libc::geteuid() };
-        let dir_fd = ensure_secure_cache_dir(euid)
-            .unwrap_or_else(|CacheError::Unsafe(msg)| fatal_pair("cache fallback init failed", msg));
+        let dir_fd = ensure_secure_cache_dir(euid).unwrap_or_else(|CacheError::Unsafe(msg)| {
+            fatal_pair("cache fallback init failed", msg)
+        });
         let ds = if diag_mode != DiagMode::Off {
             monotonic_ns()
         } else {
@@ -3299,13 +3319,19 @@ mod tests {
         let Some(dir_fd) = open_secure_cache_dir(dir.as_os_str().as_bytes(), euid, false)? else {
             return Ok(CacheOutcome::Miss);
         };
-        match validate_cache_entry_at_fd(dir_fd.as_raw_fd(), expected_sha256, expected_size, euid)? {
+        match validate_cache_entry_at_fd(dir_fd.as_raw_fd(), expected_sha256, expected_size, euid)?
+        {
             Some(fd) => Ok(CacheOutcome::Hit(fd)),
             None => Ok(CacheOutcome::Miss),
         }
     }
 
-    fn build_lz4_test_frame(payload: &[u8], indep: bool, content_cksum: bool, block_cksum: bool) -> Vec<u8> {
+    fn build_lz4_test_frame(
+        payload: &[u8],
+        indep: bool,
+        content_cksum: bool,
+        block_cksum: bool,
+    ) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&LZ4F_MAGIC.to_le_bytes());
         let mut flg = 0b0100_1000u8; // version 01 + content size
@@ -3458,7 +3484,10 @@ mod tests {
             .unwrap()
             .filter_map(|e| e.ok())
             .any(|e| e.file_name().to_string_lossy().ends_with(".tmp"));
-        assert!(!left_tmp, "no .tmp file must survive failed materialization");
+        assert!(
+            !left_tmp,
+            "no .tmp file must survive failed materialization"
+        );
 
         // Warm hit succeeds, FIFO replacement target fails closed.
         assert!(matches!(
@@ -3533,14 +3562,22 @@ mod tests {
         let v1_proc = v1_dir.join("proc_cg");
         fs::write(&v1_proc, b"5:memory:/docker/c1\n3:cpu,cpuacct:/docker/c1\n").unwrap();
         let v1_proc_c = bytes_to_cstr(v1_proc.as_os_str().as_bytes()).unwrap();
-        let v1_lim = resolve_cgroup_limits_custom(v1_dir.as_os_str().as_bytes(), &v1_proc_c).unwrap();
+        let v1_lim =
+            resolve_cgroup_limits_custom(v1_dir.as_os_str().as_bytes(), &v1_proc_c).unwrap();
         assert_eq!(v1_lim.version, 1);
         assert_eq!(v1_lim.effective_memory_limit, Some(268_435_456));
-        assert_eq!(compute_gomaxprocs(v1_lim.quota_us, v1_lim.period_us), Some(3));
+        assert_eq!(
+            compute_gomaxprocs(v1_lim.quota_us, v1_lim.period_us),
+            Some(3)
+        );
 
         // Env update replaces managed keys and preserves unrelated user vars.
         let merged = build_exec_env_from(
-            &[b"PATH=/usr/bin", b"GOMEMLIMIT=128MiB", b"MICROFAT_EXEC_MODE=auto"],
+            &[
+                b"PATH=/usr/bin",
+                b"GOMEMLIMIT=128MiB",
+                b"MICROFAT_EXEC_MODE=auto",
+            ],
             &[(b"MICROFAT_EXEC_MODE", b"memfd"), (b"GOMAXPROCS", b"2")],
         );
         assert!(merged.iter().any(|x| x == b"PATH=/usr/bin\0"));
@@ -3584,9 +3621,18 @@ mod tests {
         assert_eq!(resolve_diag_mode_from(None, None), DiagMode::Off);
         assert_eq!(resolve_diag_mode_from(Some(b"0"), None), DiagMode::Off);
         assert_eq!(resolve_diag_mode_from(Some(b"FaLsE"), None), DiagMode::Off);
-        assert_eq!(resolve_diag_mode_from(Some(b" false "), None), DiagMode::Debug);
-        assert_eq!(resolve_diag_mode_from(Some(b"0"), Some(b"0")), DiagMode::Debug);
-        assert_eq!(resolve_diag_mode_from(Some(b"0"), Some(b"JsOn")), DiagMode::Json);
+        assert_eq!(
+            resolve_diag_mode_from(Some(b" false "), None),
+            DiagMode::Debug
+        );
+        assert_eq!(
+            resolve_diag_mode_from(Some(b"0"), Some(b"0")),
+            DiagMode::Debug
+        );
+        assert_eq!(
+            resolve_diag_mode_from(Some(b"0"), Some(b"JsOn")),
+            DiagMode::Json
+        );
 
         // Internal env vars must be stripped before child exec.
         let scrubbed = build_exec_env_from(
@@ -3599,9 +3645,15 @@ mod tests {
             &[(b"MICROFAT_EXEC_MODE", b"memfd")],
         );
         assert!(scrubbed.iter().any(|x| x == b"PATH=/usr/bin\0"));
-        assert!(!scrubbed.iter().any(|x| x.starts_with(b"MICROFAT_POLICY_APPLIED=")));
-        assert!(!scrubbed.iter().any(|x| x.starts_with(b"MICROFAT_CGROUP_GOMEMLIMIT=")));
-        assert!(!scrubbed.iter().any(|x| x.starts_with(b"MICROFAT_CGROUP_GOGC=")));
+        assert!(!scrubbed
+            .iter()
+            .any(|x| x.starts_with(b"MICROFAT_POLICY_APPLIED=")));
+        assert!(!scrubbed
+            .iter()
+            .any(|x| x.starts_with(b"MICROFAT_CGROUP_GOMEMLIMIT=")));
+        assert!(!scrubbed
+            .iter()
+            .any(|x| x.starts_with(b"MICROFAT_CGROUP_GOGC=")));
 
         // Inspect Zstd frame window skips skippable frames and rejects > 128 MiB window.
         let dir = make_temp_dir("zstd-win");
