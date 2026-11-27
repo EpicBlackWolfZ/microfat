@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"flag"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestInfo(t *testing.T) {
@@ -109,4 +112,69 @@ func TestRegisterFlags(t *testing.T) {
 	if !*showVersion2 {
 		t.Errorf("expected showVersion2 to be true after -v")
 	}
+}
+
+func TestApplyBuildInfoFallback(t *testing.T) {
+	origVersion, origCommit, origDate, origBuiltBy := Version, Commit, Date, BuiltBy
+	t.Cleanup(func() {
+		Version = origVersion
+		Commit = origCommit
+		Date = origDate
+		BuiltBy = origBuiltBy
+	})
+
+	resetDefaults := func() {
+		Version = defaultVersion
+		Commit = defaultCommit
+		Date = defaultDate
+		BuiltBy = defaultBuiltBy
+	}
+
+	resetDefaults()
+	applyBuildInfo(nil)
+	assert.Equal(t, defaultVersion, Version)
+
+	resetDefaults()
+	applyBuildInfo(&debug.BuildInfo{
+		Main: debug.Module{Version: develVersion},
+		Settings: []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "abc1234"},
+			{Key: "vcs.time", Value: "2026-11-27T10:00:00Z"},
+		},
+	})
+	assert.Equal(t, defaultVersion, Version)
+	assert.Equal(t, "abc1234", Commit)
+	assert.Equal(t, "2026-11-27T10:00:00Z", Date)
+	assert.Equal(t, defaultBuiltBy, BuiltBy)
+
+	resetDefaults()
+	applyBuildInfo(&debug.BuildInfo{
+		Main: debug.Module{Version: "v0.4.1"},
+		Settings: []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "deadbeef"},
+			{Key: "vcs.modified", Value: "true"},
+			{Key: "vcs.time", Value: "2026-11-27T12:00:00Z"},
+		},
+	})
+	assert.Equal(t, "v0.4.1", Version)
+	assert.Equal(t, "deadbeef-dirty", Commit)
+	assert.Equal(t, "2026-11-27T12:00:00Z", Date)
+	assert.Equal(t, buildInfoBuiltBy, BuiltBy)
+
+	// Non-default ldflags values must never be overwritten.
+	Version = "v0.5.0"
+	Commit = "taggedsha"
+	Date = "2026-11-28T00:00:00Z"
+	BuiltBy = "goreleaser"
+	applyBuildInfo(&debug.BuildInfo{
+		Main: debug.Module{Version: "v0.4.1"},
+		Settings: []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "other"},
+			{Key: "vcs.time", Value: "other-time"},
+		},
+	})
+	assert.Equal(t, "v0.5.0", Version)
+	assert.Equal(t, "taggedsha", Commit)
+	assert.Equal(t, "2026-11-28T00:00:00Z", Date)
+	assert.Equal(t, "goreleaser", BuiltBy)
 }

@@ -36,6 +36,10 @@ type Transaction struct {
 	Transform TransformFunc
 }
 
+func shouldPreserveOwnership(intent PublicationIntent, opts Options) bool {
+	return opts.Policy == PolicyStrict && (intent == IntentReplaceSource || opts.ExplicitPolicy)
+}
+
 // Execute performs an atomic, metadata-preserving binary transformation.
 func Execute(tx Transaction) error {
 	if tx.Transform == nil {
@@ -105,12 +109,13 @@ func Execute(tx Transaction) error {
 		return fmt.Errorf("transformation callback failed: %w", err)
 	}
 
-	targetMode, err := applyMetadata(staged, snap, tx.Opts.Policy)
+	preserveOwnership := shouldPreserveOwnership(tx.Intent, tx.Opts)
+	targetMode, err := applyMetadata(staged, snap, tx.Opts.Policy, preserveOwnership, tx.Opts.flagPrefix())
 	if err != nil {
 		return err
 	}
 
-	if err := verifyReadback(staged, targetMode, snap, tx.Opts.Policy); err != nil {
+	if err := verifyReadback(staged, targetMode, snap, tx.Opts.Policy, preserveOwnership); err != nil {
 		return err
 	}
 
@@ -148,7 +153,7 @@ func resolveTargetAndSnapshot(tx *Transaction) (*SourceSnapshot, string, bool, e
 	if err != nil {
 		return nil, "", false, err
 	}
-	if err := ValidateSnapshot(snap, tx.Opts.Policy); err != nil {
+	if err := validateSnapshotWithFlagPrefix(snap, tx.Opts.Policy, tx.Opts.flagPrefix()); err != nil {
 		return nil, "", false, err
 	}
 
@@ -190,8 +195,8 @@ func resolveTargetAndSnapshot(tx *Transaction) (*SourceSnapshot, string, bool, e
 			}
 		}
 		if snap.Nlink > 1 && !tx.Opts.BreakHardlinks {
-			return nil, "", false, fmt.Errorf("%w: %s has %d links; pass --break-hardlinks to break link",
-				ErrHardLinkDetected, cleanSrc, snap.Nlink)
+			return nil, "", false, fmt.Errorf("%w: %s has %d links; pass %sbreak-hardlinks to break link",
+				ErrHardLinkDetected, cleanSrc, snap.Nlink, tx.Opts.flagPrefix())
 		}
 
 	case IntentCreateOnly:
@@ -202,21 +207,25 @@ func resolveTargetAndSnapshot(tx *Transaction) (*SourceSnapshot, string, bool, e
 	return snap, destPath, inPlace, nil
 }
 
-func applyMetadata(staged *os.File, snap *SourceSnapshot, policy MetadataPolicy) (os.FileMode, error) {
+func applyMetadata(
+	staged *os.File, snap *SourceSnapshot, policy MetadataPolicy, preserveOwnership bool, flagPrefix string,
+) (os.FileMode, error) {
 	if err := stripInheritedStagingACLs(staged); err != nil {
 		return 0, err
 	}
 
 	if policy == PolicyStrict {
-		if err := chownFunc(staged, snap.UID, snap.GID); err != nil {
-			stagedFi, statErr := staged.Stat()
-			if statErr != nil {
-				return 0, fmt.Errorf("%w: stating staged file after failed chown: %w", ErrOwnershipPreservation, statErr)
-			}
-			_, _, _, uid, gid, ok := fileStatMetadataFunc(stagedFi)
-			if !ok || uid != snap.UID || gid != snap.GID {
-				return 0, fmt.Errorf("%w: cannot preserve uid=%d gid=%d (staged file has uid=%d gid=%d): use --metadata-policy=strip: %w",
-					ErrOwnershipPreservation, snap.UID, snap.GID, uid, gid, err)
+		if preserveOwnership {
+			if err := chownFunc(staged, snap.UID, snap.GID); err != nil {
+				stagedFi, statErr := staged.Stat()
+				if statErr != nil {
+					return 0, fmt.Errorf("%w: stating staged file after failed chown: %w", ErrOwnershipPreservation, statErr)
+				}
+				_, _, _, uid, gid, ok := fileStatMetadataFunc(stagedFi)
+				if !ok || uid != snap.UID || gid != snap.GID {
+					return 0, fmt.Errorf("%w: cannot preserve uid=%d gid=%d (staged file has uid=%d gid=%d): use %smetadata-policy=strip: %w",
+						ErrOwnershipPreservation, snap.UID, snap.GID, uid, gid, flagPrefix, err)
+				}
 			}
 		}
 		for attr, val := range snap.Xattrs {
@@ -243,7 +252,9 @@ func applyMetadata(staged *os.File, snap *SourceSnapshot, policy MetadataPolicy)
 	return targetMode, nil
 }
 
-func verifyReadback(staged *os.File, targetMode os.FileMode, snap *SourceSnapshot, policy MetadataPolicy) error {
+func verifyReadback(
+	staged *os.File, targetMode os.FileMode, snap *SourceSnapshot, policy MetadataPolicy, preserveOwnership bool,
+) error {
 	stagedFi, err := staged.Stat()
 	if err != nil {
 		return fmt.Errorf("%w: stating staged file: %w", ErrReadbackVerification, err)
@@ -256,7 +267,7 @@ func verifyReadback(staged *os.File, targetMode os.FileMode, snap *SourceSnapsho
 		return fmt.Errorf("%w: mode %v does not match target %v",
 			ErrReadbackVerification, stagedMode, targetMode)
 	}
-	if policy == PolicyStrict {
+	if policy == PolicyStrict && preserveOwnership {
 		_, _, _, uid, gid, ok := fileStatMetadataFunc(stagedFi)
 		if ok && (uid != snap.UID || gid != snap.GID) {
 			return fmt.Errorf("%w: ownership %d:%d does not match %d:%d",
@@ -313,7 +324,8 @@ func publishTransaction(inPlace bool, stagedPath, destPath string, snap *SourceS
 			return fmt.Errorf("%w: %s was modified on disk during transformation", ErrSourceModified, destPath)
 		}
 		if nlink > 1 && !opts.BreakHardlinks {
-			return fmt.Errorf("%w: %s has %d links; pass --break-hardlinks to break link", ErrHardLinkDetected, destPath, nlink)
+			return fmt.Errorf("%w: %s has %d links; pass %sbreak-hardlinks to break link",
+				ErrHardLinkDetected, destPath, nlink, opts.flagPrefix())
 		}
 		if err := renameFunc(stagedPath, destPath); err != nil {
 			return fmt.Errorf("replacing %s: %w", destPath, err)

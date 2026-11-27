@@ -545,11 +545,14 @@ func TestExecute_ApplyMetadata_OwnershipError_InheritedGroupMismatch(t *testing.
 	})
 	defer restoreStat()
 
+	opts := lifecycle.DefaultOptions()
+	opts.ExplicitPolicy = true
+
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: dest,
 		Intent:   lifecycle.IntentCreateOnly,
-		Opts:     lifecycle.DefaultOptions(),
+		Opts:     opts,
 		Transform: func(staged *os.File) error {
 			_, writeErr := staged.Write([]byte("transformed"))
 			return writeErr
@@ -606,11 +609,14 @@ func TestExecute_ApplyMetadata_OwnershipTolerance_SameOwner(t *testing.T) {
 	})
 	defer restoreStat()
 
+	opts := lifecycle.DefaultOptions()
+	opts.ExplicitPolicy = true
+
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: dest,
 		Intent:   lifecycle.IntentCreateOnly,
-		Opts:     lifecycle.DefaultOptions(),
+		Opts:     opts,
 		Transform: func(staged *os.File) error {
 			_, writeErr := staged.Write([]byte("transformed"))
 			return writeErr
@@ -649,11 +655,14 @@ func TestExecute_VerifyReadback_OwnershipMismatch_NonRoot(t *testing.T) {
 	})
 	defer restoreStat()
 
+	readOnlyOpts := lifecycle.DefaultOptions()
+	readOnlyOpts.ExplicitPolicy = true
+
 	err := lifecycle.Execute(lifecycle.Transaction{
 		SrcPath:  src,
 		DestPath: filepath.Join(tmpDir, "dest_nonroot_mismatch.bin"),
 		Intent:   lifecycle.IntentCreateOnly,
-		Opts:     lifecycle.DefaultOptions(),
+		Opts:     readOnlyOpts,
 		Transform: func(staged *os.File) error {
 			_, err := staged.Write([]byte("transformed"))
 			return err
@@ -1015,4 +1024,162 @@ func TestExecute_VerifyReadback_UnexpectedAttributes(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, lifecycle.ErrReadbackVerification)
 	assert.Contains(t, err.Error(), "unexpected attribute \"user.unexpected\" not present on source")
+}
+
+func TestExecute_CreateOnlyOwnershipDefaultAndFlagPrefixHints(t *testing.T) {
+	t.Run("create_only_default_uses_invoking_user_ownership_without_chown", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		src := createTestBinary(t, tmpDir, "root_owned.bin", []byte("orig"))
+		dest := filepath.Join(tmpDir, "user_owned.bin")
+
+		const (
+			rootUID    = 0
+			invokerUID = 21005
+		)
+		chownCalled := false
+		restoreChown := lifecycle.SetChownFuncForTest(func(_ *os.File, _, _ int) error {
+			chownCalled = true
+			return errors.New("chown should not be called")
+		})
+		defer restoreChown()
+
+		restoreReadXattrs := lifecycle.SetReadXattrsFuncForTest(func(string) (map[string][]byte, error) {
+			return map[string][]byte{"user.tier": []byte("v3")}, nil
+		})
+		defer restoreReadXattrs()
+
+		var capturedXattr []byte
+		restoreSetXattr := lifecycle.SetSetFdXattrFuncForTest(func(_ int, attr string, val []byte) error {
+			if attr == "user.tier" {
+				capturedXattr = append([]byte(nil), val...)
+			}
+			return nil
+		})
+		defer restoreSetXattr()
+
+		restoreReadFdXattrs := lifecycle.SetReadFdXattrsFuncForTest(func(int) (map[string][]byte, error) {
+			if len(capturedXattr) > 0 {
+				return map[string][]byte{"user.tier": capturedXattr}, nil
+			}
+			return nil, nil
+		})
+		defer restoreReadFdXattrs()
+
+		restoreStat := lifecycle.SetFileStatMetadataFuncForTest(func(fi os.FileInfo) (uint64, uint64, uint64, int, int, bool) {
+			if strings.HasPrefix(fi.Name(), ".microfat-tx-") {
+				return 1, 2, 1, invokerUID, invokerUID, true
+			}
+			return 1, 1, 1, rootUID, rootUID, true
+		})
+		defer restoreStat()
+
+		err := lifecycle.Execute(lifecycle.Transaction{
+			SrcPath:  src,
+			DestPath: dest,
+			Intent:   lifecycle.IntentCreateOnly,
+			Opts:     lifecycle.DefaultOptions(),
+			Transform: func(staged *os.File) error {
+				_, writeErr := staged.Write([]byte("specialized"))
+				return writeErr
+			},
+		})
+		require.NoError(t, err)
+		assert.False(t, chownCalled)
+		assert.Equal(t, []byte("v3"), capturedXattr)
+	})
+
+	t.Run("create_only_explicit_strict_with_stub_prefix_prints_microfat_hint", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		src := createTestBinary(t, tmpDir, "root_owned.bin", []byte("orig"))
+		dest := filepath.Join(tmpDir, "explicit_strict.bin")
+
+		const (
+			rootUID    = 0
+			invokerUID = 21006
+		)
+		restoreChown := lifecycle.SetChownFuncForTest(func(_ *os.File, _, _ int) error {
+			return errors.New("operation not permitted")
+		})
+		defer restoreChown()
+
+		restoreStat := lifecycle.SetFileStatMetadataFuncForTest(func(fi os.FileInfo) (uint64, uint64, uint64, int, int, bool) {
+			if strings.HasPrefix(fi.Name(), ".microfat-tx-") {
+				return 1, 2, 1, invokerUID, invokerUID, true
+			}
+			return 1, 1, 1, rootUID, rootUID, true
+		})
+		defer restoreStat()
+
+		opts := lifecycle.DefaultOptions()
+		opts.ExplicitPolicy = true
+		opts.FlagPrefix = "--microfat:"
+
+		err := lifecycle.Execute(lifecycle.Transaction{
+			SrcPath:  src,
+			DestPath: dest,
+			Intent:   lifecycle.IntentCreateOnly,
+			Opts:     opts,
+			Transform: func(staged *os.File) error {
+				_, writeErr := staged.Write([]byte("specialized"))
+				return writeErr
+			},
+		})
+		require.Error(t, err)
+		require.ErrorIs(t, err, lifecycle.ErrOwnershipPreservation)
+		assert.Contains(t, err.Error(), "use --microfat:metadata-policy=strip")
+	})
+
+	t.Run("stub_flag_prefix_formats_hardlink_and_unsafe_metadata_hints", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		src := createTestBinary(t, tmpDir, "hardlink.bin", []byte("orig"))
+		link := filepath.Join(tmpDir, "hardlink_alias.bin")
+		require.NoError(t, os.Link(src, link))
+
+		stubOpts := lifecycle.DefaultOptions()
+		stubOpts.FlagPrefix = "--microfat:"
+
+		err := lifecycle.Execute(lifecycle.Transaction{
+			SrcPath:  src,
+			DestPath: src,
+			Intent:   lifecycle.IntentReplaceSource,
+			Opts:     stubOpts,
+			Transform: func(staged *os.File) error {
+				_, writeErr := staged.Write([]byte("trimmed"))
+				return writeErr
+			},
+		})
+		require.Error(t, err)
+		require.ErrorIs(t, err, lifecycle.ErrHardLinkDetected)
+		assert.Contains(t, err.Error(), "pass --microfat:break-hardlinks to break link")
+
+		const uid = 1000
+		restoreStat := lifecycle.SetFileStatMetadataFuncForTest(func(os.FileInfo) (uint64, uint64, uint64, int, int, bool) {
+			return 1, 1, 1, uid, uid, true
+		})
+		defer restoreStat()
+
+		restoreXattrs := lifecycle.SetReadFdXattrsFuncForTest(func(int) (map[string][]byte, error) {
+			return map[string][]byte{"security.capability": []byte("cap")}, nil
+		})
+		defer restoreXattrs()
+
+		capFile, openErr := os.Open(src)
+		require.NoError(t, openErr)
+		defer func() { _ = capFile.Close() }()
+
+		err = lifecycle.Execute(lifecycle.Transaction{
+			SrcPath:  src,
+			SrcFile:  capFile,
+			DestPath: filepath.Join(tmpDir, "dest_cap.bin"),
+			Intent:   lifecycle.IntentCreateOnly,
+			Opts:     stubOpts,
+			Transform: func(staged *os.File) error {
+				_, writeErr := staged.Write([]byte("trimmed"))
+				return writeErr
+			},
+		})
+		require.Error(t, err)
+		require.ErrorIs(t, err, lifecycle.ErrUnsafeCapabilities)
+		assert.Contains(t, err.Error(), "use --microfat:metadata-policy=strip")
+	})
 }

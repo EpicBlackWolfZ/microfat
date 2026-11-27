@@ -603,7 +603,7 @@ microfat trim bin/myapp --max-level v3 --policy safe_avx512 -o bin/myapp-safe
 | `--max-level` | *(none)* | `string` | `""` | Maximum microarchitecture level ceiling to retain. |
 | `--disable-variants` | *(none)* | `string` | `""` | Comma-separated list of variant levels to exclude. |
 | `--policy` | *(none)* | `string` | `""` | Policy preset name (`safe_avx512`, `no_downclock`). |
-| `--metadata-policy` | *(none)* | `string` | `"strict"` | Metadata policy (`strict`, `strip`). Strict preserves exact owner, mode, and supported xattrs; strip discards extra metadata. |
+| `--metadata-policy` | *(none)* | `string` | `"strict"` | Metadata policy (`strict`, `strip`). In-place strict preserves owner, mode, and supported xattrs; `-o` defaults to invoking-user ownership unless `strict` is explicit; `strip` discards extra metadata. |
 | `--break-hardlinks` | *(none)* | `bool` | `false` | Allow in-place mutation of files with multiple hard links by breaking link and replacing only the invoked path. |
 
 ---

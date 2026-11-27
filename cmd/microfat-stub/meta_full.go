@@ -37,6 +37,7 @@ const (
 
 func parseLifecycleOptions(args []string) (lifecycle.Options, error) {
 	opts := lifecycle.DefaultOptions()
+	opts.FlagPrefix = "--microfat:"
 	for _, arg := range args {
 		switch {
 		case strings.HasPrefix(arg, flagMetadataPolicyPrefix):
@@ -46,6 +47,7 @@ func parseLifecycleOptions(args []string) (lifecycle.Options, error) {
 				return opts, err
 			}
 			opts.Policy = pol
+			opts.ExplicitPolicy = true
 		case arg == flagBreakHardlinks:
 			opts.BreakHardlinks = true
 		}
