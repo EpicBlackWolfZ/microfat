@@ -37,7 +37,7 @@ func expectedFailure(c Case, phase int) []string {
 		return []string{"read-only file system"}
 	case noExec:
 		if c.Mode == Cache || c.Policy != "" {
-			return []string{"permission denied"}
+			return []string{"noexec"}
 		}
 	case procMissing, procInaccessible:
 		return []string{"reading secure-execution state"}
@@ -452,6 +452,9 @@ func validateCacheSnapshot(c Case, phase int, snapshot mountfixture.CacheSnapsho
 	if (c.Scenario == corruptPayload || c.Scenario == corruptDictionary) && len(snapshot.Entries) != 0 {
 		return errors.New("source corruption left a cache artifact")
 	}
+	if c.Scenario == noExec && len(snapshot.Entries) != 0 {
+		return errors.New("noexec cache left a cache artifact")
+	}
 	return nil
 }
 
@@ -493,13 +496,13 @@ func expectedSequence(c Case, phase int) []string {
 		} else {
 			sequence = append(sequence, "extract_memfd")
 		}
-	case fdPressure:
+	case fdPressure, noExec:
 		sequence = append(sequence, "cache_dir_init")
 	case Full:
 		sequence = append(sequence, "cache_extract")
 	case readOnly, symlink, fifo, insecure:
 		sequence = append(sequence, "cache_create_temp")
-	case busy, noExec, execFirst, execAll:
+	case busy, execFirst, execAll:
 		sequence = append(sequence, "dispatch/cache", "execve_cache")
 	}
 	return append(sequence, "launcher_main")

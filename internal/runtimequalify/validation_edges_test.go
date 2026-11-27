@@ -53,6 +53,9 @@ func TestEvidenceRejectsControlAndPolicyFailures(t *testing.T) {
 		{"bad-raw-control", policyControl, Memfd, func(e *Evidence) { e.Result.Executions[0].Stderr = "panic" }},
 		{"not-readonly", readOnlyWarm, Cache, func(e *Evidence) { e.Result.CacheSnapshots[0].Flags = 0 }},
 		{"not-noexec", noExec, Cache, func(e *Evidence) { e.Result.CacheSnapshots[0].Flags = 0 }},
+		{"noexec-left-artifact", noExec, Cache, func(e *Evidence) {
+			e.Result.CacheSnapshots[0].Entries = []mountfixture.CacheEntry{{Name: testHash}}
+		}},
 		{"not-private-tmpfs", Full, Cache, func(e *Evidence) { e.Result.CacheSnapshots[0].Filesystem = 1 }},
 		{"signal-lost", "signal", Cache, func(e *Evidence) { e.Result.Executions[0].Signal = "" }},
 		{"too-many-cancellations", observe, Memfd, func(e *Evidence) {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -30,11 +31,14 @@ const (
 	glyphInfo    = "[-]"
 
 	executionUnavailable = "unavailable"
+	mountExecAllowed     = "exec"
+	mountExecNoExec      = "noexec"
 )
 
 var (
 	microarchDetectFunc          = microarch.Detect
 	isAVX512DownclockingRiskFunc = microarch.IsAVX512DownclockingRisk
+	resolveCacheDirFunc          = format.ResolveCacheDir
 	createTempFileFunc           = os.CreateTemp
 	statCacheFunc                = os.Stat
 	readFileFunc                 = os.ReadFile
@@ -115,6 +119,8 @@ type CacheReport struct {
 	ResolvedPath          string   `json:"path"`
 	Permissions           string   `json:"permissions"`
 	Writable              bool     `json:"writable"`
+	NoExec                bool     `json:"noexec,omitempty"`
+	MountExec             string   `json:"mount_exec,omitempty"`
 	Execution             string   `json:"execution,omitempty"`
 	Error                 string   `json:"error,omitempty"`
 	ErrorMessage          string   `json:"error_message,omitempty"`
@@ -282,8 +288,29 @@ func runDoctor(opts DoctorOptions) *DoctorReport {
 func probeCache(customDir string) CacheReport {
 	const executionUntested = "unknown (prerequisite check only; payload execution was not tested)"
 
-	resolved, err := format.ResolveCacheDir(customDir)
+	resolved, err := resolveCacheDirFunc(customDir)
 	if err != nil {
+		if errors.Is(err, format.ErrCacheDirNoExec) {
+			noExecPath := strings.TrimSpace(customDir)
+			if noExecPath == "" {
+				noExecPath = strings.TrimSpace(os.Getenv(format.EnvCacheDir))
+			}
+			if noExecPath != "" {
+				noExecPath = filepath.Clean(noExecPath)
+			}
+			return CacheReport{
+				Ready:        false,
+				Passed:       false,
+				Phase:        "mount_check",
+				ResolvedPath: noExecPath,
+				NoExec:       true,
+				MountExec:    mountExecNoExec,
+				Execution:    executionUnavailable,
+				Error:        err.Error(),
+				ErrorMessage: err.Error(),
+				Hint:         format.HintCacheDirNoExec,
+			}
+		}
 		hint := format.DiagnoseError(format.StageCacheDirInit, err)
 		if hint == "" {
 			hint = "Ensure $XDG_CACHE_HOME, $TMPDIR, or custom cache path is writable."
@@ -425,6 +452,7 @@ func probeCache(customDir string) CacheReport {
 		ResolvedPath: resolved,
 		Permissions:  permStr,
 		Writable:     true,
+		MountExec:    mountExecAllowed,
 		Execution:    executionUntested,
 	}
 }
@@ -544,6 +572,13 @@ func printCacheSection(b *strings.Builder, cache *CacheReport) {
 			writableStr = "unwritable"
 		}
 		appendFormat(b, "    • Permissions:       %s (%s)\n", cache.Permissions, writableStr)
+	}
+	if cache.MountExec != "" {
+		mountStr := cache.MountExec
+		if cache.NoExec {
+			mountStr = "noexec (ST_NOEXEC set — binaries cannot execute)"
+		}
+		appendFormat(b, "    • Mount Exec:        %s\n", mountStr)
 	}
 	if cache.Execution != "" {
 		appendFormat(b, "    • Execution Test:    %s\n", cache.Execution)
