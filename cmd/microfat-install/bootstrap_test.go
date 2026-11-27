@@ -138,7 +138,9 @@ esac
 				assert.Contains(t, string(verified), "https://token.actions.githubusercontent.com")
 				requests, err := os.ReadFile(filepath.Join(root, "requests"))
 				require.NoError(t, err)
+				assert.Contains(t, string(requests), "--proto\n=https\n")
 				assert.Contains(t, string(requests), "--proto-redir\n=https\n")
+				assert.Contains(t, string(requests), "--tlsv1.3\n")
 				assert.Contains(t, string(requests), "--max-filesize\n1048576\n")
 				assert.Contains(t, string(requests), "/releases/download/v0.4.1/microfat-install_0.4.1_linux_"+arch)
 				assert.NotContains(t, string(requests), "/releases/download/v0.2.5/", "product selection must not change helper identity")
@@ -213,5 +215,43 @@ func TestTruncatedBootstrapHasNoEffects(t *testing.T) {
 		cmd.Env = []string{"PATH=/nonexistent"}
 		output, _ := cmd.CombinedOutput()
 		assert.NotContains(t, string(output), "required tool not found", "partial retrieval at byte %d cannot invoke the function", offset)
+	}
+}
+
+func TestOutboundHTTPSCurlScriptsEnforceTLS13(t *testing.T) {
+	t.Parallel()
+
+	paths, err := filepath.Glob("../../scripts/*.sh")
+	require.NoError(t, err)
+	require.NotEmpty(t, paths)
+
+	for _, path := range paths {
+		raw, readErr := os.ReadFile(path)
+		require.NoError(t, readErr)
+		lines := strings.Split(string(raw), "\n")
+		for i := 0; i < len(lines); i++ {
+			trimmed := strings.TrimSpace(lines[i])
+			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			if !strings.HasPrefix(trimmed, "curl ") && !strings.Contains(trimmed, "$(curl ") {
+				continue
+			}
+			var cmdBuf strings.Builder
+			cmdBuf.WriteString(trimmed)
+			for strings.HasSuffix(trimmed, `\`) && i+1 < len(lines) {
+				i++
+				trimmed = strings.TrimSpace(lines[i])
+				cmdBuf.WriteByte(' ')
+				cmdBuf.WriteString(trimmed)
+			}
+			cmd := cmdBuf.String()
+			if strings.Contains(cmd, "http://localhost") || strings.Contains(cmd, "http://127.0.0.1") {
+				continue
+			}
+			assert.Contains(t, cmd, "--proto '=https'", "script %s missing --proto '=https' in curl command", path)
+			assert.Contains(t, cmd, "--proto-redir '=https'", "script %s missing --proto-redir '=https' in curl command", path)
+			assert.Contains(t, cmd, "--tlsv1.3", "script %s missing --tlsv1.3 in curl command", path)
+		}
 	}
 }

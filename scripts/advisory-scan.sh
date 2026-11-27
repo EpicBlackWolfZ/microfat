@@ -10,7 +10,8 @@ status=0
 # Freeze one current upstream snapshot so all scans use the same advisory data.
 fetch_database() {
     local metadata digest
-    curl --fail --silent --show-error --retry 3 --max-time 60 https://vuln.go.dev/vulndb.zip -o "${report}/vulndb.zip"
+    curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --tlsv1.3 --retry 3 --max-time 60 \
+        https://vuln.go.dev/vulndb.zip -o "${report}/vulndb.zip"
     sha256sum "${report}/vulndb.zip" > "${report}/vulndb.sha256"
     unzip -q "${report}/vulndb.zip" -d "${report}/vulndb"
     metadata=$(jq -er .modified "${report}/vulndb/index/db.json")

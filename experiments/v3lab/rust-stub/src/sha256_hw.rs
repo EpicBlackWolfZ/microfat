@@ -306,6 +306,120 @@ impl Default for FastSha256 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use microfat_stub_core::sha256::{decode_hex_digest, encode_hex_lower};
+    use std::path::Path;
+
+    fn unhex_bytes(hex: &str) -> Vec<u8> {
+        hex.as_bytes()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u8::from_str_radix(core::str::from_utf8(c).unwrap(), 16).unwrap())
+            .collect()
+    }
+
+    fn extract_quoted_field<'a>(block: &'a str, key: &str) -> Option<&'a str> {
+        let needle = format!("\"{key}\": \"");
+        let start = block.find(&needle)? + needle.len();
+        let end = start + block[start..].find('"')?;
+        Some(&block[start..end])
+    }
+
+    fn verify_hw_streaming(msg: &[u8], expected_hex: &str) {
+        let expected = decode_hex_digest(expected_hex.as_bytes()).expect("valid sha256 hex");
+        assert_eq!(FastSha256::digest(msg), expected);
+
+        let steps = [1usize, 3, 7, 13, 31, 63, 64, 65, 129];
+        let mut h = FastSha256::new();
+        let mut off = 0usize;
+        let mut idx = 0usize;
+        while off < msg.len() {
+            let take = core::cmp::min(steps[idx % steps.len()], msg.len() - off);
+            h.update(&msg[off..off + take]);
+            off += take;
+            idx += 1;
+        }
+        assert_eq!(h.finalize(), expected);
+    }
+
+    #[test]
+    fn nist_cavp_sha256_hw_conformance() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("..")
+            .join("formal")
+            .join("conformance")
+            .join("sha256_cavp.json");
+        let raw = std::fs::read_to_string(path).expect("read sha256_cavp.json");
+        let (vectors_part, rest) = raw
+            .split_once("\"million_a_vector\"")
+            .expect("million_a_vector section");
+        let mut vector_count = 0usize;
+        for chunk in vectors_part.split('{').skip(1) {
+            if let (Some(msg_hex), Some(want)) = (
+                extract_quoted_field(chunk, "msg_hex"),
+                extract_quoted_field(chunk, "sha256"),
+            ) {
+                let msg = unhex_bytes(msg_hex);
+                verify_hw_streaming(&msg, want);
+                vector_count += 1;
+            }
+        }
+        assert!(vector_count >= 25, "expected FIPS 180-4 + CAVP vectors");
+
+        let (million_part, monte_part) = rest
+            .split_once("\"shavs_monte_carlo\"")
+            .expect("shavs_monte_carlo section");
+        let million_sha = extract_quoted_field(million_part, "sha256").expect("million sha256");
+        verify_hw_streaming(&vec![b'a'; 1_000_000], million_sha);
+
+        let seed_hex = extract_quoted_field(monte_part, "seed_hex").expect("seed_hex");
+        let mut cur_seed = decode_hex_digest(seed_hex.as_bytes()).expect("32-byte seed");
+        let mut checkpoints = std::collections::BTreeMap::new();
+        for chunk in monte_part.split('{').skip(1) {
+            if let (Some(round_pos), Some(sha)) = (
+                chunk.find("\"round\":"),
+                extract_quoted_field(chunk, "sha256"),
+            ) {
+                let after = chunk[round_pos + 8..].trim_start();
+                let digits_len = after
+                    .find(|c: char| !c.is_ascii_digit())
+                    .unwrap_or(after.len());
+                let round: usize = after[..digits_len].parse().expect("round integer");
+                checkpoints.insert(round, sha.to_string());
+            }
+        }
+        assert!(!checkpoints.is_empty());
+
+        let mut verified = 0usize;
+        let mut buf = [0u8; 96];
+        for round in 0..100usize {
+            let mut md0 = cur_seed;
+            let mut md1 = cur_seed;
+            let mut md2 = cur_seed;
+            for _ in 0..1000usize {
+                buf[0..32].copy_from_slice(&md0);
+                buf[32..64].copy_from_slice(&md1);
+                buf[64..96].copy_from_slice(&md2);
+                let next = FastSha256::digest(&buf);
+                md0 = md1;
+                md1 = md2;
+                md2 = next;
+            }
+            cur_seed = md2;
+            if let Some(want) = checkpoints.get(&round) {
+                let got = encode_hex_lower(&cur_seed);
+                assert_eq!(
+                    core::str::from_utf8(&got).unwrap(),
+                    want.as_str(),
+                    "hw monte carlo round {round} mismatch"
+                );
+                verified += 1;
+            }
+        }
+        assert_eq!(verified, checkpoints.len());
+    }
 
     #[test]
     fn differential_against_core_sha256() {

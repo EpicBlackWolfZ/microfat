@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"debug/elf"
 	"encoding/binary"
 	"encoding/hex"
@@ -467,5 +468,14 @@ func TestResolveRateLimitWebFallback(t *testing.T) {
 		})
 		require.ErrorContains(t, client.verifyAssetHead(t.Context(), "0.4.0", "checksums.txt"), "body close failed")
 		require.Error(t, client.verifyAssetHead(t.Context(), "0.4.0\x7f", "checksums.txt"))
+	})
+
+	t.Run("enforces_tls13_minimum_version", func(t *testing.T) {
+		t.Parallel()
+		client := NewClient()
+		tr, ok := client.http.Transport.(*http.Transport)
+		require.True(t, ok)
+		require.NotNil(t, tr.TLSClientConfig)
+		assert.Equal(t, uint16(tls.VersionTLS13), tr.TLSClientConfig.MinVersion)
 	})
 }

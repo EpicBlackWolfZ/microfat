@@ -21,7 +21,7 @@ z3_sha="${Z3_LINUX_AMD64#*@}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf -- "${tmp_dir}"' EXIT
 
-curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 180 \
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.3 --max-time 180 \
     "https://github.com/Z3Prover/z3/releases/download/z3-${z3_ver}/z3-${z3_ver}-x64-glibc-2.39.zip" \
     -o "${tmp_dir}/z3.zip"
 printf '%s  %s\n' "${z3_sha}" "${tmp_dir}/z3.zip" | sha256sum --check --status

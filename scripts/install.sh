@@ -22,7 +22,7 @@ microfat_bootstrap() (
     fail() { printf 'microfat bootstrap: %s\n' "$*" >&2; exit 1; }
     download() {
         curl --fail --silent --show-error --location --max-redirs 5 \
-            --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 180 \
+            --proto '=https' --proto-redir '=https' --tlsv1.3 --connect-timeout 15 --max-time 180 \
             --max-filesize "$3" --output "$2" "$1"
     }
     digest() {
