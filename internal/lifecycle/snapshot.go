@@ -88,10 +88,6 @@ func validateSnapshotWithFlagPrefix(snap *SourceSnapshot, policy MetadataPolicy,
 		return nil
 	}
 
-	if flagPrefix == "" {
-		flagPrefix = "--"
-	}
-
 	if policy != PolicyStrict {
 		// Strip mode strips unsafe attributes and elevated bits; everything is acceptable.
 		return nil
