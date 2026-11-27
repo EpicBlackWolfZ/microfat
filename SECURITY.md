@@ -56,6 +56,7 @@ their tested scope, not proof that a program is free of vulnerabilities.
   - **Dependabot**: Automated security updates for known vulnerable dependencies.
 - **Git Secrets Detection**: **`gitleaks`** audits all repository commits and PR diffs in CI pipelines.
 - **Release Immutability**: Published immutable releases lock their assets; an active tag ruleset separately protects release tags. All assets must be attached while the release is still a draft.
+- **Security Standards Compliance Matrix**: Evidence-backed alignment and `v0.5.0` targets across NIST SSDF, SLSA, EU CRA, BSI TR-02102/TR-03183-2, RFC 8446, NIST FIPS 180-4, and downstream frameworks are tracked in [`docs/security-standards-compliance.md`](docs/security-standards-compliance.md).
 
 ---
 
