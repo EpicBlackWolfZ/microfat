@@ -445,7 +445,9 @@ func newTrimCmd() *cobra.Command {
 				Intent:   intent,
 				Opts: lifecycle.Options{
 					Policy:         metaPolicy,
+					ExplicitPolicy: cmd.Flags().Changed("metadata-policy"),
 					BreakHardlinks: breakHardlinks,
+					FlagPrefix:     "--",
 				},
 				Transform: func(staged *os.File) error {
 					var trimErr error

@@ -7,19 +7,69 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"runtime/debug"
+)
+
+const (
+	defaultVersion   = "dev"
+	defaultCommit    = "none"
+	defaultDate      = "unknown"
+	defaultBuiltBy   = "local"
+	develVersion     = "(devel)"
+	buildInfoBuiltBy = "go-build"
 )
 
 // Injected via -ldflags at build time by GoReleaser or Taskfile.yml.
 var (
-	Role    = "standalone"
-	Version = "dev"
-	Commit  = "none"
-	Date    = "unknown"
-	BuiltBy = "local"
-	Vendor  = "EpicBlackWolfZ"
-	OS      = runtime.GOOS
-	Arch    = runtime.GOARCH
+	Role              = "standalone"
+	Version           = defaultVersion
+	Commit            = defaultCommit
+	Date              = defaultDate
+	BuiltBy           = defaultBuiltBy
+	Vendor            = "EpicBlackWolfZ"
+	OS                = runtime.GOOS
+	Arch              = runtime.GOARCH
+	readBuildInfoFunc = debug.ReadBuildInfo
 )
+
+func init() {
+	if info, ok := readBuildInfoFunc(); ok {
+		applyBuildInfo(info)
+	}
+}
+
+func applyBuildInfo(info *debug.BuildInfo) {
+	if info == nil {
+		return
+	}
+	if Version == defaultVersion && info.Main.Version != "" && info.Main.Version != develVersion {
+		Version = info.Main.Version
+		if BuiltBy == defaultBuiltBy {
+			BuiltBy = buildInfoBuiltBy
+		}
+	}
+	var revision, vcsTime, modified string
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = setting.Value
+		case "vcs.time":
+			vcsTime = setting.Value
+		case "vcs.modified":
+			modified = setting.Value
+		}
+	}
+	if Commit == defaultCommit && revision != "" {
+		if modified == "true" {
+			Commit = revision + "-dirty"
+		} else {
+			Commit = revision
+		}
+	}
+	if Date == defaultDate && vcsTime != "" {
+		Date = vcsTime
+	}
+}
 
 // ANSI color escape codes for terminal styling.
 const (

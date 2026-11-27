@@ -3565,17 +3565,22 @@ func TestParseLifecycleOptions(t *testing.T) {
 	opts, err := parseLifecycleOptions([]string{})
 	require.NoError(t, err)
 	assert.Equal(t, lifecycle.PolicyStrict, opts.Policy)
+	assert.False(t, opts.ExplicitPolicy)
+	assert.Equal(t, "--microfat:", opts.FlagPrefix)
 	assert.False(t, opts.BreakHardlinks)
 
 	// Valid policy flag strip
 	opts, err = parseLifecycleOptions([]string{"--microfat:metadata-policy=strip"})
 	require.NoError(t, err)
 	assert.Equal(t, lifecycle.PolicyStrip, opts.Policy)
+	assert.True(t, opts.ExplicitPolicy)
+	assert.Equal(t, "--microfat:", opts.FlagPrefix)
 
 	// Valid policy flag strict
 	opts, err = parseLifecycleOptions([]string{"--microfat:metadata-policy=strict"})
 	require.NoError(t, err)
 	assert.Equal(t, lifecycle.PolicyStrict, opts.Policy)
+	assert.True(t, opts.ExplicitPolicy)
 
 	// Valid break hardlinks flag
 	opts, err = parseLifecycleOptions([]string{"--microfat:break-hardlinks"})
@@ -3591,4 +3596,33 @@ func TestParseLifecycleOptions(t *testing.T) {
 	// Invalid policy flag
 	_, err = parseLifecycleOptions([]string{"--microfat:metadata-policy=invalid"})
 	require.Error(t, err)
+}
+
+func TestStubLifecycleHintsUseMicrofatPrefix(t *testing.T) {
+	originalArgs := os.Args
+	t.Cleanup(func() { os.Args = originalArgs })
+
+	tmpDir := t.TempDir()
+	src := filepath.Join(tmpDir, "app.fat")
+	const execPerm = 0o700
+	require.NoError(t, os.WriteFile(src, []byte("fat-fixture"), execPerm))
+	alias := filepath.Join(tmpDir, "app_alias.fat")
+	require.NoError(t, os.Link(src, alias))
+
+	os.Args = []string{src, flagTrim}
+	f, openErr := os.Open(src)
+	require.NoError(t, openErr)
+	defer func() { _ = f.Close() }()
+
+	err := trimInPlace(src, f, 0, "v1", mustStubLifecycleOpts(t, os.Args[1:]))
+	require.Error(t, err)
+	require.ErrorIs(t, err, lifecycle.ErrHardLinkDetected)
+	assert.Contains(t, err.Error(), "--microfat:break-hardlinks")
+}
+
+func mustStubLifecycleOpts(t *testing.T, args []string) lifecycle.Options {
+	t.Helper()
+	opts, err := parseLifecycleOptions(args)
+	require.NoError(t, err)
+	return opts
 }

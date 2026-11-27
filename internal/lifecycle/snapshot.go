@@ -80,6 +80,10 @@ func TakeSourceSnapshot(f *os.File, path string) (*SourceSnapshot, error) {
 // ValidateSnapshot verifies that the source file metadata can be safely preserved
 // under the chosen metadata policy.
 func ValidateSnapshot(snap *SourceSnapshot, policy MetadataPolicy) error {
+	return validateSnapshotWithFlagPrefix(snap, policy, "--")
+}
+
+func validateSnapshotWithFlagPrefix(snap *SourceSnapshot, policy MetadataPolicy, flagPrefix string) error {
 	if snap == nil {
 		return nil
 	}
@@ -91,25 +95,25 @@ func ValidateSnapshot(snap *SourceSnapshot, policy MetadataPolicy) error {
 
 	// 1. Refuse setuid / setgid bits in strict mode
 	if snap.Mode&(os.ModeSetuid|os.ModeSetgid) != 0 {
-		return fmt.Errorf("%w: file %s has elevated bits %v; use --metadata-policy=strip to strip",
-			ErrUnsafeSetuidSetgid, snap.Path, snap.Mode)
+		return fmt.Errorf("%w: file %s has elevated bits %v; use %smetadata-policy=strip to strip",
+			ErrUnsafeSetuidSetgid, snap.Path, snap.Mode, flagPrefix)
 	}
 
 	// 2. Inspect extended attributes
 	for attr := range snap.Xattrs {
 		switch {
 		case attr == attrSecurityCapability:
-			return fmt.Errorf("%w: file %s carries file capabilities; use --metadata-policy=strip to discard",
-				ErrUnsafeCapabilities, snap.Path)
+			return fmt.Errorf("%w: file %s carries file capabilities; use %smetadata-policy=strip to discard",
+				ErrUnsafeCapabilities, snap.Path, flagPrefix)
 		case attr == attrSecurityIMA || attr == attrSecurityEVM:
-			return fmt.Errorf("%w: file %s carries integrity claim %q; use --metadata-policy=strip to discard",
-				ErrUnsafeIntegrityClaim, snap.Path, attr)
+			return fmt.Errorf("%w: file %s carries integrity claim %q; use %smetadata-policy=strip to discard",
+				ErrUnsafeIntegrityClaim, snap.Path, attr, flagPrefix)
 		case attr == attrSecuritySELinux || strings.HasPrefix(attr, attrUserPrefix):
 			// Supported and safe to preserve
 			continue
 		default:
-			return fmt.Errorf("%w: file %s carries unapproved attribute %q; use --metadata-policy=strip to discard",
-				ErrUnsupportedXattr, snap.Path, attr)
+			return fmt.Errorf("%w: file %s carries unapproved attribute %q; use %smetadata-policy=strip to discard",
+				ErrUnsupportedXattr, snap.Path, attr, flagPrefix)
 		}
 	}
 

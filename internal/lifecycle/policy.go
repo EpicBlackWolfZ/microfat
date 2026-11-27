@@ -56,7 +56,16 @@ var (
 // Options specifies transaction configuration for a binary transformation.
 type Options struct {
 	Policy         MetadataPolicy
+	ExplicitPolicy bool
 	BreakHardlinks bool
+	FlagPrefix     string
+}
+
+func (o Options) flagPrefix() string {
+	if o.FlagPrefix == "" {
+		return "--"
+	}
+	return o.FlagPrefix
 }
 
 // DefaultOptions returns the safe baseline options for transformations.
