@@ -71,6 +71,11 @@ jobs:
         timeout-minutes: 5
         run: task verify-format-bounds
 
+      - name: Validate documentation, ADRs, SPECs, and verification ledger
+        id: docs-gate
+        timeout-minutes: 5
+        run: task lint-docs
+
       - name: Select native runtime release policy
         id: runtime-policy
         env:

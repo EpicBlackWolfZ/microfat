@@ -71,9 +71,10 @@ task build      # Compile microfat and microfat-stub into bin/
 task test       # Run unit tests with race detection (-race)
 task coverage   # Generate coverage profile and enforce >= 95.0% threshold gate
 task coverage-unit # Enforce the same statement gate before black-box integration tests
-task lint       # Run all linters (Go via golangci-lint and Bash via shellcheck)
+task lint       # Run all linters (Go via golangci-lint, Bash via shellcheck, and docs via doc-gate)
 task lint-go    # Run golangci-lint across all packages
 task lint-shell # Run ShellCheck (v0.11.0) across all tracked Bash scripts
+task lint-docs  # Validate Markdown links, ADRs, SPECs, verification ledger, and code-to-doc drift
 task vuln       # Run govulncheck vulnerability scanner
 task tidy       # Run go mod tidy and go mod verify
 task snapshot   # Test GoReleaser release packaging and self-bundling
@@ -263,13 +264,16 @@ actionable finding; review the candidate scan after tooling migrations.
 7. **Merge**:
    - Once required checks are satisfied and reviews are complete, the maintainer can merge the PR.
 
-## 8. Documentation-only pull requests
+## 8. Engineering Governance & Documentation-only pull requests
 
-The required CI workflow runs on every pull request to `main`. PR title validation, secret scanning
-and change-classification regression checks also run for documentation changes. A nonempty diff
-limited to root Markdown files, Markdown under `docs/`, and `LICENSE` skips Go lint, tests, developer
-runtime checks, vulnerability analysis, benchmarks, CodeQL and snapshots at the step/job level, so required statuses
-finish instead of remaining pending. Other paths, mixed changes and empty diffs run code checks.
+Starting in `v0.5.0` ([ADR-0012](docs/adr/ADR-0012-engineering-governance-and-docs-as-code.md)), architectural decisions belong in [ADRs](docs/adr/README.md), normative contracts in [SPECs](docs/specs/README.md), and formal proof obligations in [the verification ledger](docs/verification/README.md). Behavioral changes require red-to-green TDD evidence, and all documentation is validated as code via `task lint-docs`.
+
+The required CI workflow runs on every pull request to `main`. PR title validation, secret scanning,
+change-classification regression checks, and `task lint-docs` (`id: docs-gate`) also run for
+documentation-only changes. A nonempty diff limited to root Markdown files, Markdown under `docs/`,
+and `LICENSE` skips Go lint, tests, developer runtime checks, vulnerability analysis, benchmarks,
+CodeQL and snapshots at the step/job level, so required statuses finish instead of remaining pending.
+Other paths, mixed changes and empty diffs run code checks.
 
 Classification uses the complete Git diff of the PR merge result against its first parent, with
 rename detection disabled. A Git or classifier failure fails the required lint job; it cannot approve

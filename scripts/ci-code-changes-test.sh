@@ -14,7 +14,7 @@ cd "${fixture_dir}"
 git config user.name 'CI classification test'
 git config user.email 'ci-classification@example.invalid'
 git config commit.gpgsign false
-mkdir -p docs/nested src .github/workflows
+mkdir -p docs/nested docs/adr docs/specs docs/verification src .github/workflows internal/docgate
 printf 'documentation\n' > README.md
 printf 'guide\n' > docs/guide.md
 printf 'package main\n' > src/main.go
@@ -39,13 +39,14 @@ commit_fixture() {
 
 assert_output true 'empty diff runs code checks' "${base_sha}" HEAD
 
-for path in README.md docs/guide.md docs/nested/guide.md LICENSE; do
+for path in README.md docs/guide.md docs/nested/guide.md \
+    docs/adr/ADR-0012-governance.md docs/specs/SPEC-0001-format.md docs/verification/README.md LICENSE; do
     printf 'updated documentation\n' >> "${path}"
     commit_fixture
     assert_output false "documentation: ${path}" HEAD^ HEAD
 done
 
-for path in src/main.go docs/example.go .github/workflows/ci.yml go.mod .gitignore \
+for path in src/main.go docs/example.go internal/docgate/docgate.go .github/workflows/ci.yml go.mod .gitignore \
     scripts.md.sh src/fixture.md $'src/line\nbreak.go'; do
     printf 'code or configuration\n' > "${path}"
     commit_fixture

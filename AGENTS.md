@@ -64,6 +64,9 @@ A `microfat` fat binary consists of contiguous segments:
   - Strict baseline enforced across all tracked `*.sh` scripts: `#!/usr/bin/env bash`, `set -euo pipefail`, and `IFS=$'\n\t'`.
   - Zero-warning tolerance under `.shellcheckrc` optional rules (`check-unassigned-uppercase`, `quote-safe-variables`, `check-extra-masked-returns`, `check-set-e-suppressed`, `require-variable-braces`).
   - No broad or global rule disables (`SC1090` must remain enabled).
+- **Engineering Governance & Docs-as-Code (`ADR-0012`)**:
+  - Architectural decisions are recorded under `docs/adr/` (preserving `docs/design/adr-0001-formal-verification-and-v3-lab.md` as `ADR-0001`), normative RFC-2119 requirements under `docs/specs/` (`REQ-*` / `LAW-*` IDs), and formal proof obligations in `docs/verification/README.md`.
+  - Keep `docs/cli-reference.md`, `docs/architecture.md`, and indexes in sync with code; `task lint-docs` enforces link/anchor, schema, ledger, and code-to-doc drift checks on every PR (including docs-only PRs).
 - **Testing Standard**:
   - Table-driven tests with descriptive subtests (`t.Run`).
   - Concurrent execution where safe (`t.Parallel()`).
@@ -93,9 +96,10 @@ task check-leaks   # Probe Go 1.27 goroutine leak endpoint during running benchm
 task test-dx       # Run regression tests for developer workflows (port safety, formatting, TTY detection)
 task pprof         # Open interactive pprof web UI (PROFILE=heap|cpu|goroutine|allocs|mutex|block|goroutineleak)
 task coverage      # Generate coverage profile and enforce 95% threshold gate
-task lint          # Run all linters (Go via golangci-lint and Bash via shellcheck)
+task lint          # Run all linters (Go via golangci-lint, Bash via shellcheck, and docs via doc-gate)
 task lint-go       # Run golangci-lint across all packages
 task lint-shell    # Run ShellCheck across all tracked Bash scripts
+task lint-docs     # Validate Markdown links, ADRs, SPECs, verification ledger, and code-to-doc drift
 task vuln          # Run govulncheck vulnerability scan
 task tidy          # Run go mod tidy and go mod verify
 task tidy-check    # Verify module dependencies are tidy using non-mutating verification ('go mod tidy -diff')
