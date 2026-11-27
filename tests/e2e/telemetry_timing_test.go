@@ -242,10 +242,13 @@ func TestTelemetryAutoWarmCache(t *testing.T) {
 						env[i] = "MICROFAT_EXEC_MODE=auto"
 					}
 				}
-				stdout, stderr, err := runTelemetryProcess(t, profile.path, env, "--echo-env", "MICROFAT_EXEC_MODE")
+				stdout, stderr, err := runTelemetryProcess(t, profile.path, env, "--echo-env", "MICROFAT_DISPATCH_MODE")
 				require.NoError(t, err, stderr)
 				require.Equal(t, execModeCache, stdout)
 				requireTelemetryDiagnostics(t, diagnostic, stderr, level, execModeCache, true)
+				policyOut, _, policyErr := runTelemetryProcess(t, profile.path, env, "--echo-env", "MICROFAT_EXEC_MODE")
+				require.NoError(t, policyErr)
+				require.Equal(t, "auto", policyOut)
 			})
 		}
 	}

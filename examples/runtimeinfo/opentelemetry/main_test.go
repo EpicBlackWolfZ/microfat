@@ -35,6 +35,7 @@ func TestObservableGauges(t *testing.T) {
 			snapshot: runtimeinfo.Snapshot{
 				Launcher: runtimeinfo.LauncherHints{
 					SelectedVariant: present("v3"),
+					DispatchMode:    present("memfd"),
 					SelectedSHA256:  present("not-an-attribute"), OriginalExecutable: present("/not/an/attribute"),
 					Cgroup: runtimeinfo.CgroupHints{CPUQuota: present(1.5), MemoryLimitBytes: present(int64(0))},
 				},
@@ -88,11 +89,18 @@ func TestObservableGauges(t *testing.T) {
 					require.Len(t, gauge.DataPoints, 1)
 					point := gauge.DataPoints[0]
 					got[measurement.Name] = point.Value
+					var sawDispatch bool
 					for _, attribute := range point.Attributes.ToSlice() {
 						assert.NotContains(t, string(attribute.Key), "sha256")
 						assert.NotContains(t, string(attribute.Key), "executable")
 						assert.NotContains(t, attribute.Value.AsString(), "not-an-attribute")
 						assert.NotContains(t, attribute.Value.AsString(), "/not/an/attribute")
+						if attribute.Key == "dispatch_mode" && attribute.Value.AsString() == "memfd" {
+							sawDispatch = true
+						}
+					}
+					if measurement.Name == "microfat.launcher.hint.info" {
+						assert.True(t, sawDispatch)
 					}
 				}
 			}

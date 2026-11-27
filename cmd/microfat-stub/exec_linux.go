@@ -182,13 +182,19 @@ func upsertEnv(env []string, keyIndex map[string]int, key, val string) []string 
 	return append(env, entry)
 }
 
+func rawRequestedExecMode() string {
+	if requestedMode := os.Getenv(format.EnvExecMode); requestedMode != "" {
+		return requestedMode
+	}
+	return format.ExecModeAuto
+}
+
 func isMicrofatInternalEnv(k string) bool {
 	switch k {
 	case format.EnvOriginalExe,
 		format.EnvSelectedVariant,
 		format.EnvHostArch,
 		format.EnvHostLevel,
-		format.EnvExecMode,
 		format.EnvDispatchMode,
 		format.EnvSelectedSHA256,
 		format.EnvSelectedSize,
@@ -249,7 +255,6 @@ func buildAutoTunedEnviron(
 	env = upsertEnv(env, keyIndex, format.EnvSelectedVariant, entry.Level)
 	env = upsertEnv(env, keyIndex, format.EnvHostArch, hostInfo.Arch)
 	env = upsertEnv(env, keyIndex, format.EnvHostLevel, hostInfo.Level)
-	env = upsertEnv(env, keyIndex, format.EnvExecMode, execMode)
 	env = upsertEnv(env, keyIndex, format.EnvDispatchMode, execMode)
 	env = upsertEnv(env, keyIndex, format.EnvSelectedSHA256, entry.SHA256)
 	env = upsertEnv(env, keyIndex, format.EnvSelectedSize, strconv.FormatInt(entry.UncompressedSize, 10))
@@ -426,13 +431,7 @@ func logErrorDiagnostics(
 	policyRes microarch.PolicyResult,
 	details string,
 ) {
-	requestedMode := os.Getenv(format.EnvExecMode)
-	if requestedMode == "" {
-		requestedMode = os.Getenv(format.EnvDispatchMode)
-	}
-	if requestedMode == "" {
-		requestedMode = format.ExecModeAuto
-	}
+	requestedMode := rawRequestedExecMode()
 	attemptedMode := format.ExecModeMemfd
 	if strings.HasPrefix(stage, "cache") || stage == format.StageCacheExec {
 		attemptedMode = format.ExecModeCache
@@ -577,13 +576,7 @@ func executeViaMemfd(
 	policyRes microarch.PolicyResult,
 	startTime time.Time,
 ) error {
-	requestedMode := os.Getenv(format.EnvExecMode)
-	if requestedMode == "" {
-		requestedMode = os.Getenv(format.EnvDispatchMode)
-	}
-	if requestedMode == "" {
-		requestedMode = format.ExecModeAuto
-	}
+	requestedMode := rawRequestedExecMode()
 
 	var selfReader io.ReaderAt
 	if selfFile != nil {
@@ -682,13 +675,7 @@ func executeViaCache(
 	primaryErr error,
 	startTime time.Time,
 ) error {
-	requestedMode := os.Getenv(format.EnvExecMode)
-	if requestedMode == "" {
-		requestedMode = os.Getenv(format.EnvDispatchMode)
-	}
-	if requestedMode == "" {
-		requestedMode = format.ExecModeAuto
-	}
+	requestedMode := rawRequestedExecMode()
 
 	if selfPath == "" && selfFile != nil {
 		selfPath = selfFile.Name()

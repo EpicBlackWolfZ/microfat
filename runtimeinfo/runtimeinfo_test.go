@@ -16,6 +16,7 @@ const (
 	testDigest       = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	testGCPercent    = "75"
 	testHostArchKey  = "MICROFAT_HOST_ARCH"
+	testExecModeKey  = "MICROFAT_EXEC_MODE"
 	testDigestKey    = "MICROFAT_SELECTED_SHA256"
 	testGCProfileKey = "MICROFAT_CGROUP_GC_PROFILE"
 )
@@ -37,7 +38,7 @@ func TestLauncherContract(t *testing.T) {
 		"MICROFAT_SELECTED_VARIANT":             "v3",
 		testHostArchKey:                         "amd64",
 		"MICROFAT_HOST_LEVEL":                   "v4",
-		"MICROFAT_EXEC_MODE":                    "memfd",
+		testExecModeKey:                         "memfd",
 		"MICROFAT_DISPATCH_MODE":                "cache",
 		testDigestKey:                           strings.ToUpper(testDigest),
 		"MICROFAT_SELECTED_SIZE":                "7389447",
@@ -60,7 +61,7 @@ func TestLauncherContract(t *testing.T) {
 		SelectedVariant:    presentField("v3", "v3", "MICROFAT_SELECTED_VARIANT"),
 		HostArch:           presentField("amd64", "amd64", testHostArchKey),
 		HostLevel:          presentField("v4", "v4", "MICROFAT_HOST_LEVEL"),
-		ExecMode:           presentField("memfd", "memfd", "MICROFAT_EXEC_MODE"),
+		ExecMode:           presentField("memfd", "memfd", testExecModeKey),
 		DispatchMode:       presentField("cache", "cache", "MICROFAT_DISPATCH_MODE"),
 		SelectedSHA256:     presentField(testDigest, strings.ToUpper(testDigest), testDigestKey),
 		SelectedSizeBytes:  presentField(int64(7389447), "7389447", "MICROFAT_SELECTED_SIZE"),
@@ -90,7 +91,7 @@ func TestConfiguredContract(t *testing.T) {
 	values := map[string]string{
 		"GOMEMLIMIT": "512MiB", "GOMAXPROCS": "3", "GOGC": "off",
 		"MICROFAT_CPU_POLICY": "native", "MICROFAT_GC_PROFILE": "batch_etl",
-		"MICROFAT_AUTOTUNE": "false", "MICROFAT_DRY_RUN": "1",
+		testExecModeKey: "auto", "MICROFAT_AUTOTUNE": "false", "MICROFAT_DRY_RUN": "1",
 		"MICROFAT_MEM_RATIO": "0.85", "MICROFAT_LIVE_HEAP_ESTIMATE": "150MiB",
 	}
 	want := ConfiguredEnvironment{
@@ -99,6 +100,7 @@ func TestConfiguredContract(t *testing.T) {
 		GOGC:             presentField("off", "off", "GOGC"),
 		CPUPolicy:        presentField("native", "native", "MICROFAT_CPU_POLICY"),
 		GCProfile:        presentField("batch_etl", "batch_etl", "MICROFAT_GC_PROFILE"),
+		ExecMode:         presentField("auto", "auto", testExecModeKey),
 		Autotune:         presentField("false", "false", "MICROFAT_AUTOTUNE"),
 		DryRun:           presentField("1", "1", "MICROFAT_DRY_RUN"),
 		MemoryRatio:      presentField("0.85", "0.85", "MICROFAT_MEM_RATIO"),
@@ -211,8 +213,9 @@ func TestSupportedEnumsAndDigest(t *testing.T) {
 		{"arm host", testHostArchKey, "arm64", StatusPresent, "arm64"},
 		{"future host", testHostArchKey, "riscv64", StatusUnsupported, ""},
 		{"empty host", testHostArchKey, "", StatusUnsupported, ""},
-		{"auto is request only", "MICROFAT_EXEC_MODE", "auto", StatusUnsupported, ""},
-		{"future execution", "MICROFAT_EXEC_MODE", "future", StatusUnsupported, ""},
+		{"auto is valid policy", testExecModeKey, "auto", StatusPresent, "auto"},
+		{"auto unsupported as dispatch mode", "MICROFAT_DISPATCH_MODE", "auto", StatusUnsupported, ""},
+		{"future execution", testExecModeKey, "future", StatusUnsupported, ""},
 		{"uppercase mode", "MICROFAT_DISPATCH_MODE", "MEMFD", StatusUnsupported, ""},
 		{"future profile", testGCProfileKey, "future", StatusUnsupported, ""},
 		{"default profile", testGCProfileKey, "default", StatusPresent, "default"},
@@ -230,7 +233,7 @@ func TestSupportedEnumsAndDigest(t *testing.T) {
 			launcher := readLauncher(lookupMap(map[string]string{tc.key: tc.raw}))
 			fields := map[string]Field[string]{
 				testHostArchKey:          launcher.HostArch,
-				"MICROFAT_EXEC_MODE":     launcher.ExecMode,
+				testExecModeKey:          launcher.ExecMode,
 				"MICROFAT_DISPATCH_MODE": launcher.DispatchMode,
 				testGCProfileKey:         launcher.Cgroup.GCProfile,
 				testDigestKey:            launcher.SelectedSHA256,

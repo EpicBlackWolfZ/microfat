@@ -615,11 +615,10 @@ fn check_unprivileged() {
     }
 }
 
-fn resolve_exec_mode_from(exec_val: Option<&[u8]>, dispatch_val: Option<&[u8]>) -> ExecMode {
+fn resolve_exec_mode_from(exec_val: Option<&[u8]>) -> ExecMode {
     let raw = exec_val
         .map(trim_ascii_bytes)
         .filter(|s| !s.is_empty())
-        .or_else(|| dispatch_val.map(trim_ascii_bytes).filter(|s| !s.is_empty()))
         .unwrap_or(b"");
     if raw.eq_ignore_ascii_case(b"cache") {
         ExecMode::Cache
@@ -631,10 +630,7 @@ fn resolve_exec_mode_from(exec_val: Option<&[u8]>, dispatch_val: Option<&[u8]>) 
 }
 
 fn resolve_exec_mode() -> ExecMode {
-    resolve_exec_mode_from(
-        getenv_bytes(b"MICROFAT_EXEC_MODE\0"),
-        getenv_bytes(b"MICROFAT_DISPATCH_MODE\0"),
-    )
+    resolve_exec_mode_from(getenv_bytes(b"MICROFAT_EXEC_MODE\0"))
 }
 
 fn resolve_selection_policy_full(
@@ -1961,7 +1957,6 @@ fn is_microfat_internal_env(k: &[u8]) -> bool {
             | b"MICROFAT_SELECTED_VARIANT"
             | b"MICROFAT_HOST_ARCH"
             | b"MICROFAT_HOST_LEVEL"
-            | b"MICROFAT_EXEC_MODE"
             | b"MICROFAT_DISPATCH_MODE"
             | b"MICROFAT_SELECTED_SHA256"
             | b"MICROFAT_SELECTED_SIZE"
@@ -2111,7 +2106,6 @@ fn build_runtime_exec_env(
     owned_vals.push((b"MICROFAT_SELECTED_VARIANT", variant.level.to_vec()));
     owned_vals.push((b"MICROFAT_HOST_ARCH", arch_bytes.to_vec()));
     owned_vals.push((b"MICROFAT_HOST_LEVEL", host_lvl_bytes.to_vec()));
-    owned_vals.push((b"MICROFAT_EXEC_MODE", exec_mode_str.to_vec()));
     owned_vals.push((b"MICROFAT_DISPATCH_MODE", exec_mode_str.to_vec()));
     owned_vals.push((b"MICROFAT_SELECTED_SHA256", sha_hex.to_vec()));
     owned_vals.push((b"MICROFAT_SELECTED_SIZE", size_bytes.to_vec()));
@@ -3322,23 +3316,12 @@ mod tests {
 
     #[test]
     fn resolves_exec_mode_precedence_and_defaults() {
-        assert_eq!(resolve_exec_mode_from(None, None), ExecMode::Auto);
-        assert_eq!(
-            resolve_exec_mode_from(Some(b" "), Some(b"cache")),
-            ExecMode::Cache
-        );
-        assert_eq!(
-            resolve_exec_mode_from(Some(b"MEMFD"), Some(b"cache")),
-            ExecMode::Memfd
-        );
-        assert_eq!(
-            resolve_exec_mode_from(Some(b" Cache "), Some(b"memfd")),
-            ExecMode::Cache
-        );
-        assert_eq!(
-            resolve_exec_mode_from(Some(b"unknown"), Some(b"cache")),
-            ExecMode::Auto
-        );
+        assert_eq!(resolve_exec_mode_from(None), ExecMode::Auto);
+        assert_eq!(resolve_exec_mode_from(Some(b" ")), ExecMode::Auto);
+        assert_eq!(resolve_exec_mode_from(Some(b"auto")), ExecMode::Auto);
+        assert_eq!(resolve_exec_mode_from(Some(b"MEMFD")), ExecMode::Memfd);
+        assert_eq!(resolve_exec_mode_from(Some(b" Cache ")), ExecMode::Cache);
+        assert_eq!(resolve_exec_mode_from(Some(b"unknown")), ExecMode::Auto);
     }
 
     #[test]
@@ -3525,19 +3508,25 @@ mod tests {
             Some(3)
         );
 
-        // Env update replaces managed keys and preserves unrelated user vars.
+        // Env update replaces dispatch telemetry while preserving caller policy and user vars.
         let merged = build_exec_env_from(
             &[
                 b"PATH=/usr/bin",
                 b"GOMEMLIMIT=128MiB",
                 b"MICROFAT_EXEC_MODE=auto",
+                b"MICROFAT_DISPATCH_MODE=cache",
             ],
-            &[(b"MICROFAT_EXEC_MODE", b"memfd"), (b"GOMAXPROCS", b"2")],
+            &[(b"MICROFAT_DISPATCH_MODE", b"memfd"), (b"GOMAXPROCS", b"2")],
         );
         assert!(merged.iter().any(|x| x == b"PATH=/usr/bin\0"));
         assert!(merged.iter().any(|x| x == b"GOMEMLIMIT=128MiB\0"));
-        assert!(merged.iter().any(|x| x == b"MICROFAT_EXEC_MODE=memfd\0"));
-        assert!(!merged.iter().any(|x| x == b"MICROFAT_EXEC_MODE=auto\0"));
+        assert!(merged.iter().any(|x| x == b"MICROFAT_EXEC_MODE=auto\0"));
+        assert!(merged
+            .iter()
+            .any(|x| x == b"MICROFAT_DISPATCH_MODE=memfd\0"));
+        assert!(!merged
+            .iter()
+            .any(|x| x == b"MICROFAT_DISPATCH_MODE=cache\0"));
 
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&v1_dir);
@@ -3588,17 +3577,26 @@ mod tests {
             DiagMode::Json
         );
 
-        // Internal env vars must be stripped before child exec.
+        // Internal env vars must be stripped before child exec while caller MICROFAT_EXEC_MODE stays intact.
         let scrubbed = build_exec_env_from(
             &[
                 b"PATH=/usr/bin",
+                b"MICROFAT_EXEC_MODE=auto",
+                b"MICROFAT_DISPATCH_MODE=cache",
                 b"MICROFAT_POLICY_APPLIED=spoofed",
                 b"MICROFAT_CGROUP_GOMEMLIMIT=1B",
                 b"MICROFAT_CGROUP_GOGC=999",
             ],
-            &[(b"MICROFAT_EXEC_MODE", b"memfd")],
+            &[(b"MICROFAT_DISPATCH_MODE", b"memfd")],
         );
         assert!(scrubbed.iter().any(|x| x == b"PATH=/usr/bin\0"));
+        assert!(scrubbed.iter().any(|x| x == b"MICROFAT_EXEC_MODE=auto\0"));
+        assert!(scrubbed
+            .iter()
+            .any(|x| x == b"MICROFAT_DISPATCH_MODE=memfd\0"));
+        assert!(!scrubbed
+            .iter()
+            .any(|x| x == b"MICROFAT_DISPATCH_MODE=cache\0"));
         assert!(!scrubbed
             .iter()
             .any(|x| x.starts_with(b"MICROFAT_POLICY_APPLIED=")));

@@ -71,7 +71,7 @@ import (
 )
 func main() {
 	fmt.Printf("mixed codec payload|%s|%s|%s\n", os.Getenv("MICROFAT_SELECTED_VARIANT"),
-		os.Getenv("MICROFAT_EXEC_MODE"), os.Getenv("MICROFAT_SELECTED_SHA256"))
+		os.Getenv("MICROFAT_DISPATCH_MODE"), os.Getenv("MICROFAT_SELECTED_SHA256"))
 }
 `), 0o600))
 	payloadPath := filepath.Join(dir, "payload")

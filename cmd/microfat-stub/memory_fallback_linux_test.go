@@ -23,7 +23,7 @@ func TestAutoMemoryBudgetRejectionDoesNotMutateCache(t *testing.T) {
 	}{
 		{name: "unset"},
 		{name: "explicit auto", exec: format.ExecModeAuto},
-		{name: "legacy auto", dispatch: format.ExecModeAuto},
+		{name: "dispatch mode ignored", dispatch: format.ExecModeCache},
 		{name: "unrecognized mode", exec: "unrecognized"},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
@@ -119,7 +119,7 @@ func TestAutoMemoryBudgetAllowsVerifiedWarmCache(t *testing.T) {
 	execCalls := 0
 	execveFunc = func(path string, _, env []string) error {
 		execCalls++
-		require.Contains(t, env, format.EnvExecMode+"=cache")
+		require.Contains(t, env, format.EnvDispatchMode+"=cache")
 		data, err := os.ReadFile(path)
 		require.NoError(t, err)
 		require.Equal(t, payload, data)
@@ -146,7 +146,7 @@ func TestAutoMemoryBudgetPreservesWarmExecFailure(t *testing.T) {
 	execCalls := 0
 	execveFunc = func(_ string, _, env []string) error {
 		execCalls++
-		require.Contains(t, env, format.EnvExecMode+"=cache")
+		require.Contains(t, env, format.EnvDispatchMode+"=cache")
 		return unix.EACCES
 	}
 	err := dispatchCacheFirst(f, entry)

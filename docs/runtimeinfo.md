@@ -65,7 +65,8 @@ All sources in this table have the prefix `MICROFAT_`.
 | `SelectedVariant` | `SELECTED_VARIANT` | Opaque selected architecture level, such as `v3` or `v8.0`; no compatibility inference. |
 | `HostArch` | `HOST_ARCH` | Supported values `amd64`, `arm64`; unknown values are unsupported. |
 | `HostLevel` | `HOST_LEVEL` | Opaque launcher-detected level. |
-| `ExecMode`, `DispatchMode` | `EXEC_MODE`, `DISPATCH_MODE` | Reported actual mode: `memfd` or `cache`. The latter is the legacy alias; both are read independently. Native configuration such as `auto` is unsupported as an actual-mode hint. |
+| `ExecMode` | `EXEC_MODE` | Caller execution policy hint (`auto`, `memfd`, or `cache`), preserved untouched across `execve`. Missing when unset; non-policy strings are unsupported. |
+| `DispatchMode` | `DISPATCH_MODE` | Output-only realized dispatch mechanism (`memfd` or `cache`) emitted by the launcher. Values such as `auto` are unsupported as realized dispatch modes. |
 | `SelectedSHA256` | `SELECTED_SHA256` | Exactly 64 hexadecimal characters, normalized to lowercase in `Value`. This reads a claim; it does not verify bytes. |
 | `SelectedSizeBytes` | `SELECTED_SIZE` | Positive uncompressed payload bytes. |
 | `OriginalExecutable` | `ORIGINAL_EXE` | Opaque informational asset-resolution path; no filesystem validation. |
@@ -96,9 +97,10 @@ an RSS cap. Missing profile metadata does not imply a default was applied.
 
 `Configured.GOMEMLIMIT`, `.GOMAXPROCS` and `.GOGC` copy those exact environment
 keys. The remaining fields copy `MICROFAT_CPU_POLICY`, `MICROFAT_GC_PROFILE`,
-`MICROFAT_AUTOTUNE`, `MICROFAT_DRY_RUN`, `MICROFAT_MEM_RATIO` and
-`MICROFAT_LIVE_HEAP_ESTIMATE` into `CPUPolicy`, `GCProfile`, `Autotune`, `DryRun`,
-`MemoryRatio` and `LiveHeapEstimate`, respectively. All are opaque strings, with
+`MICROFAT_EXEC_MODE`, `MICROFAT_AUTOTUNE`, `MICROFAT_DRY_RUN`,
+`MICROFAT_MEM_RATIO` and `MICROFAT_LIVE_HEAP_ESTIMATE` into `CPUPolicy`,
+`GCProfile`, `ExecMode`, `Autotune`, `DryRun`, `MemoryRatio` and
+`LiveHeapEstimate`, respectively. All are opaque strings, with
 no parsing, validation or default resolution. A supplied live-heap estimate is not
 a measured heap. This reader does not recompute recommendations; doctor owns
 diagnostic tuning previews.

@@ -32,6 +32,7 @@ func TestCollector(t *testing.T) {
 			snapshot: runtimeinfo.Snapshot{
 				Launcher: runtimeinfo.LauncherHints{
 					SelectedVariant: present("v3"),
+					DispatchMode:    present("memfd"),
 					SelectedSHA256:  present("not-a-label"), OriginalExecutable: present("/not/a/label"),
 					Cgroup: runtimeinfo.CgroupHints{CPUQuota: present(1.5), MemoryLimitBytes: present(int64(0))},
 				},
@@ -74,11 +75,18 @@ func TestCollector(t *testing.T) {
 				require.Len(t, family.GetMetric(), 1)
 				metric := family.GetMetric()[0]
 				got[family.GetName()] = metric.GetGauge().GetValue()
+				var sawDispatch bool
 				for _, label := range metric.GetLabel() {
 					assert.NotContains(t, label.GetName(), "sha256")
 					assert.NotContains(t, label.GetName(), "executable")
 					assert.NotContains(t, label.GetValue(), "not-a-label")
 					assert.NotContains(t, label.GetValue(), "/not/a/label")
+					if label.GetName() == "dispatch_mode" && label.GetValue() == "memfd" {
+						sawDispatch = true
+					}
+				}
+				if family.GetName() == "microfat_launcher_hint_info" {
+					assert.True(t, sawDispatch)
 				}
 			}
 			assert.Equal(t, test.want, got)

@@ -80,7 +80,8 @@ func TestCacheFirstVerifiedHitPinsDescriptor(t *testing.T) {
 			var executedFD int
 			execveFunc = func(path string, args, env []string) error {
 				require.Equal(t, []string{"app", "argument"}, args)
-				require.Contains(t, env, format.EnvExecMode+"=cache")
+				require.Contains(t, env, format.EnvDispatchMode+"=cache")
+				require.NotContains(t, env, format.EnvExecMode+"=cache")
 				require.Contains(t, env, "GOMAXPROCS=2")
 				fd, err := strconv.Atoi(strings.TrimPrefix(path, "/proc/self/fd/"))
 				require.NoError(t, err)
@@ -138,7 +139,7 @@ func TestCacheFirstMissDoesNotMutate(t *testing.T) {
 				return -1, "", nil
 			}
 			execveFunc = func(path string, _, env []string) error {
-				require.Contains(t, env, format.EnvExecMode+"=memfd")
+				require.Contains(t, env, format.EnvDispatchMode+"=memfd")
 				data, err := os.ReadFile(path)
 				require.NoError(t, err)
 				require.Equal(t, payload, data)
@@ -208,10 +209,10 @@ func TestCacheFirstWarmDenialAttempts(t *testing.T) {
 			execveFunc = func(_ string, _, env []string) error {
 				calls++
 				if calls == 1 {
-					require.Contains(t, env, format.EnvExecMode+"=cache")
+					require.Contains(t, env, format.EnvDispatchMode+"=cache")
 					return unix.EACCES
 				}
-				require.Contains(t, env, format.EnvExecMode+"=memfd")
+				require.Contains(t, env, format.EnvDispatchMode+"=memfd")
 				if failure == "exec" {
 					return unix.ENOEXEC
 				}
@@ -251,10 +252,10 @@ func TestCacheFirstColdFallback(t *testing.T) {
 				entry.SHA256 = "../unsafe"
 			}
 			execveFunc = func(_ string, _, env []string) error {
-				if failure == "exec" && !strings.Contains(strings.Join(env, "\n"), format.EnvExecMode+"=cache") {
+				if failure == "exec" && !strings.Contains(strings.Join(env, "\n"), format.EnvDispatchMode+"=cache") {
 					return unix.EACCES
 				}
-				require.Contains(t, env, format.EnvExecMode+"=cache")
+				require.Contains(t, env, format.EnvDispatchMode+"=cache")
 				return nil
 			}
 			err := dispatchCacheFirst(f, entry)

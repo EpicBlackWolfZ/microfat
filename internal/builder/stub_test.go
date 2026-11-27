@@ -683,6 +683,62 @@ func TestResolveInstallationDirectory_DispatchedModes(t *testing.T) {
 			t.Fatalf("expected binDir %q, got %q", binDir, dir)
 		}
 	})
+
+	t.Run("DispatchedExecution_AutoPolicyWithDispatchMode", func(t *testing.T) {
+		binDir := filepath.Join(tmpDir, "auto-policy-dispatch-bin")
+		_ = os.MkdirAll(binDir, 0o755)
+		v1Path := createDummyELF(t, tmpDir, "app_v1_auto_policy", testArchAMD64)
+		v1Bytes, _ := os.ReadFile(v1Path)
+		v1Hash := sha256.Sum256(v1Bytes)
+		v1Digest := hex.EncodeToString(v1Hash[:])
+
+		stubPath := createDummyELF(t, tmpDir, "stub_auto_policy.elf", testArchAMD64)
+		fatPath := filepath.Join(binDir, "app-fat")
+		packOpts := pack.DefaultOptions()
+		packOpts.StubPath = stubPath
+		packOpts.OutputPath = fatPath
+		packOpts.AppName = "app-auto-policy"
+		packOpts.Variants = map[string]string{"v1": v1Path}
+		packOpts.SkipELFValidation = true
+		if _, err := pack.Pack(packOpts); err != nil {
+			t.Fatalf("pack: %v", err)
+		}
+
+		readlinkProcSelfExe = func() (string, error) {
+			return mockMemfdTarget, nil
+		}
+		readAndHashSelfExe = func() (int64, string, error) {
+			return int64(len(v1Bytes)), v1Digest, nil
+		}
+
+		_ = os.Setenv(format.EnvExecMode, format.ExecModeAuto)
+		_ = os.Setenv(format.EnvDispatchMode, format.ExecModeMemfd)
+		_ = os.Setenv(format.EnvSelectedVariant, "v1")
+		_ = os.Setenv(format.EnvSelectedSize, strconv.FormatInt(int64(len(v1Bytes)), 10))
+		_ = os.Setenv(format.EnvSelectedSHA256, v1Digest)
+		_ = os.Setenv(format.EnvOriginalExe, fatPath)
+		defer func() {
+			_ = os.Unsetenv(format.EnvExecMode)
+			_ = os.Unsetenv(format.EnvDispatchMode)
+			_ = os.Unsetenv(format.EnvSelectedVariant)
+			_ = os.Unsetenv(format.EnvSelectedSize)
+			_ = os.Unsetenv(format.EnvSelectedSHA256)
+			_ = os.Unsetenv(format.EnvOriginalExe)
+		}()
+
+		dir, err := ResolveInstallationDirectory()
+		if err != nil {
+			t.Fatalf("auto policy with dispatch mode unexpected error: %v", err)
+		}
+		if dir != binDir {
+			t.Fatalf("expected binDir %q, got %q", binDir, dir)
+		}
+
+		_ = os.Unsetenv(format.EnvDispatchMode)
+		if _, err := ResolveInstallationDirectory(); err == nil {
+			t.Fatal("expected error when MICROFAT_EXEC_MODE=auto and MICROFAT_DISPATCH_MODE is unset")
+		}
+	})
 }
 
 func TestResolveInstallationDirectory_DispatchedValidationErrors(t *testing.T) {

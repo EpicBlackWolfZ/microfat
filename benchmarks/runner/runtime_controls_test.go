@@ -116,7 +116,7 @@ func TestMatchedControlsRejectInvalidSettingsBeforeBuild(t *testing.T) {
 	cfg := DefaultExperimentConfig()
 	cfg.GOGC = "2147483648"
 	configuration := runtimeConfiguration(map[string]string{"GOMAXPROCS": "2", gogcEnvironmentKey: cfg.GOGC})
-	require.ErrorContains(t, validateIdentity(configuration, map[string]string{"level": "v1", "gomaxprocs": "2", "gogc": "100"}),
+	require.ErrorContains(t, validateIdentity(configuration, map[string]string{testLevelKey: "v1", testGoMaxProcsKey: "2", "gogc": "100"}),
 		"invalid matched GOGC configuration")
 }
 

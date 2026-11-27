@@ -462,8 +462,7 @@ Whenever the launcher stub executes a payload variant, it exports runtime metada
 | `MICROFAT_SELECTED_VARIANT` | Microarchitecture level selected for execution | `v3` |
 | `MICROFAT_HOST_ARCH` | Detected host CPU architecture | `amd64` |
 | `MICROFAT_HOST_LEVEL` | Highest detected microarchitecture capability of host | `v4` |
-| `MICROFAT_EXEC_MODE` | Runtime dispatch mechanism (`memfd` or `cache`) | `memfd` |
-| `MICROFAT_DISPATCH_MODE` | Alias for `MICROFAT_EXEC_MODE` | `memfd` |
+| `MICROFAT_DISPATCH_MODE` | Output-only realized runtime dispatch mechanism (`memfd` or `cache`; `MICROFAT_EXEC_MODE` remains caller input policy and is preserved untouched) | `memfd` |
 | `MICROFAT_POLICY_APPLIED` | Dispatch policy applied | `safe_avx512` |
 | `MICROFAT_OVERRIDE_REASON` | Explanatory reason or rule triggering the policy | `Intel Skylake-X downclock protection` |
 | `MICROFAT_SELECTED_SHA256` | SHA-256 hash of the uncompressed payload | `fda5c10d86f6...` |

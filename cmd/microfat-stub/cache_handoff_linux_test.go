@@ -52,7 +52,7 @@ func TestCacheMaterializationHandsVerifiedDescriptorToExec(t *testing.T) {
 						execCalls++
 						require.Equal(t, "/proc/self/fd/"+strconv.Itoa(validatedFD), path)
 						require.Equal(t, []string{testAppArg, "argument"}, args)
-						require.Contains(t, env, format.EnvExecMode+"=cache")
+						require.Contains(t, env, format.EnvDispatchMode+"=cache")
 						data, err := os.ReadFile(path)
 						require.NoError(t, err)
 						require.Equal(t, payload, data)

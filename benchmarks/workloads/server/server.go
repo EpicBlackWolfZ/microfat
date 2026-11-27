@@ -214,7 +214,9 @@ func diagnostics(w http.ResponseWriter, _ *http.Request) {
 	samples := []metrics.Sample{{Name: "/gc/gogc:percent"}}
 	metrics.Read(samples)
 	info["gogc"] = strconv.FormatUint(samples[0].Value.Uint64(), 10)
-	for _, key := range []string{"MICROFAT_EXEC_MODE", "MICROFAT_SELECTED_VARIANT", "MICROFAT_SELECTED_SHA256"} {
+	for _, key := range []string{
+		"MICROFAT_EXEC_MODE", "MICROFAT_DISPATCH_MODE", "MICROFAT_SELECTED_VARIANT", "MICROFAT_SELECTED_SHA256",
+	} {
 		info[key] = os.Getenv(key)
 	}
 	if build, ok := debug.ReadBuildInfo(); ok {
