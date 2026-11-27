@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/EpicBlackWolfZ/microfat/internal/tlsclient"
 )
 
 const apiBase = "https://api.github.com/repos/" + Repository
@@ -27,17 +29,20 @@ type client struct {
 }
 
 func newClient() client {
-	return client{http: &http.Client{Timeout: downloadTimeout, CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if len(via) >= redirectLimit || req.URL.Scheme != "https" || req.URL.User != nil ||
-			!slices.Contains([]string{"github.com", "api.github.com", "release-assets.githubusercontent.com",
-				"objects.githubusercontent.com"}, req.URL.Host) {
-			return errors.New("release download redirect rejected")
-		}
-		if req.URL.Host != "api.github.com" {
-			req.Header.Del("Authorization")
-		}
-		return nil
-	}}}
+	return client{http: &http.Client{
+		Transport: tlsclient.NewTransport(),
+		Timeout:   downloadTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= redirectLimit || req.URL.Scheme != "https" || req.URL.User != nil ||
+				!slices.Contains([]string{"github.com", "api.github.com", "release-assets.githubusercontent.com",
+					"objects.githubusercontent.com"}, req.URL.Host) {
+				return errors.New("release download redirect rejected")
+			}
+			if req.URL.Host != "api.github.com" {
+				req.Header.Del("Authorization")
+			}
+			return nil
+		}}}
 }
 
 func gitHubToken() string {

@@ -16,7 +16,7 @@ if [ "${SHELLCHECK_ARCH}" != x86_64 ] || [ "${SHELLCHECK_OS}" != Linux ]; then
     echo 'This pinned CI ShellCheck installer requires Linux x86-64' >&2
     exit 1
 fi
-curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 120 \
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.3 --max-time 120 \
     "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
     -o "${SHELLCHECK_TEMP}/shellcheck.tar.xz"
 printf '%s  %s\n' "${SHELLCHECK_SHA256}" "${SHELLCHECK_TEMP}/shellcheck.tar.xz" | sha256sum --check --status

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -317,4 +318,13 @@ func TestPackageRecords(t *testing.T) {
 		copyRecord[key] = "mismatch"
 		require.Error(t, verifyPackageRecord([]map[string]string{copyRecord}, f.lock.packagePin))
 	}
+}
+
+func TestClientEnforcesTLS13(t *testing.T) {
+	t.Parallel()
+	c := Client()
+	tr, ok := c.Transport.(*http.Transport)
+	require.True(t, ok)
+	require.NotNil(t, tr.TLSClientConfig)
+	require.Equal(t, uint16(tls.VersionTLS13), tr.TLSClientConfig.MinVersion)
 }

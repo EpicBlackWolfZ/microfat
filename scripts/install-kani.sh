@@ -21,7 +21,7 @@ kani_sha="${KANI_LINUX_AMD64#*@}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf -- "${tmp_dir}"' EXIT
 
-curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 300 \
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.3 --max-time 300 \
     "https://github.com/model-checking/kani/releases/download/kani-${kani_ver}/kani-${kani_ver}-x86_64-unknown-linux-gnu.tar.gz" \
     -o "${tmp_dir}/kani.tar.gz"
 printf '%s  %s\n' "${kani_sha}" "${tmp_dir}/kani.tar.gz" | sha256sum --check --status

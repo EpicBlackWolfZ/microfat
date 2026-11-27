@@ -16,7 +16,7 @@ fi
 temporary=$(mktemp -d)
 trap 'rm -rf -- "${temporary}"' EXIT
 archive="${temporary}/gitleaks.tar.gz"
-curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 120 \
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.3 --max-time 120 \
     "https://github.com/gitleaks/gitleaks/releases/download/${version}/gitleaks_${version#v}_linux_x64.tar.gz" \
     --output "${archive}"
 if ! printf '%s  %s\n' "${digest}" "${archive}" | sha256sum --check --status; then

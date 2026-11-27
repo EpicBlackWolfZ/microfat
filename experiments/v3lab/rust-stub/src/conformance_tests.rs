@@ -15,6 +15,7 @@ use crate::microarch::{
     parse_normalized_level_rank, should_replace_variant_with_policy, Arm64Features, HostCaps,
     SelectionPolicy, TargetArch, X86Features, ARM_LVL_V8_0, ARM_LVL_V8_5, ARM_LVL_V9_0,
 };
+use crate::sha256::{encode_hex_lower, Sha256};
 
 #[derive(Debug, Clone)]
 enum Json {
@@ -193,23 +194,27 @@ impl<'a> JsonParser<'a> {
     }
 }
 
-fn load_vectors() -> BTreeMap<String, Json> {
+fn load_json_file(filename: &str) -> BTreeMap<String, Json> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
         .join("..")
         .join("formal")
         .join("conformance")
-        .join("vectors.json");
-    let raw = std::fs::read(&path).expect("read vectors.json");
+        .join(filename);
+    let raw = std::fs::read(&path).expect("read conformance json");
     let mut parser = JsonParser {
         bytes: &raw,
         pos: 0,
     };
     match parser.parse_value() {
         Json::Obj(map) => map,
-        _ => panic!("vectors root must be json object"),
+        _ => panic!("conformance root must be json object"),
     }
+}
+
+fn load_vectors() -> BTreeMap<String, Json> {
+    load_json_file("vectors.json")
 }
 
 fn decode_hex(s: &str) -> Vec<u8> {
@@ -423,4 +428,92 @@ fn lean_conformance_elf_filter() {
             other => panic!("unexpected elf arch {other}"),
         }
     }
+}
+
+#[test]
+fn nist_cavp_sha256_conformance() {
+    let root = load_json_file("sha256_cavp.json");
+    let chunk_steps = [1usize, 3, 7, 13, 31, 63, 64, 65, 129];
+    let verify_streaming = |name: &str, msg: &[u8], want_hex: &str| {
+        let oneshot = encode_hex_lower(&Sha256::digest(msg));
+        assert_eq!(
+            core::str::from_utf8(&oneshot).unwrap(),
+            want_hex,
+            "{name} oneshot mismatch"
+        );
+
+        let mut h = Sha256::new();
+        let mut off = 0usize;
+        let mut step_idx = 0usize;
+        while off < msg.len() {
+            let take = core::cmp::min(chunk_steps[step_idx % chunk_steps.len()], msg.len() - off);
+            h.update(&msg[off..off + take]);
+            off += take;
+            step_idx += 1;
+        }
+        let streamed = encode_hex_lower(&h.finalize());
+        assert_eq!(
+            core::str::from_utf8(&streamed).unwrap(),
+            want_hex,
+            "{name} streaming mismatch"
+        );
+    };
+
+    for section in ["fips_180_4_vectors", "cavp_boundary_vectors"] {
+        for entry in root[section].as_arr() {
+            let obj = entry.as_obj();
+            let name = obj["name"].as_str();
+            let msg = decode_hex(obj["msg_hex"].as_str());
+            let want = obj["sha256"].as_str();
+            verify_streaming(name, &msg, want);
+        }
+    }
+
+    let million = root["million_a_vector"].as_obj();
+    let fill = decode_hex(million["byte_hex"].as_str());
+    assert_eq!(fill.len(), 1);
+    let payload = vec![fill[0]; million["count"].as_u64() as usize];
+    verify_streaming(
+        million["name"].as_str(),
+        &payload,
+        million["sha256"].as_str(),
+    );
+
+    let monte = root["shavs_monte_carlo"].as_obj();
+    let seed_vec = decode_hex(monte["seed_hex"].as_str());
+    let mut cur_seed: [u8; 32] = seed_vec.try_into().expect("seed must be 32 bytes");
+    let rounds = monte["rounds"].as_u64();
+    let inner = monte["inner_iterations"].as_u64();
+    let mut checkpoints = BTreeMap::new();
+    for cp in monte["checkpoints"].as_arr() {
+        let obj = cp.as_obj();
+        checkpoints.insert(obj["round"].as_u64(), obj["sha256"].as_str());
+    }
+    let mut verified = 0usize;
+    let mut buf = [0u8; 96];
+    for round in 0..rounds {
+        let mut md0 = cur_seed;
+        let mut md1 = cur_seed;
+        let mut md2 = cur_seed;
+        for _ in 0..inner {
+            buf[0..32].copy_from_slice(&md0);
+            buf[32..64].copy_from_slice(&md1);
+            buf[64..96].copy_from_slice(&md2);
+            let next = Sha256::digest(&buf);
+            md0 = md1;
+            md1 = md2;
+            md2 = next;
+        }
+        cur_seed = md2;
+        if let Some(want) = checkpoints.get(&round) {
+            let got = encode_hex_lower(&cur_seed);
+            assert_eq!(
+                core::str::from_utf8(&got).unwrap(),
+                *want,
+                "monte carlo round {round} mismatch"
+            );
+            verified += 1;
+        }
+    }
+    assert_eq!(verified, checkpoints.len());
 }
