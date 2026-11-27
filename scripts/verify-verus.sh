@@ -51,7 +51,7 @@ export RUSTUP_TOOLCHAIN="${RUST_VERSION}"
 # Mutant check: breaking retained_memory_limit subtraction must fail Verus postcondition.
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf -- "${tmp_dir}"' EXIT
-cp -r experiments/v3lab/rust-stub/src "${tmp_dir}/src"
+cp -R experiments/v3lab/rust-stub/src "${tmp_dir}/src"
 sed -i 's/limit - retained/limit/' "${tmp_dir}/src/cgroup.rs"
 if mutant_out="$(verus --crate-type=lib "${tmp_dir}/src/lib.rs" 2>&1)"; then
     printf '%s\n' "${mutant_out}" >&2
