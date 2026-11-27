@@ -158,6 +158,13 @@ func TestWorkflowDependencyContract(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"lint", "test", "build"}, needs(t, w.Jobs["homebrew"]))
 	assert.Equal(t, nonPushCodeCondition, w.Jobs["homebrew"].If)
+	for _, name := range []string{"formal", "rust"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			assert.ElementsMatch(t, []string{handoffLintJob}, needs(t, w.Jobs[name]))
+			assert.Equal(t, nonPushCodeCondition, w.Jobs[name].If)
+		})
+	}
 	assert.Equal(t, nonPushCodeCondition+" && inputs.failure_probe != 'skip'", w.Jobs["integration"].If)
 	for _, name := range []string{
 		"integration", "dx", "build", "benchmark-smoke", "kernel", "codeql", "installer", "mounts", "qemu", "runtime",
@@ -245,7 +252,7 @@ func TestReusableStagesCannotSilentlySkip(t *testing.T) {
 func TestCIExecutionBoundaries(t *testing.T) {
 	t.Parallel()
 	pin := regexp.MustCompile(`^[^@]+@[0-9a-f]{40}$`)
-	for _, name := range []string{"ci.yml", "pr-title.yml", "benchmark-smoke.yml", "benchmark-kernel.yml", "codeql.yml"} {
+	for _, name := range []string{"ci.yml", "pr-title.yml", "benchmark-smoke.yml", "benchmark-kernel.yml", "codeql.yml", "formal-lab.yml"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			w := readWorkflow(t, name)

@@ -100,6 +100,11 @@ task lint          # Run all linters (Go via golangci-lint, Bash via shellcheck,
 task lint-go       # Run golangci-lint across all packages
 task lint-shell    # Run ShellCheck across all tracked Bash scripts
 task lint-docs     # Validate Markdown links, ADRs, SPECs, verification ledger, and code-to-doc drift
+task verify-formal # Run all mandatory formal verifiers (Gobra, Z3, Lean 4, Kani, Verus)
+task lint-rust     # Check Rust formatting and clippy (native + aarch64-musl) with -D warnings
+task test-rust     # Run verified Rust core unit and Lean conformance tests
+task coverage-rust # Measure Rust core line coverage via cargo-llvm-cov and enforce >=95%
+task vuln-rust     # Run cargo-audit advisories and cargo-deny policy checks on Rust deps
 task vuln          # Run govulncheck vulnerability scan
 task tidy          # Run go mod tidy and go mod verify
 task tidy-check    # Verify module dependencies are tidy using non-mutating verification ('go mod tidy -diff')

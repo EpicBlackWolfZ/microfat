@@ -110,7 +110,8 @@ impl Sha256 {
         let mut w = [0u32; 64];
         for (i, slot) in w[..16].iter_mut().enumerate() {
             let off = i * 4;
-            *slot = u32::from_be_bytes([block[off], block[off + 1], block[off + 2], block[off + 3]]);
+            *slot =
+                u32::from_be_bytes([block[off], block[off + 1], block[off + 2], block[off + 3]]);
         }
         for i in 16..64 {
             let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
@@ -215,5 +216,24 @@ mod tests {
             &encode_hex_lower(&Sha256::digest(msg)),
             b"248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
         );
+
+        let mut def = Sha256::default();
+        let wrap_msg = [b'x'; 57];
+        def.update(&wrap_msg);
+        let d_wrap = def.finalize();
+        assert_eq!(d_wrap, Sha256::digest(&wrap_msg));
+
+        let mut chunked = Sha256::new();
+        chunked.update(&[b'y'; 60]);
+        chunked.update(&[b'y'; 10]);
+        assert_eq!(chunked.finalize(), Sha256::digest(&[b'y'; 70]));
+
+        let bad_short = [b'a'; 63];
+        assert_eq!(decode_hex_digest(&bad_short), None);
+        let mut bad_char = [b'a'; 64];
+        bad_char[1] = b'z';
+        assert_eq!(decode_hex_digest(&bad_char), None);
+        bad_char[1] = b'F';
+        assert!(decode_hex_digest(&bad_char).is_some());
     }
 }

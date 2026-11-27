@@ -10,6 +10,8 @@ vars:
     sh: '. .config/tool-versions.env; printf "%s" "$GOLANGCI_LINT_VERSION"'
   SHELLCHECK_VERSION:
     sh: '. .config/tool-versions.env; version=${SHELLCHECK_LINUX_AMD64%@*}; printf "%s" "${version#v}"'
+  RUST_VERSION:
+    sh: '. .config/tool-versions.env; printf "%s" "$RUST_VERSION"'
   GO_DEFAULT:
     sh: |
       if [ -x .go/bin/go ]; then
@@ -25,6 +27,7 @@ vars:
   BIN_DIR: '{{.BIN_DIR | default "bin"}}'
   COVERAGE_FILE: '{{.COVERAGE_FILE | default "coverage.out"}}'
   COVERAGE_THRESHOLD: '{{.COVERAGE_THRESHOLD | default "95"}}'
+  RUST_COVERAGE_THRESHOLD: '{{.RUST_COVERAGE_THRESHOLD | default "95"}}'
   FUZZTIME: '{{.FUZZTIME | default "5s"}}'
   PORT: '{{.PORT | default "6060"}}'
   HTTP_PORT: '{{.HTTP_PORT | default "8080"}}'
@@ -302,6 +305,77 @@ tasks:
     desc: Check the production Format v2 segment bounds laws with pinned Gobra (GOBRA_ENGINE=docker|podman)
     cmds:
     - GOBRA_ENGINE={{.GOBRA_ENGINE | shellQuote}} bash scripts/verify-format-bounds.sh
+  verify-z3:
+    desc: Verify Z3 QF_BV bit-vector proofs against pinned Z3
+    cmds:
+    - bash scripts/verify-z3.sh
+  verify-lean:
+    desc: Build Lean 4 specification proofs, enforce zero sorryAx, and check conformance vectors
+    cmds:
+    - bash scripts/verify-lean.sh
+  verify-kani:
+    desc: Run Kani bounded model-checking harnesses on the verified Rust core
+    cmds:
+    - bash scripts/verify-kani.sh
+  verify-verus:
+    desc: Verify Verus executable contracts, RUST_VERSION dual-build, and mutant sensitivity
+    cmds:
+    - bash scripts/verify-verus.sh
+  verify-formal:
+    desc: Run all mandatory formal verification gates (Gobra, Z3, Lean 4, Kani, Verus)
+    cmds:
+    - task: verify-cgroup-memory
+    - task: verify-format-bounds
+    - task: verify-z3
+    - task: verify-lean
+    - task: verify-kani
+    - task: verify-verus
+  lint-rust:
+    desc: Check Rust formatting and clippy lints (native + aarch64-musl) with zero warnings
+    preconditions:
+    - sh: command -v cargo >/dev/null
+      msg: Install pinned Rust {{.RUST_VERSION}}; Rust lint cannot be skipped
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      export RUSTUP_TOOLCHAIN={{.RUST_VERSION | shellQuote}}
+      cd experiments/v3lab/rust-stub
+      cargo fmt --check
+      cargo clippy --all-targets -- -D warnings
+      cargo clippy --target aarch64-unknown-linux-musl -- -D warnings
+  test-rust:
+    desc: Run verified Rust core unit and Lean conformance tests
+    preconditions:
+    - sh: command -v cargo >/dev/null
+      msg: Install pinned Rust {{.RUST_VERSION}}; Rust tests cannot be skipped
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      export RUSTUP_TOOLCHAIN={{.RUST_VERSION | shellQuote}}
+      cd experiments/v3lab/rust-stub
+      cargo test
+  coverage-rust:
+    desc: Measure Rust core line coverage with cargo-llvm-cov and enforce at least 95 percent
+    preconditions:
+    - sh: command -v cargo >/dev/null && command -v cargo-llvm-cov >/dev/null
+      msg: Install pinned Rust {{.RUST_VERSION}} and cargo-llvm-cov; Rust coverage cannot be skipped
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      export RUSTUP_TOOLCHAIN={{.RUST_VERSION | shellQuote}}
+      cd experiments/v3lab/rust-stub
+      cargo llvm-cov --no-cfg-coverage --lib --fail-under-lines {{.RUST_COVERAGE_THRESHOLD | shellQuote}} --summary-only
+  vuln-rust:
+    desc: Run cargo-audit advisories and cargo-deny policy checks on Rust dependencies
+    preconditions:
+    - sh: command -v cargo-audit >/dev/null && command -v cargo-deny >/dev/null
+      msg: Install pinned cargo-audit and cargo-deny; Rust vulnerability checks cannot be skipped
+    cmds:
+    - |-
+      {{.TASK_ENV}}
+      cd experiments/v3lab/rust-stub
+      cargo audit --file Cargo.lock
+      cargo deny check
   e2e:
     desc: Build and run black-box tests with race detection (exercises full and minimal stubs)
     cmds:
@@ -314,6 +388,7 @@ tasks:
     cmds:
     - |-
       {{.TASK_ENV}}
+      export RUSTUP_TOOLCHAIN={{.RUST_VERSION | shellQuote}}
       host_musl="x86_64-unknown-linux-musl"
       if [ "$("$GO" env GOARCH)" = "arm64" ]; then
         host_musl="aarch64-unknown-linux-musl"

@@ -2,6 +2,7 @@
 name = "microfat-stub-rs"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
 publish = false
 
 [lib]
@@ -42,4 +43,4 @@ opt-level = 3
 opt-level = 3
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)", "cfg(verus_keep_ghost)"] }

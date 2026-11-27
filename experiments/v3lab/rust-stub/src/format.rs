@@ -171,7 +171,10 @@ pub const fn should_replace_variant(
 }
 
 /// Parses and validates the 56-byte Format v2 EOF trailer against file size.
-pub fn parse_trailer(file_size: u64, trailer: &[u8; TRAILER_SIZE]) -> Result<TrailerInfo, FormatError> {
+pub fn parse_trailer(
+    file_size: u64,
+    trailer: &[u8; TRAILER_SIZE],
+) -> Result<TrailerInfo, FormatError> {
     if file_size < TRAILER_SIZE as u64 {
         return Err(FormatError::TooSmall);
     }
@@ -183,7 +186,13 @@ pub fn parse_trailer(file_size: u64, trailer: &[u8; TRAILER_SIZE]) -> Result<Tra
         trailer[7],
     ]);
     let index_size_u64 = u64::from_le_bytes([
-        trailer[8], trailer[9], trailer[10], trailer[11], trailer[12], trailer[13], trailer[14],
+        trailer[8],
+        trailer[9],
+        trailer[10],
+        trailer[11],
+        trailer[12],
+        trailer[13],
+        trailer[14],
         trailer[15],
     ]);
     if index_size_u64 == 0 || index_size_u64 > MAX_INDEX_SIZE {
@@ -282,7 +291,8 @@ fn decode_one_variant<'a>(
     let off_i = cur.i64_le()?;
     let comp_i = cur.i64_le()?;
     let uncomp_i = cur.i64_le()?;
-    let span = validate_variant_bounds(off_i, comp_i, uncomp_i, index_offset, dict_span, prev_spans)?;
+    let span =
+        validate_variant_bounds(off_i, comp_i, uncomp_i, index_offset, dict_span, prev_spans)?;
     let offset = off_i as u64;
     let compressed_size = comp_i as u64;
     let uncompressed_size = uncomp_i as u64;
@@ -402,7 +412,11 @@ pub fn parse_and_select_v2_index_with_policy<'a>(
 
     let arch = host.target_arch();
     for i in 0..variant_count {
-        let check_slice = if i < FAST_SPANS { &stack_spans[..i] } else { &[] };
+        let check_slice = if i < FAST_SPANS {
+            &stack_spans[..i]
+        } else {
+            &[]
+        };
         let (cand, span) =
             decode_one_variant(&mut cur, index_offset, dict_span, check_slice, arch)?;
         if i < FAST_SPANS {
@@ -597,6 +611,170 @@ mod tests {
                 .selected
                 .level,
             b"v2"
+        );
+    }
+
+    #[test]
+    fn covers_bounds_trailer_and_many_variants_errors() {
+        assert_eq!(
+            validate_dict_bounds(-1, 0, 100),
+            Err(FormatError::InvalidDict)
+        );
+        assert_eq!(
+            validate_dict_bounds(0, -1, 100),
+            Err(FormatError::InvalidDict)
+        );
+        assert_eq!(
+            validate_dict_bounds(0, (MAX_DICTIONARY_SIZE + 1) as i64, 10_000_000),
+            Err(FormatError::InvalidDict)
+        );
+        assert_eq!(
+            validate_dict_bounds(95, 10, 100),
+            Err(FormatError::InvalidDict)
+        );
+
+        let dspan = validate_dict_bounds(10, 20, 100).unwrap();
+        assert_eq!(
+            validate_variant_bounds(-1, 1, 1, 100, None, &[]),
+            Err(FormatError::InvalidVariantBounds)
+        );
+        assert_eq!(
+            validate_variant_bounds(10, 1, (MAX_PAYLOAD_SIZE + 1) as i64, 100, None, &[]),
+            Err(FormatError::InvalidVariantBounds)
+        );
+        assert_eq!(
+            validate_variant_bounds(95, 10, 10, 100, None, &[]),
+            Err(FormatError::InvalidVariantBounds)
+        );
+        assert_eq!(
+            validate_variant_bounds(15, 10, 10, 100, dspan, &[]),
+            Err(FormatError::OverlappingSegments)
+        );
+
+        assert!(!should_replace_variant(None, 4, HostCaps::Amd64(2)));
+        assert!(should_replace_variant(Some(1), 2, HostCaps::Amd64(3)));
+
+        let mut trailer = [0u8; TRAILER_SIZE];
+        assert_eq!(parse_trailer(10, &trailer), Err(FormatError::TooSmall));
+        assert_eq!(parse_trailer(100, &trailer), Err(FormatError::InvalidMagic));
+        trailer[48..56].copy_from_slice(TRAILER_MAGIC);
+        assert_eq!(
+            parse_trailer(100, &trailer),
+            Err(FormatError::InvalidIndexSize)
+        );
+        trailer[8..16].copy_from_slice(&10u64.to_le_bytes());
+        trailer[0..8].copy_from_slice(&90u64.to_le_bytes());
+        assert_eq!(
+            parse_trailer(100, &trailer),
+            Err(FormatError::InvalidIndexOffset)
+        );
+        trailer[0..8].copy_from_slice(&10u64.to_le_bytes());
+        assert_eq!(
+            parse_trailer(100, &trailer),
+            Err(FormatError::InvalidIndexOffset)
+        );
+        let info = TrailerInfo {
+            index_offset: 2000,
+            index_size: 4,
+            expected_index_sha256: [0u8; 32],
+        };
+        assert_eq!(
+            verify_and_select_v2(&info, b"12", HostCaps::Amd64(1)),
+            Err(FormatError::InvalidIndexSize)
+        );
+        assert_eq!(
+            verify_and_select_v2(&info, b"1234", HostCaps::Amd64(1)),
+            Err(FormatError::IndexChecksumMismatch)
+        );
+
+        assert_eq!(
+            parse_and_select_v2_index(&[], 100, b"amd64", HostCaps::Amd64(0)),
+            Err(FormatError::NoCompatibleVariant)
+        );
+        assert_eq!(
+            parse_and_select_v2_index(&[], 100, b"arm64", HostCaps::Arm64(0)),
+            Err(FormatError::NoCompatibleVariant)
+        );
+        assert_eq!(
+            parse_and_select_v2_index(&[0; 4], 100, b"amd64", HostCaps::Amd64(1)),
+            Err(FormatError::InvalidMagic)
+        );
+
+        let mut bad_ver = build_valid_index(b"amd64", &[(b"v1", 1000, 10, 10, b"zstd")]);
+        bad_ver[4] = 9;
+        assert_eq!(
+            parse_and_select_v2_index(&bad_ver, 2000, b"amd64", HostCaps::Amd64(1)),
+            Err(FormatError::UnsupportedVersion)
+        );
+
+        let arch_idx = build_valid_index(b"arm64", &[(b"v8.0", 1000, 10, 10, b"zstd")]);
+        assert_eq!(
+            parse_and_select_v2_index(&arch_idx, 2000, b"amd64", HostCaps::Amd64(1)),
+            Err(FormatError::ArchMismatch)
+        );
+        let zero_idx = build_valid_index(b"amd64", &[]);
+        assert_eq!(
+            parse_and_select_v2_index(&zero_idx, 2000, b"amd64", HostCaps::Amd64(1)),
+            Err(FormatError::ZeroVariants)
+        );
+        let empty_lvl = build_valid_index(b"amd64", &[(b"", 1000, 10, 10, b"zstd")]);
+        assert_eq!(
+            parse_and_select_v2_index(&empty_lvl, 2000, b"amd64", HostCaps::Amd64(1)),
+            Err(FormatError::InvalidVariantBounds)
+        );
+        let bad_comp = build_valid_index(b"amd64", &[(b"v1", 1000, 10, 10, b"brotli")]);
+        assert_eq!(
+            parse_and_select_v2_index(&bad_comp, 2000, b"amd64", HostCaps::Amd64(1)),
+            Err(FormatError::UnsupportedCompression)
+        );
+
+        // Dictionary metadata path
+        let mut dict_idx = Vec::new();
+        dict_idx.extend_from_slice(INDEX_MAGIC_V2);
+        dict_idx.extend_from_slice(&FORMAT_VERSION_2.to_le_bytes());
+        dict_idx.extend_from_slice(&0i64.to_le_bytes());
+        dict_idx.extend_from_slice(&500i64.to_le_bytes());
+        dict_idx.extend_from_slice(&100i64.to_le_bytes());
+        dict_idx.extend_from_slice(&7u32.to_le_bytes());
+        dict_idx.push(64);
+        dict_idx.extend_from_slice(&encode_hex_lower(&Sha256::digest(b"dict")));
+        dict_idx.push(5);
+        dict_idx.extend_from_slice(b"linux");
+        dict_idx.push(5);
+        dict_idx.extend_from_slice(b"amd64");
+        dict_idx.extend_from_slice(&4u16.to_le_bytes());
+        dict_idx.extend_from_slice(b"demo");
+        dict_idx.extend_from_slice(&1u16.to_le_bytes());
+        dict_idx.push(2);
+        dict_idx.extend_from_slice(b"v1");
+        dict_idx.extend_from_slice(&600i64.to_le_bytes());
+        dict_idx.extend_from_slice(&50i64.to_le_bytes());
+        dict_idx.extend_from_slice(&100i64.to_le_bytes());
+        dict_idx.push(64);
+        dict_idx.extend_from_slice(&encode_hex_lower(&Sha256::digest(b"p")));
+        dict_idx.push(4);
+        dict_idx.extend_from_slice(b"zstd");
+        let parsed_dict =
+            parse_and_select_v2_index(&dict_idx, 2000, b"amd64", HostCaps::Amd64(1)).unwrap();
+        assert_eq!(parsed_dict.dict.unwrap().id, 7);
+
+        // > 32 variants exercises the no-alloc re-scan path
+        let mut specs: Vec<TestVariantSpec<'_>> = Vec::new();
+        for k in 0..34i64 {
+            specs.push((b"v1", 100 + k * 10, 5, 10, b"zstd"));
+        }
+        let many = build_valid_index(b"amd64", &specs);
+        assert_eq!(
+            parse_and_select_v2_index(&many, 5000, b"amd64", HostCaps::Amd64(1))
+                .unwrap()
+                .variant_count,
+            34
+        );
+        specs[33] = (b"v1", 100, 5, 10, b"zstd");
+        let many_overlap = build_valid_index(b"amd64", &specs);
+        assert_eq!(
+            parse_and_select_v2_index(&many_overlap, 5000, b"amd64", HostCaps::Amd64(1)),
+            Err(FormatError::OverlappingSegments)
         );
     }
 }

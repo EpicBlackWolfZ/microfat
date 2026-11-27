@@ -1,5 +1,8 @@
 //! Native host capability probing for Linux x86-64 (CPUID + XGETBV) and ARM64 (/proc/self/auxv).
 
+use microfat_stub_core::microarch::HostCaps;
+#[cfg(target_arch = "aarch64")]
+use microfat_stub_core::microarch::ARM_LVL_V8_0;
 #[cfg(target_arch = "x86_64")]
 use microfat_stub_core::microarch::{
     evaluate_amd64_rank, X86Features, BIT_AVX, BIT_AVX2, BIT_AVX512BW, BIT_AVX512CD, BIT_AVX512DQ,
@@ -10,13 +13,9 @@ use microfat_stub_core::microarch::{
 use microfat_stub_core::microarch::{
     evaluate_arm64_mask, Arm64Features, ARM_BIT_ASIMD, ARM_BIT_ASIMDDP, ARM_BIT_ASIMDHP,
     ARM_BIT_ATOMICS, ARM_BIT_BF16, ARM_BIT_CRC32, ARM_BIT_DCPOP, ARM_BIT_DIT, ARM_BIT_FCMA,
-    ARM_BIT_FP, ARM_BIT_FPHP, ARM_BIT_GCS, ARM_BIT_HBC, ARM_BIT_I8MM, ARM_BIT_JSCVT,
-    ARM_BIT_LRCPC, ARM_BIT_MOPS, ARM_BIT_SME, ARM_BIT_SME2, ARM_BIT_SVE, ARM_BIT_SVE2,
-    ARM_BIT_WFXT,
+    ARM_BIT_FP, ARM_BIT_FPHP, ARM_BIT_GCS, ARM_BIT_HBC, ARM_BIT_I8MM, ARM_BIT_JSCVT, ARM_BIT_LRCPC,
+    ARM_BIT_MOPS, ARM_BIT_SME, ARM_BIT_SME2, ARM_BIT_SVE, ARM_BIT_SVE2, ARM_BIT_WFXT,
 };
-#[cfg(target_arch = "aarch64")]
-use microfat_stub_core::microarch::ARM_LVL_V8_0;
-use microfat_stub_core::microarch::HostCaps;
 
 #[cfg(target_arch = "x86_64")]
 #[cfg_attr(test, allow(dead_code))]
@@ -359,8 +358,14 @@ mod tests {
             | (1 << 22)
             | (1 << 24)
             | (1 << 32);
-        let hwcap2: u64 =
-            (1 << 1) | (1 << 13) | (1 << 14) | (1 << 23) | (1 << 31) | (1 << 37) | (1 << 43) | (1 << 44);
+        let hwcap2: u64 = (1 << 1)
+            | (1 << 13)
+            | (1 << 14)
+            | (1 << 23)
+            | (1 << 31)
+            | (1 << 37)
+            | (1 << 43)
+            | (1 << 44);
 
         let mut buf = Vec::new();
         buf.extend_from_slice(&16u64.to_le_bytes());

@@ -23,7 +23,7 @@ type Job struct {
 // RequiredJobs must match the final CI job's explicit needs list. Keeping every
 // expected job here prevents a removed dependency from silently approving a PR.
 func RequiredJobs() []string {
-	return []string{"lint", "gitleaks", "vulncheck", "test", "integration", "dx", "build",
+	return []string{"lint", "gitleaks", "vulncheck", "test", "formal", "rust", "integration", "dx", "build",
 		"benchmark-smoke", "kernel", "codeql", "installer", "mounts", "qemu", "homebrew", "runtime"}
 }
 

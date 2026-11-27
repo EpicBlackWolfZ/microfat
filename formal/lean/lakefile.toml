@@ -4,3 +4,7 @@ defaultTargets = ["Microfat"]
 
 [[lean_lib]]
 name = "Microfat"
+
+[[lean_exe]]
+name = "microfat-conformance"
+root = "Microfat.Conformance"

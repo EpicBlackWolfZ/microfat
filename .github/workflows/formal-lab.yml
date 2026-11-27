@@ -1,15 +1,6 @@
 name: Formal Verification & Rust Lab
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'formal/lean/**'
-      - 'formal/smt/**'
-      - 'experiments/v3lab/rust-stub/**'
-      - 'tests/e2e/rust_stub_parity_test.go'
-      - '.config/tool-versions.env'
-      - '.github/workflows/formal-lab.yml'
   workflow_dispatch:
     inputs:
       run_z3:
@@ -21,11 +12,15 @@ on:
         type: boolean
         default: true
       run_rust_stub:
-        description: Lint, test, and cross-compile microfat-stub-rs
+        description: Lint, test, cover, audit, and cross-compile microfat-stub-rs
         type: boolean
         default: true
       run_kani:
         description: Run standalone Kani verification harnesses
+        type: boolean
+        default: true
+      run_verus:
+        description: Run Verus contracts, RUST_VERSION dual-build, and mutant sensitivity
         type: boolean
         default: true
 
@@ -39,134 +34,105 @@ concurrency:
 jobs:
   z3:
     name: Z3 Bit-Vector Proofs
-    if: github.event_name != 'workflow_dispatch' || inputs.run_z3
+    if: inputs.run_z3
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Install pinned Z3 and verify SMT models
-        shell: bash
+      - name: Install pinned Z3
         run: |
-          set -euo pipefail
-          IFS=$'\n\t'
-          source .config/tool-versions.env
-          z3_tag_ver="${Z3_LINUX_AMD64%@*}"
-          z3_ver="${z3_tag_ver#v}"
-          z3_sha="${Z3_LINUX_AMD64#*@}"
-          tmp_dir="$(mktemp -d)"
-          trap 'rm -rf -- "${tmp_dir}"' EXIT
-          curl -fsSL "https://github.com/Z3Prover/z3/releases/download/z3-${z3_ver}/z3-${z3_ver}-x64-glibc-2.39.zip" -o "${tmp_dir}/z3.zip"
-          printf '%s  %s\n' "${z3_sha}" "${tmp_dir}/z3.zip" | sha256sum --check --status
-          unzip -q "${tmp_dir}/z3.zip" -d "${tmp_dir}"
-          z3_bin="${tmp_dir}/z3-${z3_ver}-x64-glibc-2.39/bin/z3"
-          fmt_out="$("${z3_bin}" formal/smt/format_v2_bounds.smt2)"
-          [[ "${fmt_out}" == $'sat\nunsat\nunsat\nunsat' ]] || { printf '%s\n' "${fmt_out}" >&2; exit 1; }
-          cg_out="$("${z3_bin}" formal/smt/cgroup_memory.smt2)"
-          [[ "${cg_out}" == $'sat\nunsat\nsat\nunsat\nsat\nunsat\nsat\nunsat' ]] || { printf '%s\n' "${cg_out}" >&2; exit 1; }
+          mkdir -p "$RUNNER_TEMP/microfat-tools"
+          bash scripts/install-z3.sh "$RUNNER_TEMP/microfat-tools"
+          echo "$RUNNER_TEMP/microfat-tools" >> "$GITHUB_PATH"
+      - name: Verify Z3 bit-vector models
+        run: bash scripts/verify-z3.sh
 
   lean4:
     name: Lean 4 Specification Proofs
-    if: github.event_name != 'workflow_dispatch' || inputs.run_lean
+    if: inputs.run_lean
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Install pinned elan and build Lean 4 proofs
-        shell: bash
+      - name: Install pinned elan
         run: |
-          set -euo pipefail
-          IFS=$'\n\t'
-          source .config/tool-versions.env
-          elan_ver="${ELAN_LINUX_AMD64%@*}"
-          elan_sha="${ELAN_LINUX_AMD64#*@}"
-          tmp_dir="$(mktemp -d)"
-          trap 'rm -rf -- "${tmp_dir}"' EXIT
-          curl -fsSL "https://github.com/leanprover/elan/releases/download/${elan_ver}/elan-x86_64-unknown-linux-gnu.tar.gz" -o "${tmp_dir}/elan.tar.gz"
-          printf '%s  %s\n' "${elan_sha}" "${tmp_dir}/elan.tar.gz" | sha256sum --check --status
-          tar -xzf "${tmp_dir}/elan.tar.gz" -C "${tmp_dir}"
-          "${tmp_dir}/elan-init" -y --default-toolchain none --no-modify-path
-          export PATH="${HOME}/.elan/bin:${PATH}"
-          cd formal/lean
-          build_log="$(lake build 2>&1)"
-          printf '%s\n' "${build_log}"
-          if grep -Fq 'sorryAx' <<< "${build_log}"; then
-            echo 'Lean proof uses forbidden sorryAx axiom' >&2
-            exit 1
-          fi
+          bash scripts/install-elan.sh
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Verify Lean 4 proofs and conformance vectors
+        run: bash scripts/verify-lean.sh
 
   rust-stub:
-    name: Rust Stub Lint, Test & Static musl Builds
-    if: github.event_name != 'workflow_dispatch' || inputs.run_rust_stub
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Verify microfat-stub-rs on x86_64 and aarch64 musl targets
-        shell: bash
-        run: |
-          set -euo pipefail
-          IFS=$'\n\t'
-          source .config/tool-versions.env
-          rustup toolchain install "${RUST_VERSION}" --profile minimal --component clippy \
-            --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
-          export RUSTUP_TOOLCHAIN="${RUST_VERSION}"
-          (
-            cd experiments/v3lab/rust-stub
-            cargo clippy --all-targets -- -D warnings
-            cargo clippy --target aarch64-unknown-linux-musl -- -D warnings
-            cargo test
-            cargo build --release --target x86_64-unknown-linux-musl
-            cargo build --release --target aarch64-unknown-linux-musl
-          )
-          MICROFAT_TEST_LEAKS=1 \
-          MICROFAT_RUST_STUB_TESTS=required \
-          MICROFAT_RUST_STUB_PATH="${PWD}/experiments/v3lab/rust-stub/target/x86_64-unknown-linux-musl/release/microfat-stub-rs" \
-          go test -race -v ./tests/e2e -run '^TestRustStub' -count=1
-
-  kani:
-    name: Kani Rust Core Verification
-    if: github.event_name != 'workflow_dispatch' || inputs.run_kani
+    name: Rust Stub Lint, Coverage (>= 95%) & Static musl Builds
+    if: inputs.run_rust_stub
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Install pinned Kani and run verification harnesses
-        shell: bash
+      - name: Read shared tool versions
+        id: toolchain
+        uses: ./.github/actions/toolchain-config
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: ./.github/actions/setup-task
+        with:
+          version: ${{ steps.toolchain.outputs.task }}
+      - name: Install pinned Rust toolchain and quality tools
         run: |
-          set -euo pipefail
-          IFS=$'\n\t'
           source .config/tool-versions.env
-          kani_tag_ver="${KANI_LINUX_AMD64%@*}"
-          kani_ver="${kani_tag_ver#v}"
-          kani_sha="${KANI_LINUX_AMD64#*@}"
-          tmp_dir="$(mktemp -d)"
-          trap 'rm -rf -- "${tmp_dir}"' EXIT
-          curl -fsSL "https://github.com/model-checking/kani/releases/download/kani-${kani_ver}/kani-${kani_ver}-x86_64-unknown-linux-gnu.tar.gz" -o "${tmp_dir}/kani.tar.gz"
-          printf '%s  %s\n' "${kani_sha}" "${tmp_dir}/kani.tar.gz" | sha256sum --check --status
-          tar -xzf "${tmp_dir}/kani.tar.gz" -C "${tmp_dir}"
-          kani_dir="${tmp_dir}/kani-${kani_ver}"
-          kani_toolchain="$(tr -d '\r\n' < "${kani_dir}/rust-toolchain-version")"
-          rustup toolchain install "${kani_toolchain}" --profile minimal
-          toolchain_root="${HOME}/.rustup/toolchains/${kani_toolchain}"
-          export LD_LIBRARY_PATH="${toolchain_root}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-          export PATH="${toolchain_root}/bin:${kani_dir}/bin:${PATH}"
-          kani_out="$(kani-driver experiments/v3lab/rust-stub/src/lib.rs --jobs 4 --output-format=terse)"
-          printf '%s\n' "${kani_out}"
-          grep -Fq 'Complete - 17 successfully verified harnesses, 0 failures, 17 total.' <<< "${kani_out}"
+          rustup toolchain install "${RUST_VERSION}" --profile minimal \
+            --component clippy --component rustfmt --component llvm-tools-preview \
+            --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
+          mkdir -p "$RUNNER_TEMP/microfat-tools"
+          bash scripts/install-rust-tools.sh "$RUNNER_TEMP/microfat-tools"
+          echo "$RUNNER_TEMP/microfat-tools" >> "$GITHUB_PATH"
+      - name: Run Rust quality, coverage, cross-build, and E2E parity checks
+        run: |
+          tooling_path=$(bash scripts/tooling-path.sh)
+          export PATH="$tooling_path"
+          task lint-rust vuln-rust test-rust coverage-rust test-rust-stub-e2e
+          source .config/tool-versions.env
+          RUSTUP_TOOLCHAIN="${RUST_VERSION}" cargo build --manifest-path experiments/v3lab/rust-stub/Cargo.toml --release --target aarch64-unknown-linux-musl
+
+  kani:
+    name: Kani Rust Core Verification
+    if: inputs.run_kani
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Kani
+        run: |
+          mkdir -p "$RUNNER_TEMP/microfat-tools"
+          bash scripts/install-kani.sh "$RUNNER_TEMP/microfat-tools"
+          echo "$RUNNER_TEMP/microfat-tools" >> "$GITHUB_PATH"
+      - name: Run Kani verification harnesses
+        run: bash scripts/verify-kani.sh
+
+  verus:
+    name: Verus Dual-Compilation & Mutant Checks
+    if: inputs.run_verus
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Verus and Rust
+        run: |
+          source .config/tool-versions.env
+          rustup toolchain install "${RUST_VERSION}" --profile minimal --target x86_64-unknown-linux-musl
+          mkdir -p "$RUNNER_TEMP/microfat-tools"
+          bash scripts/install-verus.sh "$RUNNER_TEMP/microfat-tools"
+          echo "$RUNNER_TEMP/microfat-tools" >> "$GITHUB_PATH"
+      - name: Run Verus verification and mutant check
+        run: bash scripts/verify-verus.sh

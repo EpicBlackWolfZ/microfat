@@ -25,8 +25,15 @@ pub const BIT_AVX512VL: u32 = 1 << 20;
 pub const V2_MASK: u32 =
     BIT_LAHF_SAHF | BIT_CX16 | BIT_POPCNT | BIT_SSE3 | BIT_SSSE3 | BIT_SSE41 | BIT_SSE42;
 
-pub const V3_ONLY_MASK: u32 =
-    BIT_AVX | BIT_AVX2 | BIT_BMI1 | BIT_BMI2 | BIT_FMA | BIT_OSXSAVE | BIT_F16C | BIT_LZCNT | BIT_MOVBE;
+pub const V3_ONLY_MASK: u32 = BIT_AVX
+    | BIT_AVX2
+    | BIT_BMI1
+    | BIT_BMI2
+    | BIT_FMA
+    | BIT_OSXSAVE
+    | BIT_F16C
+    | BIT_LZCNT
+    | BIT_MOVBE;
 
 pub const V4_ONLY_MASK: u32 =
     BIT_AVX512F | BIT_AVX512BW | BIT_AVX512CD | BIT_AVX512DQ | BIT_AVX512VL;
@@ -539,10 +546,19 @@ mod tests {
 
     #[test]
     fn policy_enforces_force_max_disabled_and_sigill_safety() {
-        assert_eq!(parse_normalized_level_rank(TargetArch::Amd64, b" linux_amd64_V3 "), 3);
+        assert_eq!(
+            parse_normalized_level_rank(TargetArch::Amd64, b" linux_amd64_V3 "),
+            3
+        );
         assert_eq!(parse_normalized_level_rank(TargetArch::Amd64, b"2"), 2);
-        assert_eq!(parse_normalized_level_rank(TargetArch::Arm64, b"arm64-v8.2"), 82);
-        assert_eq!(parse_normalized_level_rank(TargetArch::Amd64, b"invalid"), 0);
+        assert_eq!(
+            parse_normalized_level_rank(TargetArch::Arm64, b"arm64-v8.2"),
+            82
+        );
+        assert_eq!(
+            parse_normalized_level_rank(TargetArch::Amd64, b"invalid"),
+            0
+        );
 
         let host = HostCaps::Amd64(3);
         let mut p = SelectionPolicy::default_none();
@@ -561,7 +577,9 @@ mod tests {
             ..SelectionPolicy::default_none()
         };
         for cand in [1, 2, 3, 4] {
-            assert!(!should_replace_variant_with_policy(None, cand, host, &force_v4));
+            assert!(!should_replace_variant_with_policy(
+                None, cand, host, &force_v4
+            ));
         }
 
         // Compatible force_level=v1 selects only v1 even if v3 is present.
@@ -570,7 +588,64 @@ mod tests {
             ..SelectionPolicy::default_none()
         };
         assert!(should_replace_variant_with_policy(None, 1, host, &force_v1));
-        assert!(!should_replace_variant_with_policy(Some(1), 3, host, &force_v1));
+        assert!(!should_replace_variant_with_policy(
+            Some(1),
+            3,
+            host,
+            &force_v1
+        ));
+    }
+
+    #[test]
+    fn covers_arm64_rank_levels_and_normalization_edges() {
+        let levels = [
+            ("v8.0", 80u8, ARM_LVL_V8_0),
+            ("v8.1", 81, ARM_LVL_V8_1),
+            ("v8.2", 82, ARM_LVL_V8_2),
+            ("v8.3", 83, ARM_LVL_V8_3),
+            ("v8.4", 84, ARM_LVL_V8_4),
+            ("v8.5", 85, ARM_LVL_V8_5),
+            ("v8.6", 86, ARM_LVL_V8_6),
+            ("v8.7", 87, ARM_LVL_V8_7),
+            ("v8.8", 88, ARM_LVL_V8_8),
+            ("v8.9", 89, ARM_LVL_V8_9),
+            ("v9.0", 90, ARM_LVL_V9_0),
+            ("v9.1", 91, ARM_LVL_V9_1),
+            ("v9.2", 92, ARM_LVL_V9_2),
+            ("v9.3", 93, ARM_LVL_V9_3),
+            ("v9.4", 94, ARM_LVL_V9_4),
+            ("v9.5", 95, ARM_LVL_V9_5),
+        ];
+        for (name, rank, bit) in levels {
+            assert_eq!(parse_arm64_rank(name.as_bytes()), rank);
+            assert_eq!(highest_arm64_level_str(bit), name);
+        }
+        assert_eq!(parse_arm64_rank(b"v7.0"), 0);
+        assert_eq!(parse_amd64_rank(b"v9"), 0);
+        assert_eq!(amd64_level_str(4), Some("v4"));
+        assert_eq!(amd64_level_str(5), None);
+        assert_eq!(HostCaps::Amd64(2).target_arch(), TargetArch::Amd64);
+        assert_eq!(HostCaps::Arm64(1).target_arch(), TargetArch::Arm64);
+
+        assert_eq!(parse_normalized_level_rank(TargetArch::Amd64, b"  "), 1);
+        assert_eq!(parse_normalized_level_rank(TargetArch::Arm64, b" "), 0);
+        assert_eq!(
+            parse_normalized_level_rank(TargetArch::Amd64, b"very_long_level_name"),
+            0
+        );
+        assert_eq!(
+            parse_normalized_level_rank(TargetArch::Amd64, b"toolong99"),
+            0
+        );
+        let mut p = SelectionPolicy::default_none();
+        p.disabled_len = 99;
+        assert!(!p.is_disabled(1));
+        assert!(should_replace_variant_with_policy(
+            Some(1),
+            2,
+            HostCaps::Amd64(3),
+            &p
+        ));
     }
 }
 
