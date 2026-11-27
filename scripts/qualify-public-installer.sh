@@ -32,7 +32,7 @@ container_probe() {
     printf '%s\n' keep > "${HOME}/workload.keep"
     printf '%s\n' keep > "${HOME}/.cache/user-workloads/keep"
     bootstrap="${HOME}/install.sh"
-    curl --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' \
+    curl --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' --tlsv1.3 \
         --connect-timeout 15 --max-time 180 --max-filesize 1048576 \
         --dump-header "${evidence}/bootstrap.headers" --write-out '%{url_effective}\n' \
         --output "${bootstrap}" \
@@ -71,7 +71,7 @@ container_probe() {
         [[ ${latest_generation} == "${other_generation}" ]]
     done
     # An independently hash-checked public native helper is a baseline ELF payload for packing.
-    curl --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' \
+    curl --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' --tlsv1.3 \
         --connect-timeout 15 --max-time 180 --max-filesize 268435456 --output "${helper}" \
         "https://github.com/EpicBlackWolfZ/microfat/releases/download/${tag}/microfat-install_${version}_linux_${arch}"
     actual=$(sha256sum < "${helper}")

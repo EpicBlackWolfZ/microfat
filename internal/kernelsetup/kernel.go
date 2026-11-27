@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/EpicBlackWolfZ/microfat/internal/tlsclient"
 )
 
 const (
@@ -71,12 +73,15 @@ func trustedURL(raw string) error {
 }
 
 func Client() *http.Client {
-	return &http.Client{Timeout: requestTimeout, CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if len(via) >= redirectLimit {
-			return errors.New("too many Ubuntu redirects")
-		}
-		return trustedURL(req.URL.String())
-	}}
+	return &http.Client{
+		Transport: tlsclient.NewTransport(),
+		Timeout:   requestTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= redirectLimit {
+				return errors.New("too many Ubuntu redirects")
+			}
+			return trustedURL(req.URL.String())
+		}}
 }
 
 func decodeLock(data []byte) (kernelLock, error) {

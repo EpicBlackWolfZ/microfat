@@ -30,7 +30,7 @@ verus_sha="${verus_pin#*@}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf -- "${tmp_dir}"' EXIT
 
-curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 300 \
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.3 --max-time 300 \
     "https://github.com/verus-lang/verus/releases/download/release/${verus_ver}/verus-${verus_ver}-${verus_arch}-linux.zip" \
     -o "${tmp_dir}/verus.zip"
 printf '%s  %s\n' "${verus_sha}" "${tmp_dir}/verus.zip" | sha256sum --check --status

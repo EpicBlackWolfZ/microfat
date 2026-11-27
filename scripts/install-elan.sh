@@ -19,7 +19,7 @@ elan_sha="${ELAN_LINUX_AMD64#*@}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf -- "${tmp_dir}"' EXIT
 
-curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-time 180 \
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.3 --max-time 180 \
     "https://github.com/leanprover/elan/releases/download/${elan_ver}/elan-x86_64-unknown-linux-gnu.tar.gz" \
     -o "${tmp_dir}/elan.tar.gz"
 printf '%s  %s\n' "${elan_sha}" "${tmp_dir}/elan.tar.gz" | sha256sum --check --status

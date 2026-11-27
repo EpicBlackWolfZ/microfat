@@ -3,6 +3,7 @@ package homebrew
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
@@ -232,4 +233,13 @@ func TestClientGitHubTokenSelection(t *testing.T) {
 	t.Setenv("GH_TOKEN", "ghp_primary")
 	require.NoError(t, c.json(t.Context(), apiBase, &struct{}{}))
 	assert.Equal(t, "Bearer ghp_primary", gotAuth)
+}
+
+func TestClientEnforcesTLS13(t *testing.T) {
+	t.Parallel()
+	c := newClient()
+	tr, ok := c.http.Transport.(*http.Transport)
+	require.True(t, ok)
+	require.NotNil(t, tr.TLSClientConfig)
+	assert.Equal(t, uint16(tls.VersionTLS13), tr.TLSClientConfig.MinVersion)
 }

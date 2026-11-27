@@ -32,7 +32,7 @@ esac
 cosign_version=${cosign_pin%@*}
 pin=${cosign_pin#*@}
 cosign="${private}/cosign"
-curl --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' \
+curl --fail --silent --show-error --location --max-redirs 5 --proto '=https' --proto-redir '=https' --tlsv1.3 \
     --connect-timeout 15 --max-time 180 --max-filesize 268435456 \
     --output "${cosign}" "https://github.com/sigstore/cosign/releases/download/${cosign_version}/cosign-linux-${arch}"
 actual=$(sha256sum < "${cosign}")

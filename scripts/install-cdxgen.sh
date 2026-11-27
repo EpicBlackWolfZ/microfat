@@ -21,7 +21,7 @@ CDXGEN_VERSION=${CDXGEN_PIN%@*}
 CDXGEN_SHA=${CDXGEN_PIN#*@}
 CDXGEN_TEMP="$(mktemp -d)"
 trap 'rm -rf "${CDXGEN_TEMP}"' EXIT
-curl --fail --show-error --silent --location --connect-timeout 15 --max-time 180 \
+curl --fail --show-error --silent --location --proto '=https' --proto-redir '=https' --tlsv1.3 --connect-timeout 15 --max-time 180 \
     "https://github.com/cdxgen/cdxgen/releases/download/${CDXGEN_VERSION}/cdx-convert-linux-${CDXGEN_ARCH}" \
     --output "${CDXGEN_TEMP}/cdx-convert"
 printf '%s  %s\n' "${CDXGEN_SHA}" "${CDXGEN_TEMP}/cdx-convert" | sha256sum --check --status

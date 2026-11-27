@@ -19,6 +19,7 @@ import (
 	"github.com/EpicBlackWolfZ/microfat/internal/inputfile"
 	"github.com/EpicBlackWolfZ/microfat/internal/install"
 	"github.com/EpicBlackWolfZ/microfat/internal/releasechecksums"
+	"github.com/EpicBlackWolfZ/microfat/internal/tlsclient"
 )
 
 const (
@@ -80,7 +81,7 @@ type Client struct {
 }
 
 func NewClient() *Client {
-	return &Client{http: &http.Client{Timeout: requestTimeout, CheckRedirect: checkRedirect}}
+	return &Client{http: &http.Client{Transport: tlsclient.NewTransport(), Timeout: requestTimeout, CheckRedirect: checkRedirect}}
 }
 
 // NewLocalClient consumes operator-downloaded assets, including an unpublished
