@@ -2912,6 +2912,54 @@ fn argv_bytes(
     Some(unsafe { core::slice::from_raw_parts(p.cast::<u8>(), len) })
 }
 
+#[derive(Clone, Copy)]
+struct DispatchContext<'a> {
+    original_exe: &'a [u8],
+    diag_mode: DiagMode,
+    start_ns: u64,
+    host_caps: HostCaps,
+    selected: &'a SelectedVariant<'a>,
+    policy_applied: Option<&'static str>,
+    override_reason: Option<&'a [u8]>,
+    cgroup_limits: Option<CgroupLimits>,
+}
+
+fn prepare_dispatch_env(
+    ctx: &DispatchContext<'_>,
+    exec_mode_str: &[u8],
+    cold_extract: bool,
+    decomp_ns: u64,
+) -> Vec<Vec<u8>> {
+    let env_lines = build_runtime_exec_env(
+        ctx.original_exe,
+        ctx.host_caps,
+        ctx.selected,
+        exec_mode_str,
+        ctx.policy_applied,
+        ctx.override_reason,
+        ctx.cgroup_limits,
+    );
+    let total_ns = if ctx.diag_mode != DiagMode::Off {
+        monotonic_ns().saturating_sub(ctx.start_ns)
+    } else {
+        0
+    };
+    emit_dispatch_telemetry(
+        ctx.diag_mode,
+        ctx.host_caps,
+        ctx.selected,
+        exec_mode_str,
+        ctx.policy_applied,
+        ctx.override_reason,
+        ctx.cgroup_limits,
+        &env_lines,
+        cold_extract,
+        decomp_ns,
+        total_ns,
+    );
+    env_lines
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 fn run_launcher(argc: libc::c_int, argv: *const *const libc::c_char) {
     check_unprivileged();
@@ -3011,6 +3059,16 @@ fn run_launcher(argc: libc::c_int, argv: *const *const libc::c_char) {
     let original_exe = readlink_proc_self_exe(argv0_fallback);
     let cgroup_limits = resolve_cgroup_limits_custom(b"/sys/fs/cgroup", b"/proc/self/cgroup\0");
     let exec_mode = resolve_exec_mode();
+    let dispatch_ctx = DispatchContext {
+        original_exe: &original_exe,
+        diag_mode,
+        start_ns,
+        host_caps,
+        selected: &validated.selected,
+        policy_applied,
+        override_reason: override_reason.as_deref(),
+        cgroup_limits,
+    };
 
     if exec_mode == ExecMode::Cache {
         let hit_fd = match try_warm_cache(
@@ -3065,33 +3123,7 @@ fn run_launcher(argc: libc::c_int, argv: *const *const libc::c_char) {
                 fd
             }
         };
-        let env_lines = build_runtime_exec_env(
-            &original_exe,
-            host_caps,
-            &validated.selected,
-            b"cache",
-            policy_applied,
-            override_reason.as_deref(),
-            cgroup_limits,
-        );
-        let total_ns = if diag_mode != DiagMode::Off {
-            monotonic_ns().saturating_sub(start_ns)
-        } else {
-            0
-        };
-        emit_dispatch_telemetry(
-            diag_mode,
-            host_caps,
-            &validated.selected,
-            b"cache",
-            policy_applied,
-            override_reason.as_deref(),
-            cgroup_limits,
-            &env_lines,
-            cold_extract,
-            decomp_ns,
-            total_ns,
-        );
+        let env_lines = prepare_dispatch_env(&dispatch_ctx, b"cache", cold_extract, decomp_ns);
         drop(index_cow);
         drop(trailer_cow);
         drop(mapped);
@@ -3107,33 +3139,7 @@ fn run_launcher(argc: libc::c_int, argv: *const *const libc::c_char) {
             validated.selected.uncompressed_size,
         ) {
             Ok(CacheOutcome::Hit(cached_fd)) => {
-                let env_lines = build_runtime_exec_env(
-                    &original_exe,
-                    host_caps,
-                    &validated.selected,
-                    b"cache",
-                    policy_applied,
-                    override_reason.as_deref(),
-                    cgroup_limits,
-                );
-                let total_ns = if diag_mode != DiagMode::Off {
-                    monotonic_ns().saturating_sub(start_ns)
-                } else {
-                    0
-                };
-                emit_dispatch_telemetry(
-                    diag_mode,
-                    host_caps,
-                    &validated.selected,
-                    b"cache",
-                    policy_applied,
-                    override_reason.as_deref(),
-                    cgroup_limits,
-                    &env_lines,
-                    false,
-                    0,
-                    total_ns,
-                );
+                let env_lines = prepare_dispatch_env(&dispatch_ctx, b"cache", false, 0);
                 let _err = exec_verified_fd(cached_fd, argc, argv, &env_lines);
                 warm_hit_exec_failed = true;
             }
@@ -3182,33 +3188,7 @@ fn run_launcher(argc: libc::c_int, argv: *const *const libc::c_char) {
             if unsafe { libc::fcntl(memfd.as_raw_fd(), libc::F_ADD_SEALS, SEAL_MASK) } != 0 {
                 true
             } else {
-                let env_lines = build_runtime_exec_env(
-                    &original_exe,
-                    host_caps,
-                    &validated.selected,
-                    b"memfd",
-                    policy_applied,
-                    override_reason.as_deref(),
-                    cgroup_limits,
-                );
-                let total_ns = if diag_mode != DiagMode::Off {
-                    monotonic_ns().saturating_sub(start_ns)
-                } else {
-                    0
-                };
-                emit_dispatch_telemetry(
-                    diag_mode,
-                    host_caps,
-                    &validated.selected,
-                    b"memfd",
-                    policy_applied,
-                    override_reason.as_deref(),
-                    cgroup_limits,
-                    &env_lines,
-                    true,
-                    decomp_ns,
-                    total_ns,
-                );
+                let env_lines = prepare_dispatch_env(&dispatch_ctx, b"memfd", true, decomp_ns);
                 let _exec_err = exec_verified_fd(memfd, argc, argv, &env_lines);
                 true
             }
@@ -3247,33 +3227,7 @@ fn run_launcher(argc: libc::c_int, argv: *const *const libc::c_char) {
         } else {
             0
         };
-        let env_lines = build_runtime_exec_env(
-            &original_exe,
-            host_caps,
-            &validated.selected,
-            b"cache",
-            policy_applied,
-            override_reason.as_deref(),
-            cgroup_limits,
-        );
-        let total_ns = if diag_mode != DiagMode::Off {
-            monotonic_ns().saturating_sub(start_ns)
-        } else {
-            0
-        };
-        emit_dispatch_telemetry(
-            diag_mode,
-            host_caps,
-            &validated.selected,
-            b"cache",
-            policy_applied,
-            override_reason.as_deref(),
-            cgroup_limits,
-            &env_lines,
-            true,
-            decomp_ns,
-            total_ns,
-        );
+        let env_lines = prepare_dispatch_env(&dispatch_ctx, b"cache", true, decomp_ns);
         drop(dict_bytes);
         drop(index_cow);
         drop(trailer_cow);
