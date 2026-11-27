@@ -8,9 +8,9 @@ microfat_bootstrap() (
 
     readonly helper_version='0.4.1'
     # renovate: datasource=github-release-attachments depName=sigstore/cosign
-    readonly cosign_amd64='v3.1.4@424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa'
+    readonly cosign_amd64='v3.1.6@318a99ade4156a0c4113aa983b46c0a0830fa7896a096c63121ee47b610a94c6'
     # renovate: datasource=github-release-attachments depName=sigstore/cosign
-    readonly cosign_arm64='v3.1.4@ade83b7aac62e131cacfe96d958948b2150cc9efec46a570a2649b8e27dedad2'
+    readonly cosign_arm64='v3.1.6@bbb2ebc765f483cf9fac42da8763dddc2b55b350ee12ea0c44a520a6d6d52334'
     readonly repository='https://github.com/EpicBlackWolfZ/microfat'
     readonly issuer='https://token.actions.githubusercontent.com'
     readonly metadata_limit=1048576
