@@ -806,7 +806,7 @@ use each candidate's `effective_environment` to inspect its inherited or injecte
 | `MICROFAT_DISABLE_VARIANTS` | `string` | *(unset)* | Comma-separated list of variant levels to exclude from selection (e.g. `v4,v9.2`). |
 | `MICROFAT_POLICY` | `string` | *(unset)* | Preset dispatch policy name (`safe_avx512`, `no_downclock`). |
 | `MICROFAT_AVX512_DOWNCLOCK_PROTECTION` | `bool` | `0` | Enable Intel Skylake-X/Cascade Lake Xeon downclocking mitigation. |
-| `MICROFAT_EXEC_MODE` | `string` | *(unset: auto)* | Auto checks an existing verified cache entry, then sealed memfd on a miss; cold memfd denial can materialize cache. Explicit `memfd` bypasses cache and fails closed; `cache` materializes verified disk entries. |
+| `MICROFAT_EXEC_MODE` | `string` | *(unset: auto)* | Caller execution policy: `auto` checks an existing verified cache entry, then sealed memfd on a miss (cold memfd denial can materialize cache). Explicit `memfd` bypasses cache and fails closed; `cache` materializes verified disk entries. Preserved untouched across `execve` for child processes. |
 | `MICROFAT_CACHE_DIR` | `string` | *(unset)* | Custom node cache directory path (defaults to `$XDG_CACHE_HOME/microfat`). |
 | `MICROFAT_VERIFY_CACHE` | *(ignored)* | *(ignored)* | Cache size, owner, permissions and SHA-256 checks are mandatory on every hit; this variable cannot disable them. |
 | `MICROFAT_LOG` | `string` | `text` | Logging mode: `text` or `json` (structured JSON telemetry on stderr). |
@@ -824,7 +824,7 @@ Extraction corruption is terminal. See the [complete dispatch and trust contract
 
 ### Exported Downstream Runtime Telemetry Variables
 
-Whenever the launcher stub executes a payload variant, it exports runtime metadata variables to child processes in `os.Environ()`:
+Whenever the launcher stub executes a payload variant, it exports runtime metadata variables to child processes in `os.Environ()` (`MICROFAT_EXEC_MODE` stays preserved untouched as caller input policy):
 
 | Environment Variable | Type | Example Value | Description |
 | :--- | :--- | :--- | :--- |
@@ -832,8 +832,7 @@ Whenever the launcher stub executes a payload variant, it exports runtime metada
 | `MICROFAT_SELECTED_VARIANT` | `string` | `v3` | Microarchitecture level selected for execution. |
 | `MICROFAT_HOST_ARCH` | `string` | `amd64` | Detected host CPU architecture. |
 | `MICROFAT_HOST_LEVEL` | `string` | `v4` | Highest detected microarchitecture capability of host CPU. |
-| `MICROFAT_EXEC_MODE` | `string` | `memfd` | Runtime dispatch mechanism (`memfd` or `cache`). |
-| `MICROFAT_DISPATCH_MODE` | `string` | `memfd` | Alias for `MICROFAT_EXEC_MODE`. |
+| `MICROFAT_DISPATCH_MODE` | `string` | `memfd` | Output-only realized runtime dispatch mechanism (`memfd` or `cache`). Stripped from parent environments on entry and never read as an input override. |
 | `MICROFAT_POLICY_APPLIED` | `string` | `safe_avx512` | Policy applied during variant selection. |
 | `MICROFAT_OVERRIDE_REASON` | `string` | `Intel Skylake-X downclock protection` | Explanatory reason for policy override. |
 | `MICROFAT_SELECTED_SHA256` | `string` | `fda5c10d86f6...` | SHA-256 hash of the uncompressed payload. |

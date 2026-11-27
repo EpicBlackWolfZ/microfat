@@ -16,12 +16,9 @@ const (
 	autotuneDryRun   = "dry-run"
 )
 
-// resolveRequestedExecMode mirrors dispatch policy, including its legacy fallback and invalid-value handling.
+// resolveRequestedExecMode resolves the caller's execution policy, defaulting invalid or unset values to auto.
 func resolveRequestedExecMode() string {
 	requested := os.Getenv(format.EnvExecMode)
-	if requested == "" {
-		requested = os.Getenv(format.EnvDispatchMode)
-	}
 	switch {
 	case strings.EqualFold(requested, format.ExecModeCache):
 		return format.ExecModeCache

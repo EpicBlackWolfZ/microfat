@@ -26,7 +26,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const unknownConfig = "unknown"
+const (
+	unknownConfig     = "unknown"
+	testGoMaxProcsKey = "gomaxprocs"
+	testLevelKey      = "level"
+)
 
 func TestMain(m *testing.M) {
 	if len(os.Args) == 4 && os.Args[1] == "benchmark" && os.Args[2] == "observe" {
@@ -193,16 +197,23 @@ func TestTrialHelpers(t *testing.T) {
 	t.Parallel()
 	cfg := schema.Configuration{Level: "v1", Mode: "native", Tuning: tuningMatched,
 		Environment: map[string]string{"GOMAXPROCS": "1"}}
-	diagnostic := map[string]string{"level": "v1", "gomaxprocs": "1"}
+	diagnostic := map[string]string{testLevelKey: "v1", testGoMaxProcsKey: "1"}
 	require.NoError(t, validateIdentity(cfg, diagnostic))
-	diagnostic["level"] = "v2"
+	diagnostic[testLevelKey] = "v2"
 	require.Error(t, validateIdentity(cfg, diagnostic))
-	diagnostic["level"] = "v1"
-	diagnostic["gomaxprocs"] = "2"
+	diagnostic[testLevelKey] = "v1"
+	diagnostic[testGoMaxProcsKey] = "2"
 	require.Error(t, validateIdentity(cfg, diagnostic))
 	cfg.Mode = "memfd"
 	require.Error(t, validateIdentity(cfg, diagnostic))
-	assert.Contains(t, targetEnvironment(cfg, "/cache"), "MICROFAT_DISPATCH_MODE=memfd")
+	require.NoError(t, validateIdentity(cfg, map[string]string{
+		testLevelKey:                "v1",
+		testGoMaxProcsKey:           "1",
+		"MICROFAT_EXEC_MODE":        "auto",
+		"MICROFAT_DISPATCH_MODE":    "memfd",
+		"MICROFAT_SELECTED_VARIANT": "v1",
+	}))
+	assert.Contains(t, targetEnvironment(cfg, "/cache"), "MICROFAT_EXEC_MODE=memfd")
 	require.Error(t, prewarm(missingExperimentPath, "v1", t.TempDir()))
 	file := filepath.Join(t.TempDir(), "invalid")
 	require.NoError(t, os.WriteFile(file, []byte("invalid"), evidenceFilePerm))

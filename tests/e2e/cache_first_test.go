@@ -5,13 +5,16 @@ package e2e_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/runtimeinfo"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 )
@@ -21,7 +24,11 @@ type cacheFirstProfile struct {
 	path string
 }
 
-const cacheFirstSymlink = "symlink"
+const (
+	cacheFirstSymlink          = "symlink"
+	cacheFirstReadOnlyPerm     = 0o500
+	multiHopExpectedMemfdCount = 2
+)
 
 func cacheFirstProfiles(t *testing.T) []cacheFirstProfile {
 	t.Helper()
@@ -66,7 +73,7 @@ func runCacheFirstProcess(t *testing.T, path string, env []string, args ...strin
 
 func requireCacheFirstMode(t *testing.T, path string, env []string, mode string) {
 	t.Helper()
-	stdout, stderr, err := runCacheFirstProcess(t, path, env, "--echo-env", "MICROFAT_EXEC_MODE")
+	stdout, stderr, err := runCacheFirstProcess(t, path, env, "--echo-env", "MICROFAT_DISPATCH_MODE")
 	require.NoError(t, err, stderr)
 	require.Equal(t, mode, stdout, stderr)
 	require.Contains(t, stderr, "exec_mode="+mode)
@@ -132,7 +139,7 @@ func TestCacheFirstAutoExecution(t *testing.T) {
 				t.Parallel()
 				dir := filepath.Join(t.TempDir(), "cache")
 				stdout, stderr, err := runCacheFirstProcess(t, seccompRunnerPath, cacheFirstEnv(dir),
-					profile.path, "--echo-env", "MICROFAT_EXEC_MODE")
+					profile.path, "--echo-env", "MICROFAT_DISPATCH_MODE")
 				require.NoError(t, err, stderr)
 				require.Equal(t, execModeCache, stdout, stderr)
 				entries, err := os.ReadDir(dir)
@@ -190,7 +197,7 @@ func TestCacheFirstUnsafeEntriesFailClosed(t *testing.T) {
 				before := cacheTreeSnapshot(t, root)
 				for _, mode := range []string{"", execModeCache} {
 					env := append(cacheFirstEnv(dir), "MICROFAT_EXEC_MODE="+mode)
-					stdout, stderr, err := runCacheFirstProcess(t, profile.path, env, "--echo-env", "MICROFAT_EXEC_MODE")
+					stdout, stderr, err := runCacheFirstProcess(t, profile.path, env, "--echo-env", "MICROFAT_DISPATCH_MODE")
 					require.Error(t, err, "unsafe entry was accepted: %s", stderr)
 					require.Empty(t, stdout, "payload executed despite unsafe cache metadata")
 					require.Equal(t, before, cacheTreeSnapshot(t, root), "unsafe entry was repaired or removed")
@@ -260,11 +267,148 @@ func TestCacheFirstWarmHitAndSourceCorruption(t *testing.T) {
 				append(cacheFirstEnv(dir), "MICROFAT_EXEC_MODE=memfd"),
 				cacheFirstEnv(filepath.Join(root, "absent-cache")),
 			} {
-				stdout, stderr, err := runCacheFirstProcess(t, fat, env, "--echo-env", "MICROFAT_EXEC_MODE")
+				stdout, stderr, err := runCacheFirstProcess(t, fat, env, "--echo-env", "MICROFAT_DISPATCH_MODE")
 				require.Error(t, err, stderr)
 				require.Empty(t, stdout, "source corruption must abort extraction without cache fallback")
 			}
 			require.Equal(t, before, cacheTreeSnapshot(t, root))
+		})
+	}
+}
+
+func assertMultiHopParentToChildAutoDispatch(t *testing.T, childStubPath, parentFat string) {
+	t.Helper()
+	binDir := t.TempDir()
+	reporter := filepath.Join(binDir, "runtimeinfo-reporter")
+	require.NoError(t, compileBinary(runtimeInfoReporterPkg, reporter,
+		[]string{envStatic, envBaselineAMD64, runtimeInfoARM64Base}))
+	baseLevel, _ := hostVariantLabels()
+	childFat := filepath.Join(binDir, "child-reporter.fat")
+	require.NoError(t, packBinary(cliPath, childStubPath, "multihop-child", childFat, map[string]string{baseLevel: reporter}))
+
+	runHop := func(env []string) (runtimeinfo.Snapshot, string) {
+		stdout, stderr, err := runCacheFirstProcess(t, parentFat, env, "--exec-child", childFat)
+		require.NoError(t, err, "multi-hop failed: %s", stderr)
+		var snapshot runtimeinfo.Snapshot
+		require.NoError(t, json.Unmarshal([]byte(stdout), &snapshot), "stdout=%s stderr=%s", stdout, stderr)
+		return snapshot, stderr
+	}
+
+	t.Run("warm parent in read-only cache spawns uncached child in auto mode", func(t *testing.T) {
+		t.Parallel()
+		for _, callerPolicy := range []string{"", stubInfoModeAuto} {
+			name := "unset"
+			if callerPolicy != "" {
+				name = callerPolicy
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				root := t.TempDir()
+				dir := filepath.Join(root, "cache")
+				entry := prepareCacheFirstEntry(t, parentFat, dir)
+				require.NoError(t, os.Chmod(entry, cacheFirstReadOnlyPerm))
+				require.NoError(t, os.Chmod(dir, cacheFirstReadOnlyPerm))
+				t.Cleanup(func() { require.NoError(t, os.Chmod(dir, privateDirPerm)) })
+				before := cacheTreeSnapshot(t, root)
+
+				env := stubInfoProcessEnvironment(dir, envDebugTrue)
+				if callerPolicy != "" {
+					env = append(env, "MICROFAT_EXEC_MODE="+callerPolicy)
+				}
+				snapshot, stderr := runHop(env)
+				require.Equal(t, before, cacheTreeSnapshot(t, root))
+				assertRuntimeInfoField(t, snapshot.Launcher.DispatchMode, execModeMemfd)
+				if callerPolicy == "" {
+					require.Equal(t, runtimeinfo.StatusMissing, snapshot.Launcher.ExecMode.Status)
+					require.Equal(t, runtimeinfo.StatusMissing, snapshot.Configured.ExecMode.Status)
+				} else {
+					assertRuntimeInfoField(t, snapshot.Launcher.ExecMode, callerPolicy)
+					assertRuntimeInfoField(t, snapshot.Configured.ExecMode, callerPolicy)
+				}
+				cachePos := strings.Index(stderr, "exec_mode="+execModeCache)
+				memfdPos := strings.Index(stderr, "exec_mode="+execModeMemfd)
+				require.NotEqual(t, -1, cachePos, stderr)
+				require.Greater(t, memfdPos, cachePos, "parent should dispatch via cache before child uses memfd: %s", stderr)
+			})
+		}
+	})
+
+	t.Run("uncached parent spawns warm-cached child in read-only cache", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		dir := filepath.Join(root, "cache")
+		_, stderrPre, err := runCacheFirstProcess(t, childFat,
+			stubInfoProcessEnvironment(dir, envExecCache), "-set-env", "UNUSED=1")
+		require.NoError(t, err, stderrPre)
+		entries, err := os.ReadDir(dir)
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+		childEntry := filepath.Join(dir, entries[0].Name())
+		require.NoError(t, os.Chmod(childEntry, cacheFirstReadOnlyPerm))
+		require.NoError(t, os.Chmod(dir, cacheFirstReadOnlyPerm))
+		t.Cleanup(func() { require.NoError(t, os.Chmod(dir, privateDirPerm)) })
+		before := cacheTreeSnapshot(t, root)
+
+		env := stubInfoProcessEnvironment(dir, envDebugTrue, "MICROFAT_EXEC_MODE=auto")
+		snapshot, stderr := runHop(env)
+		require.Equal(t, before, cacheTreeSnapshot(t, root))
+		assertRuntimeInfoField(t, snapshot.Launcher.DispatchMode, execModeCache)
+		assertRuntimeInfoField(t, snapshot.Launcher.ExecMode, stubInfoModeAuto)
+		assertRuntimeInfoField(t, snapshot.Configured.ExecMode, stubInfoModeAuto)
+		memfdPos := strings.Index(stderr, "exec_mode="+execModeMemfd)
+		cachePos := strings.Index(stderr, "exec_mode="+execModeCache)
+		require.NotEqual(t, -1, memfdPos, stderr)
+		require.Greater(t, cachePos, memfdPos, "parent should dispatch via memfd before child hits warm cache: %s", stderr)
+	})
+
+	t.Run("explicit memfd policy propagates through multi-hop dispatch", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		dir := filepath.Join(root, "cache")
+		parentEntry := prepareCacheFirstEntry(t, parentFat, dir)
+		_, stderrPre, err := runCacheFirstProcess(t, childFat,
+			stubInfoProcessEnvironment(dir, envExecCache))
+		require.NoError(t, err, stderrPre)
+		entries, err := os.ReadDir(dir)
+		require.NoError(t, err)
+		for _, item := range entries {
+			require.NoError(t, os.Chmod(filepath.Join(dir, item.Name()), cacheFirstReadOnlyPerm))
+		}
+		_, err = os.Stat(parentEntry)
+		require.NoError(t, err)
+		require.NoError(t, os.Chmod(dir, cacheFirstReadOnlyPerm))
+		t.Cleanup(func() { require.NoError(t, os.Chmod(dir, privateDirPerm)) })
+		before := cacheTreeSnapshot(t, root)
+
+		env := stubInfoProcessEnvironment(dir, envDebugTrue, "MICROFAT_EXEC_MODE=memfd")
+		snapshot, stderr := runHop(env)
+		require.Equal(t, before, cacheTreeSnapshot(t, root))
+		assertRuntimeInfoField(t, snapshot.Launcher.DispatchMode, execModeMemfd)
+		assertRuntimeInfoField(t, snapshot.Launcher.ExecMode, execModeMemfd)
+		assertRuntimeInfoField(t, snapshot.Configured.ExecMode, execModeMemfd)
+		require.Equal(t, multiHopExpectedMemfdCount, strings.Count(stderr, "exec_mode="+execModeMemfd), stderr)
+		require.NotContains(t, stderr, "exec_mode="+execModeCache)
+	})
+}
+
+func TestCacheFirstAutoMultiHopParentToChild(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	minimalStub := filepath.Join(dir, "minimal-stub")
+	require.NoError(t, compileBinaryWithFlags(stubPackagePath, minimalStub,
+		[]string{envBaselineAMD64, "GOARM64=" + manifestARM64Base}, "-tags=minimal", "-ldflags=-s -w"))
+	minimalFat := filepath.Join(dir, "minimal-fat")
+	require.NoError(t, packBinary(cliPath, minimalStub, "multihop-min", minimalFat, goldenVariantBins))
+
+	for _, tc := range []struct {
+		name, stub, fat string
+	}{
+		{name: launcherFullProfile, stub: stubPath, fat: goldenFatBin},
+		{name: launcherMinimalProfile, stub: minimalStub, fat: minimalFat},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assertMultiHopParentToChildAutoDispatch(t, tc.stub, tc.fat)
 		})
 	}
 }

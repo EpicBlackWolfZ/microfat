@@ -107,15 +107,18 @@ func TestBuildAutoTunedEnviron(t *testing.T) {
 	env, _ := buildAutoTunedEnviron("", base, entry, format.ExecModeMemfd, hostInfo, testPolicyRes)
 	assert.Subset(t, env, []string{
 		"MICROFAT_SELECTED_VARIANT=v3", "MICROFAT_HOST_ARCH=amd64", "MICROFAT_HOST_LEVEL=v3",
-		"MICROFAT_EXEC_MODE=memfd", "MICROFAT_DISPATCH_MODE=memfd", "MICROFAT_SELECTED_SHA256=abcdef123456",
+		"MICROFAT_DISPATCH_MODE=memfd", "MICROFAT_SELECTED_SHA256=abcdef123456",
 		"MICROFAT_SELECTED_SIZE=1000", "MICROFAT_POLICY_APPLIED=force_level",
 		"MICROFAT_OVERRIDE_REASON=MICROFAT_FORCE_LEVEL=v3",
 	})
+	assert.False(t, slices.ContainsFunc(env, func(e string) bool {
+		return strings.HasPrefix(e, format.EnvExecMode+"=")
+	}), "unset caller MICROFAT_EXEC_MODE must not be synthesized")
 
 	// 2. Opt-out via MICROFAT_AUTOTUNE=0
 	t.Setenv("MICROFAT_AUTOTUNE", "0")
 	envOptOut, _ := buildAutoTunedEnviron("", base, entry, format.ExecModeCache, hostInfo, microarch.PolicyResult{})
-	assert.GreaterOrEqual(t, len(envOptOut), len(base)+7, "base plus seven injected metadata variables")
+	assert.GreaterOrEqual(t, len(envOptOut), len(base)+6, "base plus six injected metadata variables")
 
 	// 3. Opt-out via MICROFAT_AUTOTUNE=false
 	t.Setenv("MICROFAT_AUTOTUNE", "false")
@@ -259,6 +262,7 @@ func TestBuildAutoTunedEnviron_DeduplicationAndReplacement(t *testing.T) {
 		"NO_EQUALS_ENTRY",
 		"=LEADING_EQUALS",
 		"MICROFAT_EXEC_MODE=cache",
+		"MICROFAT_DISPATCH_MODE=cache",
 		"MICROFAT_SELECTED_VARIANT=v1",
 		"MICROFAT_HOST_ARCH=arm64",
 		"MICROFAT_HOST_LEVEL=v8.0",
@@ -283,12 +287,12 @@ func TestBuildAutoTunedEnviron_DeduplicationAndReplacement(t *testing.T) {
 		}
 	}
 
-	// Verify launcher-owned keys replaced stale values from baseEnv
+	// Verify launcher-owned keys replaced stale values while caller MICROFAT_EXEC_MODE was preserved
 	expectedValues := map[string]string{
 		format.EnvSelectedVariant: "v3",
 		format.EnvHostArch:        testArchAMD64,
 		format.EnvHostLevel:       "v3",
-		format.EnvExecMode:        format.ExecModeMemfd,
+		format.EnvExecMode:        format.ExecModeCache,
 		format.EnvDispatchMode:    format.ExecModeMemfd,
 		"GOMEMLIMIT":              "1GiB", // User-specified override preserved from later base entry
 		"GOMAXPROCS":              "4",    // User-specified override preserved from later base entry
@@ -1304,14 +1308,23 @@ func TestStubPrewarmAndCacheDispatch(t *testing.T) {
 		t.Errorf("expected execve from cacheDir %s, got %s", cacheDir, executedPath)
 	}
 
-	// 10. Runtime cache execution dispatch with MICROFAT_DISPATCH_MODE=cache
+	// 10. MICROFAT_DISPATCH_MODE is output-only telemetry and never overrides auto policy
 	t.Setenv(format.EnvExecMode, "")
+	t.Setenv(format.EnvDispatchMode, format.ExecModeMemfd)
+	executedPath = ""
+	require.NoError(t, runBinary(fatPath), "runBinary with warm cache and MICROFAT_DISPATCH_MODE=memfd failed")
+	if !strings.Contains(executedPath, cacheDir) {
+		t.Errorf("expected warm cache hit from cacheDir %s despite MICROFAT_DISPATCH_MODE=memfd, got %s", cacheDir, executedPath)
+	}
+	coldCacheDir := filepath.Join(t.TempDir(), "cold_cache")
+	t.Setenv(format.EnvCacheDir, coldCacheDir)
 	t.Setenv(format.EnvDispatchMode, format.ExecModeCache)
 	executedPath = ""
-	require.NoError(t, runBinary(fatPath), "runBinary with MICROFAT_DISPATCH_MODE=cache failed")
-	if !strings.Contains(executedPath, cacheDir) {
-		t.Errorf("expected execve from cacheDir %s, got %s", cacheDir, executedPath)
+	require.NoError(t, runBinary(fatPath), "runBinary with cold cache and MICROFAT_DISPATCH_MODE=cache failed")
+	if strings.Contains(executedPath, coldCacheDir) {
+		t.Errorf("expected cold miss to use memfd instead of forcing coldCacheDir %s, got %s", coldCacheDir, executedPath)
 	}
+	t.Setenv(format.EnvCacheDir, cacheDir)
 	t.Setenv(format.EnvDispatchMode, "")
 
 	// 11. Runtime cache execution failing execve when primaryErr is nil
@@ -1605,13 +1618,14 @@ func TestExecuteVariant_StrictEnvironmentMatrix(t *testing.T) {
 			format.EnvSelectedVariant: "v1",
 			format.EnvHostArch:        testArchAMD64,
 			format.EnvHostLevel:       "v3",
-			format.EnvExecMode:        format.ExecModeMemfd,
 			format.EnvDispatchMode:    format.ExecModeMemfd,
 			format.EnvSelectedSHA256:  entry.SHA256,
 			format.EnvSelectedSize:    fmt.Sprintf("%d", entry.UncompressedSize),
 			format.EnvPolicyApplied:   testPolicyForceLevel,
 			format.EnvOverrideReason:  testForceLevelV3,
 		}
+		_, hasExecMode := envMap[format.EnvExecMode]
+		assert.False(t, hasExecMode, "unset caller MICROFAT_EXEC_MODE should not be injected")
 
 		for k, expVal := range expected {
 			if val, ok := envMap[k]; !ok || val != expVal {
