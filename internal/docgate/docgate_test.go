@@ -431,6 +431,38 @@ func TestCodeDocDriftChecks(t *testing.T) {
 			},
 			wantRule: "drift-rust-format",
 		},
+		{
+			name: "rust_max_index_size_drift",
+			mutate: func(t *testing.T, root string) {
+				writeFixtureFile(t, root, "experiments/v3lab/rust-stub/src/format.rs", strings.Join([]string{
+					`pub const TRAILER_MAGIC: &[u8; 8] = b"\x00\xFA\x7FMICRO";`,
+					`pub const TRAILER_SIZE: usize = 56;`,
+					`pub const INDEX_MAGIC_V2: &[u8; 4] = b"\x00\xFAM2";`,
+					`pub const FORMAT_VERSION_2: u16 = 2;`,
+					`pub const MAX_INDEX_SIZE: u64 = 512;`,
+				}, "\n"))
+			},
+			wantRule: "drift-rust-format",
+		},
+		{
+			name: "duplicate_env_constant_and_release_gate_ledger",
+			mutate: func(t *testing.T, root string) {
+				writeFixtureFile(t, root, "internal/format/format.go", strings.Join([]string{
+					"package format",
+					"const (",
+					"\tMagicString = \"\\x00\\xFA\\x7FMICRO\"",
+					"\tTrailerSize = 56",
+					"\tIndexMagicV2 = \"\\x00\\xFAM2\"",
+					"\tFormatVersion2 = 2",
+					"\tMaxIndexSize = 1024 * 1024",
+					"\tEnvExecMode = \"MICROFAT_EXEC_MODE\"",
+					"\tEnvExecDup = \"MICROFAT_EXEC_MODE\"",
+					"\tEnvMissing = \"MICROFAT_UNDOCUMENTED\"",
+					")",
+				}, "\n"))
+			},
+			wantRule: "drift-env-var",
+		},
 	}
 
 	for _, tc := range cases {
@@ -444,4 +476,67 @@ func TestCodeDocDriftChecks(t *testing.T) {
 			assert.True(t, hasRule(report.Findings, tc.wantRule), report.Format())
 		})
 	}
+}
+
+func TestDocGateEdgeCasesAndErrors(t *testing.T) {
+	t.Parallel()
+
+	t.Run("lazy_loaded_cross_file_anchor_outside_docs", func(t *testing.T) {
+		t.Parallel()
+		root := seedMinimalValidRepo(t)
+		writeFixtureFile(t, root, "extra/note.md", "# Extra\n\n## Sub Section\n")
+		writeFixtureFile(t, root, "README.md", strings.Join([]string{
+			"# Main",
+			"",
+			"[ok](extra/note.md#sub-section) [skip](#) [empty]() [bad](extra/note.md#missing)",
+		}, "\n"))
+		report, err := Check(root)
+		require.NoError(t, err)
+		assert.False(t, report.OK())
+		assert.True(t, hasRule(report.Findings, "broken-anchor"), report.Format())
+	})
+
+	t.Run("unclosed_backtick_and_malformed_metadata_handled", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, "hello-world", gfmSlug("`hello world"))
+		assert.Equal(t, "", cleanLinkTarget("   "))
+		assert.True(t, shouldSkipTarget("#"))
+		meta := extractMetadata("- **Valid**: ok\n- **NoColon\n## Stop\n- **After**: no\n")
+		assert.Equal(t, "ok", meta["Valid"])
+		assert.Empty(t, meta["After"])
+	})
+
+	t.Run("file_size_limit_and_missing_required_inputs_return_errors", func(t *testing.T) {
+		t.Parallel()
+		root := seedMinimalValidRepo(t)
+		big := strings.Repeat("a", maxDocFileBytes+1)
+		writeFixtureFile(t, root, "docs/huge.md", big)
+		_, err := Check(root)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "byte limit")
+
+		for _, drop := range []string{
+			"docs/cli-reference.md",
+			"internal/format/format.go",
+			"docs/architecture.md",
+			".config/tool-versions.env",
+			"Taskfile.yml",
+			".github/workflows/ci.yml",
+			".github/workflows/release.yml",
+		} {
+			r := seedMinimalValidRepo(t)
+			require.NoError(t, os.Remove(filepath.Join(r, filepath.FromSlash(drop))))
+			_, checkErr := Check(r)
+			require.Error(t, checkErr, "expected error when %s is missing", drop)
+		}
+	})
+
+	t.Run("ledger_missing_release_step", func(t *testing.T) {
+		t.Parallel()
+		root := seedMinimalValidRepo(t)
+		writeFixtureFile(t, root, ".github/workflows/release.yml", "jobs:\n  gate:\n    steps: []\n")
+		report, err := Check(root)
+		require.NoError(t, err)
+		assert.True(t, hasRule(report.Findings, "ledger-unknown-ci-step"), report.Format())
+	})
 }
