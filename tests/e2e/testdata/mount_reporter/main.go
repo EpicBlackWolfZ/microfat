@@ -65,7 +65,7 @@ func main() {
 	}
 	r := mountfixture.Report{Identity: identity, PID: os.Getpid(), UID: os.Getuid(), EUID: os.Geteuid(),
 		GID: os.Getgid(), EGID: os.Getegid(), Args: os.Args, Environment: os.Getenv("MOUNT_SENTINEL"),
-		Mode: os.Getenv("MICROFAT_EXEC_MODE"), Original: os.Getenv("MICROFAT_ORIGINAL_EXE"), Errors: map[string]string{}}
+		Mode: os.Getenv("MICROFAT_DISPATCH_MODE"), Original: os.Getenv("MICROFAT_ORIGINAL_EXE"), Errors: map[string]string{}}
 	if os.Getenv("RUNTIME_QUALIFY") == "1" {
 		r.Descriptors = descriptors()
 	}

@@ -118,7 +118,7 @@ func observe(observer metric.Observer, instruments []metric.Float64ObservableGau
 	if hints.SelectedVariant.Status == runtimeinfo.StatusPresent {
 		attributes := []attribute.KeyValue{attribute.String("selected_variant", hints.SelectedVariant.Value)}
 		for key, field := range map[string]runtimeinfo.Field[string]{
-			"host_arch": hints.HostArch, "host_level": hints.HostLevel, "exec_mode": hints.ExecMode,
+			"host_arch": hints.HostArch, "host_level": hints.HostLevel, "dispatch_mode": hints.DispatchMode,
 		} {
 			if field.Status == runtimeinfo.StatusPresent {
 				attributes = append(attributes, attribute.String(key, field.Value))

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EpicBlackWolfZ/microfat/internal/cgroup"
 	"github.com/EpicBlackWolfZ/microfat/internal/codec"
 	"github.com/EpicBlackWolfZ/microfat/internal/format"
 	"github.com/EpicBlackWolfZ/microfat/internal/microarch"
@@ -573,4 +574,40 @@ func TestLogErrorDiagnosticsBranches(t *testing.T) {
 			"",
 		)
 	})
+}
+
+func TestResolveRequestedExecModeAndEnvSeparation(t *testing.T) {
+	t.Setenv(format.EnvDispatchMode, format.ExecModeCache)
+	t.Setenv(format.EnvExecMode, "")
+	assert.Equal(t, format.ExecModeAuto, resolveRequestedExecMode())
+	assert.Equal(t, format.ExecModeAuto, rawRequestedExecMode())
+
+	t.Setenv(format.EnvExecMode, format.ExecModeMemfd)
+	assert.Equal(t, format.ExecModeMemfd, resolveRequestedExecMode())
+	assert.Equal(t, format.ExecModeMemfd, rawRequestedExecMode())
+
+	entry := &format.VariantEntry{Level: "v3", SHA256: strings.Repeat("a", sha256HexDigestLen), UncompressedSize: 1024}
+	hostInfo := microarch.Info{Arch: testArchAMD64, Level: "v3"}
+	readCgroup := readCgroupLimitsFunc
+	t.Cleanup(func() { readCgroupLimitsFunc = readCgroup })
+	readCgroupLimitsFunc = func() (cgroup.Limits, error) {
+		return cgroup.Limits{CgroupVersion: cgroup.VersionUnknown}, nil
+	}
+
+	for _, callerPolicy := range []string{"", format.ExecModeAuto, format.ExecModeCache, format.ExecModeMemfd} {
+		base := []string{testExecPathEnv, format.EnvDispatchMode + "=" + format.ExecModeMemfd}
+		if callerPolicy != "" {
+			base = append(base, format.EnvExecMode+"="+callerPolicy)
+		}
+		env, _ := buildAutoTunedEnviron("", base, entry, format.ExecModeCache, hostInfo, microarch.PolicyResult{})
+		assert.Contains(t, env, format.EnvDispatchMode+"="+format.ExecModeCache)
+		assert.NotContains(t, env, format.EnvDispatchMode+"="+format.ExecModeMemfd)
+		if callerPolicy == "" {
+			for _, item := range env {
+				assert.False(t, strings.HasPrefix(item, format.EnvExecMode+"="), item)
+			}
+		} else {
+			assert.Contains(t, env, format.EnvExecMode+"="+callerPolicy)
+		}
+	}
 }

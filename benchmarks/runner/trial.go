@@ -151,7 +151,7 @@ func targetEnvironment(config schema.Configuration, cacheDir string) []string {
 	}
 	result = append(result, "MICROFAT_CACHE_DIR="+cacheDir)
 	if config.Mode != nativeMode {
-		result = append(result, "MICROFAT_DISPATCH_MODE="+config.Mode, "MICROFAT_FORCE_LEVEL="+config.Level)
+		result = append(result, "MICROFAT_EXEC_MODE="+config.Mode, "MICROFAT_FORCE_LEVEL="+config.Level)
 	}
 	slices.Sort(result)
 	return result
@@ -221,7 +221,11 @@ func validateIdentity(config schema.Configuration, diagnostic map[string]string)
 	if diagnostic["level"] != config.Level {
 		return errors.New("target ISA does not match scheduled payload")
 	}
-	if config.Mode != nativeMode && (diagnostic["MICROFAT_EXEC_MODE"] != config.Mode ||
+	actualMode := diagnostic["MICROFAT_DISPATCH_MODE"]
+	if actualMode == "" {
+		actualMode = diagnostic["MICROFAT_EXEC_MODE"]
+	}
+	if config.Mode != nativeMode && (actualMode != config.Mode ||
 		diagnostic["MICROFAT_SELECTED_VARIANT"] != config.Level) {
 		return errors.New("actual dispatch differs from requested mode or ISA")
 	}

@@ -210,3 +210,31 @@ func TestRuntimeInfoConfiguredEnvironmentDiffersFromRunningRuntime(t *testing.T)
 		})
 	}
 }
+
+func TestRuntimeInfoAutoModeReportsPolicyAndRealizedDispatch(t *testing.T) {
+	t.Parallel()
+	_, fat := runtimeInfoProducts(t)
+	for _, profile := range []string{launcherFullProfile, launcherMinimalProfile} {
+		t.Run(profile, func(t *testing.T) {
+			t.Parallel()
+			cacheDir := filepath.Join(t.TempDir(), "cache")
+			unsetSnapshot := runRuntimeInfoReporter(t, fat[profile], stubInfoProcessEnvironment(cacheDir))
+			assert.Equal(t, runtimeinfo.StatusMissing, unsetSnapshot.Launcher.ExecMode.Status)
+			assert.Equal(t, runtimeinfo.StatusMissing, unsetSnapshot.Configured.ExecMode.Status)
+			assertRuntimeInfoField(t, unsetSnapshot.Launcher.DispatchMode, execModeMemfd)
+
+			autoEnv := stubInfoProcessEnvironment(cacheDir, "MICROFAT_EXEC_MODE=auto", "MICROFAT_DISPATCH_MODE=cache")
+			autoSnapshot := runRuntimeInfoReporter(t, fat[profile], autoEnv)
+			assertRuntimeInfoField(t, autoSnapshot.Launcher.ExecMode, stubInfoModeAuto)
+			assertRuntimeInfoField(t, autoSnapshot.Configured.ExecMode, stubInfoModeAuto)
+			assertRuntimeInfoField(t, autoSnapshot.Launcher.DispatchMode, execModeMemfd)
+
+			// Populate cache explicitly, then confirm auto picks warm cache while keeping MICROFAT_EXEC_MODE=auto.
+			_ = runRuntimeInfoReporter(t, fat[profile], stubInfoProcessEnvironment(cacheDir, envExecCache))
+			warmAuto := runRuntimeInfoReporter(t, fat[profile], stubInfoProcessEnvironment(cacheDir, "MICROFAT_EXEC_MODE=auto"))
+			assertRuntimeInfoField(t, warmAuto.Launcher.ExecMode, stubInfoModeAuto)
+			assertRuntimeInfoField(t, warmAuto.Configured.ExecMode, stubInfoModeAuto)
+			assertRuntimeInfoField(t, warmAuto.Launcher.DispatchMode, execModeCache)
+		})
+	}
+}

@@ -107,12 +107,13 @@ func TestLauncherInfoExecutionPolicy(t *testing.T) {
 		{name: "ExplicitCache", env: []string{envExecCache}, mode: execModeCache},
 		{name: "ExplicitMemfd", env: []string{"MICROFAT_EXEC_MODE=memfd"}, mode: execModeMemfd},
 		{name: "CaseInsensitiveCache", env: []string{"MICROFAT_EXEC_MODE=CACHE"}, mode: execModeCache},
-		{name: "LegacyCache", env: []string{"MICROFAT_DISPATCH_MODE=cache"}, mode: execModeCache},
-		{name: "LegacyMemfd", env: []string{"MICROFAT_EXEC_MODE=", "MICROFAT_DISPATCH_MODE=memfd"}, mode: execModeMemfd},
+		{name: "OutputOnlyDispatchCacheIgnored", env: []string{"MICROFAT_DISPATCH_MODE=cache"}, mode: stubInfoModeAuto},
+		{name: "OutputOnlyDispatchMemfdIgnored", env: []string{"MICROFAT_EXEC_MODE=", "MICROFAT_DISPATCH_MODE=memfd"},
+			mode: stubInfoModeAuto},
 		{name: "PrimaryTakesPriority", env: []string{"MICROFAT_EXEC_MODE=cache", "MICROFAT_DISPATCH_MODE=memfd"}, mode: execModeCache},
 		{name: "InvalidPrimaryUsesAuto", env: []string{"MICROFAT_EXEC_MODE=invalid", "MICROFAT_DISPATCH_MODE=cache"},
 			mode: stubInfoModeAuto},
-		{name: "InvalidLegacyUsesAuto", env: []string{"MICROFAT_DISPATCH_MODE=invalid"}, mode: stubInfoModeAuto},
+		{name: "InvalidDispatchIgnoredUsesAuto", env: []string{"MICROFAT_DISPATCH_MODE=invalid"}, mode: stubInfoModeAuto},
 	}
 	for _, tt := range tests {
 		for _, state := range []string{"AbsentCache", "PopulatedCache", "WarmCache"} {
@@ -129,7 +130,7 @@ func TestLauncherInfoExecutionPolicy(t *testing.T) {
 					// Populate a verified entry before inspection: auto must still describe a
 					// prospective policy when a cache hit is possible for later execution.
 					prepareEnv := stubInfoProcessEnvironment(cacheDir, envExecCache)
-					require.Equal(t, execModeCache, runStubInfoProcess(t, prepareEnv, "--echo-env", "MICROFAT_EXEC_MODE"))
+					require.Equal(t, execModeCache, runStubInfoProcess(t, prepareEnv, "--echo-env", "MICROFAT_DISPATCH_MODE"))
 					entries, err := os.ReadDir(cacheDir)
 					require.NoError(t, err)
 					require.Len(t, entries, 1)

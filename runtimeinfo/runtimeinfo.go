@@ -82,6 +82,7 @@ type ConfiguredEnvironment struct {
 	GOGC             Field[string] `json:"gogc"`
 	CPUPolicy        Field[string] `json:"cpu_policy"`
 	GCProfile        Field[string] `json:"gc_profile"`
+	ExecMode         Field[string] `json:"exec_mode"`
 	Autotune         Field[string] `json:"autotune"`
 	DryRun           Field[string] `json:"dry_run"`
 	MemoryRatio      Field[string] `json:"memory_ratio"`
@@ -140,7 +141,7 @@ func readLauncher(lookup lookupEnv) LauncherHints {
 		SelectedVariant:    textField(lookup, "MICROFAT_SELECTED_VARIANT"),
 		HostArch:           enumField(lookup, "MICROFAT_HOST_ARCH", "amd64", "arm64"),
 		HostLevel:          textField(lookup, "MICROFAT_HOST_LEVEL"),
-		ExecMode:           enumField(lookup, "MICROFAT_EXEC_MODE", "memfd", "cache"),
+		ExecMode:           enumField(lookup, "MICROFAT_EXEC_MODE", "auto", "memfd", "cache"),
 		DispatchMode:       enumField(lookup, "MICROFAT_DISPATCH_MODE", "memfd", "cache"),
 		SelectedSHA256:     digestField(lookup, "MICROFAT_SELECTED_SHA256"),
 		SelectedSizeBytes:  integerField(lookup, "MICROFAT_SELECTED_SIZE", 1),
@@ -178,6 +179,7 @@ func readConfigured(lookup lookupEnv) ConfiguredEnvironment {
 		GOGC:             textField(lookup, "GOGC"),
 		CPUPolicy:        textField(lookup, "MICROFAT_CPU_POLICY"),
 		GCProfile:        textField(lookup, "MICROFAT_GC_PROFILE"),
+		ExecMode:         textField(lookup, "MICROFAT_EXEC_MODE"),
 		Autotune:         textField(lookup, "MICROFAT_AUTOTUNE"),
 		DryRun:           textField(lookup, "MICROFAT_DRY_RUN"),
 		MemoryRatio:      textField(lookup, "MICROFAT_MEM_RATIO"),

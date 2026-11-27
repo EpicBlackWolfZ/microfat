@@ -40,7 +40,7 @@ func newCollector() *collector {
 		read: runtimeinfo.Read,
 		launcherInfo: prometheus.NewDesc("microfat_launcher_hint_info",
 			"Informational launcher environment hints; not authenticated identity.",
-			[]string{"selected_variant", "host_arch", "host_level", "exec_mode"}, nil),
+			[]string{"selected_variant", "host_arch", "host_level", "dispatch_mode"}, nil),
 		gomaxprocs: prometheus.NewDesc("microfat_runtime_gomaxprocs",
 			"GOMAXPROCS observed from the running Go process.", nil, nil),
 		gomemlimit: prometheus.NewDesc("microfat_runtime_gomemlimit_bytes",
@@ -73,7 +73,7 @@ func (c *collector) Collect(ch chan<- prometheus.Metric) {
 	if hints.SelectedVariant.Status == runtimeinfo.StatusPresent {
 		ch <- prometheus.MustNewConstMetric(c.launcherInfo, prometheus.GaugeValue, 1,
 			hints.SelectedVariant.Value, presentString(hints.HostArch),
-			presentString(hints.HostLevel), presentString(hints.ExecMode))
+			presentString(hints.HostLevel), presentString(hints.DispatchMode))
 	}
 
 	observed := snapshot.Observed

@@ -198,6 +198,11 @@ Explicit `memfd` skips cache discovery and requires creation, verification, seal
 to succeed. Explicit `cache` skips memfd and materializes/repairs only safe regular cache entries.
 `MICROFAT_VERIFY_CACHE` is ignored: it cannot disable any cache validation.
 
+Launchers preserve caller `MICROFAT_EXEC_MODE` untouched (or unset) across `execve`, strip any
+inherited `MICROFAT_DISPATCH_MODE` on entry, and export output-only `MICROFAT_DISPATCH_MODE`
+(`memfd` or `cache`) to record the realized mechanism without turning a parent's dispatch outcome
+into a forced policy override for child processes.
+
 ### Cache validation and materialization
 
 1. **Read-only discovery**: Auto first opens existing cache directories, using

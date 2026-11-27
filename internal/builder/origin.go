@@ -245,9 +245,9 @@ func resolveDispatchedInstallationDirectory() (string, error) {
 }
 
 func validateDispatchedPayloadEnvironment() (string, int64, string, error) {
-	mode := os.Getenv(format.EnvExecMode)
+	mode := os.Getenv(format.EnvDispatchMode)
 	if mode == "" {
-		mode = os.Getenv(format.EnvDispatchMode)
+		mode = os.Getenv(format.EnvExecMode)
 	}
 	if mode != format.ExecModeMemfd && mode != format.ExecModeCache {
 		return "", 0, "", fmt.Errorf("dispatched execution has unsupported or missing mode %q", mode)

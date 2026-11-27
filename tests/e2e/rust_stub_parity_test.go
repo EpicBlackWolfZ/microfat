@@ -563,7 +563,7 @@ func TestRustStubCacheFirstAutoAndUnsafeChaos(t *testing.T) {
 			before := cacheTreeSnapshot(t, root)
 			for _, mode := range []string{"", execModeCache} {
 				env := append(cacheFirstEnv(dir), "MICROFAT_EXEC_MODE="+mode)
-				stdout, stderr, err := runCacheFirstProcess(t, fat, env, "--echo-env", "MICROFAT_EXEC_MODE")
+				stdout, stderr, err := runCacheFirstProcess(t, fat, env, "--echo-env", "MICROFAT_DISPATCH_MODE")
 				require.Error(t, err, "unsafe entry %s accepted in mode %q: %s", kind, mode, stderr)
 				require.Empty(t, stdout)
 				if kind == cacheFirstSymlink {
@@ -598,7 +598,7 @@ func TestRustStubCacheFirstAutoAndUnsafeChaos(t *testing.T) {
 			append(cacheFirstEnv(dir), rustStubExecModeMemfdEnv),
 			cacheFirstEnv(filepath.Join(root, "absent-cache")),
 		} {
-			stdout, stderr, err := runCacheFirstProcess(t, corruptFat, env, "--echo-env", "MICROFAT_EXEC_MODE")
+			stdout, stderr, err := runCacheFirstProcess(t, corruptFat, env, "--echo-env", "MICROFAT_DISPATCH_MODE")
 			require.Error(t, err, stderr)
 			require.Empty(t, stdout)
 		}
@@ -995,10 +995,13 @@ func TestRustStubTelemetryAndRuntimeInfoParity(t *testing.T) {
 					env[i] = "MICROFAT_EXEC_MODE=auto"
 				}
 			}
-			stdout, stderr, err := runTelemetryProcess(t, fat, env, "--echo-env", "MICROFAT_EXEC_MODE")
+			stdout, stderr, err := runTelemetryProcess(t, fat, env, "--echo-env", "MICROFAT_DISPATCH_MODE")
 			require.NoError(t, err, stderr)
 			require.Equal(t, execModeCache, stdout)
 			requireTelemetryDiagnostics(t, diagnostic, stderr, levels[0], execModeCache, true)
+			policyOut, _, policyErr := runTelemetryProcess(t, fat, env, "--echo-env", "MICROFAT_EXEC_MODE")
+			require.NoError(t, policyErr)
+			require.Equal(t, stubInfoModeAuto, policyOut)
 			if diagnostic.output == "" {
 				badEnv, _ := telemetryProcessEnvironment(t, fat, "invalid-level", execModeMemfd, diagnostic)
 				badOut, badErr, errFail := runTelemetryProcess(t, fat, badEnv)
@@ -1034,6 +1037,7 @@ func TestRustStubTelemetryAndRuntimeInfoParity(t *testing.T) {
 					env := runtimeInfoEnvironment(t,
 						tuning.key+"="+tuning.value,
 						"MICROFAT_EXEC_MODE="+mode,
+						"MICROFAT_DISPATCH_MODE=spoofed_dispatch",
 						"MICROFAT_POLICY_APPLIED=spoofed_policy",
 						"MICROFAT_OVERRIDE_REASON=spoofed_reason",
 						"MICROFAT_CGROUP_GOMEMLIMIT=1B",
@@ -1079,5 +1083,23 @@ func TestRustStubTelemetryAndRuntimeInfoParity(t *testing.T) {
 			}
 			assert.Equal(t, runtimeinfo.StatusMissing, snapshot.Configured.GOMAXPROCS.Status)
 		})
+
+		t.Run("AutoPolicyScrubsSpoofedDispatchMode", func(t *testing.T) {
+			t.Parallel()
+			env := stubInfoProcessEnvironment(t.TempDir(),
+				"MICROFAT_EXEC_MODE="+stubInfoModeAuto,
+				"MICROFAT_DISPATCH_MODE="+execModeCache,
+			)
+			snapshot := runRuntimeInfoReporter(t, riFat, env)
+			assertRuntimeInfoField(t, snapshot.Launcher.ExecMode, stubInfoModeAuto)
+			assertRuntimeInfoField(t, snapshot.Configured.ExecMode, stubInfoModeAuto)
+			assertRuntimeInfoField(t, snapshot.Launcher.DispatchMode, execModeMemfd)
+		})
+	})
+
+	t.Run("MultiHopAutoDispatch", func(t *testing.T) {
+		t.Parallel()
+		parentFat := packRustStubGolden(t, rustStub, t.TempDir(), "multihop-parent.fat", false, "")
+		assertMultiHopParentToChildAutoDispatch(t, rustStub, parentFat)
 	})
 }
