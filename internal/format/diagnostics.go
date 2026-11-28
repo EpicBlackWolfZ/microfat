@@ -58,6 +58,8 @@ const (
 		"Re-package the binary with 'microfat pack' or verify integrity with 'microfat verify'."
 	HintInsecureCacheDir = "Cache directory has insecure permissions, is a symlink, or is owned by another user. " +
 		"Use a private directory owned by your UID with mode 0700 or set MICROFAT_CACHE_DIR."
+	HintCacheDirNoExec = "Cache directory is on a 'noexec' filesystem mount, which prevents executing cached binaries. " +
+		"Set $MICROFAT_CACHE_DIR or $TMPDIR to an executable mount, or use MICROFAT_EXEC_MODE=memfd."
 
 	// Deprecated compatibility aliases:
 	HintMemfdSeccomp = HintMemfdEPERM
@@ -143,6 +145,8 @@ func diagnoseMemfdSeal(err error) string {
 
 func diagnoseCacheWrite(err error) string {
 	switch {
+	case errors.Is(err, ErrCacheDirNoExec):
+		return HintCacheDirNoExec
 	case errors.Is(err, ErrInsecureCacheDir):
 		return HintInsecureCacheDir
 	case errors.Is(err, syscall.EROFS):
@@ -205,6 +209,9 @@ func diagnoseExecutionSentinels(err error) string {
 	}
 	if errors.Is(err, ErrMemfdSealingFailed) {
 		return diagnoseMemfdSeal(err)
+	}
+	if errors.Is(err, ErrCacheDirNoExec) {
+		return HintCacheDirNoExec
 	}
 	if errors.Is(err, ErrCacheInit) || errors.Is(err, ErrCacheWrite) || errors.Is(err, ErrCacheExtract) {
 		return diagnoseCacheWrite(err)

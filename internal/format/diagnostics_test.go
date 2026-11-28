@@ -87,6 +87,12 @@ func TestDiagnoseError(t *testing.T) {
 			expectedHint: HintMemfdSeal,
 		},
 		{
+			name:         "cache dir init ErrCacheDirNoExec",
+			stage:        StageCacheDirInit,
+			err:          fmt.Errorf("custom cache directory /var/cache cannot execute binaries: %w", ErrCacheDirNoExec),
+			expectedHint: HintCacheDirNoExec,
+		},
+		{
 			name:         "cache dir init ErrInsecureCacheDir",
 			stage:        StageCacheDirInit,
 			err:          ErrInsecureCacheDir,
@@ -241,6 +247,12 @@ func TestDiagnoseError(t *testing.T) {
 			stage:        StageLauncherMain,
 			err:          syscall.ENFILE,
 			expectedHint: HintFileDescriptorLimit,
+		},
+		{
+			name:         "generic launcher_main ErrCacheDirNoExec",
+			stage:        StageLauncherMain,
+			err:          fmt.Errorf("%w: %w", ErrCacheInit, ErrCacheDirNoExec),
+			expectedHint: HintCacheDirNoExec,
 		},
 		{
 			name:         "generic launcher_main ErrExecve with EACCES",

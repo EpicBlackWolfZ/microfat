@@ -47,9 +47,23 @@ if [[ ! -x "${verus_bin}" ]]; then
     exit 1
 fi
 
+verus_version_json="${dest_abs}/verus-dist/verus-${verus_arch}-linux/version.json"
+if [[ ! -r "${verus_version_json}" ]]; then
+    echo "Expected Verus version metadata not found at ${verus_version_json}" >&2
+    exit 1
+fi
+verus_toolchain_line="$(sed -n '/"toolchain":/{s/^[[:space:]]*"toolchain":[[:space:]]*"\([^"]*\)".*/\1/p;q;}' "${verus_version_json}")"
+verus_toolchain="${verus_toolchain_line%% *}"
+if [[ -z "${verus_toolchain}" || ! "${verus_toolchain}" =~ ^[0-9A-Za-z._-]+$ ]]; then
+    echo "Unable to parse required Rust toolchain from ${verus_version_json}: '${verus_toolchain_line}'" >&2
+    exit 1
+fi
+rustup toolchain install "${verus_toolchain}" --profile minimal
+
 cat > "${dest_abs}/verus" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+unset RUSTUP_TOOLCHAIN
 exec "${verus_bin}" "\$@"
 EOF
 chmod 0755 "${dest_abs}/verus"
