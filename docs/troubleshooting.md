@@ -175,8 +175,7 @@ When running in hardened containers (`readOnlyRootFilesystem: true`) or distrole
   cache. Successful cold memfd execution does not populate the cache.
 - If cold memfd creation, sealing or execution is blocked, disk materialization needs a writable
   cache. It fails when every selected destination is read-only or unavailable.
-- If a warm entry cannot execute (for example, its mount is `noexec`), auto tries sealed memfd once.
-  If memfd also fails, it reports both attempts without repairing or retrying that entry.
+- Automatic cache discovery checks `fstatfs` (`ST_NOEXEC` on Linux) on each candidate directory descriptor and skips `noexec` mounts without mutating permissions. Explicit `MICROFAT_CACHE_DIR` (or `microfat doctor --cache-dir`) on a `noexec` mount fails fast at cache initialization instead of materializing unexecutable payloads. If `auto` mode's sealed `memfd` path is available, it runs in memory directly.
 
 #### Remediation: Prewarm or Mount a Writable `tmpfs`
 Prewarm cache for the runtime UID on executable storage before making it read-only, or permit

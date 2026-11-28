@@ -2409,6 +2409,24 @@ fn validate_stat_metadata(
     Ok(())
 }
 
+fn is_noexec_mount_flags(flags: u64) -> bool {
+    #[allow(clippy::unnecessary_cast)]
+    let noexec = libc::ST_NOEXEC as u64;
+    (flags & noexec) != 0
+}
+
+fn fd_is_noexec_mount(fd: libc::c_int) -> bool {
+    // SAFETY: `libc::statvfs` is plain-old-data initialized to zero and populated by `libc::fstatvfs`.
+    let mut svfs: libc::statvfs = unsafe { core::mem::zeroed() };
+    // SAFETY: `fd` is a valid open directory descriptor.
+    if unsafe { libc::fstatvfs(fd, &mut svfs) } != 0 {
+        return false;
+    }
+    #[allow(clippy::unnecessary_cast)]
+    let flags = svfs.f_flag as u64;
+    is_noexec_mount_flags(flags)
+}
+
 fn open_secure_cache_dir(
     dir_bytes: &[u8],
     euid: libc::uid_t,
@@ -2431,9 +2449,33 @@ fn open_secure_cache_dir(
     let fd = OwnedFd::from_raw(raw_fd);
     let st =
         fstat_fd(fd.as_raw_fd()).ok_or(CacheError::Unsafe("unable to fstat cache directory"))?;
+    if (st.st_mode & libc::S_IFMT) != libc::S_IFDIR {
+        return Err(CacheError::Unsafe(
+            "cache directory path is not a directory",
+        ));
+    }
+    if st.st_uid != euid {
+        return Err(CacheError::Unsafe(
+            "cache directory owned by unexpected uid",
+        ));
+    }
+    if !tighten {
+        validate_stat_metadata(&st, euid, true)?;
+        if fd_is_noexec_mount(fd.as_raw_fd()) {
+            return Err(CacheError::Unsafe(
+                "cache directory is on a noexec filesystem mount",
+            ));
+        }
+        return Ok(Some(fd));
+    }
+    if fd_is_noexec_mount(fd.as_raw_fd()) {
+        return Err(CacheError::Unsafe(
+            "cache directory is on a noexec filesystem mount",
+        ));
+    }
     match validate_stat_metadata(&st, euid, true) {
         Ok(()) => Ok(Some(fd)),
-        Err(_) if tighten && (st.st_mode & libc::S_IFMT) == libc::S_IFDIR && st.st_uid == euid => {
+        Err(_) => {
             // SAFETY: open descriptor to own-UID directory tightened to 0700.
             if unsafe { libc::fchmod(fd.as_raw_fd(), 0o700) } != 0 {
                 return Err(CacheError::Unsafe("cannot tighten cache directory mode"));
@@ -2443,7 +2485,6 @@ fn open_secure_cache_dir(
             validate_stat_metadata(&st2, euid, true)?;
             Ok(Some(fd))
         }
-        Err(e) => Err(e),
     }
 }
 
@@ -3628,6 +3669,29 @@ mod tests {
             rank: 1,
         };
         assert!(inspect_zstd_frame_window(pfd.as_raw_fd(), None, &var).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn noexec_mount_flag_helper_and_executable_dir_probe() {
+        #[allow(clippy::unnecessary_cast)]
+        let noexec_flag = libc::ST_NOEXEC as u64;
+        assert!(is_noexec_mount_flags(noexec_flag));
+        assert!(is_noexec_mount_flags(noexec_flag | 1));
+        assert!(!is_noexec_mount_flags(0));
+        assert!(!fd_is_noexec_mount(-1));
+
+        let dir = make_temp_dir("exec-mount");
+        let dir_c = bytes_to_cstr(dir.as_os_str().as_bytes()).unwrap();
+        let raw_fd = unsafe {
+            libc::open(
+                dir_c.as_ptr().cast(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        assert!(raw_fd >= 0);
+        let fd = OwnedFd::from_raw(raw_fd);
+        assert!(!fd_is_noexec_mount(fd.as_raw_fd()));
         let _ = fs::remove_dir_all(&dir);
     }
 }
