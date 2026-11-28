@@ -32,7 +32,7 @@ For `v0.5.0`, `microfat` promotes the native Rust launcher stub to production an
 ## Consequences & Tradeoffs
 
 - **Size vs Cold Format v2 Zstd Speed:** Fat binaries drop by ~3.6 MiB cleanly; cold Format v2 `zstd` launches trade ~3–4 ms (accepted in `#523`), mitigated by cache-first warm runs and Format v3 parallel block decoding.
-- **Toolchain Scope:** CI and release workflows require pinned Rust `1.100.0`, `aarch64-unknown-linux-musl` cross targets, Kani, Verus, `cargo-audit`, `cargo-deny`, and `cargo-llvm-cov` (`task lint-rust test-rust coverage-rust vuln-rust verify-kani verify-verus`).
+- **Toolchain Scope:** CI and release workflows require pinned Rust (`RUST_VERSION` in `.config/tool-versions.env`), `aarch64-unknown-linux-musl` cross targets, Kani, Verus, `cargo-audit`, `cargo-deny`, and `cargo-llvm-cov` (`task lint-rust test-rust coverage-rust vuln-rust verify-kani verify-verus`).
 
 ## Rollback
 

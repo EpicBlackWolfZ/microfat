@@ -41,8 +41,8 @@ if ! grep -Fq 'verification results:: 4 verified, 0 errors' <<< "${verus_out}"; 
     exit 1
 fi
 
-export RUSTUP_TOOLCHAIN="${RUST_VERSION}"
 (
+    export RUSTUP_TOOLCHAIN="${RUST_VERSION}"
     cd experiments/v3lab/rust-stub
     cargo check --lib
     cargo build --release --target "${host_musl}"
