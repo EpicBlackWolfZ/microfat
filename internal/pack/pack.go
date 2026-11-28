@@ -314,26 +314,7 @@ func Pack(opts Options) (*format.Index, error) {
 		)
 	}
 
-	// 2. Write Shared Dictionary (if trained)
-	if len(dictBytes) > 0 {
-		dictOffset := currentOffset
-		dictSize := int64(len(dictBytes))
-		if _, err := tmpFile.Write(dictBytes); err != nil {
-			return nil, fmt.Errorf("writing dictionary payload: %w", err)
-		}
-		var advErr error
-		currentOffset, advErr = advanceLayoutOffset(currentOffset, dictSize)
-		if advErr != nil {
-			return nil, fmt.Errorf("advancing dictionary layout offset: %w", advErr)
-		}
-		idx.DictionaryOffset = dictOffset
-		idx.DictionarySize = dictSize
-		idx.DictionarySHA256 = dictSHAHex
-		idx.DictionaryID = codec.DefaultDictionaryID
-	}
-
-	// 3. Compress and write each variant payload (parallelized under bounded CPU/memory admission)
-	variantEntries, newOffset, err := writeAllVariantPayloads(tmpFile, outDir, levels, &opts, currentOffset, dictBytes)
+	variantEntries, newOffset, err := writeDictionaryAndVariants(tmpFile, outDir, levels, &opts, currentOffset, idx, dictBytes, dictSHAHex)
 	if err != nil {
 		return nil, err
 	}
@@ -351,6 +332,35 @@ func Pack(opts Options) (*format.Index, error) {
 	}
 
 	return idx, nil
+}
+
+func writeDictionaryAndVariants(
+	tmpFile *os.File,
+	outDir string,
+	levels []string,
+	opts *Options,
+	currentOffset int64,
+	idx *format.Index,
+	dictBytes []byte,
+	dictSHAHex string,
+) ([]format.VariantEntry, int64, error) {
+	if len(dictBytes) > 0 {
+		dictOffset := currentOffset
+		dictSize := int64(len(dictBytes))
+		nextOffset, advErr := advanceLayoutOffset(currentOffset, dictSize)
+		if advErr != nil {
+			return nil, 0, fmt.Errorf("advancing dictionary layout offset: %w", advErr)
+		}
+		if _, err := tmpFile.Write(dictBytes); err != nil {
+			return nil, 0, fmt.Errorf("writing dictionary payload: %w", err)
+		}
+		currentOffset = nextOffset
+		idx.DictionaryOffset = dictOffset
+		idx.DictionarySize = dictSize
+		idx.DictionarySHA256 = dictSHAHex
+		idx.DictionaryID = codec.DefaultDictionaryID
+	}
+	return writeAllVariantPayloads(tmpFile, outDir, levels, opts, currentOffset, dictBytes)
 }
 
 func validateOptions(opts *Options) error {
@@ -615,83 +625,46 @@ func TrimBinary(r io.ReaderAt, totalSize int64, targetLevel string, out io.Write
 	}
 
 	currentOffset := stubSize
-	var newIdx *format.Index
-
+	var dictOffset int64
 	if idx.DictionarySize > 0 {
-		// 2. Copy Shared Dictionary
-		dictReader := io.NewSectionReader(r, idx.DictionaryOffset, idx.DictionarySize)
-		if _, err := io.Copy(out, dictReader); err != nil {
-			return nil, fmt.Errorf("copying dictionary frame: %w", err)
+		var dictErr error
+		dictOffset, currentOffset, dictErr = copyTrimmedSegment(
+			out, r, idx.DictionaryOffset, idx.DictionarySize, currentOffset, "dictionary",
+		)
+		if dictErr != nil {
+			return nil, dictErr
 		}
-		dictOffset := currentOffset
-		var advErr error
-		currentOffset, advErr = advanceLayoutOffset(currentOffset, idx.DictionarySize)
-		if advErr != nil {
-			return nil, advErr
-		}
+	}
 
-		// 3. Copy Compressed Variant Frame
-		varReader := io.NewSectionReader(r, selected.Offset, selected.CompressedSize)
-		if _, err := io.Copy(out, varReader); err != nil {
-			return nil, fmt.Errorf("copying variant frame: %w", err)
-		}
-		variantOffset := currentOffset
-		currentOffset, advErr = advanceLayoutOffset(currentOffset, selected.CompressedSize)
-		if advErr != nil {
-			return nil, advErr
-		}
+	variantOffset, currentOffset, varErr := copyTrimmedSegment(
+		out, r, selected.Offset, selected.CompressedSize, currentOffset, "variant",
+	)
+	if varErr != nil {
+		return nil, varErr
+	}
 
-		newIdx = &format.Index{
-			Version:          idx.Version,
-			AppName:          idx.AppName,
-			TargetOS:         idx.TargetOS,
-			TargetArch:       idx.TargetArch,
-			CreatedUnix:      time.Now().Unix(),
-			DictionaryOffset: dictOffset,
-			DictionarySize:   idx.DictionarySize,
-			DictionarySHA256: idx.DictionarySHA256,
-			DictionaryID:     idx.DictionaryID,
-			Variants: []format.VariantEntry{
-				{
-					Level:            selected.Level,
-					Offset:           variantOffset,
-					CompressedSize:   selected.CompressedSize,
-					UncompressedSize: selected.UncompressedSize,
-					SHA256:           selected.SHA256,
-					Compression:      selected.Compression,
-				},
+	newIdx := &format.Index{
+		Version:     idx.Version,
+		AppName:     idx.AppName,
+		TargetOS:    idx.TargetOS,
+		TargetArch:  idx.TargetArch,
+		CreatedUnix: time.Now().Unix(),
+		Variants: []format.VariantEntry{
+			{
+				Level:            selected.Level,
+				Offset:           variantOffset,
+				CompressedSize:   selected.CompressedSize,
+				UncompressedSize: selected.UncompressedSize,
+				SHA256:           selected.SHA256,
+				Compression:      selected.Compression,
 			},
-		}
-	} else {
-		// 2. Copy Compressed Variant Frame
-		varReader := io.NewSectionReader(r, selected.Offset, selected.CompressedSize)
-		if _, err := io.Copy(out, varReader); err != nil {
-			return nil, fmt.Errorf("copying variant frame: %w", err)
-		}
-		variantOffset := currentOffset
-		var advErr error
-		currentOffset, advErr = advanceLayoutOffset(currentOffset, selected.CompressedSize)
-		if advErr != nil {
-			return nil, advErr
-		}
-
-		newIdx = &format.Index{
-			Version:     idx.Version,
-			AppName:     idx.AppName,
-			TargetOS:    idx.TargetOS,
-			TargetArch:  idx.TargetArch,
-			CreatedUnix: time.Now().Unix(),
-			Variants: []format.VariantEntry{
-				{
-					Level:            selected.Level,
-					Offset:           variantOffset,
-					CompressedSize:   selected.CompressedSize,
-					UncompressedSize: selected.UncompressedSize,
-					SHA256:           selected.SHA256,
-					Compression:      selected.Compression,
-				},
-			},
-		}
+		},
+	}
+	if idx.DictionarySize > 0 {
+		newIdx.DictionaryOffset = dictOffset
+		newIdx.DictionarySize = idx.DictionarySize
+		newIdx.DictionarySHA256 = idx.DictionarySHA256
+		newIdx.DictionaryID = idx.DictionaryID
 	}
 
 	// 4. Write New Index and Trailer
@@ -700,6 +673,22 @@ func TrimBinary(r io.ReaderAt, totalSize int64, targetLevel string, out io.Write
 	}
 
 	return newIdx, nil
+}
+
+func copyTrimmedSegment(
+	out io.Writer,
+	r io.ReaderAt,
+	srcOffset, size, currentOffset int64,
+	label string,
+) (int64, int64, error) {
+	nextOffset, err := advanceLayoutOffset(currentOffset, size)
+	if err != nil {
+		return 0, 0, fmt.Errorf("advancing %s layout offset: %w", label, err)
+	}
+	if _, err := io.Copy(out, io.NewSectionReader(r, srcOffset, size)); err != nil {
+		return 0, 0, fmt.Errorf("copying %s frame: %w", label, err)
+	}
+	return currentOffset, nextOffset, nil
 }
 
 // VerifyBinary reads the index and decompresses each variant to verify SHA-256 checksums and boundaries.
