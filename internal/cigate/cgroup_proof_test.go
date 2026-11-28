@@ -20,6 +20,11 @@ func TestProductionGobraProofGates(t *testing.T) {
 	}{
 		{"cgroup-memory-proof", "task verify-cgroup-memory"},
 		{"format-bounds-proof", "task verify-format-bounds"},
+		{"pack-layout-proof", "task verify-pack-layout"},
+		{"cache-metadata-proof", "task verify-cache-metadata"},
+		{"install-metadata-proof", "task verify-install-metadata"},
+		{"microarch-policy-proof", "task verify-microarch-policy"},
+		{"lifecycle-policy-proof", "task verify-lifecycle-policy"},
 	}
 	for _, tc := range workflows {
 		t.Run(tc.workflow, func(t *testing.T) {

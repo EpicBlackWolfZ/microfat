@@ -305,6 +305,26 @@ tasks:
     desc: Check the production Format v2 segment bounds laws with pinned Gobra (GOBRA_ENGINE=docker|podman)
     cmds:
     - GOBRA_ENGINE={{.GOBRA_ENGINE | shellQuote}} bash scripts/verify-format-bounds.sh
+  verify-pack-layout:
+    desc: Check the production packaging segment layout laws with pinned Gobra (GOBRA_ENGINE=docker|podman)
+    cmds:
+    - GOBRA_ENGINE={{.GOBRA_ENGINE | shellQuote}} bash scripts/verify-pack-layout.sh
+  verify-cache-metadata:
+    desc: Check the production cache metadata safety laws with pinned Gobra (GOBRA_ENGINE=docker|podman)
+    cmds:
+    - GOBRA_ENGINE={{.GOBRA_ENGINE | shellQuote}} bash scripts/verify-cache-metadata.sh
+  verify-install-metadata:
+    desc: Check the production install metadata bounds laws with pinned Gobra (GOBRA_ENGINE=docker|podman)
+    cmds:
+    - GOBRA_ENGINE={{.GOBRA_ENGINE | shellQuote}} bash scripts/verify-install-metadata.sh
+  verify-microarch-policy:
+    desc: Check the production microarchitecture rank policy laws with pinned Gobra (GOBRA_ENGINE=docker|podman)
+    cmds:
+    - GOBRA_ENGINE={{.GOBRA_ENGINE | shellQuote}} bash scripts/verify-microarch-policy.sh
+  verify-lifecycle-policy:
+    desc: Check the production lifecycle mode/ownership policy laws with pinned Gobra (GOBRA_ENGINE=docker|podman)
+    cmds:
+    - GOBRA_ENGINE={{.GOBRA_ENGINE | shellQuote}} bash scripts/verify-lifecycle-policy.sh
   verify-z3:
     desc: Verify Z3 QF_BV bit-vector proofs against pinned Z3
     cmds:
@@ -326,6 +346,11 @@ tasks:
     cmds:
     - task: verify-cgroup-memory
     - task: verify-format-bounds
+    - task: verify-pack-layout
+    - task: verify-cache-metadata
+    - task: verify-install-metadata
+    - task: verify-microarch-policy
+    - task: verify-lifecycle-policy
     - task: verify-z3
     - task: verify-lean
     - task: verify-kani

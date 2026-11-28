@@ -13,23 +13,21 @@ import (
 )
 
 const (
-	SchemaVersion            = 1
-	OwnerKind                = "microfat-installer"
-	ownerFile                = "owner.json"
-	generationFile           = "generation.json"
-	currentLink              = "current"
-	generationDir            = "generations"
-	lockFile                 = ".lock"
-	metadataLimit            = 32 * 1024
-	MaxFileBytes       int64 = 250 * 1024 * 1024
-	directoryMode            = 0o755
-	privateMode              = 0o700
-	metadataMode             = 0o600
-	publicMetadataMode       = 0o644
+	SchemaVersion      = 1
+	OwnerKind          = "microfat-installer"
+	ownerFile          = "owner.json"
+	generationFile     = "generation.json"
+	currentLink        = "current"
+	generationDir      = "generations"
+	lockFile           = ".lock"
+	metadataLimit      = 32 * 1024
+	directoryMode      = 0o755
+	privateMode        = 0o700
+	metadataMode       = 0o600
+	publicMetadataMode = 0o644
 )
 
 var (
-	ErrOwnership   = errors.New("installation ownership validation failed")
 	ErrChanged     = errors.New("installation changed; inspect it again before retrying")
 	ErrConflict    = errors.New("destination contains an unmanaged or modified entrypoint")
 	ErrCorrupt     = errors.New("installed generation is corrupt; explicit repair is required")
@@ -98,7 +96,7 @@ func (g Generation) Validate() error {
 	}
 	for _, name := range Products() {
 		file := g.Files[name]
-		if file.Size <= 0 || file.Size > MaxFileBytes || !digestPattern.MatchString(file.SHA256) {
+		if !checkInstallFileSize(file.Size) || !digestPattern.MatchString(file.SHA256) {
 			return fmt.Errorf("invalid generation file metadata: %s", name)
 		}
 	}

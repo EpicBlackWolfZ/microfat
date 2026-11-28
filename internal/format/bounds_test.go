@@ -94,3 +94,36 @@ func TestCheckVariantSegmentBounds(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckTrailerAndIndexBounds(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name                            string
+		totalSize, indexOffset, indexSz int64
+		wantTrailerOff                  int64
+		wantErr                         error
+	}{
+		{"valid_minimal", TrailerSize + 1, 0, 1, 1, nil},
+		{"valid_with_payload", 4096 + TrailerSize, 3072, 1024, 4096, nil},
+		{"too_small", TrailerSize - 1, 0, 0, 0, ErrBinaryTooSmall},
+		{"negative_index_offset", 4096 + TrailerSize, -1, 10, 0, ErrInvalidIndexOffset},
+		{"offset_at_trailer", 4096 + TrailerSize, 4096, 0, 0, ErrInvalidIndexOffset},
+		{"zero_index_size", 4096 + TrailerSize, 4096, 0, 0, ErrInvalidIndexOffset},
+		{"non_positive_index_size", 4096 + TrailerSize, 3072, 0, 0, ErrInvalidIndexSize},
+		{"oversized_index", 2*MaxIndexSize + TrailerSize, MaxIndexSize - 1, MaxIndexSize + 1, 0, ErrInvalidIndexSize},
+		{"mismatched_trailer_gap", 4096 + TrailerSize, 3072, 512, 0, ErrInvalidIndexSize},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := checkTrailerAndIndexBounds(tc.totalSize, tc.indexOffset, tc.indexSz, TrailerSize, MaxIndexSize)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+				require.Zero(t, got)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.wantTrailerOff, got)
+			}
+		})
+	}
+}

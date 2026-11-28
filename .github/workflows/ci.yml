@@ -100,6 +100,36 @@ jobs:
         timeout-minutes: 5
         run: task verify-format-bounds
 
+      - name: Verify pack segment layout arithmetic
+        id: pack-layout-proof
+        if: steps.changes.outputs.run-code-checks == 'true'
+        timeout-minutes: 5
+        run: task verify-pack-layout
+
+      - name: Verify cache metadata safety predicates
+        id: cache-metadata-proof
+        if: steps.changes.outputs.run-code-checks == 'true'
+        timeout-minutes: 5
+        run: task verify-cache-metadata
+
+      - name: Verify install metadata bounds predicates
+        id: install-metadata-proof
+        if: steps.changes.outputs.run-code-checks == 'true'
+        timeout-minutes: 5
+        run: task verify-install-metadata
+
+      - name: Verify microarch rank policy arithmetic
+        id: microarch-policy-proof
+        if: steps.changes.outputs.run-code-checks == 'true'
+        timeout-minutes: 5
+        run: task verify-microarch-policy
+
+      - name: Verify lifecycle mode policy arithmetic
+        id: lifecycle-policy-proof
+        if: steps.changes.outputs.run-code-checks == 'true'
+        timeout-minutes: 5
+        run: task verify-lifecycle-policy
+
       - name: Compile and exercise isolated runtime metadata recipes
         if: steps.changes.outputs.run-code-checks == 'true'
         run: task test-runtimeinfo-examples

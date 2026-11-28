@@ -73,6 +73,31 @@ jobs:
         timeout-minutes: 5
         run: task verify-format-bounds
 
+      - name: Verify pack segment layout arithmetic
+        id: pack-layout-proof
+        timeout-minutes: 5
+        run: task verify-pack-layout
+
+      - name: Verify cache metadata safety predicates
+        id: cache-metadata-proof
+        timeout-minutes: 5
+        run: task verify-cache-metadata
+
+      - name: Verify install metadata bounds predicates
+        id: install-metadata-proof
+        timeout-minutes: 5
+        run: task verify-install-metadata
+
+      - name: Verify microarch rank policy arithmetic
+        id: microarch-policy-proof
+        timeout-minutes: 5
+        run: task verify-microarch-policy
+
+      - name: Verify lifecycle mode policy arithmetic
+        id: lifecycle-policy-proof
+        timeout-minutes: 5
+        run: task verify-lifecycle-policy
+
       - name: Validate documentation, ADRs, SPECs, and verification ledger
         id: docs-gate
         timeout-minutes: 5

@@ -29,8 +29,8 @@ This specification defines runtime self-dispatch semantics across Go ([`cmd/micr
 
 ## Formal Laws & Invariants
 
-- `LAW-CACHE-01`: (*Scheduled [#528](https://github.com/EpicBlackWolfZ/microfat/issues/528)*) Safe cache metadata predicates and descriptor validation invariants in [`internal/cache`](../../internal/cache/cache_unix.go) reject non-regular files, symlinks, foreign UIDs, and `0o6022` mode bits prior to execution (Gobra backfill target).
-- `LAW-LEAN-05`: (*Scheduled [#528](https://github.com/EpicBlackWolfZ/microfat/issues/528)*) Formal dispatch state machine (`DispatchState.lean`) proving mode separation (`auto`/`memfd`/`cache`), unsafe-entry fail-closed termination, single-retry bound, and corruption/budget non-materialization (Lean 4 backfill target).
+- `LAW-CACHE-01`: Safe cache metadata predicates and descriptor validation invariants ([`checkCacheMetadataFields`](../../internal/cache/metadata.go), [`checkCacheEntryFields`](../../internal/cache/metadata.go), called by [`internal/cache/cache_unix.go`](../../internal/cache/cache_unix.go)) reject non-regular files, symlinks, foreign UIDs, and `0o6022` mode bits prior to execution (`task verify-cache-metadata`).
+- `LAW-LEAN-05`: Formal dispatch state machine ([`formal/lean/Microfat/DispatchState.lean`](../../formal/lean/Microfat/DispatchState.lean)) proving mode separation (`auto`/`memfd`/`cache`), 4-seal monotonicity, unsafe-entry fail-closed termination, single-retry bound, and corruption/budget non-materialization (`task verify-lean`).
 
 ## Traceability Matrix
 
@@ -43,5 +43,5 @@ This specification defines runtime self-dispatch semantics across Go ([`cmd/micr
 | `REQ-0003-05` | Descriptor-bound `openat` & unsafe entry refusal | [`internal/cache/cache_unix.go`](../../internal/cache/cache_unix.go), [`experiments/v3lab/rust-stub/src/main.rs`](../../experiments/v3lab/rust-stub/src/main.rs) | [`internal/cache/safety_test.go`](../../internal/cache/safety_test.go), [`tests/e2e/cache_fifo_test.go`](../../tests/e2e/cache_fifo_test.go) |
 | `REQ-0003-06` | `MICROFAT_EXEC_MODE` vs `MICROFAT_DISPATCH_MODE` isolation | [`cmd/microfat-stub/exec_linux.go`](../../cmd/microfat-stub/exec_linux.go), [`experiments/v3lab/rust-stub/src/main.rs`](../../experiments/v3lab/rust-stub/src/main.rs) | [`tests/e2e/rust_stub_parity_test.go`](../../tests/e2e/rust_stub_parity_test.go), [`tests/e2e/running_image_test.go`](../../tests/e2e/running_image_test.go) |
 | `REQ-0003-07` | Full vs minimal meta-command profile routing & hint | [`cmd/microfat-stub/meta_minimal.go`](../../cmd/microfat-stub/meta_minimal.go), [`cmd/microfat-stub/meta_full.go`](../../cmd/microfat-stub/meta_full.go) | [`cmd/microfat-stub/minimal_test.go`](../../cmd/microfat-stub/minimal_test.go), [`tests/e2e/stub_profile_e2e_test.go`](../../tests/e2e/stub_profile_e2e_test.go) |
-| `LAW-CACHE-01` | Cache descriptor metadata safety (*#528 backfill*) | [`internal/cache/cache_unix.go`](../../internal/cache/cache_unix.go) | Tracked in [`#528`](https://github.com/EpicBlackWolfZ/microfat/issues/528) |
-| `LAW-LEAN-05` | `DispatchState.lean` transition model (*#528 backfill*) | Scheduled `formal/lean/Microfat/DispatchState.lean` | Tracked in [`#528`](https://github.com/EpicBlackWolfZ/microfat/issues/528) |
+| `LAW-CACHE-01` | Cache descriptor metadata safety | [`internal/cache/metadata.go`](../../internal/cache/metadata.go) | `task verify-cache-metadata` |
+| `LAW-LEAN-05` | `DispatchState.lean` transition model | [`formal/lean/Microfat/DispatchState.lean`](../../formal/lean/Microfat/DispatchState.lean) | `task verify-lean` |

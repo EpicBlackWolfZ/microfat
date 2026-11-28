@@ -25,8 +25,8 @@ This specification elevates [`docs/design/installation-discovery-contract.md`](.
 
 ## Formal Laws & Invariants
 
-- `LAW-INSTALL-01`: (*Scheduled [#528](https://github.com/EpicBlackWolfZ/microfat/issues/528)*) Generation path traversal rejection, file-count/size bounds, and atomic switch/rollback postconditions in [`internal/install`](../../internal/install/transaction.go) (Gobra backfill target).
-- `LAW-LEAN-06`: (*Scheduled [#528](https://github.com/EpicBlackWolfZ/microfat/issues/528)*) Formal generation install/rollback state machine (`InstallTx.lean`) proving every failure before switch leaves active links unchanged and post-switch validation failure restores the previous valid generation (Lean 4 backfill target).
+- `LAW-INSTALL-01`: Ownership match, `0o6022` special/writable mode refusal, and `<= MaxFileBytes` size bounds ([`checkInstallEntryMetadata`](../../internal/install/metadata.go), [`checkInstallFileSize`](../../internal/install/metadata.go), called by [`platform_linux.go`](../../internal/install/platform_linux.go) & [`types.go`](../../internal/install/types.go), `task verify-install-metadata`).
+- `LAW-LEAN-06`: Formal generation install/rollback state machine ([`formal/lean/Microfat/InstallTx.lean`](../../formal/lean/Microfat/InstallTx.lean)) proving every failure before switch leaves active links unchanged and post-switch validation failure restores the previous valid generation (`task verify-lean`).
 
 ## Traceability Matrix
 
@@ -39,5 +39,5 @@ This specification elevates [`docs/design/installation-discovery-contract.md`](.
 | `REQ-0007-05` | Self-update verification & `--staging-dir` `noexec` safety | [`internal/update/update.go`](../../internal/update/update.go) | [`internal/update/update_test.go`](../../internal/update/update_test.go), [`tests/e2e/update_test.go`](../../tests/e2e/update_test.go) |
 | `REQ-0007-06` | Clean generation & prefix uninstall | [`internal/install/uninstall.go`](../../internal/install/uninstall.go) | [`internal/install/transaction_test.go`](../../internal/install/transaction_test.go) |
 | `REQ-0007-07` | Linux Homebrew formula checksum & native check | [`internal/homebrew/recipe.go`](../../internal/homebrew/recipe.go) | [`tests/e2e/homebrew_test.go`](../../tests/e2e/homebrew_test.go) |
-| `LAW-INSTALL-01` | Installer generation bounds & rollback (*#528 backfill*) | [`internal/install/transaction.go`](../../internal/install/transaction.go) | Tracked in [`#528`](https://github.com/EpicBlackWolfZ/microfat/issues/528) |
-| `LAW-LEAN-06` | Lean 4 `InstallTx.lean` rollback model (*#528 backfill*) | Scheduled `formal/lean/Microfat/InstallTx.lean` | Tracked in [`#528`](https://github.com/EpicBlackWolfZ/microfat/issues/528) |
+| `LAW-INSTALL-01` | Installer entry safety & size bounds | [`internal/install/metadata.go`](../../internal/install/metadata.go) | `task verify-install-metadata` |
+| `LAW-LEAN-06` | Lean 4 `InstallTx.lean` rollback model | [`formal/lean/Microfat/InstallTx.lean`](../../formal/lean/Microfat/InstallTx.lean) | `task verify-lean` |

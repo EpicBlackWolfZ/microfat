@@ -2,7 +2,7 @@
 
 This directory holds normative RFC-2119 specifications (`docs/specs/SPEC-NNNN-<slug>.md`) governed by [ADR-0012](../adr/ADR-0012-engineering-governance-and-docs-as-code.md). Use [the SPEC template](TEMPLATE.md) when authoring new specifications.
 
-> **Backfill status (`v0.5.0`):** Normative specifications `SPEC-0001` through `SPEC-0009` (`v0.1.0`–`v0.4.1` baseline) have been backfilled under [#527](https://github.com/EpicBlackWolfZ/microfat/issues/527). Formal proof expansions (`LAW-FORMAT-03`, `LAW-SMT-03`, `LAW-MICROARCH-01`, `LAW-CACHE-01`, `LAW-LEAN-05`, `LAW-PACK-01`, `LAW-SMT-04`, `LAW-LIFECYCLE-01`, `LAW-INSTALL-01`, `LAW-LEAN-06`) are scheduled in [#528](https://github.com/EpicBlackWolfZ/microfat/issues/528), and `SPEC-0010` (Format v3) is scheduled in [#529](https://github.com/EpicBlackWolfZ/microfat/issues/529). Existing design documents under [`docs/design/`](../design/installation-discovery-contract.md) remain active supporting references.
+> **Backfill status (`v0.5.0`):** Normative specifications `SPEC-0001` through `SPEC-0009` (`v0.1.0`–`v0.4.1` baseline) were backfilled under [#527](https://github.com/EpicBlackWolfZ/microfat/issues/527), and formal proof expansions (`LAW-FORMAT-03`, `LAW-SMT-03`, `LAW-MICROARCH-01`, `LAW-CACHE-01`, `LAW-LEAN-05`, `LAW-PACK-01`, `LAW-SMT-04`, `LAW-LIFECYCLE-01`, `LAW-INSTALL-01`, `LAW-LEAN-06`) under [#528](https://github.com/EpicBlackWolfZ/microfat/issues/528); `SPEC-0010` (Format v3) is scheduled in [#529](https://github.com/EpicBlackWolfZ/microfat/issues/529). Existing design documents under [`docs/design/`](../design/installation-discovery-contract.md) remain active supporting references.
 
 | Spec | Title | Status | Date | Related ADRs |
 | :--- | :--- | :--- | :--- | :--- |

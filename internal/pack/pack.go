@@ -321,7 +321,11 @@ func Pack(opts Options) (*format.Index, error) {
 		if _, err := tmpFile.Write(dictBytes); err != nil {
 			return nil, fmt.Errorf("writing dictionary payload: %w", err)
 		}
-		currentOffset += dictSize
+		var advErr error
+		currentOffset, advErr = advanceLayoutOffset(currentOffset, dictSize)
+		if advErr != nil {
+			return nil, fmt.Errorf("advancing dictionary layout offset: %w", advErr)
+		}
 		idx.DictionaryOffset = dictOffset
 		idx.DictionarySize = dictSize
 		idx.DictionarySHA256 = dictSHAHex
@@ -517,11 +521,15 @@ func writeVariantPayload(
 	if err != nil {
 		return format.VariantEntry{}, 0, fmt.Errorf("seeking current file offset: %w", err)
 	}
+	compressedSize, extErr := computeSegmentExtent(variantOffset, newOffset, format.MaxPayloadSize, uncompressedSize)
+	if extErr != nil {
+		return format.VariantEntry{}, 0, extErr
+	}
 
 	entry := format.VariantEntry{
 		Level:            format.NormalizeVariant(lvl),
 		Offset:           variantOffset,
-		CompressedSize:   newOffset - variantOffset,
+		CompressedSize:   compressedSize,
 		UncompressedSize: uncompressedSize,
 		SHA256:           rawHashHex,
 		Compression:      c.Name(),
@@ -616,7 +624,11 @@ func TrimBinary(r io.ReaderAt, totalSize int64, targetLevel string, out io.Write
 			return nil, fmt.Errorf("copying dictionary frame: %w", err)
 		}
 		dictOffset := currentOffset
-		currentOffset += idx.DictionarySize
+		var advErr error
+		currentOffset, advErr = advanceLayoutOffset(currentOffset, idx.DictionarySize)
+		if advErr != nil {
+			return nil, advErr
+		}
 
 		// 3. Copy Compressed Variant Frame
 		varReader := io.NewSectionReader(r, selected.Offset, selected.CompressedSize)
@@ -624,7 +636,10 @@ func TrimBinary(r io.ReaderAt, totalSize int64, targetLevel string, out io.Write
 			return nil, fmt.Errorf("copying variant frame: %w", err)
 		}
 		variantOffset := currentOffset
-		currentOffset += selected.CompressedSize
+		currentOffset, advErr = advanceLayoutOffset(currentOffset, selected.CompressedSize)
+		if advErr != nil {
+			return nil, advErr
+		}
 
 		newIdx = &format.Index{
 			Version:          idx.Version,
@@ -654,7 +669,11 @@ func TrimBinary(r io.ReaderAt, totalSize int64, targetLevel string, out io.Write
 			return nil, fmt.Errorf("copying variant frame: %w", err)
 		}
 		variantOffset := currentOffset
-		currentOffset += selected.CompressedSize
+		var advErr error
+		currentOffset, advErr = advanceLayoutOffset(currentOffset, selected.CompressedSize)
+		if advErr != nil {
+			return nil, advErr
+		}
 
 		newIdx = &format.Index{
 			Version:     idx.Version,

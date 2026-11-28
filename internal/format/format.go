@@ -119,12 +119,9 @@ var userHomeDirFunc = os.UserHomeDir
 
 // Standard error definitions for binary format parsing and execution.
 var (
-	ErrBinaryTooSmall      = errors.New("binary size is smaller than trailer size")
 	ErrInvalidMagic        = errors.New("invalid microfat magic bytes at EOF")
 	ErrTrailerRead         = errors.New("reading binary trailer")
 	ErrUnsupportedVersion  = errors.New("unsupported microfat format version")
-	ErrInvalidIndexOffset  = errors.New("invalid index offset in trailer")
-	ErrInvalidIndexSize    = errors.New("invalid index size in trailer")
 	ErrIndexCorrupted      = errors.New("index SHA-256 checksum mismatch")
 	ErrTruncatedIndex      = errors.New("truncated index data")
 	ErrDictionaryCorrupted = errors.New("shared dictionary SHA-256 checksum mismatch")
@@ -911,14 +908,14 @@ func ReadTrailerAndIndex(r io.ReaderAt, totalSize int64) (*Index, error) {
 	// #nosec G115 -- trailer format offset and size
 	indexSize := int64(binary.LittleEndian.Uint64(trailerBuf[OffsetLen:offset]))
 
-	trailerOffset := totalSize - TrailerSize
-	if indexOffset < 0 || indexOffset >= trailerOffset {
-		return nil, fmt.Errorf("%w: offset %d beyond trailer %d",
-			ErrInvalidIndexOffset, indexOffset, trailerOffset)
-	}
-	if indexSize <= 0 || indexSize > MaxIndexSize || indexSize != trailerOffset-indexOffset {
+	_, err := checkTrailerAndIndexBounds(totalSize, indexOffset, indexSize, TrailerSize, MaxIndexSize)
+	if err != nil {
+		if errors.Is(err, ErrInvalidIndexOffset) {
+			return nil, fmt.Errorf("%w: offset %d beyond trailer %d",
+				ErrInvalidIndexOffset, indexOffset, totalSize-TrailerSize)
+		}
 		return nil, fmt.Errorf("%w: index size %d with offset %d does not match trailer boundary %d",
-			ErrInvalidIndexSize, indexSize, indexOffset, trailerOffset)
+			ErrInvalidIndexSize, indexSize, indexOffset, totalSize-TrailerSize)
 	}
 
 	expectedHash := trailerBuf[offset : offset+HashLen]

@@ -29,25 +29,19 @@ func validateInfo(info os.FileInfo, directory bool, exactUID bool) error {
 	if !ok {
 		return ErrOwnership
 	}
-	uid := int(stat.Uid)
-	if (exactUID && uid != os.Geteuid()) || (!exactUID && uid != 0 && uid != os.Geteuid()) {
-		return ErrOwnership
-	}
-	if directory {
-		if !info.IsDir() {
-			return ErrOwnership
-		}
-		// A root-owned sticky ancestor (such as /tmp) protects owned child names.
-		if !exactUID && uid == 0 && info.Mode()&os.ModeSticky != 0 {
-			return nil
-		}
-	} else if !info.Mode().IsRegular() || stat.Nlink != 1 {
-		return ErrOwnership
-	}
-	if info.Mode().Perm()&0o022 != 0 || info.Mode()&(os.ModeSetuid|os.ModeSetgid) != 0 {
-		return ErrOwnership
-	}
-	return nil
+	//nolint:unconvert // stat.Nlink is uint32 on linux/arm64 and uint64 on linux/amd64
+	return checkInstallEntryMetadata(
+		int64(stat.Uid),
+		int64(os.Geteuid()),
+		info.IsDir(),
+		info.Mode().IsRegular(),
+		uint64(stat.Nlink),
+		info.Mode().Perm()&0o022 != 0,
+		info.Mode()&os.ModeSticky != 0,
+		info.Mode()&(os.ModeSetuid|os.ModeSetgid) != 0,
+		directory,
+		exactUID,
+	)
 }
 
 func lock(ctx context.Context, root *os.Root) (*os.File, error) {

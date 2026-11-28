@@ -10,17 +10,6 @@ import (
 
 // Common cache validation errors.
 var (
-	// ErrNonRegularFile indicates that the cache entry is not a standard regular file (e.g. symlink or directory).
-	ErrNonRegularFile = errors.New("cached path is not a regular file")
-
-	ErrUnsafeFile = errors.New("cache file has unexpected owner or unsafe permissions")
-
-	// ErrNotExecutable marks a safe regular entry that needs explicit materialization.
-	ErrNotExecutable = errors.New("cache file lacks owner execute permission")
-
-	// ErrSizeMismatch indicates that the cache file length does not match the expected uncompressed variant size.
-	ErrSizeMismatch = errors.New("cache file size mismatch")
-
 	// ErrChecksumMismatch indicates that the cache file SHA-256 payload digest failed verification.
 	ErrChecksumMismatch = format.ErrPayloadCorrupted
 
