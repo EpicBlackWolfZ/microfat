@@ -935,6 +935,109 @@ func TestResolveCacheDir_SecurityValidation(t *testing.T) {
 	})
 }
 
+func TestResolveCacheDir_NoExecMountDetection(t *testing.T) {
+	origFstatfs := fstatfsDirFunc
+	origOpen := openDirFunc
+	origClose := closeDirFunc
+	defer func() {
+		fstatfsDirFunc = origFstatfs
+		openDirFunc = origOpen
+		closeDirFunc = origClose
+	}()
+
+	tempDir := t.TempDir()
+	noExecCustom := filepath.Join(tempDir, "noexec_custom")
+	noExecEnv := filepath.Join(tempDir, "noexec_env")
+	xdgRoot := filepath.Join(tempDir, "xdg_noexec")
+	noExecXDG := filepath.Join(xdgRoot, "microfat")
+	execTmpRoot := filepath.Join(tempDir, "exec_tmp")
+	for _, d := range []string{noExecCustom, noExecEnv, execTmpRoot} {
+		require.NoError(t, os.MkdirAll(d, testPerm0700))
+	}
+	require.NoError(t, os.MkdirAll(noExecXDG, testPerm0777))
+	require.NoError(t, os.Chmod(noExecXDG, testPerm0777))
+
+	activeFDs := make(map[int]string)
+	var mu sync.Mutex
+	openDirFunc = func(name string) (int, error) {
+		fd, err := origOpen(name)
+		if err == nil {
+			mu.Lock()
+			activeFDs[fd] = name
+			mu.Unlock()
+		}
+		return fd, err
+	}
+	closeDirFunc = func(fd int) error {
+		mu.Lock()
+		delete(activeFDs, fd)
+		mu.Unlock()
+		return origClose(fd)
+	}
+	noExecAll := false
+	fstatfsErr := false
+	fstatfsDirFunc = func(fd int, buf *unix.Statfs_t) error {
+		if fstatfsErr {
+			return errors.New("simulated fstatfs error")
+		}
+		mu.Lock()
+		p := activeFDs[fd]
+		mu.Unlock()
+		if noExecAll || p == noExecCustom || p == noExecEnv || p == noExecXDG {
+			buf.Flags = unix.ST_NOEXEC
+		} else {
+			buf.Flags = 0
+		}
+		return nil
+	}
+
+	// 1. Explicit customDir fails with ErrCacheDirNoExec.
+	_, err := ResolveCacheDir(noExecCustom)
+	require.ErrorIs(t, err, ErrCacheDirNoExec)
+	require.Contains(t, err.Error(), "cannot execute binaries")
+
+	// 2. Explicit ResolveExistingCacheDir fails with ErrCacheDirNoExec too.
+	_, err = ResolveExistingCacheDir(noExecCustom)
+	require.ErrorIs(t, err, ErrCacheDirNoExec)
+
+	// 3. Explicit MICROFAT_CACHE_DIR fails with ErrCacheDirNoExec.
+	t.Setenv(EnvCacheDir, noExecEnv)
+	_, err = ResolveCacheDir("")
+	require.ErrorIs(t, err, ErrCacheDirNoExec)
+	require.Contains(t, err.Error(), "cannot execute binaries")
+
+	// 4. Explicit insecure dir still fails with ErrInsecureCacheDir before mount check.
+	require.NoError(t, os.Chmod(noExecEnv, testPerm0777))
+	_, err = ResolveCacheDir("")
+	require.ErrorIs(t, err, ErrInsecureCacheDir)
+
+	// 5. Cascade skips noexec XDG candidate without mutating its permissions, uses exec TMPDIR.
+	t.Setenv(EnvCacheDir, "")
+	t.Setenv("XDG_CACHE_HOME", xdgRoot)
+	t.Setenv("TMPDIR", execTmpRoot)
+	resolved, err := ResolveCacheDir("")
+	require.NoError(t, err)
+	expectedFallback := filepath.Join(execTmpRoot, fmt.Sprintf(".microfat-%d", os.Geteuid()))
+	require.Equal(t, expectedFallback, resolved)
+
+	fi, statErr := os.Lstat(noExecXDG)
+	require.NoError(t, statErr)
+	require.Equal(t, os.FileMode(testPerm0777), fi.Mode().Perm(), "noexec cascade skip must not mutate permissions")
+
+	// 6. All candidates noexec surfaces both ErrCacheInit and ErrCacheDirNoExec.
+	noExecAll = true
+	_, err = ResolveCacheDir("")
+	require.ErrorIs(t, err, ErrCacheInit)
+	require.ErrorIs(t, err, ErrCacheDirNoExec)
+
+	// 7. fstatfs failure is non-fatal so restricted sandboxes do not false-fail.
+	noExecAll = false
+	fstatfsErr = true
+	resolvedAfterErr, err := ResolveCacheDir(noExecCustom)
+	require.NoError(t, err)
+	require.Equal(t, noExecCustom, resolvedAfterErr)
+}
+
 func TestValidateCacheDirSecurity(t *testing.T) {
 	origOpen := openDirFunc
 	origFstat := fstatDirFunc

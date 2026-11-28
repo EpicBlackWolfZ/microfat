@@ -209,10 +209,12 @@ into a forced policy override for child processes.
    `$MICROFAT_CACHE_DIR` when supplied, otherwise the XDG/home and temporary-directory candidates
    (`$XDG_CACHE_HOME/microfat`, `~/.cache/microfat`, `/tmp/.microfat-<uid>`). It does not create
    directories, repair permissions, extract payloads or remove entries during lookup.
-2. **Private permission boundary**: Existing directories must have the expected owner and no
-   group/other write permission. Materialized directories and variant binaries use `0o700`.
-   Entries must be regular files owned by the effective UID, without group/other write or special
-   permission bits.
+2. **Private permission and mount boundary**: Existing directories must have the expected owner and no
+   group/other write permission, and on Linux must reside on an executable filesystem (`fstatfs` `ST_NOEXEC`
+   clear). Automatic cascade discovery skips `noexec` directories without mutating permissions; explicit
+   `$MICROFAT_CACHE_DIR` / `--cache-dir` paths on a `noexec` mount fail fast with `ErrCacheDirNoExec`.
+   Materialized directories and variant binaries use `0o700`. Entries must be regular files owned by the
+   effective UID, without group/other write or special permission bits.
 3. **Descriptor-bound verification**: Opens use
    `O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK` relative to the validated directory descriptor.
    `O_NOFOLLOW` rejects a symlink in the final entry component; `O_NONBLOCK` prevents FIFO waits.

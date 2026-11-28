@@ -77,13 +77,18 @@ func OpenAndValidateCacheDirFD(dir string, allowRemediate bool) (int, error) {
 			ErrInsecureCacheDir, dir, stat.Uid, euid)
 	}
 
-	if stat.Mode&InsecureCacheWriteBits != 0 {
-		if !allowRemediate {
-			_ = closeDirFunc(fd)
-			return -1, fmt.Errorf("%w: cache directory %s has insecure write permissions: %04o (group/world write not allowed)",
-				ErrInsecureCacheDir, dir, stat.Mode&PermissionMask)
-		}
+	if !allowRemediate && stat.Mode&InsecureCacheWriteBits != 0 {
+		_ = closeDirFunc(fd)
+		return -1, fmt.Errorf("%w: cache directory %s has insecure write permissions: %04o (group/world write not allowed)",
+			ErrInsecureCacheDir, dir, stat.Mode&PermissionMask)
+	}
 
+	if mountErr := checkCacheDirExecMount(fd, dir); mountErr != nil {
+		_ = closeDirFunc(fd)
+		return -1, mountErr
+	}
+
+	if stat.Mode&InsecureCacheWriteBits != 0 {
 		if chmodErr := fchmodDirFunc(fd, PrivateCacheDirMode); chmodErr != nil {
 			_ = closeDirFunc(fd)
 			return -1, fmt.Errorf("%w: failed to tighten cache directory %s permissions: %w",
