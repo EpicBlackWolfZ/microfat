@@ -141,6 +141,7 @@ var (
 	ErrExecve             = errors.New("execve failed")
 	ErrCacheInit          = errors.New("cache directory initialization failed")
 	ErrInsecureCacheDir   = errors.New("cache directory has insecure permissions or invalid ownership")
+	ErrCacheDirNoExec     = errors.New("cache directory is on a noexec filesystem mount")
 	ErrCacheWrite         = errors.New("cache file creation failed")
 	ErrCacheExtract       = errors.New("cache decompression failed")
 )
@@ -1090,6 +1091,13 @@ func ResolveExistingCacheDirFD(customDir string) (int, string, error) {
 	return resolveCacheDirFD(customDir, false)
 }
 
+func wrapExplicitCacheDirErr(sourceDesc string, err error) error {
+	if errors.Is(err, ErrCacheDirNoExec) {
+		return fmt.Errorf("%s cannot execute binaries: %w", sourceDesc, err)
+	}
+	return fmt.Errorf("%s is insecure: %w", sourceDesc, err)
+}
+
 func resolveCacheDirFD(customDir string, materialize bool) (int, string, error) {
 	if customDir != "" {
 		cleanDir := filepath.Clean(customDir)
@@ -1098,7 +1106,7 @@ func resolveCacheDirFD(customDir string, materialize bool) (int, string, error) 
 		}
 		fd, err := OpenAndValidateCacheDirFD(cleanDir, false)
 		if err != nil {
-			return -1, "", fmt.Errorf("custom cache directory %s is insecure: %w", cleanDir, err)
+			return -1, "", wrapExplicitCacheDirErr(fmt.Sprintf("custom cache directory %s", cleanDir), err)
 		}
 		return fd, cleanDir, nil
 	}
@@ -1110,7 +1118,7 @@ func resolveCacheDirFD(customDir string, materialize bool) (int, string, error) 
 		}
 		fd, err := OpenAndValidateCacheDirFD(cleanDir, false)
 		if err != nil {
-			return -1, "", fmt.Errorf("cache directory from %s (%s) is insecure: %w", EnvCacheDir, cleanDir, err)
+			return -1, "", wrapExplicitCacheDirErr(fmt.Sprintf("cache directory from %s (%s)", EnvCacheDir, cleanDir), err)
 		}
 		return fd, cleanDir, nil
 	}
@@ -1127,6 +1135,8 @@ func resolveCacheDirFD(customDir string, materialize bool) (int, string, error) 
 
 	var attempted []string
 	seen := make(map[string]bool, len(candidates))
+	sawNoExec := false
+	allNoExec := true
 
 	for _, cand := range candidates {
 		cleanDir := filepath.Clean(cand)
@@ -1137,6 +1147,7 @@ func resolveCacheDirFD(customDir string, materialize bool) (int, string, error) 
 		attempted = append(attempted, cleanDir)
 
 		if err := prepareCacheDir(cleanDir, materialize); err != nil {
+			allNoExec = false
 			continue
 		}
 
@@ -1144,6 +1155,16 @@ func resolveCacheDirFD(customDir string, materialize bool) (int, string, error) 
 		if err == nil {
 			return fd, cleanDir, nil
 		}
+		if errors.Is(err, ErrCacheDirNoExec) {
+			sawNoExec = true
+		} else {
+			allNoExec = false
+		}
+	}
+
+	if len(attempted) > 0 && sawNoExec && allNoExec {
+		return -1, "", fmt.Errorf("%w: %w (tried %s)",
+			ErrCacheInit, ErrCacheDirNoExec, strings.Join(attempted, ", "))
 	}
 
 	return -1, "", fmt.Errorf("%w: unable to resolve secure microfat cache directories (tried %s)",

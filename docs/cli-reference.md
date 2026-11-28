@@ -193,6 +193,7 @@ tuning preview described above.
 [✔] Disk Cache Execution Fallback Prerequisites
     • Resolved Path:  /home/deployer/.cache/microfat
     • Permissions:    0700 (read/write OK)
+    • Mount Exec:     exec
     • Execution Test: unknown (prerequisite check only; payload execution was not tested)
 
 [✔] Container Resource Limits (cgroup v2)

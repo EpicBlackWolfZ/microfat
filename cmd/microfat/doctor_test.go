@@ -1159,3 +1159,57 @@ func TestDoctorCmdFailingNonZeroExit(t *testing.T) {
 		t.Errorf("expected report.Scope == prerequisites, got %s", report.Scope)
 	}
 }
+
+func TestDoctorNoExecCacheMountDetection(t *testing.T) {
+	origResolve := resolveCacheDirFunc
+	defer func() { resolveCacheDirFunc = origResolve }()
+
+	const noExecCachePath = "/mnt/noexec-cache"
+	resolveCacheDirFunc = func(customDir string) (string, error) {
+		return "", errors.Join(format.ErrCacheDirNoExec, errors.New("ST_NOEXEC mounted at "+customDir))
+	}
+
+	t.Setenv(format.EnvCacheDir, noExecCachePath)
+	rep := probeCache("")
+	if rep.Ready || rep.Passed {
+		t.Fatalf("expected noexec cache probe to fail, got: %+v", rep)
+	}
+	if !rep.NoExec || rep.MountExec != mountExecNoExec {
+		t.Fatalf("expected NoExec=true and MountExec=noexec, got: %+v", rep)
+	}
+	if rep.Phase != "mount_check" {
+		t.Fatalf("expected mount_check phase, got %q", rep.Phase)
+	}
+	if rep.ResolvedPath != noExecCachePath {
+		t.Fatalf("expected resolved path %q, got %q", noExecCachePath, rep.ResolvedPath)
+	}
+	if rep.Hint != format.HintCacheDirNoExec {
+		t.Fatalf("unexpected hint: %q", rep.Hint)
+	}
+
+	cmd := newDoctorCmd()
+	var textBuf bytes.Buffer
+	cmd.SetOut(&textBuf)
+	cmd.SetArgs([]string{flagCacheDir, noExecCachePath, flagStrict})
+	if err := cmd.Execute(); err == nil {
+		t.Fatalf("expected strict doctor to fail on noexec cache mount")
+	}
+	if !strings.Contains(textBuf.String(), "Mount Exec:        noexec (ST_NOEXEC set") {
+		t.Fatalf("expected Mount Exec noexec line in doctor output, got:\n%s", textBuf.String())
+	}
+
+	jsonCmd := newDoctorCmd()
+	var jsonBuf bytes.Buffer
+	jsonCmd.SetOut(&jsonBuf)
+	jsonCmd.SetArgs([]string{flagJSON, flagCacheDir, noExecCachePath, flagStrict})
+	if err := jsonCmd.Execute(); err == nil {
+		t.Fatalf("expected strict json doctor to fail on noexec cache mount")
+	}
+	var parsed DoctorReport
+	if err := json.Unmarshal(jsonBuf.Bytes(), &parsed); err != nil {
+		t.Fatalf("failed to parse JSON doctor output: %v\nRaw: %s", err, jsonBuf.String())
+	}
+	if parsed.Cache.Passed || !parsed.Cache.NoExec || parsed.Cache.MountExec != mountExecNoExec {
+		t.Fatalf("unexpected JSON cache report: %+v", parsed.Cache)
+	}
+}
