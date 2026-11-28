@@ -32,4 +32,45 @@ if [[ "${cg_out}" != "${expected_cg}" ]]; then
     exit 1
 fi
 
-printf 'Z3 %s verified Format v2 bounds (4 checks) and cgroup memory (8 checks).\n' "${z3_ver}"
+ma_out="$(z3 formal/smt/microarch_dag.smt2)"
+expected_ma=$'sat\nsat\nunsat\nunsat\nunsat'
+if [[ "${ma_out}" != "${expected_ma}" ]]; then
+    printf 'Unexpected Z3 output for formal/smt/microarch_dag.smt2:\n%s\n' "${ma_out}" >&2
+    exit 1
+fi
+
+codec_out="$(z3 formal/smt/lz4_zstd_bounds.smt2)"
+expected_codec=$'sat\nunsat\nunsat\nsat\nunsat'
+if [[ "${codec_out}" != "${expected_codec}" ]]; then
+    printf 'Unexpected Z3 output for formal/smt/lz4_zstd_bounds.smt2:\n%s\n' "${codec_out}" >&2
+    exit 1
+fi
+
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf -- "${tmp_dir}"' EXIT
+
+ma_mutant="${tmp_dir}/microarch_dag_mutant.smt2"
+sed 's/(and (sat_v9_0 m) (sat_v8_6 m))/(sat_v9_0 m)/' formal/smt/microarch_dag.smt2 > "${ma_mutant}"
+if cmp -s formal/smt/microarch_dag.smt2 "${ma_mutant}"; then
+    printf 'Mutant sed did not modify microarch_dag.smt2\n' >&2
+    exit 1
+fi
+ma_mut_out="$(z3 "${ma_mutant}")"
+if [[ "${ma_mut_out}" == "${expected_ma}" ]]; then
+    printf 'Z3 mutant unexpectedly matched expected microarch_dag.smt2 output\n' >&2
+    exit 1
+fi
+
+codec_mutant="${tmp_dir}/lz4_zstd_bounds_mutant.smt2"
+sed 's/(define-fun MAX_ZSTD_WIN () (_ BitVec 64) #x0000000008000000)/(define-fun MAX_ZSTD_WIN () (_ BitVec 64) #x0000000020000000)/' formal/smt/lz4_zstd_bounds.smt2 > "${codec_mutant}"
+if cmp -s formal/smt/lz4_zstd_bounds.smt2 "${codec_mutant}"; then
+    printf 'Mutant sed did not modify lz4_zstd_bounds.smt2\n' >&2
+    exit 1
+fi
+codec_mut_out="$(z3 "${codec_mutant}")"
+if [[ "${codec_mut_out}" == "${expected_codec}" ]]; then
+    printf 'Z3 mutant unexpectedly matched expected lz4_zstd_bounds.smt2 output\n' >&2
+    exit 1
+fi
+
+printf 'Z3 %s verified Format v2 (4), cgroup (8), microarch DAG (5), and codec bounds (5) + mutants.\n' "${z3_ver}"

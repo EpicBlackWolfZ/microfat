@@ -15,6 +15,9 @@ const (
 
 // Bounds and layout error sentinels shared across Format v2 parsing, validation, and launcher dispatch.
 var (
+	ErrBinaryTooSmall     = errors.New("binary size is smaller than trailer size")
+	ErrInvalidIndexOffset = errors.New("invalid index offset in trailer")
+	ErrInvalidIndexSize   = errors.New("invalid index size in trailer")
 	ErrOutOfBounds        = errors.New("variant payload extends beyond binary boundary")
 	ErrPayloadTooLarge    = errors.New("variant payload size exceeds safety limit")
 	ErrOverlappingVariant = errors.New("variant payloads overlap or are unsorted")
@@ -22,6 +25,16 @@ var (
 )
 
 /*@
+ghost
+decreases
+pure func trailerAndIndexBoundsValid(totalSize, indexOffset, indexSize, trailerSize, maxIndexSize int64) bool {
+	return trailerSize <= totalSize &&
+		0 <= indexOffset &&
+		integer(indexOffset) < integer(totalSize)-integer(trailerSize) &&
+		0 < indexSize &&
+		indexSize <= maxIndexSize &&
+		integer(indexOffset)+integer(indexSize) == integer(totalSize)-integer(trailerSize)
+}
 ghost
 decreases
 pure func dictBoundsValid(indexOffset, dictOffset, dictSize int64) bool {
@@ -134,4 +147,33 @@ func checkVariantSegmentBounds(
 		return 0, ErrOverlappingVariant
 	}
 	return offset + compressedSize, nil
+}
+
+// checkTrailerAndIndexBounds validates Format v2 EOF trailer offset and index bounds without signed overflow.
+// @ requires ErrBinaryTooSmall != nil && isComparable(ErrBinaryTooSmall)
+// @ requires ErrInvalidIndexOffset != nil && isComparable(ErrInvalidIndexOffset)
+// @ requires ErrInvalidIndexSize != nil && isComparable(ErrInvalidIndexSize)
+// @ requires trailerSize > 0 && maxIndexSize > 0
+// @ ensures (err == nil) == trailerAndIndexBoundsValid(totalSize, indexOffset, indexSize, trailerSize, maxIndexSize)
+// @ ensures err == nil ==> integer(trailerOffset) == integer(totalSize) - integer(trailerSize)
+// @ ensures err == nil ==> integer(trailerOffset) + integer(trailerSize) == integer(totalSize)
+// @ ensures err == nil ==> 0 <= indexOffset && indexOffset < trailerOffset && 0 < indexSize && indexSize <= maxIndexSize
+// @ ensures err != nil ==> trailerOffset == 0 && isComparable(err)
+// @ ensures err != nil ==> (err == ErrBinaryTooSmall || err == ErrInvalidIndexOffset || err == ErrInvalidIndexSize)
+// @ decreases
+func checkTrailerAndIndexBounds(totalSize, indexOffset, indexSize, trailerSize, maxIndexSize int64) (
+	/*@ trailerOffset @*/ int64,
+	/*@ err @*/ error,
+) {
+	if totalSize < trailerSize {
+		return 0, ErrBinaryTooSmall
+	}
+	trailerOffset := totalSize - trailerSize
+	if indexOffset < 0 || indexOffset >= trailerOffset {
+		return 0, ErrInvalidIndexOffset
+	}
+	if indexSize <= 0 || indexSize > maxIndexSize || indexSize != trailerOffset-indexOffset {
+		return 0, ErrInvalidIndexSize
+	}
+	return trailerOffset, nil
 }

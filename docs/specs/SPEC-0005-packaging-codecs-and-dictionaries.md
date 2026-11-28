@@ -26,8 +26,8 @@ This specification defines input binary validation, compression codec resolution
 
 - `LAW-LEAN-04`: Reversible x86-64 BCJ+RIP and ARM64 `BL`/`B`/`ADRP` pre-filter bijections and chunk-local boundary preservation with zero `sorryAx` ([`formal/lean/Microfat/ElfFilter.lean`](../../formal/lean/Microfat/ElfFilter.lean), `task verify-lean`).
 - `LAW-KANI-04`: Bounded (`len <= 8`) symbolic bijection and chunk-split round-trip checks for Rust ELF filters ([`experiments/v3lab/rust-stub/src/elffilter.rs`](../../experiments/v3lab/rust-stub/src/elffilter.rs), `task verify-kani`).
-- `LAW-PACK-01`: (*Scheduled [#528](https://github.com/EpicBlackWolfZ/microfat/issues/528)*) Variant count bounds, offset/size overflow safety, and atomic replacement guarantees in [`internal/pack/pack.go`](../../internal/pack/pack.go) (Gobra backfill target).
-- `LAW-SMT-04`: (*Scheduled [#528](https://github.com/EpicBlackWolfZ/microfat/issues/528)*) Bounded LZ4/Zstd window & content-size arithmetic SMT proof (`lz4_zstd_bounds.smt2`, Z3 backfill target).
+- `LAW-PACK-01`: Overflow-free segment layout arithmetic and positive compressed segment extent invariants ([`advanceLayoutOffset`](../../internal/pack/layout.go), [`computeSegmentExtent`](../../internal/pack/layout.go), called by [`internal/pack/pack.go`](../../internal/pack/pack.go), `task verify-pack-layout`).
+- `LAW-SMT-04`: Bounded LZ4/Zstd window & content-size arithmetic SMT proof ([`formal/smt/lz4_zstd_bounds.smt2`](../../formal/smt/lz4_zstd_bounds.smt2), `task verify-z3`).
 
 ## Traceability Matrix
 
@@ -41,5 +41,5 @@ This specification defines input binary validation, compression codec resolution
 | `REQ-0005-06` | Staged `fsync` & atomic container publication | [`internal/pack/pack.go`](../../internal/pack/pack.go) | [`tests/e2e/input_safety_test.go`](../../tests/e2e/input_safety_test.go), [`tests/e2e/manifest_build_test.go`](../../tests/e2e/manifest_build_test.go) |
 | `LAW-LEAN-04` | Lean 4 ELF pre-filter bijection proofs | [`formal/lean/Microfat/ElfFilter.lean`](../../formal/lean/Microfat/ElfFilter.lean) | `task verify-lean` |
 | `LAW-KANI-04` | Kani Rust ELF pre-filter round-trip proof | [`experiments/v3lab/rust-stub/src/elffilter.rs`](../../experiments/v3lab/rust-stub/src/elffilter.rs) | `task verify-kani` |
-| `LAW-PACK-01` | Pack overflow & replacement bounds (*#528 backfill*) | [`internal/pack/pack.go`](../../internal/pack/pack.go) | Tracked in [`#528`](https://github.com/EpicBlackWolfZ/microfat/issues/528) |
-| `LAW-SMT-04` | Z3 `lz4_zstd_bounds.smt2` (*#528 backfill*) | Scheduled `formal/smt/lz4_zstd_bounds.smt2` | Tracked in [`#528`](https://github.com/EpicBlackWolfZ/microfat/issues/528) |
+| `LAW-PACK-01` | Pack segment offset & extent bounds | [`internal/pack/layout.go`](../../internal/pack/layout.go) | `task verify-pack-layout` |
+| `LAW-SMT-04` | Z3 `lz4_zstd_bounds.smt2` | [`formal/smt/lz4_zstd_bounds.smt2`](../../formal/smt/lz4_zstd_bounds.smt2) | `task verify-z3` |

@@ -465,30 +465,26 @@ func resolveForcedVariant(arch string, hostRank int, hostLevel string, available
 }
 
 func computeEffectiveMaxRank(arch string, hostRank int, policy Policy) (int, string, string) {
-	effectiveMaxRank := hostRank
-	var policyApplied string
-	var overrideReason string
-
+	explicitMaxRank := -1
+	hasExplicitMax := false
 	if policy.MaxLevel != "" {
-		maxRank := Rank(arch, Normalize(policy.MaxLevel))
-		if maxRank >= 0 && maxRank < effectiveMaxRank {
-			effectiveMaxRank = maxRank
-			policyApplied = "max_level"
-			overrideReason = fmt.Sprintf("MICROFAT_MAX_LEVEL=%s", policy.MaxLevel)
-		}
+		explicitMaxRank = Rank(arch, Normalize(policy.MaxLevel))
+		hasExplicitMax = explicitMaxRank >= 0
 	}
 
 	isSafeAVX512 := policy.AVX512DownclockProtection || policy.Name == PolicySafeAVX512 || policy.Name == PolicyNoDownclock
-	if isSafeAVX512 && canonicalArch(arch) == ArchAMD64 && hostRank >= rankAMD64v4 && isSkylakeXOrCascadeLakeFunc() {
-		const v3Rank = rankAMD64v3
-		if v3Rank < effectiveMaxRank {
-			effectiveMaxRank = v3Rank
-			policyApplied = "avx512_downclock_protection"
-			overrideReason = "Intel Skylake-X/Cascade Lake AVX-512 downclocking protection applied (capped at v3)"
-		}
-	}
+	applyAVX512Cap := isSafeAVX512 && canonicalArch(arch) == ArchAMD64 && hostRank >= rankAMD64v4 && isSkylakeXOrCascadeLakeFunc()
 
-	return effectiveMaxRank, policyApplied, overrideReason
+	effectiveMaxRank, reasonCode := effectivePolicyMaxRank(hostRank, explicitMaxRank, hasExplicitMax, applyAVX512Cap, rankAMD64v3)
+	switch reasonCode {
+	case policyReasonMaxLevel:
+		return effectiveMaxRank, "max_level", fmt.Sprintf("MICROFAT_MAX_LEVEL=%s", policy.MaxLevel)
+	case policyReasonAVX512Cap:
+		return effectiveMaxRank, "avx512_downclock_protection",
+			"Intel Skylake-X/Cascade Lake AVX-512 downclocking protection applied (capped at v3)"
+	default:
+		return effectiveMaxRank, "", ""
+	}
 }
 
 func buildDisabledSet(disabled []string) map[string]struct{} {
@@ -516,10 +512,8 @@ func filterAndRankCandidates(
 	for _, lvl := range availableLevels {
 		norm := Normalize(lvl)
 		r := Rank(arch, norm)
-		if r < 0 || r > hostRank || r > effectiveMaxRank {
-			continue
-		}
-		if _, disabled := disabledSet[norm]; disabled {
+		_, disabled := disabledSet[norm]
+		if !candidateAllowedByPolicy(r, hostRank, effectiveMaxRank, disabled) {
 			continue
 		}
 		candidates = append(candidates, variantCandidate{

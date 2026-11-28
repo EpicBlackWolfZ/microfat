@@ -24,7 +24,7 @@ This specification defines in-place and out-of-place executable mutation operati
 
 ## Formal Laws & Invariants
 
-- `LAW-LIFECYCLE-01`: (*Scheduled [#528](https://github.com/EpicBlackWolfZ/microfat/issues/528)*) Transaction staging, advisory lock release, and `IntentCreateOnly` vs `IntentReplaceExisting` mode-bit stripping invariants in [`internal/lifecycle/transaction.go`](../../internal/lifecycle/transaction.go) (Gobra backfill target).
+- `LAW-LIFECYCLE-01`: `IntentCreateOnly` vs `IntentReplaceExisting` ownership preservation and octal `PolicyStrip` triad masking invariants ([`resolveOwnershipPreservation`](../../internal/lifecycle/mode_policy.go), [`computeTargetModeBits`](../../internal/lifecycle/mode_policy.go), [`stripRxOnlyTriad`](../../internal/lifecycle/mode_policy.go), called by [`internal/lifecycle/transaction.go`](../../internal/lifecycle/transaction.go), `task verify-lifecycle-policy`).
 
 ## Traceability Matrix
 
@@ -36,4 +36,4 @@ This specification defines in-place and out-of-place executable mutation operati
 | `REQ-0006-04` | `trim` variant retention & validation | [`cmd/microfat-stub/trim.go`](../../cmd/microfat-stub/trim.go), [`cmd/microfat/main.go`](../../cmd/microfat/main.go) | [`cmd/microfat/trim_path_test.go`](../../cmd/microfat/trim_path_test.go), [`tests/e2e/lifecycle_routing_test.go`](../../tests/e2e/lifecycle_routing_test.go) |
 | `REQ-0006-05` | `optimize` plain native ELF specialization | [`cmd/microfat-stub/optimize.go`](../../cmd/microfat-stub/optimize.go), [`cmd/microfat/main.go`](../../cmd/microfat/main.go) | [`tests/e2e/lifecycle_test.go`](../../tests/e2e/lifecycle_test.go), [`tests/e2e/stub_profile_e2e_test.go`](../../tests/e2e/stub_profile_e2e_test.go) |
 | `REQ-0006-06` | `prewarm` cache materialization matrix | [`cmd/microfat/prewarm.go`](../../cmd/microfat/prewarm.go) | [`cmd/microfat/prewarm_test.go`](../../cmd/microfat/prewarm_test.go), [`tests/e2e/prewarm_plan_matrix_test.go`](../../tests/e2e/prewarm_plan_matrix_test.go) |
-| `LAW-LIFECYCLE-01` | Lifecycle transaction & mode invariants (*#528 backfill*) | [`internal/lifecycle/transaction.go`](../../internal/lifecycle/transaction.go) | Tracked in [`#528`](https://github.com/EpicBlackWolfZ/microfat/issues/528) |
+| `LAW-LIFECYCLE-01` | Lifecycle ownership & mode policy invariants | [`internal/lifecycle/mode_policy.go`](../../internal/lifecycle/mode_policy.go) | `task verify-lifecycle-policy` |

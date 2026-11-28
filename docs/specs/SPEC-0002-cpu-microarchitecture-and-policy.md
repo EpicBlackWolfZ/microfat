@@ -5,7 +5,7 @@
 - **Date**: 2026-11-28
 - **Related ADRs**: [`ADR-0001`](../design/adr-0001-formal-verification-and-v3-lab.md), [`ADR-0003`](../adr/ADR-0003-dual-tier-cpu-probing-and-arm64-dag-selection.md)
 - **Related Issues**: [#523](https://github.com/EpicBlackWolfZ/microfat/issues/523), [#527](https://github.com/EpicBlackWolfZ/microfat/issues/527), [#528](https://github.com/EpicBlackWolfZ/microfat/issues/528)
-- **Verified By**: [`internal/microarch`](../../internal/microarch/compatibility_test.go), [`internal/conformance`](../../internal/conformance/conformance_test.go), [`experiments/v3lab/rust-stub/src/microarch.rs`](../../experiments/v3lab/rust-stub/src/microarch.rs), [`formal/lean/Microfat/Microarch.lean`](../../formal/lean/Microfat/Microarch.lean), `LAW-LEAN-02`, `LAW-KANI-02`
+- **Verified By**: [`internal/microarch`](../../internal/microarch/compatibility_test.go), [`internal/conformance`](../../internal/conformance/conformance_test.go), [`experiments/v3lab/rust-stub/src/microarch.rs`](../../experiments/v3lab/rust-stub/src/microarch.rs), [`formal/lean/Microfat/Microarch.lean`](../../formal/lean/Microfat/Microarch.lean), [`formal/smt/microarch_dag.smt2`](../../formal/smt/microarch_dag.smt2), `LAW-LEAN-02`, `LAW-KANI-02`, `LAW-SMT-03`, `LAW-MICROARCH-01`
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in RFC 2119.
 
@@ -33,8 +33,8 @@ This specification defines runtime CPU feature probing, microarchitecture level 
 
 - `LAW-LEAN-02`: AMD64 feature monotonicity, ARM64 DAG acyclicity, unforced optimality, and hardware `SIGILL`-freedom ([`formal/lean/Microfat/Microarch.lean`](../../formal/lean/Microfat/Microarch.lean), `task verify-lean`).
 - `LAW-KANI-02`: Exhaustive symbolic proof over `2^21` AMD64 and `2^24` ARM64 feature combinations proving `SIGILL`-free selection and policy precedence ([`experiments/v3lab/rust-stub/src/microarch.rs`](../../experiments/v3lab/rust-stub/src/microarch.rs), `task verify-kani`).
-- `LAW-SMT-03`: (*Scheduled [#528](https://github.com/EpicBlackWolfZ/microfat/issues/528)*) Bit-vector SMT encoding (`microarch_dag.smt2`) of non-linear ARM64 `v8.x`/`v9.x` partial order and policy precedence (Z3 backfill target).
-- `LAW-MICROARCH-01`: (*Scheduled [#528](https://github.com/EpicBlackWolfZ/microfat/issues/528)*) Go selector contract & compatibility table verification in [`internal/microarch`](../../internal/microarch/microarch.go) (Gobra / qualification backfill target).
+- `LAW-SMT-03`: Bit-vector SMT encoding ([`formal/smt/microarch_dag.smt2`](../../formal/smt/microarch_dag.smt2)) of non-linear ARM64 `v8.x`/`v9.x` partial order and 32-bit signed policy rank cap (`task verify-z3`).
+- `LAW-MICROARCH-01`: Pure rank-ceiling and host-rank upper bound verification in [`internal/microarch/policy_math.go`](../../internal/microarch/policy_math.go) (`effectivePolicyMaxRank`, `candidateAllowedByPolicy`, `amd64RankSatisfied`, `task verify-microarch-policy`), paired with Lean 4 / Z3 / Kani / conformance verification of `microarch.go` string maps and ARM64 DAG bitmasks.
 
 ## Traceability Matrix
 
@@ -48,5 +48,5 @@ This specification defines runtime CPU feature probing, microarchitecture level 
 | `REQ-0002-06` | Fail-closed when zero compatible variants exist | [`cmd/microfat-stub/selection_diagnostics_test.go`](../../cmd/microfat-stub/selection_diagnostics_test.go) | [`tests/e2e/rust_stub_parity_test.go`](../../tests/e2e/rust_stub_parity_test.go) |
 | `LAW-LEAN-02` | Lean 4 AMD64/ARM64 DAG & policy proof | [`formal/lean/Microfat/Microarch.lean`](../../formal/lean/Microfat/Microarch.lean) | `task verify-lean` |
 | `LAW-KANI-02` | Kani exhaustive mask & policy verification | [`experiments/v3lab/rust-stub/src/microarch.rs`](../../experiments/v3lab/rust-stub/src/microarch.rs) | `task verify-kani` |
-| `LAW-SMT-03` | Z3 `microarch_dag.smt2` (*#528 backfill*) | Scheduled `formal/smt/microarch_dag.smt2` | Tracked in [`#528`](https://github.com/EpicBlackWolfZ/microfat/issues/528) |
-| `LAW-MICROARCH-01` | Go selector contract (*#528 backfill*) | [`internal/microarch/microarch.go`](../../internal/microarch/microarch.go) | Tracked in [`#528`](https://github.com/EpicBlackWolfZ/microfat/issues/528) |
+| `LAW-SMT-03` | Z3 `microarch_dag.smt2` | [`formal/smt/microarch_dag.smt2`](../../formal/smt/microarch_dag.smt2) | `task verify-z3` |
+| `LAW-MICROARCH-01` | Go rank policy & ceiling bounds | [`internal/microarch/policy_math.go`](../../internal/microarch/policy_math.go) | `task verify-microarch-policy` |

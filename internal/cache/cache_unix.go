@@ -179,21 +179,29 @@ func validateOpenedDescriptor(fd int, label string, expectedSize int64, expected
 		return -1, fmt.Errorf("fstat cache descriptor: %w", statErr)
 	}
 
-	if err := validateCacheEntryMetadata(stat, label); err != nil {
+	if err := checkCacheEntryFields(
+		stat.Uid,
+		stat.Mode&unix.S_IFMT == unix.S_IFREG,
+		stat.Mode&cacheUnsafeModeBits != 0,
+		stat.Mode&unix.S_IXUSR != 0,
+		stat.Size,
+		os.Geteuid(),
+		expectedSize,
+		true,
+		true,
+	); err != nil {
 		_ = unix.Close(fd)
-		return -1, err
-	}
-	if stat.Mode&unix.S_IXUSR == 0 {
-		_ = unix.Close(fd)
-		return -1, fmt.Errorf("%w: %s", ErrNotExecutable, label)
-	}
-
-	if stat.Size != expectedSize {
-		_ = unix.Close(fd)
-		if onCorrupt != nil {
-			onCorrupt()
+		switch {
+		case errors.Is(err, ErrNonRegularFile):
+			return -1, fmt.Errorf("%w: %s (mode 0o%o)", ErrNonRegularFile, label, stat.Mode)
+		case errors.Is(err, ErrSizeMismatch):
+			if onCorrupt != nil {
+				onCorrupt()
+			}
+			return -1, fmt.Errorf("%w: %s (expected %d bytes, got %d bytes)", ErrSizeMismatch, label, expectedSize, stat.Size)
+		default:
+			return -1, fmt.Errorf("%w: %s", err, label)
 		}
-		return -1, fmt.Errorf("%w: %s (expected %d bytes, got %d bytes)", ErrSizeMismatch, label, expectedSize, stat.Size)
 	}
 
 	if !verifyCachedFD(fd, expectedSHA256) {
@@ -221,14 +229,27 @@ func classifyFailedCacheOpen(label string, openErr error, stat unix.Stat_t, stat
 	return openErr
 }
 
+const cacheUnsafeModeBits = unix.S_IWGRP | unix.S_IWOTH | unix.S_ISUID | unix.S_ISGID | unix.S_ISVTX
+
 func validateCacheEntryMetadata(stat unix.Stat_t, label string) error {
-	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
+	err := checkCacheEntryFields(
+		stat.Uid,
+		stat.Mode&unix.S_IFMT == unix.S_IFREG,
+		stat.Mode&cacheUnsafeModeBits != 0,
+		stat.Mode&unix.S_IXUSR != 0,
+		stat.Size,
+		os.Geteuid(),
+		0,
+		false,
+		false,
+	)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrNonRegularFile) {
 		return fmt.Errorf("%w: %s (mode 0o%o)", ErrNonRegularFile, label, stat.Mode)
 	}
-	if err := validateCacheMetadata(stat, os.Geteuid()); err != nil {
-		return fmt.Errorf("%w: %s", err, label)
-	}
-	return nil
+	return fmt.Errorf("%w: %s", err, label)
 }
 
 // Existing unsafe entries must not become replacement targets for direct
@@ -247,11 +268,7 @@ func validateCacheReplacementAt(dirFD int, name string) error {
 
 // Ownership checks do not prevent mutation by a trusted same-UID writer.
 func validateCacheMetadata(stat unix.Stat_t, expectedUID int) error {
-	const unsafeBits = unix.S_IWGRP | unix.S_IWOTH | unix.S_ISUID | unix.S_ISGID | unix.S_ISVTX
-	if int64(stat.Uid) != int64(expectedUID) || stat.Mode&unsafeBits != 0 {
-		return ErrUnsafeFile
-	}
-	return nil
+	return checkCacheMetadataFields(stat.Uid, stat.Mode&cacheUnsafeModeBits != 0, expectedUID)
 }
 
 func verifyCachedFD(fd int, expectedHex string) bool {

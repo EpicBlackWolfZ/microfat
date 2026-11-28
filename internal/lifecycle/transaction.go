@@ -37,7 +37,7 @@ type Transaction struct {
 }
 
 func shouldPreserveOwnership(intent PublicationIntent, opts Options) bool {
-	return opts.Policy == PolicyStrict && (intent == IntentReplaceSource || opts.ExplicitPolicy)
+	return resolveOwnershipPreservation(opts.Policy == PolicyStrict, intent == IntentReplaceSource, opts.ExplicitPolicy)
 }
 
 // Execute performs an atomic, metadata-preserving binary transformation.
@@ -235,15 +235,15 @@ func applyMetadata(
 		}
 	}
 
-	targetMode := snap.Mode.Perm()
-	if policy == PolicyStrict {
-		targetMode |= snap.Mode & os.ModeSticky
-	}
-	if policy == PolicyStrip {
-		targetMode &= standardExecMask
-		if targetMode&ownerExecuteMask == 0 {
-			targetMode |= standardExecMask
-		}
+	permBits, keepSticky := computeTargetModeBits(
+		uint32(snap.Mode.Perm()),
+		snap.Mode&os.ModeSticky != 0,
+		policy == PolicyStrict,
+		policy == PolicyStrip,
+	)
+	targetMode := os.FileMode(permBits)
+	if keepSticky {
+		targetMode |= os.ModeSticky
 	}
 
 	if err := chmodFunc(staged, targetMode); err != nil {
